@@ -23,8 +23,9 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # Unix
 
-# Environment setup (ANTHROPIC_API_KEY required for LLM operations)
-cp .env.example .env          # then fill in API keys
+# Environment setup
+cp .env.example .env          # then fill in:
+# ANTHROPIC_API_KEY (required), FIRECRAWL_API_KEY (optional), OPENAI_API_KEY (optional)
 
 # Install deps + editable package (enables `kb` CLI command)
 # NOTE: `pip install -e .` must be run before `kb` CLI or `from kb import ...` works outside pytest
@@ -108,9 +109,11 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 
 ### Testing
 
-Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Key fixture: `tmp_wiki(tmp_path)` in `conftest.py` creates an isolated wiki directory with all 5 subdirectories — use this for tests that write wiki pages.
+Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `conftest.py`:
+- `project_root` / `raw_dir` / `wiki_dir` — point to real project directories (read-only use)
+- `tmp_wiki(tmp_path)` — isolated wiki directory with all 5 subdirectories for tests that write wiki pages
 
-Currently only `tests/test_models.py` exists (4 tests covering wikilink extraction, raw ref extraction, content hashing). Operations need tests as they're implemented.
+Currently only `tests/test_models.py` exists (4 tests: wikilink extraction, empty-string edge case, raw ref extraction, content hashing). Operations need tests as they're implemented.
 
 ## Conventions
 
@@ -173,3 +176,11 @@ Key usage:
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.
+
+## Automation
+
+Auto-commit hooks are configured in `.claude/settings.local.json`:
+- **Stop hook** — When Claude finishes a turn, if there are uncommitted changes and `pytest` passes, auto-commits with `auto: session checkpoint` message.
+- **PostToolUse (Bash)** — After any Bash command containing `pytest` with "passed" in output, auto-commits with `auto: tests passed` message.
+
+All tools are auto-approved for this project (permissions in `settings.local.json`).
