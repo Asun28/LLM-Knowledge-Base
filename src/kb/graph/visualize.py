@@ -6,7 +6,6 @@ import networkx as nx
 
 from kb.config import PROJECT_ROOT
 
-
 # Color mapping for wiki page types
 TYPE_COLORS = {
     "entities": "#4ecdc4",
