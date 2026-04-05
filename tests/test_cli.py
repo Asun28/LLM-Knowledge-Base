@@ -6,7 +6,6 @@ from click.testing import CliRunner
 
 from kb.cli import cli
 
-
 runner = CliRunner()
 
 

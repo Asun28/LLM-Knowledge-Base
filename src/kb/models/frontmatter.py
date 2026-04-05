@@ -6,7 +6,6 @@ import frontmatter
 
 from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES
 
-
 REQUIRED_FIELDS = ("title", "source", "created", "updated", "type", "confidence")
 
 

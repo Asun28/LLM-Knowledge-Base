@@ -1,8 +1,6 @@
 """Markdown parsing helpers — wikilink extraction, frontmatter access."""
 
 import re
-from pathlib import Path
-
 
 WIKILINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 

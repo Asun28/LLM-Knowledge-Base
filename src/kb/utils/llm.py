@@ -1,6 +1,5 @@
 """Anthropic API wrapper with model tiering."""
 
-import os
 
 import anthropic
 

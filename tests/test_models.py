@@ -1,7 +1,7 @@
 """Tests for data models and frontmatter validation."""
 
-from kb.utils.markdown import extract_wikilinks, extract_raw_refs
 from kb.utils.hashing import content_hash
+from kb.utils.markdown import extract_raw_refs, extract_wikilinks
 
 
 def test_extract_wikilinks():
