@@ -1,6 +1,5 @@
 """Tests for the CLI commands."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 from click.testing import CliRunner

@@ -67,8 +67,8 @@ def compile(incremental: bool):
 @click.argument("question")
 def query(question: str):
     """Query the knowledge base."""
-    from kb.query.engine import query_wiki
     from kb.query.citations import format_citations
+    from kb.query.engine import query_wiki
 
     click.echo(f"Querying: {question}\n")
     try:
