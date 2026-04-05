@@ -1,0 +1,20 @@
+# Extraction template: Web article / blog post
+name: article
+description: Web articles, blog posts, opinion pieces
+
+extract:
+  - title
+  - author
+  - publication_date
+  - publication_name
+  - url
+  - core_argument       # Main thesis or point
+  - key_claims           # List of specific claims made
+  - evidence             # Evidence cited for claims
+  - entities_mentioned   # People, orgs, tools referenced
+  - concepts_mentioned   # Ideas, methods, frameworks referenced
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"    # Update existing or create
+  - concepts: "concepts/{concept_name}.md"   # Update existing or create

@@ -1,0 +1,21 @@
+# Extraction template: Conversation / interview
+name: conversation
+description: Interviews, discussions, Q&A sessions
+
+extract:
+  - title
+  - participants        # List of speakers with roles/affiliations
+  - date
+  - context             # What prompted this conversation
+  - speaker_claims      # Claims attributed to specific speakers
+  - agreements          # Points of consensus
+  - disagreements       # Points of contention
+  - open_questions      # Unresolved questions raised
+  - action_items        # Next steps discussed
+  - entities_mentioned
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

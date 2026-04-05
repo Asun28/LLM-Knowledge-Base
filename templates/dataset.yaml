@@ -1,0 +1,21 @@
+# Extraction template: Dataset
+name: dataset
+description: Datasets, benchmarks, data collections
+
+extract:
+  - name
+  - source_org
+  - url
+  - schema              # Data schema / fields
+  - size                # Row count, file size
+  - provenance          # Where the data came from
+  - known_biases        # Documented biases or limitations
+  - example_records     # 2-3 representative examples
+  - use_cases           # What it's commonly used for
+  - entities_mentioned
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

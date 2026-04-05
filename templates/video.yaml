@@ -1,0 +1,21 @@
+# Extraction template: YouTube video / talk
+name: video
+description: YouTube videos, conference talks, lectures
+
+extract:
+  - title
+  - speaker
+  - channel
+  - publication_date
+  - url
+  - duration
+  - key_points          # Main ideas, with approximate timestamps
+  - claims_with_timestamps  # Specific claims tied to timestamps
+  - entities_mentioned
+  - concepts_mentioned
+  - action_items        # Things the speaker recommends doing
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

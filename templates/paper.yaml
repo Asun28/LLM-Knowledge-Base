@@ -1,0 +1,23 @@
+# Extraction template: Research paper
+name: paper
+description: Research papers, arXiv preprints, conference papers
+
+extract:
+  - title
+  - authors
+  - publication_date
+  - venue               # Journal, conference, arXiv
+  - arxiv_id
+  - abstract
+  - key_claims          # Main findings / contributions
+  - methodology         # How they did it
+  - results             # Quantitative or qualitative results
+  - limitations         # Acknowledged limitations
+  - citations_relevant  # Key papers this one builds on
+  - entities_mentioned
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

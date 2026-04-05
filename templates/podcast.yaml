@@ -1,0 +1,22 @@
+# Extraction template: Podcast episode
+name: podcast
+description: Podcast episodes, audio interviews
+
+extract:
+  - title
+  - podcast_name
+  - speakers             # List of speakers with roles
+  - publication_date
+  - url
+  - duration
+  - topics_by_timestamp  # Topic segments with approximate times
+  - speaker_claims       # Claims attributed to specific speakers
+  - agreements           # Points of agreement between speakers
+  - disagreements        # Points of disagreement
+  - entities_mentioned
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

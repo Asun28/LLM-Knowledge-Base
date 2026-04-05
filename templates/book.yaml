@@ -1,0 +1,20 @@
+# Extraction template: Book / book chapter
+name: book
+description: Books, book chapters, excerpts
+
+extract:
+  - title
+  - author
+  - publication_year
+  - isbn
+  - chapter             # If a specific chapter
+  - key_arguments       # Central thesis and supporting arguments
+  - entities_mentioned  # Characters, people, orgs, concepts
+  - quotes              # Notable quotes with page numbers
+  - themes              # Recurring themes
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"

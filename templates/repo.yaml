@@ -1,0 +1,23 @@
+# Extraction template: GitHub repository
+name: repo
+description: GitHub repositories, open source projects
+
+extract:
+  - name
+  - owner
+  - url
+  - stars
+  - last_updated
+  - language
+  - description
+  - architecture        # High-level architecture / key abstractions
+  - problem_solved      # What problem does this solve?
+  - dependencies        # Key dependencies
+  - usage_patterns      # How to use it
+  - entities_mentioned  # Authors, maintainers, related projects
+  - concepts_mentioned
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"
+  - concepts: "concepts/{concept_name}.md"
