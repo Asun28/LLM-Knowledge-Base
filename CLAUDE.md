@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 1 complete (v0.2.0).** All 5 operations and graph module are implemented, tested (78 tests), and wired to the CLI.
+**Phase 1 complete (v0.3.0).** All 5 operations, graph module, and MCP server are implemented, tested (78 tests), and wired to the CLI.
 
 **Implemented and tested:**
 - `kb.config` — paths, model tiers, page types, confidence levels
@@ -60,6 +60,7 @@ kb compile [--full]
 kb query "What is compile-not-retrieve?"
 kb lint [--fix]
 kb evolve
+kb mcp                        # Start MCP server for Claude Code
 
 # Playwright browser (needed by crawl4ai)
 python -m playwright install chromium
@@ -85,7 +86,7 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 
 ### Python Package (`src/kb/`)
 
-Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init__.py`.
+Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init__.py`. MCP server entry: `python -m kb.mcp_server` or `kb mcp`.
 
 All paths, model tiers, page types, and confidence levels are defined in `kb.config` — import from there, never hardcode. `PROJECT_ROOT` resolves from `config.py`'s location, so it works regardless of working directory.
 
@@ -124,7 +125,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `project_root` / `raw_dir` / `wiki_dir` — point to real project directories (read-only use)
 - `tmp_wiki(tmp_path)` — isolated wiki directory with all 5 subdirectories for tests that write wiki pages
 
-Currently only `tests/test_models.py` exists (4 tests: wikilink extraction, empty-string edge case, raw ref extraction, content hashing). Operations need tests as they're implemented.
+78 tests across 7 test files covering models, ingest, compile, query, lint, evolve, and graph modules.
 
 ## Conventions
 

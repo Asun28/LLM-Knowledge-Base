@@ -141,6 +141,50 @@ Reports:
 - Dead links that suggest new pages to create
 - Disconnected graph components
 
+### Claude Code Integration (MCP Server)
+
+The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) so Claude Code can use it directly as a tool during conversations.
+
+```bash
+# Start the MCP server standalone
+kb mcp
+
+# Or run as a Python module
+python -m kb.mcp_server
+```
+
+**Setup:** Add to your `.mcp.json` (already configured in this repo):
+
+```json
+{
+  "mcpServers": {
+    "kb": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "kb.mcp_server"]
+    }
+  }
+}
+```
+
+After restarting Claude Code, you get 9 tools:
+
+| Tool | Description |
+|------|-------------|
+| `kb_search` | Keyword search across wiki pages (fast, no LLM cost) |
+| `kb_read_page` | Read a specific wiki page by ID |
+| `kb_list_pages` | List all pages, optionally filtered by type |
+| `kb_list_sources` | List all raw source files |
+| `kb_query` | LLM-powered Q&A with citations (uses API tokens) |
+| `kb_stats` | Page counts, graph metrics, coverage info |
+| `kb_lint` | Health checks (dead links, orphans, staleness) |
+| `kb_evolve` | Gap analysis and connection suggestions |
+| `kb_ingest` | Ingest a raw source into the wiki |
+
+**Example in Claude Code:**
+> "Search my knowledge base for articles about RAG" -> uses `kb_search`
+> "What does my wiki say about transformer architectures?" -> uses `kb_query`
+> "Show me wiki health" -> uses `kb_lint`
+
 ## Supported Source Types
 
 | Type | Template | Capture Method |
@@ -219,8 +263,9 @@ LLM-Knowledge-Base/
   research/                # Human-authored analysis
   templates/               # 8 YAML extraction schemas
   src/kb/                  # Python package
-    cli.py                 # Click CLI (5 commands)
+    cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, settings
+    mcp_server.py          # FastMCP server for Claude Code integration
     models/                # WikiPage, RawSource, frontmatter
     ingest/                # Pipeline + extractors
     compile/               # Compiler + differ + linker
@@ -250,7 +295,7 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 
 ## Roadmap
 
-- **Phase 1 (complete):** All 5 operations working end-to-end, 78 tests, CLI wired
+- **Phase 1 (complete):** All 5 operations + MCP server working end-to-end, 78 tests, CLI wired
 - **Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages)
 
