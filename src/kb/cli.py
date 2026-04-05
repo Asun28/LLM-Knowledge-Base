@@ -115,5 +115,13 @@ def evolve():
         raise SystemExit(1)
 
 
+@cli.command()
+def mcp():
+    """Start the MCP server for Claude Code integration."""
+    from kb.mcp_server import main as mcp_main
+
+    mcp_main()
+
+
 if __name__ == "__main__":
     cli()
