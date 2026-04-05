@@ -2,12 +2,9 @@
 
 from pathlib import Path
 
-import networkx as nx
-
-from kb.config import WIKI_DIR, WIKI_LOG
 from kb.compile.linker import build_backlinks
+from kb.config import WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
-from kb.utils.llm import call_llm
 from kb.utils.markdown import extract_wikilinks
 
 

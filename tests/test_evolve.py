@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from kb.evolve.analyzer import (
     analyze_coverage,
     find_connection_opportunities,
