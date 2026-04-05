@@ -22,7 +22,8 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 - `kb.lint` — checks (dead links, orphan pages, staleness, frontmatter validation, source coverage), runner (orchestrator, report formatting)
 - `kb.evolve` — analyzer (coverage analysis, connection opportunities, new page suggestions, evolution report)
 - `kb.graph` — builder (networkx DiGraph from wikilinks, statistics), visualize (pyvis HTML output)
-- CLI — all 5 commands fully wired: `ingest`, `compile`, `query`, `lint`, `evolve`
+- `kb.mcp_server` — FastMCP server exposing all KB operations as Claude Code tools
+- CLI — all 6 commands fully wired: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`
 
 **Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. Detailed architecture research is in `research/agent-architecture-research.md`.
 
@@ -172,9 +173,10 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 
 ## MCP Servers
 
-Configured in `.mcp.json` (git-ignored, local only): git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
+Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
+- **kb** — The knowledge base itself as an MCP server (`kb.mcp_server`). Exposes 9 tools: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_query`, `kb_stats`, `kb_lint`, `kb_evolve`, `kb_ingest`, `kb_list_sources`. Start with `kb mcp` or `python -m kb.mcp_server`. This is the primary way Claude Code interacts with the wiki.
 - **memory** — Persistent knowledge graph in `.memory/memory.jsonl`. Track wiki entity relationships across sessions.
 - **arxiv** — Search/download papers to `raw/papers/`.
 - **sqlite** — Metadata DB at `.data/metadata.db`. For wikilink graph, ingestion history, lint results.
