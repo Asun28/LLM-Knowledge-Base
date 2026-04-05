@@ -1,14 +1,12 @@
 """Tests for the ingest pipeline."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from kb.ingest.extractors import build_extraction_prompt, extract_from_source, load_template
 from kb.ingest.pipeline import detect_source_type, ingest_source, slugify
-
 
 # -- Extractors tests -----------------------------------------------------------
 

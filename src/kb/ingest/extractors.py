@@ -1,7 +1,6 @@
 """Source-type-specific extraction logic (article, paper, video, etc.)."""
 
 import json
-from pathlib import Path
 
 import yaml
 
@@ -29,7 +28,8 @@ Source type: {template['name']} — {template['description']}
 Extract these fields as a JSON object:
 {field_descriptions}
 
-For list fields (key_claims, entities_mentioned, concepts_mentioned, etc.), return arrays of strings.
+For list fields (key_claims, entities_mentioned, concepts_mentioned, etc.),
+return arrays of strings.
 For scalar fields, return strings.
 If a field cannot be determined from the source, use null.
 
@@ -53,7 +53,6 @@ def extract_from_source(content: str, source_type: str) -> dict:
     """
     template = load_template(source_type)
     prompt = build_extraction_prompt(content, template)
-    response = call_llm(
-        prompt, tier="write", system="You are a precise information extractor. Return only valid JSON."
-    )
+    system_msg = "You are a precise information extractor. Return only valid JSON."
+    response = call_llm(prompt, tier="write", system=system_msg)
     return json.loads(response)
