@@ -10,11 +10,21 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Implemented and tested:** `kb.config`, `kb.models` (WikiPage, RawSource, frontmatter validation), `kb.utils` (hashing, markdown parsing, LLM API wrapper). CLI skeleton is wired with Click but all 5 commands are TODO stubs.
+**Phase 1 complete (v0.2.0).** All 5 operations and graph module are implemented, tested (78 tests), and wired to the CLI.
 
-**Stubbed (empty):** `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`. These are the core operations that need implementation.
+**Implemented and tested:**
+- `kb.config` — paths, model tiers, page types, confidence levels
+- `kb.models` — WikiPage, RawSource dataclasses, frontmatter validation
+- `kb.utils` — hashing (SHA-256), markdown parsing (wikilinks, raw refs), LLM API wrapper (3-tier)
+- `kb.ingest` — pipeline (read raw source → LLM extraction → generate wiki pages → update indexes), extractors (template loading, prompt building)
+- `kb.compile` — compiler (hash-based incremental detection, batch orchestration), differ (unified diffs, dry-run), linker (wikilink resolution, backlinks)
+- `kb.query` — engine (keyword search with title boosting, LLM synthesis), citations (extraction, formatting)
+- `kb.lint` — checks (dead links, orphan pages, staleness, frontmatter validation, source coverage), runner (orchestrator, report formatting)
+- `kb.evolve` — analyzer (coverage analysis, connection opportunities, new page suggestions, evolution report)
+- `kb.graph` — builder (networkx DiGraph from wikilinks, statistics), visualize (pyvis HTML output)
+- CLI — all 5 commands fully wired: `ingest`, `compile`, `query`, `lint`, `evolve`
 
-**Phase 1 priority:** Get Ingest and Compile working end-to-end. Detailed architecture research is in `research/agent-architecture-research.md`.
+**Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. Detailed architecture research is in `research/agent-architecture-research.md`.
 
 ## Development Commands
 
