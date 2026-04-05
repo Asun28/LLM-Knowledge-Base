@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, WIKI_LOG
-from kb.utils.hashing import content_hash
 from kb.ingest.pipeline import ingest_source
-
+from kb.utils.hashing import content_hash
 
 # Hash manifest location (git-ignored)
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"

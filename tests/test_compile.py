@@ -13,7 +13,6 @@ from kb.compile.compiler import (
 from kb.compile.differ import apply_diff, compute_diff
 from kb.compile.linker import build_backlinks, resolve_wikilinks
 
-
 # ── Compiler tests ──────────────────────────────────────────────
 
 

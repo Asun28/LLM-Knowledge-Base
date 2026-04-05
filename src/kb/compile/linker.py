@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from kb.config import WIKI_DIR
+from kb.graph.builder import page_id, scan_wiki_pages
 from kb.utils.markdown import extract_wikilinks
-from kb.graph.builder import scan_wiki_pages, page_id
 
 
 def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
