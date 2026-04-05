@@ -3,10 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from kb.query.citations import extract_citations, format_citations
-from kb.query.engine import search_pages, query_wiki
+from kb.query.engine import query_wiki, search_pages
 
 
 def _create_wiki_page(path: Path, title: str, content: str, page_type: str = "concept") -> None:

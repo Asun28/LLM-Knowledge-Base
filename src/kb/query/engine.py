@@ -150,7 +150,10 @@ INSTRUCTIONS:
     answer = call_llm(
         prompt,
         tier="orchestrate",
-        system="You are a knowledge base assistant. Answer questions using wiki content with inline citations.",
+        system=(
+            "You are a knowledge base assistant. "
+            "Answer questions using wiki content with inline citations."
+        ),
         max_tokens=2048,
     )
 
