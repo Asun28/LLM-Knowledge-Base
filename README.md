@@ -166,23 +166,57 @@ python -m kb.mcp_server
 }
 ```
 
-After restarting Claude Code, you get 9 tools:
+After restarting Claude Code, you get 13 tools in two modes:
+
+#### Always Local (no API key)
 
 | Tool | Description |
 |------|-------------|
-| `kb_search` | Keyword search across wiki pages (fast, no LLM cost) |
+| `kb_search` | Keyword search across wiki pages |
 | `kb_read_page` | Read a specific wiki page by ID |
 | `kb_list_pages` | List all pages, optionally filtered by type |
 | `kb_list_sources` | List all raw source files |
-| `kb_query` | LLM-powered Q&A with citations (uses API tokens) |
 | `kb_stats` | Page counts, graph metrics, coverage info |
 | `kb_lint` | Health checks (dead links, orphans, staleness) |
 | `kb_evolve` | Gap analysis and connection suggestions |
+
+#### With API Key (calls Anthropic API directly)
+
+| Tool | Description |
+|------|-------------|
+| `kb_query` | LLM-powered Q&A with citations |
 | `kb_ingest` | Ingest a raw source into the wiki |
+
+#### Claude Code Native (no API key — Claude Code is the LLM)
+
+| Tool | Description |
+|------|-------------|
+| `kb_query_context` | Returns wiki search results + full page content; Claude Code synthesizes the answer |
+| `kb_ingest_prepare` | Reads source + template, returns extraction prompt for Claude Code to process |
+| `kb_ingest_apply` | Takes Claude Code's extraction JSON and writes summary/entity/concept pages |
+| `kb_compile_scan` | Lists new/changed sources; use with `kb_ingest_prepare`/`kb_ingest_apply` for each |
+
+**Claude Code native workflow (no API key needed):**
+
+```
+# Query: ask a question
+1. kb_query_context("What is RAG?")     → returns wiki context
+2. Claude Code reads context             → synthesizes answer directly
+
+# Ingest: add a source
+1. kb_ingest_prepare("raw/articles/rag.md")  → returns extraction prompt
+2. Claude Code extracts structured JSON       → from the prompt
+3. kb_ingest_apply("raw/articles/rag.md", "article", '{"title":...}')  → writes pages
+
+# Compile: batch process
+1. kb_compile_scan()                     → lists sources needing ingestion
+2. For each source: prepare → extract → apply
+```
 
 **Example in Claude Code:**
 > "Search my knowledge base for articles about RAG" -> uses `kb_search`
-> "What does my wiki say about transformer architectures?" -> uses `kb_query`
+> "What does my wiki say about transformer architectures?" -> uses `kb_query_context`
+> "Ingest this article into my wiki" -> uses `kb_ingest_prepare` + `kb_ingest_apply`
 > "Show me wiki health" -> uses `kb_lint`
 
 ## Supported Source Types
@@ -265,7 +299,7 @@ LLM-Knowledge-Base/
   src/kb/                  # Python package
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, settings
-    mcp_server.py          # FastMCP server for Claude Code integration
+    mcp_server.py          # FastMCP server for Claude Code (13 tools, 2 modes)
     models/                # WikiPage, RawSource, frontmatter
     ingest/                # Pipeline + extractors
     compile/               # Compiler + differ + linker

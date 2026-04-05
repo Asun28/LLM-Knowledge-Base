@@ -177,7 +177,10 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
-- **kb** — The knowledge base itself as an MCP server (`kb.mcp_server`). Exposes 9 tools: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_query`, `kb_stats`, `kb_lint`, `kb_evolve`, `kb_ingest`, `kb_list_sources`. Start with `kb mcp` or `python -m kb.mcp_server`. This is the primary way Claude Code interacts with the wiki.
+- **kb** — The knowledge base itself as an MCP server (`kb.mcp_server`). Start with `kb mcp` or `python -m kb.mcp_server`. This is the primary way Claude Code interacts with the wiki. Two modes:
+  - **API mode** (needs `ANTHROPIC_API_KEY`): `kb_ingest`, `kb_query`, `kb_compile` — call the Anthropic API directly.
+  - **Claude Code native** (no API key): `kb_query_context`, `kb_ingest_prepare`/`kb_ingest_apply`, `kb_compile_scan` — Claude Code acts as the LLM. Workflow: prepare → Claude Code extracts/synthesizes → apply.
+  - **Always local** (no API key): `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`, `kb_stats`, `kb_lint`, `kb_evolve`.
 - **memory** — Persistent knowledge graph in `.memory/memory.jsonl`. Track wiki entity relationships across sessions.
 - **arxiv** — Search/download papers to `raw/papers/`.
 - **sqlite** — Metadata DB at `.data/metadata.db`. For wikilink graph, ingestion history, lint results.
