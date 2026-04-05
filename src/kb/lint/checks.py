@@ -5,8 +5,8 @@ from pathlib import Path
 
 import frontmatter
 
-from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
 from kb.compile.linker import resolve_wikilinks
+from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.markdown import extract_raw_refs

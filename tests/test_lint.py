@@ -3,8 +3,6 @@
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
-
 from kb.lint.checks import (
     check_dead_links,
     check_frontmatter,
