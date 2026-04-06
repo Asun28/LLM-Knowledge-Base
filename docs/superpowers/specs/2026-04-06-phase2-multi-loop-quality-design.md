@@ -39,6 +39,7 @@ Claude Code Session (LLM reasoning)
 - Python modules handle I/O, hashing, indexing, and context assembly
 - Claude Code handles evaluation, decision-making, and loop control
 - API mode (`use_api=true`) remains available for headless/automated runs
+- **Cleanup:** Remove `langgraph`, `dspy`, `langchain*`, `langsmith` from `requirements.txt` (currently unused, ~40 transitive deps). Move to `requirements-experimental.txt` if needed for Phase 3 experimentation.
 
 ## 3. Four Phase 2 Patterns
 
@@ -77,10 +78,26 @@ Claude Code Session (LLM reasoning)
 
 Functions:
 - `build_fidelity_context(page_id, wiki_dir, raw_dir) -> dict` — returns page content paired with all referenced source content. Includes claim extraction (sentences ending with factual assertions) for targeted checking.
-- `build_consistency_context(page_ids, wiki_dir) -> dict` — groups related pages (shared sources or topics) and returns paired content for contradiction detection. Auto-selects if no page_ids given (picks pages sharing the most sources).
+- `build_consistency_context(page_ids, wiki_dir) -> dict` — groups related pages and returns paired content for contradiction detection. Auto-selects if no page_ids given, using three grouping strategies in priority order:
+  1. Pages sharing raw sources (from frontmatter `source:` fields)
+  2. Pages connected by wikilinks (from `build_graph()`)
+  3. Pages with high term overlap (reuse logic from `evolve/analyzer.py:find_connection_opportunities`)
+  Deduplicates across strategies and caps each group at `MAX_CONSISTENCY_GROUP_SIZE`.
 - `build_completeness_context(page_id, wiki_dir, raw_dir) -> dict` — returns source content alongside page content, highlighting source sections not reflected in the page.
 
-**Change-gated optimization:** Only check pages whose source hashes changed since last review. A review manifest at `.data/review_manifest.json` maps `page_id -> { last_reviewed: date, source_hash: str }`. Skip pages where the source hash matches.
+**Change-gated optimization:** Only check pages that have changed since last review. A review manifest at `.data/review_manifest.json` tracks both source and page hashes:
+
+```json
+{
+  "page_id": {
+    "last_reviewed": "2026-04-06",
+    "source_hash": "abc123",
+    "page_hash": "def456"
+  }
+}
+```
+
+Skip only when **both** hashes match. Pages can change independently of their sources (wikilink fixes, frontmatter corrections, content added via `_update_existing_page` when a new source mentions an existing entity). Reuses `content_hash()` from `kb.utils.hashing` for the page file.
 
 ### 3.2 Actor-Critic Compile
 
@@ -114,7 +131,9 @@ Reviewer Sub-agent (Critic):
 5. No hallucinated facts beyond source material
 6. Title accurately reflects content
 
-**Review output format:**
+**Important distinction:** The `kb_review_page` MCP tool returns **raw context** — page markdown, source text, and checklist questions as plain text. The structured JSON review below is produced by **Claude Code or the wiki-reviewer agent** reasoning over that context. `review/context.py` builds a text prompt, not a structured review.
+
+**Expected review output format (produced by Claude Code / wiki-reviewer agent):**
 ```json
 {
   "verdict": "approve | revise | reject",
@@ -143,7 +162,7 @@ model: sonnet
 ---
 ```
 
-The agent is instructed to evaluate strictly against source material, flag confidence:stated claims that are actually inferences, and return structured JSON findings. It has access to: `kb_review_page`, `kb_read_page`, `kb_search`, `Read`.
+The agent is instructed to evaluate strictly against source material, flag confidence:stated claims that are actually inferences, and return structured JSON findings. It has access to: `kb_review_page`, `kb_read_page`, `kb_search`, `kb_list_pages`, `Read`.
 
 ### 3.3 Query Feedback Loop
 
@@ -194,10 +213,10 @@ trust = (useful + 1) / (useful + wrong + incomplete + 2)
 ```
 Bayesian smoothing with prior of 0.5 (pseudocounts of 1 success, 1 failure). A page with no feedback starts at 0.5.
 
-**Integration points:**
-- `kb_query()` includes trust scores in returned context so Claude Code can weight sources
-- `kb_lint()` prioritizes low-trust pages (trust < 0.4) in its report
-- `kb_evolve()` includes "incomplete" feedback as coverage gaps
+**Integration points (all in `mcp_server.py`, not in foundation modules — keeps modules independent):**
+- `kb_query()` merges trust scores into search results before returning context. Done in `mcp_server.py` (which already calls `search_pages()`), NOT in `query/engine.py`. Wrapped in try/except so corrupted or missing feedback JSON doesn't break queries.
+- `kb_lint()` appends a "low-trust pages" section to its report by calling `get_flagged_pages()`. Again in `mcp_server.py`, not `lint/runner.py`.
+- `kb_evolve()` appends "incomplete" feedback as coverage gaps by calling `get_coverage_gaps()`. In `mcp_server.py`, not `evolve/analyzer.py`.
 
 ### 3.4 Self-Refine on Compile
 
@@ -216,7 +235,8 @@ Bayesian smoothing with prior of 0.5 (pseudocounts of 1 success, 1 failure). A p
 - Receives page_id, new markdown body, and revision notes
 - Preserves YAML frontmatter (updates `updated` date only)
 - Appends revision entry to `.data/review_history.json`
-- Returns confirmation with diff summary
+- Appends to `wiki/log.md`: `"Refined {page_id}: {revision_notes}"` (maintains the audit trail convention — every write operation logs)
+- Returns confirmation with diff summary and list of affected pages (calls `kb_affected_pages` internally)
 
 ### 3.5 Lightweight Reweave
 
@@ -371,11 +391,12 @@ Each new module gets its own test file following the Phase 1 pattern (pytest, fi
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| `tests/test_review.py` | ~12 | `build_review_context`, `build_review_checklist`, `refine_page`, review history CRUD, frontmatter preservation |
-| `tests/test_feedback.py` | ~10 | Feedback CRUD, trust score computation (Bayesian), flagged pages, coverage gaps, empty state |
-| `tests/test_lint_semantic.py` | ~10 | Fidelity context building, consistency grouping, completeness context, change-gated skipping |
+| `tests/test_review.py` | ~12 | `pair_page_with_sources`, `build_review_context`, `build_review_checklist`, `refine_page`, review history CRUD, frontmatter preservation, wiki/log.md audit trail |
+| `tests/test_feedback.py` | ~10 | Feedback CRUD, trust score computation (Bayesian), flagged pages, coverage gaps, empty state, corrupted JSON resilience |
+| `tests/test_lint_semantic.py` | ~10 | Fidelity context building, consistency grouping (3 strategies), completeness context, change-gated skipping (both hashes) |
+| `tests/test_mcp_phase2.py` | ~8 | MCP tool integration for all 7 new tools, error cases (missing pages, invalid ratings, corrupted feedback) |
 
-**Target:** ~32 new tests, bringing total to ~110.
+**Target:** ~40 new tests, bringing total to ~118.
 
 All tests use `tmp_wiki` / `tmp_path` fixtures with pre-built pages and sources. No API calls — tests validate context assembly and data operations only.
 
@@ -403,5 +424,5 @@ Phase 2 is complete when:
 6. `kb_reliability_map` returns sorted trust scores
 7. `kb_affected_pages` returns backlinks and shared-source pages
 8. `.claude/agents/wiki-reviewer.md` enables context-isolated review
-9. All ~110 tests pass (78 existing + ~32 new)
+9. All ~118 tests pass (78 existing + ~40 new)
 10. CLAUDE.md documents Phase 2 workflows
