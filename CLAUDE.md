@@ -127,6 +127,42 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 
 78 tests across 7 test files covering models, ingest, compile, query, lint, evolve, and graph modules.
 
+## Phase 2 Workflows
+
+### Standard Ingest (with Self-Refine)
+1. `kb_ingest(path)` — get extraction prompt
+2. Extract JSON — `kb_ingest(path, extraction_json)`
+3. For each created page: `kb_review_page(page_id)` — self-critique
+4. If issues: `kb_refine_page(page_id, updated_content)` (max 2 rounds)
+
+### Thorough Ingest (with Actor-Critic)
+1-4. Same as Standard Ingest
+5. Spawn wiki-reviewer agent with created page_ids
+6. Review findings — fix or accept
+7. `kb_affected_pages` — flag related pages
+
+### Deep Lint
+1. `kb_lint()` — mechanical report
+2. For errors: `kb_lint_deep(page_id)` — evaluate fidelity
+3. Fix issues via `kb_refine_page`
+4. `kb_lint_consistency()` — contradiction check
+5. Re-run `kb_lint()` to verify (max 3 rounds)
+
+### Query with Feedback
+1. `kb_query(question)` — synthesize answer
+2. After user reaction: `kb_query_feedback(question, rating, pages)`
+
+### Phase 2 MCP Tools
+| Tool | Purpose |
+|------|---------|
+| `kb_review_page(page_id)` | Page + sources + checklist for quality review |
+| `kb_refine_page(page_id, content, notes)` | Update page preserving frontmatter |
+| `kb_lint_deep(page_id)` | Source fidelity check context |
+| `kb_lint_consistency(page_ids)` | Cross-page contradiction check |
+| `kb_query_feedback(question, rating, pages, notes)` | Record query success/failure |
+| `kb_reliability_map()` | Page trust scores from feedback |
+| `kb_affected_pages(page_id)` | Pages affected by a change |
+
 ## Conventions
 
 - All wiki pages must link claims back to specific `raw/` source files. Unsourced claims should be flagged.

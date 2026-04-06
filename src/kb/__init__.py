@@ -1,3 +1,3 @@
 """LLM Knowledge Base — compile raw sources into an interlinked markdown wiki."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
