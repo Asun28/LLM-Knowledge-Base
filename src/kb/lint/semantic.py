@@ -1,6 +1,7 @@
 """Semantic lint checks — build contexts for LLM-powered quality evaluation."""
 
 import logging
+import re
 from pathlib import Path
 
 import frontmatter
@@ -112,11 +113,14 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
     page_terms: dict[str, set[str]] = {}
 
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8").lower()
+        raw = page_path.read_text(encoding="utf-8")
         pid = page_id(page_path, wiki_dir)
+        # Strip YAML frontmatter before tokenizing
+        fm_match = re.match(r"\A\s*---\n.*?\n---\n?(.*)", raw, re.DOTALL)
+        body = fm_match.group(1) if fm_match else raw
         words = {
-            w.strip(".,!?()[]{}\"'")
-            for w in content.split()
+            w.strip(".,!?()[]{}\"':-/")
+            for w in body.lower().split()
             if len(w) > 4
         } - common_words
         page_terms[pid] = words
