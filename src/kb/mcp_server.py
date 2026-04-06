@@ -57,6 +57,14 @@ def _slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
+def _validate_page_id(page_id: str) -> str | None:
+    """Validate that a page ID exists. Returns error message or None."""
+    page_path = WIKI_DIR / f"{page_id}.md"
+    if not page_path.exists():
+        return f"Page not found: {page_id}. Use kb_list_pages to see available pages."
+    return None
+
+
 def _load_all_pages() -> list[dict]:
     """Load all wiki pages with metadata."""
     pages = []
@@ -713,6 +721,10 @@ def kb_review_page(page_id: str) -> str:
     Args:
         page_id: Page to review (e.g., 'concepts/rag').
     """
+    err = _validate_page_id(page_id)
+    if err:
+        return f"Error: {err}"
+
     try:
         from kb.review.context import build_review_context
 
@@ -772,6 +784,10 @@ def kb_lint_deep(page_id: str) -> str:
     Args:
         page_id: Page to check (e.g., 'concepts/rag').
     """
+    err = _validate_page_id(page_id)
+    if err:
+        return f"Error: {err}"
+
     try:
         from kb.lint.semantic import build_fidelity_context
 
