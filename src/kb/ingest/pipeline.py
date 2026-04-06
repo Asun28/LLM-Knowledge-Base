@@ -35,16 +35,22 @@ def detect_source_type(source_path: Path) -> str:
     raise ValueError(f"Cannot detect source type from path: {source_path}")
 
 
+def _yaml_escape(value: str) -> str:
+    """Escape a string for safe YAML quoting (double-quote style)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _write_wiki_page(
     path: Path, title: str, page_type: str, source_ref: str, confidence: str, content: str
 ) -> None:
     """Write a wiki page with proper YAML frontmatter."""
     today = date.today().isoformat()
-    # Quote title and source_ref to handle YAML-special characters (: # [ {)
+    safe_title = _yaml_escape(title)
+    safe_source = _yaml_escape(source_ref)
     frontmatter = f'''---
-title: "{title}"
+title: "{safe_title}"
 source:
-  - "{source_ref}"
+  - "{safe_source}"
 created: {today}
 updated: {today}
 type: {page_type}
