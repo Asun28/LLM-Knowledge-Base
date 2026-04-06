@@ -85,13 +85,15 @@ def refine_page(
     )
     save_review_history(history, history_path)
 
-    # Append to wiki/log.md
+    # Append to wiki/log.md (create if missing)
     log_path = wiki_dir / "log.md"
-    if log_path.exists():
-        log_content = log_path.read_text(encoding="utf-8")
-        entry = f"- {today} | refine | Refined {page_id}: {revision_notes}\n"
-        log_content += entry
-        log_path.write_text(log_content, encoding="utf-8")
+    if not log_path.exists():
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
+    log_content = log_path.read_text(encoding="utf-8")
+    entry = f"- {today} | refine | Refined {page_id}: {revision_notes}\n"
+    log_content += entry
+    log_path.write_text(log_content, encoding="utf-8")
 
     return {
         "page_id": page_id,

@@ -37,8 +37,10 @@ def pair_page_with_sources(
 
     source_contents = []
     for source_ref in sources_meta:
-        # Resolve: "raw/articles/foo.md" -> raw_dir.parent / "raw/articles/foo.md"
-        source_path = raw_dir.parent / source_ref
+        # Resolve: "raw/articles/foo.md" -> project_root / "raw/articles/foo.md"
+        # source_ref starts with "raw/" so we go to parent of raw_dir (= project root)
+        project_root = raw_dir.parent
+        source_path = project_root / source_ref
         if source_path.exists():
             source_contents.append(
                 {
