@@ -1,8 +1,11 @@
 """Query engine — search wiki, synthesize answers with citations."""
 
+import logging
 from pathlib import Path
 
 import frontmatter
+
+logger = logging.getLogger(__name__)
 
 from kb.config import WIKI_DIR
 from kb.query.citations import extract_citations

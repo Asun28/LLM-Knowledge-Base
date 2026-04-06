@@ -1,9 +1,12 @@
 """Individual lint checks: orphans, dead links, staleness, circular refs, coverage gaps."""
 
+import logging
 from datetime import date, timedelta
 from pathlib import Path
 
 import frontmatter
+
+logger = logging.getLogger(__name__)
 
 from kb.compile.linker import resolve_wikilinks
 from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR

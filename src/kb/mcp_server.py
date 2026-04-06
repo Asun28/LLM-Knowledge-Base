@@ -694,9 +694,12 @@ def kb_review_page(page_id: str) -> str:
     Args:
         page_id: Page to review (e.g., 'concepts/rag').
     """
-    from kb.review.context import build_review_context
+    try:
+        from kb.review.context import build_review_context
 
-    return build_review_context(page_id)
+        return build_review_context(page_id)
+    except Exception as e:
+        return f"Error reviewing {page_id}: {e}"
 
 
 @mcp.tool()
@@ -717,11 +720,14 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     if "error" in result:
         return f"Error: {result['error']}"
 
-    # Include affected pages in response
-    from kb.compile.linker import build_backlinks
+    # Include affected pages in response (fail-safe)
+    try:
+        from kb.compile.linker import build_backlinks
 
-    backlinks = build_backlinks()
-    affected = backlinks.get(page_id, [])
+        backlinks = build_backlinks()
+        affected = backlinks.get(page_id, [])
+    except Exception:
+        affected = []
 
     lines = [
         f"Refined: {page_id}",
@@ -744,9 +750,12 @@ def kb_lint_deep(page_id: str) -> str:
     Args:
         page_id: Page to check (e.g., 'concepts/rag').
     """
-    from kb.lint.semantic import build_fidelity_context
+    try:
+        from kb.lint.semantic import build_fidelity_context
 
-    return build_fidelity_context(page_id)
+        return build_fidelity_context(page_id)
+    except Exception as e:
+        return f"Error checking fidelity for {page_id}: {e}"
 
 
 @mcp.tool()

@@ -1,8 +1,11 @@
 """Semantic lint checks — build contexts for LLM-powered quality evaluation."""
 
+import logging
 from pathlib import Path
 
 import frontmatter
+
+logger = logging.getLogger(__name__)
 
 from kb.config import MAX_CONSISTENCY_GROUP_SIZE, WIKI_DIR
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages

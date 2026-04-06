@@ -40,17 +40,18 @@ def _write_wiki_page(
 ) -> None:
     """Write a wiki page with proper YAML frontmatter."""
     today = date.today().isoformat()
-    frontmatter = f"""---
+    # Quote title and source_ref to handle YAML-special characters (: # [ {)
+    frontmatter = f'''---
 title: "{title}"
 source:
-  - {source_ref}
+  - "{source_ref}"
 created: {today}
 updated: {today}
 type: {page_type}
 confidence: {confidence}
 ---
 
-"""
+'''
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(frontmatter + content, encoding="utf-8")
 
