@@ -135,6 +135,8 @@ def _apply_extraction(
         if not entity or not entity.strip():
             continue
         entity_slug = slugify(entity)
+        if not entity_slug:
+            continue
         entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
         if entity_path.exists():
             _update_existing_page(entity_path, source_ref)
@@ -149,6 +151,8 @@ def _apply_extraction(
         if not concept or not concept.strip():
             continue
         concept_slug = slugify(concept)
+        if not concept_slug:
+            continue
         concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
         if concept_path.exists():
             _update_existing_page(concept_path, source_ref)
