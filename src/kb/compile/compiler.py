@@ -139,14 +139,12 @@ def compile_wiki(
             results["pages_created"].extend(ingest_result["pages_created"])
             results["pages_updated"].extend(ingest_result["pages_updated"])
 
-            # Update manifest with new hash
+            # Update manifest and save immediately (crash-safe)
             rel_path = _canonical_rel_path(source, raw_dir)
             manifest[rel_path] = content_hash(source)
+            save_manifest(manifest, manifest_path)
         except Exception as e:
             results["errors"].append({"source": str(source), "error": str(e)})
-
-    # Save updated manifest
-    save_manifest(manifest, manifest_path)
 
     # Append to log
     append_wiki_log(

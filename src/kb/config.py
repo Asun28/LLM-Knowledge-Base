@@ -80,3 +80,8 @@ MIN_SHARED_TERMS = 3
 # ── Query search weights ────────────────────────────────────
 SEARCH_TITLE_WEIGHT = 3
 SEARCH_CONTENT_WEIGHT = 1
+
+# ── Query context limits ───────────────────────────────────
+# Approximate character budget for query context sent to LLM.
+# ~4 chars/token, 100k context window → conservative 80k char limit.
+QUERY_CONTEXT_MAX_CHARS = 80_000

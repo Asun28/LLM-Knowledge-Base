@@ -185,8 +185,11 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
         for f in actual_dir.iterdir():
             if f.is_file() and f.name != ".gitkeep":
                 rel_path = f"raw/{type_dir.name}/{f.name}"
-                # Check if this source is referenced (partial match)
-                referenced = any(rel_path in ref or f.name in ref for ref in all_raw_refs)
+                # Check if this source is referenced (exact path or ends with filename)
+                referenced = any(
+                    ref == rel_path or ref.endswith(f"/{f.name}")
+                    for ref in all_raw_refs
+                )
                 if not referenced:
                     issues.append(
                         {

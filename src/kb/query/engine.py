@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from kb.config import SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT
+from kb.config import QUERY_CONTEXT_MAX_CHARS, SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
 from kb.utils.pages import load_all_pages
@@ -91,16 +91,31 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     return scored[:max_results]
 
 
-def _build_query_context(pages: list[dict]) -> str:
-    """Build context string from matching wiki pages for the LLM."""
+def _build_query_context(
+    pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS
+) -> str:
+    """Build context string from matching wiki pages for the LLM.
+
+    Truncates to max_chars to avoid exceeding the model's context window.
+    Pages are included in relevance order; partially-fitting pages are trimmed.
+    """
     if not pages:
         return "No relevant wiki pages found."
     sections = []
+    total = 0
     for page in pages:
-        sections.append(
-            f"--- Page: {page['id']} (type: {page['type']}, confidence: {page['confidence']}) ---\n"
+        section = (
+            f"--- Page: {page['id']} (type: {page['type']}, "
+            f"confidence: {page['confidence']}) ---\n"
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
+        if total + len(section) > max_chars:
+            remaining = max_chars - total
+            if remaining > 200:
+                sections.append(section[:remaining] + "\n[...truncated]")
+            break
+        sections.append(section)
+        total += len(section)
     return "\n".join(sections)
 
 

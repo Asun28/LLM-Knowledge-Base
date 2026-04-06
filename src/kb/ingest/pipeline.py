@@ -1,5 +1,6 @@
 """Ingest pipeline — read raw sources, create wiki summaries, update indexes."""
 
+import logging
 import re
 from datetime import date
 from pathlib import Path
@@ -16,6 +17,8 @@ from kb.utils.hashing import content_hash
 from kb.utils.paths import make_source_ref
 from kb.utils.text import slugify, yaml_escape
 from kb.utils.wiki_log import append_wiki_log
+
+logger = logging.getLogger(__name__)
 
 
 def detect_source_type(source_path: Path) -> str:
@@ -129,19 +132,67 @@ def _build_concept_content(concept_name: str, source_ref: str, context: str) -> 
     return "\n".join(lines)
 
 
+def _extract_entity_context(name: str, extraction: dict) -> str:
+    """Build context snippet for an entity from extraction data.
+
+    Searches key_claims, core_argument, and abstract for mentions of the entity.
+    Returns a brief description or empty string if nothing relevant found.
+    """
+    name_lower = name.lower()
+    relevant = []
+
+    for field in ("core_argument", "abstract", "description", "problem_solved"):
+        val = extraction.get(field)
+        if val and name_lower in val.lower():
+            relevant.append(val)
+            break
+
+    for claim in extraction.get("key_claims") or extraction.get("key_points") or []:
+        if isinstance(claim, str) and name_lower in claim.lower():
+            relevant.append(claim)
+
+    if not relevant:
+        return ""
+
+    lines = ["## Context\n"]
+    for item in relevant[:3]:
+        lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
 def _update_existing_page(page_path: Path, source_ref: str) -> None:
-    """Add a new source reference to an existing wiki page's References section."""
+    """Add a new source reference to an existing wiki page.
+
+    Updates both the YAML frontmatter source: list and the References section.
+    """
     content = page_path.read_text(encoding="utf-8")
-    ref_line = f"- Mentioned in {source_ref}"
     if source_ref in content:
         return  # Already referenced
-    # Append to References section
+
+    # 1. Update frontmatter source: list
+    safe_ref = yaml_escape(source_ref)
+    # Insert new source entry after the last existing source line
+    if re.search(r'^  - ".*"$', content, re.MULTILINE):
+        content = re.sub(
+            r'(^  - "[^"]*"$)(?![\s\S]*^  - ")',
+            rf'\1\n  - "{safe_ref}"',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    elif "source:" in content:
+        content = content.replace(
+            "source:\n", f'source:\n  - "{safe_ref}"\n', 1
+        )
+
+    # 2. Append to References section
+    ref_line = f"- Mentioned in {source_ref}"
     if "## References" in content:
         content = content.replace("## References\n", f"## References\n{ref_line}\n", 1)
     else:
         content += f"\n## References\n\n{ref_line}\n"
 
-    # Update the 'updated' field in frontmatter
+    # 3. Update the 'updated' date in frontmatter
     today = date.today().isoformat()
     content = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", content)
 
@@ -247,35 +298,59 @@ def ingest_source(
 
     # 2. Create or update entity pages
     entities = extraction.get("entities_mentioned") or []
+    seen_entity_slugs: dict[str, str] = {}
     for entity in entities:
         if not entity or not entity.strip():
             continue
         entity_slug = slugify(entity)
         if not entity_slug:
+            logger.warning("Skipping entity with empty slug: %r", entity)
             continue
+        if entity_slug in seen_entity_slugs:
+            prev = seen_entity_slugs[entity_slug]
+            if prev != entity:
+                logger.warning(
+                    "Slug collision: %r and %r both slug to %r",
+                    prev, entity, entity_slug,
+                )
+            continue
+        seen_entity_slugs[entity_slug] = entity
         entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
         if entity_path.exists():
             _update_existing_page(entity_path, source_ref)
             pages_updated.append(f"entities/{entity_slug}")
         else:
-            entity_content = _build_entity_content(entity, source_ref, "")
+            ctx = _extract_entity_context(entity, extraction)
+            entity_content = _build_entity_content(entity, source_ref, ctx)
             _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
             pages_created.append(f"entities/{entity_slug}")
 
     # 3. Create or update concept pages
     concepts = extraction.get("concepts_mentioned") or []
+    seen_concept_slugs: dict[str, str] = {}
     for concept in concepts:
         if not concept or not concept.strip():
             continue
         concept_slug = slugify(concept)
         if not concept_slug:
+            logger.warning("Skipping concept with empty slug: %r", concept)
             continue
+        if concept_slug in seen_concept_slugs:
+            prev = seen_concept_slugs[concept_slug]
+            if prev != concept:
+                logger.warning(
+                    "Slug collision: %r and %r both slug to %r",
+                    prev, concept, concept_slug,
+                )
+            continue
+        seen_concept_slugs[concept_slug] = concept
         concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
         if concept_path.exists():
             _update_existing_page(concept_path, source_ref)
             pages_updated.append(f"concepts/{concept_slug}")
         else:
-            concept_content = _build_concept_content(concept, source_ref, "")
+            ctx = _extract_entity_context(concept, extraction)
+            concept_content = _build_concept_content(concept, source_ref, ctx)
             _write_wiki_page(
                 concept_path, concept, "concept", source_ref, "stated", concept_content
             )
