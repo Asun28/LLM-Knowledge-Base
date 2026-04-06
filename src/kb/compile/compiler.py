@@ -11,6 +11,18 @@ from kb.utils.hashing import content_hash
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
 
 
+def _canonical_rel_path(source: Path, raw_dir: Path) -> str:
+    """Compute a canonical relative path for a source file (always forward slashes).
+
+    Uses raw_dir's parent (project root) as the base, producing paths like
+    'raw/articles/example.md' regardless of OS.
+    """
+    try:
+        return str(source.resolve().relative_to(raw_dir.resolve().parent)).replace("\\", "/")
+    except ValueError:
+        return str(source).replace("\\", "/")
+
+
 def load_manifest(manifest_path: Path | None = None) -> dict[str, str]:
     """Load the content hash manifest (source path → hash mapping).
 
@@ -72,7 +84,7 @@ def find_changed_sources(
     changed_sources = []
 
     for source in all_sources:
-        rel_path = str(source).replace("\\", "/")
+        rel_path = _canonical_rel_path(source, raw_dir or RAW_DIR)
         current_hash = content_hash(source)
 
         if rel_path not in manifest:
@@ -127,7 +139,7 @@ def compile_wiki(
             results["pages_updated"].extend(ingest_result["pages_updated"])
 
             # Update manifest with new hash
-            rel_path = str(source).replace("\\", "/")
+            rel_path = _canonical_rel_path(source, raw_dir)
             manifest[rel_path] = content_hash(source)
         except Exception as e:
             results["errors"].append({"source": str(source), "error": str(e)})
