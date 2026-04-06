@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import frontmatter
+import yaml
 
 from kb.config import WIKI_DIR
 from kb.graph.builder import page_id
@@ -53,7 +54,7 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "raw_content": post.content.lower(),
                     }
                 )
-            except Exception as e:
+            except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
                 logger.warning("Skipping page %s: %s", page_path, e)
                 continue
     return pages

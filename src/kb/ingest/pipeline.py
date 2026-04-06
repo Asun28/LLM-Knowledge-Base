@@ -5,6 +5,8 @@ import re
 from datetime import date
 from pathlib import Path
 
+import frontmatter
+
 from kb.config import (
     RAW_DIR,
     SOURCE_TYPE_DIRS,
@@ -14,6 +16,7 @@ from kb.config import (
 )
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
+from kb.utils.pages import normalize_sources
 from kb.utils.paths import make_source_ref
 from kb.utils.text import slugify, yaml_escape
 from kb.utils.wiki_log import append_wiki_log
@@ -169,8 +172,14 @@ def _update_existing_page(
     When name and extraction are provided, enriches page with context from the new source.
     """
     content = page_path.read_text(encoding="utf-8")
-    if source_ref in content:
-        return  # Already referenced
+    # Check frontmatter sources specifically, not full content
+    try:
+        post = frontmatter.load(str(page_path))
+        existing_sources = normalize_sources(post.metadata.get("source"))
+        if source_ref in existing_sources:
+            return  # Already referenced in frontmatter
+    except Exception:
+        pass  # If frontmatter parse fails, proceed with update
 
     # 1. Update frontmatter source: list
     safe_ref = yaml_escape(source_ref)

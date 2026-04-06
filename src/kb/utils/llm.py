@@ -1,6 +1,7 @@
 """Anthropic API wrapper with model tiering, retry, and timeout."""
 
 import logging
+import threading
 import time
 
 import anthropic
@@ -16,13 +17,16 @@ RETRY_MAX_DELAY = 30.0  # seconds
 REQUEST_TIMEOUT = 120.0  # seconds
 
 _client: anthropic.Anthropic | None = None
+_client_lock = threading.Lock()
 
 
 def get_client() -> anthropic.Anthropic:
     """Get a reusable Anthropic client (uses ANTHROPIC_API_KEY env var)."""
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(timeout=REQUEST_TIMEOUT, max_retries=0)
+        with _client_lock:
+            if _client is None:  # double-check locking
+                _client = anthropic.Anthropic(timeout=REQUEST_TIMEOUT, max_retries=0)
     return _client
 
 
@@ -42,6 +46,8 @@ def call_llm(
     a descriptive LLMError.
     """
     client = get_client()
+    if tier not in MODEL_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
     model = MODEL_TIERS[tier]
 
     messages = [{"role": "user", "content": prompt}]

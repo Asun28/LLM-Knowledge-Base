@@ -87,10 +87,10 @@ def test_call_llm_empty_response(mock_get_client):
 
 @patch("kb.utils.llm.get_client")
 def test_call_llm_invalid_tier(mock_get_client):
-    """call_llm raises KeyError for an unknown model tier."""
+    """call_llm raises ValueError for an unknown model tier."""
     mock_get_client.return_value = MagicMock()
 
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="Invalid tier"):
         call_llm("Say hello", tier="invalid")
 
 

@@ -27,9 +27,8 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
-    content = log_path.read_text(encoding="utf-8")
-    content += entry
-    log_path.write_text(content, encoding="utf-8")
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(entry)
 
     if log_path.stat().st_size > LOG_SIZE_WARNING_BYTES:
         logger.warning(
