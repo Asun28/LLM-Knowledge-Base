@@ -354,7 +354,7 @@ LLM-Knowledge-Base/
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
     utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
-  tests/                   # 289 tests across 18 test files (2.5s)
+  tests/                   # 382 tests across 24 test files (~4s)
 ```
 
 ## Development
@@ -387,6 +387,7 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 234 tests
 - **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words keyword matching with BM25 ranking (TF saturation, IDF, length normalization), custom tokenizer with stopword filtering, configurable parameters. 252 tests
 - **Phase 3.1 (complete, v0.9.0):** Hardening — path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling for all tools, max_results bounds, MCP Phase 2 instructions, SDK double-retry fix, wikilink normalization cleanup. 289 tests
+- **Phase 3.2 (complete, v0.9.1):** Comprehensive audit — BM25 div-by-zero fix, source path traversal protection, thread-safe LLM client, O(1) wiki log append, narrowed exception handling, frontmatter-aware source collision detection, consistent MCP validation, confidence/yaml_escape/retention fixes. 93 new tests (382 total), MCP tool coverage 41%→95%
 - **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License
