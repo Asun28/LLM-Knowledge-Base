@@ -230,3 +230,41 @@ def test_save_and_load_review_history(tmp_path):
     save_review_history(history, history_path)
     loaded = load_review_history(history_path)
     assert loaded == history
+
+
+def test_refine_page_missing_updated_field(tmp_project):
+    """refine_page adds updated field when missing from frontmatter."""
+    wiki_dir = tmp_project / "wiki"
+    page_path = wiki_dir / "concepts" / "rag.md"
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    # Frontmatter without updated: field
+    fm = (
+        '---\ntitle: "RAG"\nsource:\n  - raw/articles/rag.md\n'
+        "created: 2026-04-06\ntype: concept\nconfidence: stated\n---\n\nOld."
+    )
+    page_path.write_text(fm, encoding="utf-8")
+
+    refine_page(
+        "concepts/rag", "New.", "test",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    text = page_path.read_text(encoding="utf-8")
+    assert f"updated: {date.today().isoformat()}" in text
+
+
+def test_refine_page_creates_log_when_missing(tmp_project):
+    """refine_page creates log.md if it doesn't exist."""
+    wiki_dir = tmp_project / "wiki"
+    _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
+    # Remove the log.md that tmp_project creates
+    log_path = wiki_dir / "log.md"
+    log_path.unlink()
+    assert not log_path.exists()
+
+    refine_page(
+        "concepts/rag", "New.", "test",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    assert log_path.exists()
+    log = log_path.read_text(encoding="utf-8")
+    assert "concepts/rag" in log
