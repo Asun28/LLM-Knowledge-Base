@@ -1,6 +1,5 @@
 """Anthropic API wrapper with model tiering."""
 
-
 import anthropic
 
 from kb.config import MODEL_TIERS

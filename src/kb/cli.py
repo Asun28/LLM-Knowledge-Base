@@ -15,9 +15,23 @@ def cli():
 
 @cli.command()
 @click.argument("source_path")
-@click.option("--type", "source_type", type=click.Choice([
-    "article", "paper", "repo", "video", "podcast", "book", "dataset", "conversation",
-]), help="Source type (auto-detected if omitted)")
+@click.option(
+    "--type",
+    "source_type",
+    type=click.Choice(
+        [
+            "article",
+            "paper",
+            "repo",
+            "video",
+            "podcast",
+            "book",
+            "dataset",
+            "conversation",
+        ]
+    ),
+    help="Source type (auto-detected if omitted)",
+)
 def ingest(source_path: str, source_type: str | None):
     """Ingest a raw source into the knowledge base."""
     from kb.ingest.pipeline import ingest_source

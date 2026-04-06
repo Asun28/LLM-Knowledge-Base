@@ -15,7 +15,7 @@ def _create_page(path: Path, title: str, content: str, page_type: str = "concept
     """Helper to create a wiki page with frontmatter."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - raw/articles/test.md\n"
+        f'---\ntitle: "{title}"\nsource:\n  - raw/articles/test.md\n'
         f"created: 2026-04-06\nupdated: 2026-04-06\ntype: {page_type}\n"
         f"confidence: stated\n---\n\n"
     )
@@ -29,9 +29,7 @@ def test_analyze_coverage(tmp_wiki):
     """analyze_coverage counts pages by type."""
     _create_page(tmp_wiki / "concepts" / "rag.md", "RAG", "About RAG")
     _create_page(tmp_wiki / "concepts" / "llm.md", "LLM", "About LLMs")
-    _create_page(
-        tmp_wiki / "entities" / "openai.md", "OpenAI", "About OpenAI", page_type="entity"
-    )
+    _create_page(tmp_wiki / "entities" / "openai.md", "OpenAI", "About OpenAI", page_type="entity")
     result = analyze_coverage(tmp_wiki)
     assert result["total_pages"] == 3
     assert result["by_type"]["concepts"] == 2

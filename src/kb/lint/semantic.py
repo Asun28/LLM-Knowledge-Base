@@ -4,7 +4,7 @@ from pathlib import Path
 
 import frontmatter
 
-from kb.config import MAX_CONSISTENCY_GROUP_SIZE, RAW_DIR, WIKI_DIR
+from kb.config import MAX_CONSISTENCY_GROUP_SIZE, WIKI_DIR
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages
 from kb.review.context import pair_page_with_sources
 

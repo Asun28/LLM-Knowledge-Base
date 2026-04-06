@@ -14,7 +14,7 @@ def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_
     page_path = wiki_dir / f"{page_id}.md"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - {source_ref}\n"
+        f'---\ntitle: "{title}"\nsource:\n  - {source_ref}\n'
         f"created: 2026-04-06\nupdated: 2026-04-06\ntype: concept\n"
         f"confidence: stated\n---\n\n"
     )
@@ -89,7 +89,10 @@ def test_build_consistency_context_empty(tmp_project):
     wiki_dir = tmp_project / "wiki"
     # Single page, no groups possible
     _create_page(
-        wiki_dir, "concepts/rag", "RAG", "Content with unique words only.",
+        wiki_dir,
+        "concepts/rag",
+        "RAG",
+        "Content with unique words only.",
         "raw/articles/unique1.md",
     )
 
@@ -101,8 +104,11 @@ def test_build_consistency_context_auto_wikilinks(tmp_project):
     """build_consistency_context groups pages connected by wikilinks."""
     wiki_dir = tmp_project / "wiki"
     _create_page(
-        wiki_dir, "concepts/rag", "RAG",
-        "RAG uses [[concepts/llm]] models.", "raw/articles/rag.md",
+        wiki_dir,
+        "concepts/rag",
+        "RAG",
+        "RAG uses [[concepts/llm]] models.",
+        "raw/articles/rag.md",
     )
     _create_page(wiki_dir, "concepts/llm", "LLM", "LLM content.", "raw/articles/llm.md")
 

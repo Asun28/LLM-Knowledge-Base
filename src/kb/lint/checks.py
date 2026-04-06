@@ -22,13 +22,15 @@ def check_dead_links(wiki_dir: Path | None = None) -> list[dict]:
     result = resolve_wikilinks(wiki_dir)
     issues = []
     for broken in result["broken"]:
-        issues.append({
-            "check": "dead_link",
-            "severity": "error",
-            "source": broken["source"],
-            "target": broken["target"],
-            "message": f"Broken wikilink: [[{broken['target']}]] in {broken['source']}",
-        })
+        issues.append(
+            {
+                "check": "dead_link",
+                "severity": "error",
+                "source": broken["source"],
+                "target": broken["target"],
+                "message": f"Broken wikilink: [[{broken['target']}]] in {broken['source']}",
+            }
+        )
     return issues
 
 
@@ -48,21 +50,25 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
         # Summaries are natural entry points, don't flag them
         if orphan.startswith("summaries/"):
             continue
-        issues.append({
-            "check": "orphan_page",
-            "severity": "warning",
-            "page": orphan,
-            "message": f"Orphan page (no incoming links): {orphan}",
-        })
+        issues.append(
+            {
+                "check": "orphan_page",
+                "severity": "warning",
+                "page": orphan,
+                "message": f"Orphan page (no incoming links): {orphan}",
+            }
+        )
 
     # Isolated: no links at all (neither in nor out)
     for isolated in stats["isolated"]:
-        issues.append({
-            "check": "isolated_page",
-            "severity": "warning",
-            "page": isolated,
-            "message": f"Isolated page (no links at all): {isolated}",
-        })
+        issues.append(
+            {
+                "check": "isolated_page",
+                "severity": "warning",
+                "page": isolated,
+                "message": f"Isolated page (no links at all): {isolated}",
+            }
+        )
 
     return issues
 
@@ -84,13 +90,15 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = 90) -> list[di
             updated = post.metadata.get("updated")
             if updated and isinstance(updated, date) and updated < cutoff:
                 pid = page_id(page_path, wiki_dir)
-                issues.append({
-                    "check": "stale_page",
-                    "severity": "info",
-                    "page": pid,
-                    "last_updated": updated.isoformat(),
-                    "message": f"Stale page (last updated {updated}): {pid}",
-                })
+                issues.append(
+                    {
+                        "check": "stale_page",
+                        "severity": "info",
+                        "page": pid,
+                        "last_updated": updated.isoformat(),
+                        "message": f"Stale page (last updated {updated}): {pid}",
+                    }
+                )
         except Exception:
             continue
 
@@ -113,29 +121,31 @@ def check_frontmatter(wiki_dir: Path | None = None) -> list[dict]:
             errors = validate_frontmatter(post)
             if errors:
                 pid = page_id(page_path, wiki_dir)
-                issues.append({
+                issues.append(
+                    {
+                        "check": "frontmatter",
+                        "severity": "error",
+                        "page": pid,
+                        "errors": errors,
+                        "message": f"Frontmatter issues in {pid}: {'; '.join(errors)}",
+                    }
+                )
+        except Exception as e:
+            pid = page_id(page_path, wiki_dir)
+            issues.append(
+                {
                     "check": "frontmatter",
                     "severity": "error",
                     "page": pid,
-                    "errors": errors,
-                    "message": f"Frontmatter issues in {pid}: {'; '.join(errors)}",
-                })
-        except Exception as e:
-            pid = page_id(page_path, wiki_dir)
-            issues.append({
-                "check": "frontmatter",
-                "severity": "error",
-                "page": pid,
-                "errors": [str(e)],
-                "message": f"Failed to parse frontmatter in {pid}: {e}",
-            })
+                    "errors": [str(e)],
+                    "message": f"Failed to parse frontmatter in {pid}: {e}",
+                }
+            )
 
     return issues
 
 
-def check_source_coverage(
-    wiki_dir: Path | None = None, raw_dir: Path | None = None
-) -> list[dict]:
+def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = None) -> list[dict]:
     """Find raw sources not referenced in any wiki page.
 
     Returns:
@@ -176,11 +186,13 @@ def check_source_coverage(
                 # Check if this source is referenced (partial match)
                 referenced = any(rel_path in ref or f.name in ref for ref in all_raw_refs)
                 if not referenced:
-                    issues.append({
-                        "check": "source_coverage",
-                        "severity": "warning",
-                        "source": rel_path,
-                        "message": f"Raw source not referenced in wiki: {rel_path}",
-                    })
+                    issues.append(
+                        {
+                            "check": "source_coverage",
+                            "severity": "warning",
+                            "source": rel_path,
+                            "message": f"Raw source not referenced in wiki: {rel_path}",
+                        }
+                    )
 
     return issues

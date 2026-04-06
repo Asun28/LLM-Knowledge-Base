@@ -40,16 +40,20 @@ def pair_page_with_sources(
         # Resolve: "raw/articles/foo.md" -> raw_dir.parent / "raw/articles/foo.md"
         source_path = raw_dir.parent / source_ref
         if source_path.exists():
-            source_contents.append({
-                "path": source_ref,
-                "content": source_path.read_text(encoding="utf-8"),
-            })
+            source_contents.append(
+                {
+                    "path": source_ref,
+                    "content": source_path.read_text(encoding="utf-8"),
+                }
+            )
         else:
-            source_contents.append({
-                "path": source_ref,
-                "content": None,
-                "error": f"Source file not found: {source_ref}",
-            })
+            source_contents.append(
+                {
+                    "path": source_ref,
+                    "content": None,
+                    "error": f"Source file not found: {source_ref}",
+                }
+            )
 
     return {
         "page_id": page_id,
@@ -70,7 +74,7 @@ def build_review_checklist() -> str:
         "4. **Confidence level**: Does the confidence match the evidence strength?\n"
         "5. **No hallucination**: Is there information NOT present in the raw source?\n"
         "6. **Title accuracy**: Does the title accurately reflect the page content?\n\n"
-        'Return your review as JSON:\n```json\n'
+        "Return your review as JSON:\n```json\n"
         '{\n  "verdict": "approve | revise | reject",\n'
         '  "fidelity_score": 0.0,\n'
         '  "issues": [{"severity": "error|warning|info", '

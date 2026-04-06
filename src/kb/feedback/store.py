@@ -56,9 +56,7 @@ def add_feedback_entry(
         ValueError: If rating is not valid.
     """
     if rating not in ("useful", "wrong", "incomplete"):
-        raise ValueError(
-            f"Invalid rating: {rating}. Must be 'useful', 'wrong', or 'incomplete'"
-        )
+        raise ValueError(f"Invalid rating: {rating}. Must be 'useful', 'wrong', or 'incomplete'")
 
     data = load_feedback(path)
 
@@ -75,7 +73,10 @@ def add_feedback_entry(
     for page_id in cited_pages:
         if page_id not in data["page_scores"]:
             data["page_scores"][page_id] = {
-                "useful": 0, "wrong": 0, "incomplete": 0, "trust": 0.5,
+                "useful": 0,
+                "wrong": 0,
+                "incomplete": 0,
+                "trust": 0.5,
             }
         scores = data["page_scores"][page_id]
         scores[rating] += 1

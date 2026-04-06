@@ -62,9 +62,7 @@ def refine_page(
 
     # Update the 'updated' date in frontmatter
     today = date.today().isoformat()
-    frontmatter_text = re.sub(
-        r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", frontmatter_text
-    )
+    frontmatter_text = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", frontmatter_text)
 
     # Reconstruct page
     new_text = f"---{frontmatter_text}---\n\n{updated_content}\n"
@@ -72,11 +70,13 @@ def refine_page(
 
     # Append to review history
     history = load_review_history(history_path)
-    history.append({
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "page_id": page_id,
-        "revision_notes": revision_notes,
-    })
+    history.append(
+        {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "page_id": page_id,
+            "revision_notes": revision_notes,
+        }
+    )
     save_review_history(history, history_path)
 
     # Append to wiki/log.md

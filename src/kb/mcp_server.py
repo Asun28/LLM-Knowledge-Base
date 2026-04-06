@@ -66,17 +66,19 @@ def _load_all_pages() -> list[dict]:
                 page_id = (
                     str(page_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
                 )
-                pages.append({
-                    "id": page_id,
-                    "title": post.metadata.get("title", page_path.stem),
-                    "type": post.metadata.get("type", "unknown"),
-                    "confidence": post.metadata.get("confidence", "unknown"),
-                    "sources": post.metadata.get("source", []),
-                    "created": str(post.metadata.get("created", "")),
-                    "updated": str(post.metadata.get("updated", "")),
-                    "path": _rel(page_path),
-                    "content": post.content,
-                })
+                pages.append(
+                    {
+                        "id": page_id,
+                        "title": post.metadata.get("title", page_path.stem),
+                        "type": post.metadata.get("type", "unknown"),
+                        "confidence": post.metadata.get("confidence", "unknown"),
+                        "sources": post.metadata.get("source", []),
+                        "created": str(post.metadata.get("created", "")),
+                        "updated": str(post.metadata.get("updated", "")),
+                        "path": _rel(page_path),
+                        "content": post.content,
+                    }
+                )
             except Exception:
                 continue
     return pages
@@ -126,9 +128,7 @@ def _apply_extraction(
             pages_updated.append(f"entities/{entity_slug}")
         else:
             entity_content = _build_entity_content(entity, source_ref, "")
-            _write_wiki_page(
-                entity_path, entity, "entity", source_ref, "stated", entity_content
-            )
+            _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
             pages_created.append(f"entities/{entity_slug}")
 
     # 3. Concept pages
@@ -343,8 +343,8 @@ def kb_ingest(
         f"**Type:** {source_type}\n"
         f"**Template:** {template['name']} — {template['description']}\n\n"
         f"Read the source below, extract the JSON, then call kb_ingest again with:\n"
-        f"  source_path=\"{_rel(path)}\"\n"
-        f"  source_type=\"{source_type}\"\n"
+        f'  source_path="{_rel(path)}"\n'
+        f'  source_type="{source_type}"\n'
         f"  extraction_json=<your JSON>\n\n"
         f"---\n\n{prompt}"
     )
@@ -378,8 +378,7 @@ def kb_ingest_content(
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
-            f"Error: Unknown source_type '{source_type}'. "
-            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+            f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
         )
 
     type_dir.mkdir(parents=True, exist_ok=True)
@@ -401,9 +400,8 @@ def kb_ingest_content(
     result = _apply_extraction(source_ref, file_path, source_type, extraction)
     source_hash = content_hash(file_path)
 
-    return (
-        f"Saved source: {source_ref} ({len(save_content)} chars)\n"
-        + _format_ingest_result(source_ref, source_type, source_hash, result)
+    return f"Saved source: {source_ref} ({len(save_content)} chars)\n" + _format_ingest_result(
+        source_ref, source_type, source_hash, result
     )
 
 
@@ -428,8 +426,7 @@ def kb_save_source(
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
-            f"Error: Unknown source_type '{source_type}'. "
-            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+            f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
         )
 
     type_dir.mkdir(parents=True, exist_ok=True)
@@ -442,7 +439,7 @@ def kb_save_source(
     file_path.write_text(content, encoding="utf-8")
     return (
         f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
-        f"To ingest: kb_ingest(\"{_rel(file_path)}\", \"{source_type}\")"
+        f'To ingest: kb_ingest("{_rel(file_path)}", "{source_type}")'
     )
 
 
@@ -650,7 +647,7 @@ def kb_lint() -> str:
                 f"{len(flagged)} page(s) with trust score below threshold:\n"
             )
             for p in flagged:
-                result += f"- {p} — run `kb_lint_deep(\"{p}\")` for fidelity check\n"
+                result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
     except Exception:
         pass
 
@@ -677,7 +674,7 @@ def kb_evolve() -> str:
             )
             for g in gaps:
                 notes = f" — {g['notes']}" if g["notes"] else ""
-                result += f"- \"{g['question']}\"{notes}\n"
+                result += f'- "{g["question"]}"{notes}\n'
     except Exception:
         pass
 
@@ -771,9 +768,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
 
 
 @mcp.tool()
-def kb_query_feedback(
-    question: str, rating: str, cited_pages: str = "", notes: str = ""
-) -> str:
+def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: str = "") -> str:
     """Record feedback on a query answer to improve wiki reliability.
 
     Args:
@@ -786,7 +781,7 @@ def kb_query_feedback(
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
     try:
-        entry = add_feedback_entry(question, rating, pages, notes)
+        add_feedback_entry(question, rating, pages, notes)
     except ValueError as e:
         return f"Error: {e}"
 
@@ -823,7 +818,9 @@ def kb_reliability_map() -> str:
         )
 
     if flagged:
-        lines.append(f"\n**{len(flagged)} page(s) flagged** (trust < 0.4). Run kb_lint_deep on these.")
+        lines.append(
+            f"\n**{len(flagged)} page(s) flagged** (trust < 0.4). Run kb_lint_deep on these."
+        )
 
     return "\n".join(lines)
 
@@ -860,7 +857,9 @@ def kb_affected_pages(page_id: str) -> str:
         for other_path in scan_wiki_pages():
             try:
                 other_post = fm.load(str(other_path))
-                other_id = str(other_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
+                other_id = (
+                    str(other_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
+                )
                 if other_id == page_id:
                     continue
                 other_sources = other_post.metadata.get("source", [])

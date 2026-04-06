@@ -23,7 +23,7 @@ def build_extraction_prompt(content: str, template: dict) -> str:
 
     return f"""Extract structured information from the following source document.
 
-Source type: {template['name']} — {template['description']}
+Source type: {template["name"]} — {template["description"]}
 
 Extract these fields as a JSON object:
 {field_descriptions}

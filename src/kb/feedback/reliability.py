@@ -16,9 +16,7 @@ def compute_trust_scores(path: Path | None = None) -> dict[str, dict]:
     return data.get("page_scores", {})
 
 
-def get_flagged_pages(
-    path: Path | None = None, threshold: float | None = None
-) -> list[str]:
+def get_flagged_pages(path: Path | None = None, threshold: float | None = None) -> list[str]:
     """Get page IDs with trust score below threshold.
 
     Args:

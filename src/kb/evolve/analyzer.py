@@ -230,8 +230,7 @@ def format_evolution_report(report: dict) -> str:
     gs = report["graph_stats"]
     lines.append("## Graph\n")
     lines.append(
-        f"**Nodes:** {gs['nodes']} | **Edges:** {gs['edges']} "
-        f"| **Components:** {gs['components']}"
+        f"**Nodes:** {gs['nodes']} | **Edges:** {gs['edges']} | **Components:** {gs['components']}"
     )
     lines.append("")
 
@@ -239,9 +238,7 @@ def format_evolution_report(report: dict) -> str:
     if report["new_page_suggestions"]:
         lines.append("## Suggested New Pages\n")
         for np in report["new_page_suggestions"][:10]:
-            lines.append(
-                f"- **{np['target']}** — referenced by {len(np['referenced_by'])} page(s)"
-            )
+            lines.append(f"- **{np['target']}** — referenced by {len(np['referenced_by'])} page(s)")
         lines.append("")
 
     # Connection opportunities

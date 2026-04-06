@@ -200,7 +200,7 @@ def _create_page(path: Path, title: str, content: str, page_type: str = "concept
     """Helper to create a wiki page with frontmatter."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - raw/articles/test.md\n"
+        f'---\ntitle: "{title}"\nsource:\n  - raw/articles/test.md\n'
         f"created: 2026-04-06\nupdated: 2026-04-06\ntype: {page_type}\n"
         f"confidence: stated\n---\n\n"
     )
@@ -224,12 +224,8 @@ def test_resolve_wikilinks(tmp_wiki):
 
 def test_resolve_wikilinks_all_valid(tmp_wiki):
     """resolve_wikilinks reports all resolved when no broken links."""
-    _create_page(
-        tmp_wiki / "concepts" / "rag.md", "RAG", "Links to [[concepts/llm]]."
-    )
-    _create_page(
-        tmp_wiki / "concepts" / "llm.md", "LLM", "Links to [[concepts/rag]]."
-    )
+    _create_page(tmp_wiki / "concepts" / "rag.md", "RAG", "Links to [[concepts/llm]].")
+    _create_page(tmp_wiki / "concepts" / "llm.md", "LLM", "Links to [[concepts/rag]].")
     result = resolve_wikilinks(tmp_wiki)
     assert result["total_links"] == 2
     assert result["resolved"] == 2

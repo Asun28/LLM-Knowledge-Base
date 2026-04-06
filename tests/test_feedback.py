@@ -1,10 +1,11 @@
 """Tests for the feedback module (store + reliability)."""
 
-import json
-from pathlib import Path
-
+from kb.feedback.reliability import (
+    compute_trust_scores,
+    get_coverage_gaps,
+    get_flagged_pages,
+)
 from kb.feedback.store import add_feedback_entry, load_feedback, save_feedback
-
 
 # ── Store tests ───────────────────────────────────────────────
 
@@ -36,9 +37,7 @@ def test_load_feedback_corrupted(tmp_path):
 def test_add_feedback_entry_useful(tmp_path):
     """add_feedback_entry with 'useful' rating boosts trust score."""
     path = tmp_path / "feedback.json"
-    entry = add_feedback_entry(
-        "What is RAG?", "useful", ["concepts/rag"], path=path
-    )
+    entry = add_feedback_entry("What is RAG?", "useful", ["concepts/rag"], path=path)
     assert entry["rating"] == "useful"
     data = load_feedback(path)
     assert len(data["entries"]) == 1
@@ -87,21 +86,12 @@ def test_add_feedback_entry_invalid_rating(tmp_path):
 def test_add_feedback_entry_multiple_pages(tmp_path):
     """add_feedback_entry updates scores for all cited pages."""
     path = tmp_path / "feedback.json"
-    add_feedback_entry(
-        "Q1", "useful", ["concepts/rag", "entities/openai"], path=path
-    )
+    add_feedback_entry("Q1", "useful", ["concepts/rag", "entities/openai"], path=path)
     data = load_feedback(path)
     assert "concepts/rag" in data["page_scores"]
     assert "entities/openai" in data["page_scores"]
     assert data["page_scores"]["concepts/rag"]["useful"] == 1
     assert data["page_scores"]["entities/openai"]["useful"] == 1
-
-
-from kb.feedback.reliability import (
-    compute_trust_scores,
-    get_coverage_gaps,
-    get_flagged_pages,
-)
 
 
 # ── Reliability tests ─────────────────────────────────────────

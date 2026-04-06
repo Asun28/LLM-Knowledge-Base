@@ -27,23 +27,23 @@ def _load_wiki_pages(wiki_dir: Path | None = None) -> list[dict]:
                 page_id = (
                     str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md")
                 )
-                pages.append({
-                    "path": str(page_path),
-                    "id": page_id,
-                    "title": post.metadata.get("title", page_path.stem),
-                    "type": post.metadata.get("type", "unknown"),
-                    "confidence": post.metadata.get("confidence", "unknown"),
-                    "content": post.content,
-                    "raw_content": post.content.lower(),
-                })
+                pages.append(
+                    {
+                        "path": str(page_path),
+                        "id": page_id,
+                        "title": post.metadata.get("title", page_path.stem),
+                        "type": post.metadata.get("type", "unknown"),
+                        "confidence": post.metadata.get("confidence", "unknown"),
+                        "content": post.content,
+                        "raw_content": post.content.lower(),
+                    }
+                )
             except Exception:
                 continue
     return pages
 
 
-def search_pages(
-    question: str, wiki_dir: Path | None = None, max_results: int = 10
-) -> list[dict]:
+def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
     """Search wiki pages by keyword matching.
 
     Simple keyword-based search: splits the question into words and scores pages
@@ -63,9 +63,39 @@ def search_pages(
 
     # Tokenize question into search terms
     stop_words = {
-        "the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for",
-        "of", "and", "or", "not", "with", "by", "from", "what", "how", "why", "when",
-        "where", "which", "who", "does", "do", "can", "will", "should", "would", "it",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "and",
+        "or",
+        "not",
+        "with",
+        "by",
+        "from",
+        "what",
+        "how",
+        "why",
+        "when",
+        "where",
+        "which",
+        "who",
+        "does",
+        "do",
+        "can",
+        "will",
+        "should",
+        "would",
+        "it",
     }
     terms = [
         w.lower().strip("?.,!")

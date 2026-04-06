@@ -24,7 +24,7 @@ def _create_page(
     path.parent.mkdir(parents=True, exist_ok=True)
     updated = updated or date.today().isoformat()
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - raw/articles/test.md\n"
+        f'---\ntitle: "{title}"\nsource:\n  - raw/articles/test.md\n'
         f"created: 2026-04-06\nupdated: {updated}\ntype: {page_type}\n"
         f"confidence: stated\n---\n\n"
     )

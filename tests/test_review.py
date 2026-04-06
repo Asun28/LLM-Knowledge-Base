@@ -8,6 +8,7 @@ from kb.review.context import (
     build_review_context,
     pair_page_with_sources,
 )
+from kb.review.refiner import load_review_history, refine_page, save_review_history
 
 
 def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_ref: str) -> None:
@@ -15,7 +16,7 @@ def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_
     page_path = wiki_dir / f"{page_id}.md"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - {source_ref}\n"
+        f'---\ntitle: "{title}"\nsource:\n  - {source_ref}\n'
         f"created: 2026-04-06\nupdated: 2026-04-06\ntype: concept\n"
         f"confidence: stated\n---\n\n"
     )
@@ -72,7 +73,7 @@ def test_pair_page_with_sources_multiple_sources(tmp_project):
     page_path = wiki_dir / "concepts" / "rag.md"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        "---\ntitle: \"RAG\"\nsource:\n  - raw/articles/rag1.md\n"
+        '---\ntitle: "RAG"\nsource:\n  - raw/articles/rag1.md\n'
         "  - raw/articles/rag2.md\ncreated: 2026-04-06\nupdated: 2026-04-06\n"
         "type: concept\nconfidence: stated\n---\n\nRAG content."
     )
@@ -120,9 +121,6 @@ def test_build_review_checklist():
     assert "Title accuracy" in checklist
 
 
-from kb.review.refiner import load_review_history, refine_page, save_review_history
-
-
 # ── refine_page ───────────────────────────────────────────────
 
 
@@ -132,8 +130,11 @@ def test_refine_page(tmp_project):
     _create_page(wiki_dir, "concepts/rag", "RAG", "Old content.", "raw/articles/rag.md")
 
     result = refine_page(
-        "concepts/rag", "New improved content.", "Fixed unsourced claim",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New improved content.",
+        "Fixed unsourced claim",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     assert result["updated"] is True
 
@@ -151,8 +152,11 @@ def test_refine_page_preserves_frontmatter_format(tmp_project):
     _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
 
     refine_page(
-        "concepts/rag", "New.", "test",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New.",
+        "test",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     text = (wiki_dir / "concepts" / "rag.md").read_text(encoding="utf-8")
     # Frontmatter should still have source field intact
@@ -167,8 +171,11 @@ def test_refine_page_logs_to_wiki_log(tmp_project):
     _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
 
     refine_page(
-        "concepts/rag", "New.", "Fixed claim",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New.",
+        "Fixed claim",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     log = (wiki_dir / "log.md").read_text(encoding="utf-8")
     assert "refine" in log
@@ -183,8 +190,11 @@ def test_refine_page_saves_review_history(tmp_project):
     _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
 
     refine_page(
-        "concepts/rag", "New.", "Fixed claim",
-        wiki_dir=wiki_dir, history_path=history_path,
+        "concepts/rag",
+        "New.",
+        "Fixed claim",
+        wiki_dir=wiki_dir,
+        history_path=history_path,
     )
     history = load_review_history(history_path)
     assert len(history) == 1
@@ -196,8 +206,11 @@ def test_refine_page_not_found(tmp_project):
     """refine_page returns error for non-existent page."""
     wiki_dir = tmp_project / "wiki"
     result = refine_page(
-        "concepts/nonexistent", "Content.", "notes",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/nonexistent",
+        "Content.",
+        "notes",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     assert "error" in result
 

@@ -1,17 +1,6 @@
 """Integration tests for Phase 2 MCP tools."""
 
-from datetime import date
 from pathlib import Path
-
-from kb.mcp_server import (
-    kb_affected_pages,
-    kb_lint_consistency,
-    kb_lint_deep,
-    kb_query_feedback,
-    kb_refine_page,
-    kb_reliability_map,
-    kb_review_page,
-)
 
 
 def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_ref: str) -> None:
@@ -19,7 +8,7 @@ def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_
     page_path = wiki_dir / f"{page_id}.md"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     fm = (
-        f"---\ntitle: \"{title}\"\nsource:\n  - {source_ref}\n"
+        f'---\ntitle: "{title}"\nsource:\n  - {source_ref}\n'
         f"created: 2026-04-06\nupdated: 2026-04-06\ntype: concept\n"
         f"confidence: stated\n---\n\n"
     )
@@ -47,7 +36,9 @@ def test_kb_query_feedback_useful(tmp_path, monkeypatch):
     # Test the underlying function directly
     from kb.feedback.store import add_feedback_entry
 
-    entry = add_feedback_entry("What is RAG?", "useful", ["concepts/rag"], path=tmp_path / "fb.json")
+    entry = add_feedback_entry(
+        "What is RAG?", "useful", ["concepts/rag"], path=tmp_path / "fb.json"
+    )
     assert entry["rating"] == "useful"
 
 
@@ -100,8 +91,11 @@ def test_kb_refine_page_integration(tmp_project):
     from kb.review.refiner import refine_page
 
     result = refine_page(
-        "concepts/rag", "New content.", "Fixed claims",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New content.",
+        "Fixed claims",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     assert result["updated"] is True
     log = (wiki_dir / "log.md").read_text(encoding="utf-8")
@@ -131,8 +125,11 @@ def test_kb_affected_pages_with_backlinks(tmp_project):
     """kb_affected_pages finds pages that link to the given page."""
     wiki_dir = tmp_project / "wiki"
     _create_page(
-        wiki_dir, "concepts/rag", "RAG",
-        "Uses [[concepts/llm]] for generation.", "raw/articles/rag.md",
+        wiki_dir,
+        "concepts/rag",
+        "RAG",
+        "Uses [[concepts/llm]] for generation.",
+        "raw/articles/rag.md",
     )
     _create_page(wiki_dir, "concepts/llm", "LLM", "LLM content.", "raw/articles/llm.md")
 

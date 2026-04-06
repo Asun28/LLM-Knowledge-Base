@@ -26,8 +26,7 @@ def validate_frontmatter(post: frontmatter.Post) -> list[str]:
 
     if "confidence" in post.metadata and post.metadata["confidence"] not in CONFIDENCE_LEVELS:
         errors.append(
-            f"Invalid confidence: {post.metadata['confidence']}. "
-            f"Must be one of {CONFIDENCE_LEVELS}"
+            f"Invalid confidence: {post.metadata['confidence']}. Must be one of {CONFIDENCE_LEVELS}"
         )
 
     return errors
