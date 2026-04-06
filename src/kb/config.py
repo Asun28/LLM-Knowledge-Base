@@ -68,3 +68,15 @@ LOW_TRUST_THRESHOLD = 0.4
 SELF_REFINE_MAX_ROUNDS = 2
 LINT_MAX_ROUNDS = 3
 MAX_CONSISTENCY_GROUP_SIZE = 5
+
+# ── Lint tuning ──────────────────────────────────────────────
+STALENESS_MAX_DAYS = 90
+
+# ── Evolve / connection discovery tuning ─────────────────────
+MIN_PAGES_FOR_TERM = 2
+MAX_PAGES_FOR_TERM = 5
+MIN_SHARED_TERMS = 3
+
+# ── Query search weights ────────────────────────────────────
+SEARCH_TITLE_WEIGHT = 3
+SEARCH_CONTENT_WEIGHT = 1

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import frontmatter
 
-from kb.config import WIKI_DIR
+from kb.config import SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT, WIKI_DIR
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
 
@@ -119,9 +119,9 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         title_lower = page["title"].lower()
         for term in terms:
             if term in title_lower:
-                score += 3  # Title match weighted higher
+                score += SEARCH_TITLE_WEIGHT
             if term in content_lower:
-                score += 1
+                score += SEARCH_CONTENT_WEIGHT
         if score > 0:
             page["score"] = score
             scored.append(page)

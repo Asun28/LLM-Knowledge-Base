@@ -5,7 +5,7 @@ from pathlib import Path
 
 import frontmatter
 
-from kb.config import MAX_CONSISTENCY_GROUP_SIZE, WIKI_DIR
+from kb.config import MAX_CONSISTENCY_GROUP_SIZE, MIN_SHARED_TERMS, WIKI_DIR
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages
 from kb.review.context import pair_page_with_sources
 
@@ -115,7 +115,7 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
             if pair in seen_pairs:
                 continue
             shared = page_terms[pid_a] & page_terms[pid_b]
-            if len(shared) >= 3:
+            if len(shared) >= MIN_SHARED_TERMS:
                 groups.append(sorted([pid_a, pid_b]))
                 seen_pairs.add(pair)
 

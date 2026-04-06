@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
-from kb.config import WIKI_DIR
+from kb.config import MAX_PAGES_FOR_TERM, MIN_PAGES_FOR_TERM, MIN_SHARED_TERMS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.utils.markdown import extract_wikilinks
 
@@ -74,7 +74,7 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
     seen_pairs: set[tuple[str, str]] = set()
 
     for term, page_ids in term_index.items():
-        if len(page_ids) < 2 or len(page_ids) > 5:  # Skip too common/rare terms
+        if len(page_ids) < MIN_PAGES_FOR_TERM or len(page_ids) > MAX_PAGES_FOR_TERM:
             continue
         for i, page_a in enumerate(page_ids):
             for page_b in page_ids[i + 1 :]:
@@ -89,9 +89,9 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
                     shared = [
                         t
                         for t, pids in term_index.items()
-                        if page_a in pids and page_b in pids and len(pids) <= 5
+                        if page_a in pids and page_b in pids and len(pids) <= MAX_PAGES_FOR_TERM
                     ]
-                    if len(shared) >= 3:  # Require at least 3 shared terms
+                    if len(shared) >= MIN_SHARED_TERMS:
                         opportunities.append(
                             {
                                 "page_a": page_a,

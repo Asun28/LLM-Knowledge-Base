@@ -7,7 +7,7 @@ from pathlib import Path
 import frontmatter
 
 from kb.compile.linker import resolve_wikilinks
-from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
+from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.markdown import extract_raw_refs
@@ -76,7 +76,7 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
     return issues
 
 
-def check_staleness(wiki_dir: Path | None = None, max_days: int = 90) -> list[dict]:
+def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_DAYS) -> list[dict]:
     """Find pages not updated within max_days.
 
     Returns:
