@@ -16,6 +16,9 @@ build/
 .data/
 openspec/
 
+# Wiki (LLM-generated, local only)
+wiki/
+
 # Environment
 .env
 .env.*
