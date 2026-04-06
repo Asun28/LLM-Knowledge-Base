@@ -119,15 +119,18 @@ def test_make_source_ref(tmp_path):
 
 
 def test_make_source_ref_fallback(tmp_path):
-    """make_source_ref falls back for files outside raw/."""
-    raw_dir = tmp_path / "raw"
-    raw_dir.mkdir()
-    source = tmp_path / "elsewhere" / "doc.md"
-    source.parent.mkdir()
-    source.write_text("content")
+    """make_source_ref falls back for files completely outside the project tree."""
+    import tempfile
 
-    ref = make_source_ref(source, raw_dir)
-    assert ref == "raw/doc.md"
+    raw_dir = tmp_path / "project" / "raw"
+    raw_dir.mkdir(parents=True)
+
+    # Create file in an unrelated temp dir (outside raw_dir.parent)
+    with tempfile.TemporaryDirectory() as other_dir:
+        source = Path(other_dir) / "doc.md"
+        source.write_text("content")
+        ref = make_source_ref(source, raw_dir)
+        assert ref == "raw/doc.md"
 
 
 # ── H3: Fence stripping edge cases ─────────────────────────────
