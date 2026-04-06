@@ -636,6 +636,218 @@ def kb_evolve() -> str:
     return format_evolution_report(report)
 
 
+# ── Phase 2: Quality Tools ──────────────────────────────────────────
+
+
+@mcp.tool()
+def kb_review_page(page_id: str) -> str:
+    """Review a wiki page — returns page content, raw sources, and review checklist.
+
+    The tool returns raw context (text). You (Claude Code) or a wiki-reviewer
+    sub-agent evaluate the context and produce a structured JSON review.
+
+    Args:
+        page_id: Page to review (e.g., 'concepts/rag').
+    """
+    from kb.review.context import build_review_context
+
+    return build_review_context(page_id)
+
+
+@mcp.tool()
+def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "") -> str:
+    """Update a wiki page's content while preserving frontmatter.
+
+    Used after review or self-critique to apply improvements.
+    Logs to wiki/log.md and .data/review_history.json.
+
+    Args:
+        page_id: Page to update (e.g., 'concepts/rag').
+        updated_content: New markdown body (frontmatter preserved automatically).
+        revision_notes: What changed and why.
+    """
+    from kb.review.refiner import refine_page
+
+    result = refine_page(page_id, updated_content, revision_notes)
+    if "error" in result:
+        return f"Error: {result['error']}"
+
+    # Include affected pages in response
+    from kb.compile.linker import build_backlinks
+
+    backlinks = build_backlinks()
+    affected = backlinks.get(page_id, [])
+
+    lines = [
+        f"Refined: {page_id}",
+        f"Notes: {revision_notes}",
+    ]
+    if affected:
+        lines.append(f"Affected pages ({len(affected)} — may need review):")
+        for p in affected:
+            lines.append(f"  - {p}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_lint_deep(page_id: str) -> str:
+    """Deep lint a single page — returns page + raw sources side-by-side
+    for source fidelity evaluation.
+
+    You (Claude Code) evaluate whether each claim traces to the source.
+
+    Args:
+        page_id: Page to check (e.g., 'concepts/rag').
+    """
+    from kb.lint.semantic import build_fidelity_context
+
+    return build_fidelity_context(page_id)
+
+
+@mcp.tool()
+def kb_lint_consistency(page_ids: str = "") -> str:
+    """Cross-page consistency check — returns related pages grouped for
+    contradiction detection.
+
+    Pass comma-separated page IDs, or leave empty to auto-select
+    pages most likely to conflict (shared sources, wikilink neighbors).
+
+    Args:
+        page_ids: Comma-separated page IDs (e.g., 'concepts/rag,concepts/llm').
+                  Empty = auto-select groups.
+    """
+    from kb.lint.semantic import build_consistency_context
+
+    ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
+    return build_consistency_context(ids)
+
+
+@mcp.tool()
+def kb_query_feedback(
+    question: str, rating: str, cited_pages: str = "", notes: str = ""
+) -> str:
+    """Record feedback on a query answer to improve wiki reliability.
+
+    Args:
+        question: The question that was asked.
+        rating: 'useful', 'wrong', or 'incomplete'.
+        cited_pages: Comma-separated page IDs cited in the answer.
+        notes: What was wrong or missing.
+    """
+    from kb.feedback.store import add_feedback_entry
+
+    pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
+    try:
+        entry = add_feedback_entry(question, rating, pages, notes)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    action = {
+        "useful": "Trust scores boosted for cited pages.",
+        "wrong": "Cited pages flagged for priority re-lint.",
+        "incomplete": "Coverage gap logged for kb_evolve.",
+    }
+    return f"Feedback recorded: {rating}\n{action.get(rating, '')}"
+
+
+@mcp.tool()
+def kb_reliability_map() -> str:
+    """Show page trust scores based on query feedback history.
+
+    Pages cited in successful queries score higher.
+    Pages cited in wrong answers score lower and are flagged for re-lint.
+    """
+    from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
+
+    scores = compute_trust_scores()
+    if not scores:
+        return "No feedback recorded yet. Use kb_query_feedback after queries."
+
+    sorted_pages = sorted(scores.items(), key=lambda x: x[1].get("trust", 0.5), reverse=True)
+    flagged = set(get_flagged_pages())
+
+    lines = ["# Page Reliability Map\n"]
+    for pid, s in sorted_pages:
+        flag = " **[FLAGGED]**" if pid in flagged else ""
+        lines.append(
+            f"- {pid}: trust={s['trust']:.2f} "
+            f"(useful={s['useful']}, wrong={s['wrong']}, incomplete={s['incomplete']}){flag}"
+        )
+
+    if flagged:
+        lines.append(f"\n**{len(flagged)} page(s) flagged** (trust < 0.4). Run kb_lint_deep on these.")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_affected_pages(page_id: str) -> str:
+    """Find pages affected when this page changes.
+
+    Returns pages that link TO this page (backlinks) and pages
+    that share the same raw sources. Use after updating a page
+    to decide whether related pages need review.
+
+    Args:
+        page_id: Page that was changed (e.g., 'concepts/rag').
+    """
+    import frontmatter as fm
+
+    from kb.compile.linker import build_backlinks
+    from kb.graph.builder import scan_wiki_pages
+
+    backlinks_map = build_backlinks()
+    back = backlinks_map.get(page_id, [])
+
+    # Find pages sharing same sources
+    page_path = WIKI_DIR / f"{page_id}.md"
+    shared_source_pages: list[str] = []
+    if page_path.exists():
+        post = fm.load(str(page_path))
+        page_sources = post.metadata.get("source", [])
+        if isinstance(page_sources, str):
+            page_sources = [page_sources]
+
+        # Scan all pages for matching sources
+        for other_path in scan_wiki_pages():
+            try:
+                other_post = fm.load(str(other_path))
+                other_id = str(other_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
+                if other_id == page_id:
+                    continue
+                other_sources = other_post.metadata.get("source", [])
+                if isinstance(other_sources, str):
+                    other_sources = [other_sources]
+                if set(page_sources) & set(other_sources):
+                    shared_source_pages.append(other_id)
+            except Exception:
+                continue
+
+    all_affected = sorted(set(back + shared_source_pages))
+
+    if not all_affected:
+        return f"No pages are affected by changes to {page_id}."
+
+    lines = [
+        f"# Pages Affected by Changes to {page_id}\n",
+        f"**Total:** {len(all_affected)} page(s)\n",
+    ]
+
+    if back:
+        lines.append(f"## Backlinks ({len(back)} pages link to this page)")
+        for p in back:
+            lines.append(f"  - {p}")
+
+    if shared_source_pages:
+        lines.append(f"\n## Shared Sources ({len(shared_source_pages)} pages share raw sources)")
+        for p in shared_source_pages:
+            lines.append(f"  - {p}")
+
+    lines.append("\nReview these pages if the changes affect shared claims or definitions.")
+
+    return "\n".join(lines)
+
+
 def main():
     """Run the MCP server (stdio transport)."""
     mcp.run()
