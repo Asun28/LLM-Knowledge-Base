@@ -29,3 +29,16 @@ def tmp_wiki(tmp_path: Path) -> Path:
     for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
         (wiki / subdir).mkdir(parents=True)
     return wiki
+
+
+@pytest.fixture
+def tmp_project(tmp_path: Path) -> Path:
+    """Create a temporary project directory with wiki/, raw/, and log.md."""
+    wiki = tmp_path / "wiki"
+    raw = tmp_path / "raw"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki / subdir).mkdir(parents=True)
+    for subdir in ("articles", "papers", "repos", "videos"):
+        (raw / subdir).mkdir(parents=True)
+    (wiki / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    return tmp_path

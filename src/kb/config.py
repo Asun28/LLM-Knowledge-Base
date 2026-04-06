@@ -57,3 +57,14 @@ MODEL_TIERS = {
 # ── Page types ────────────────────────────────────────────────
 PAGE_TYPES = ("entity", "concept", "comparison", "synthesis", "summary")
 CONFIDENCE_LEVELS = ("stated", "inferred", "speculative")
+
+# ── Phase 2: Quality system paths ────────────────────────────
+FEEDBACK_PATH = PROJECT_ROOT / ".data" / "query_feedback.json"
+REVIEW_MANIFEST_PATH = PROJECT_ROOT / ".data" / "review_manifest.json"
+REVIEW_HISTORY_PATH = PROJECT_ROOT / ".data" / "review_history.json"
+
+# ── Phase 2: Quality thresholds ──────────────────────────────
+LOW_TRUST_THRESHOLD = 0.4
+SELF_REFINE_MAX_ROUNDS = 2
+LINT_MAX_ROUNDS = 3
+MAX_CONSISTENCY_GROUP_SIZE = 5
