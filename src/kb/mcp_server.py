@@ -11,6 +11,7 @@ Claude Code is the default LLM. No API key needed for any operation.
 """
 
 import json
+import logging
 import re
 from datetime import date
 from pathlib import Path
@@ -19,6 +20,8 @@ import frontmatter
 from fastmcp import FastMCP
 
 from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "LLM Knowledge Base",
@@ -79,7 +82,8 @@ def _load_all_pages() -> list[dict]:
                         "content": post.content,
                     }
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("Skipping page %s: %s", page_path, e)
                 continue
     return pages
 
@@ -648,8 +652,8 @@ def kb_lint() -> str:
             )
             for p in flagged:
                 result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load feedback data for lint: %s", e)
 
     return result
 
@@ -675,8 +679,8 @@ def kb_evolve() -> str:
             for g in gaps:
                 notes = f" — {g['notes']}" if g["notes"] else ""
                 result += f'- "{g["question"]}"{notes}\n'
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load feedback data for evolve: %s", e)
 
     return result
 
@@ -876,7 +880,8 @@ def kb_affected_pages(page_id: str) -> str:
                     other_sources = [other_sources]
                 if set(page_sources) & set(other_sources):
                     shared_source_pages.append(other_id)
-            except Exception:
+            except Exception as e:
+                logger.warning("Skipping page %s in affected scan: %s", other_path, e)
                 continue
 
     all_affected = sorted(set(back + shared_source_pages))
