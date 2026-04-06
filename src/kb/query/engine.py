@@ -41,7 +41,8 @@ def _load_wiki_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "raw_content": post.content.lower(),
                     }
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load wiki page %s: %s", page_path, e)
                 continue
     return pages
 

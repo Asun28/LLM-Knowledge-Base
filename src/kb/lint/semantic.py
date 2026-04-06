@@ -67,7 +67,8 @@ def _group_by_shared_sources(wiki_dir: Path) -> list[list[str]]:
                 sources = [sources]
             for src in sources:
                 source_to_pages.setdefault(src, []).append(pid)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
             continue
 
     return [pids for pids in source_to_pages.values() if len(pids) >= 2]

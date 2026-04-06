@@ -102,7 +102,8 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = 90) -> list[di
                         "message": f"Stale page (last updated {updated}): {pid}",
                     }
                 )
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load wiki page %s: %s", page_path, e)
             continue
 
     return issues
@@ -174,7 +175,8 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
                 all_raw_refs.update(sources)
             elif isinstance(sources, str):
                 all_raw_refs.add(sources)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
             continue
 
     # Find raw sources not referenced
