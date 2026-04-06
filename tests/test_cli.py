@@ -13,7 +13,7 @@ def test_cli_version():
     """CLI --version prints version."""
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "0.5.0" in result.output
+    assert "0.6.0" in result.output
 
 
 def test_cli_help():
