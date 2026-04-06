@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 2 complete (v0.4.0).** 121 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint).
+**Phase 2 complete (v0.4.0).** 126 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
 
@@ -86,9 +86,9 @@ Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init_
 All paths, model tiers, page types, and confidence levels are defined in `kb.config` — import from there, never hardcode. `PROJECT_ROOT` resolves from `config.py`'s location, so it works regardless of working directory.
 
 **Key APIs:**
-- `call_llm(prompt, tier="write")` — Anthropic API wrapper with model tiering. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Defined in `kb.utils.llm`.
-- `content_hash(text)` — SHA-256, 16-char hex. For incremental compile change detection. In `kb.utils.hashing`.
-- `extract_wikilinks(text)` / `extract_raw_refs(text)` — Regex extraction of `[[wikilinks]]` and `raw/...` references. In `kb.utils.markdown`.
+- `call_llm(prompt, tier="write")` — Anthropic API wrapper with model tiering. Validates non-empty response. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Defined in `kb.utils.llm`.
+- `content_hash(path)` — SHA-256, 32-char hex. Accepts `Path | str`. For incremental compile change detection. In `kb.utils.hashing`.
+- `extract_wikilinks(text)` / `extract_raw_refs(text)` — Regex extraction of `[[wikilinks]]` (normalized: stripped, no `.md` suffix) and `raw/...` references. In `kb.utils.markdown`.
 - `load_page(path)` / `validate_frontmatter(post)` — Parse and validate wiki page YAML frontmatter. In `kb.models.frontmatter`. Required fields: `title`, `source`, `created`, `updated`, `type`, `confidence`.
 - `WikiPage` / `RawSource` — Dataclasses in `kb.models.page`.
 
@@ -121,7 +121,16 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `tmp_wiki(tmp_path)` — isolated wiki directory with all 5 subdirectories for tests that write wiki pages
 - `tmp_project(tmp_path)` — full project directory with wiki/ (5 subdirs + log.md) and raw/ (4 subdirs) for Phase 2 tests
 
-121 tests across 12 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (14), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (7).
+126 tests across 12 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10).
+
+### Error Handling Patterns
+
+All modules use `logging.getLogger(__name__)` for warnings on skipped pages or failed operations.
+
+- **MCP tools**: Return `"Error: ..."` strings on failure — never raise exceptions to the MCP client. Phase 2 tools (`kb_review_page`, `kb_lint_deep`) wrap calls in `try/except`. Fail-safe integrations (trust scores in `kb_query`, flagged pages in `kb_lint`) use `try/except` with `logger.debug` since failure is expected when feedback data doesn't exist yet.
+- **LLM responses**: `call_llm()` validates non-empty `response.content`. `extract_from_source()` strips markdown code fences before `json.loads()` and wraps `JSONDecodeError` in `ValueError` with context.
+- **Frontmatter**: `_write_wiki_page()` quotes `source_ref` in YAML to handle special characters. `refine_page()` adds `updated:` field if missing, auto-creates `log.md` if absent.
+- **Page loading loops**: All `except Exception` blocks in page-scanning loops (query engine, lint checks, graph builder, MCP server) log warnings with file path and error, then `continue`.
 
 ## Phase 2 Workflows
 
@@ -172,9 +181,9 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 
 ```yaml
 ---
-title: Page Title
+title: "Page Title"
 source:
-  - raw/articles/source-file.md
+  - "raw/articles/source-file.md"
 created: 2026-04-05
 updated: 2026-04-05
 type: entity | concept | comparison | synthesis | summary
