@@ -1,0 +1,1 @@
+Obsidian Web Clipper is a browser extension that lets you save web pages directly into your Obsidian vault as markdown files. It preserves formatting, images, and metadata. It's particularly useful for building LLM knowledge bases because it converts web content into clean markdown that LLMs can easily process.
