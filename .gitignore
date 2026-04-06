@@ -7,8 +7,9 @@ dist/
 build/
 *.egg
 
-# Claude Code local config
+# Claude Code local config (except agent definitions which are tracked)
 .claude/
+!.claude/agents/
 .tools/
 .mcp.json
 .planning/
