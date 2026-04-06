@@ -1,6 +1,21 @@
-"""Integration tests for Phase 2 MCP tools."""
+"""Integration tests for Phase 2 MCP tools — tests actual MCP wrapper functions."""
 
 from pathlib import Path
+
+import kb.compile.linker
+import kb.config
+import kb.feedback.store
+import kb.lint.semantic
+import kb.review.context
+import kb.review.refiner
+from kb.mcp_server import (
+    kb_lint_consistency,
+    kb_lint_deep,
+    kb_query_feedback,
+    kb_refine_page,
+    kb_reliability_map,
+    kb_review_page,
+)
 
 
 def _create_page(wiki_dir: Path, page_id: str, title: str, content: str, source_ref: str) -> None:
@@ -22,119 +37,138 @@ def _create_source(project_dir: Path, source_ref: str, content: str) -> None:
     source_path.write_text(content, encoding="utf-8")
 
 
-# Note: MCP tool functions use global WIKI_DIR/RAW_DIR from config.
-# For integration tests, we test the underlying modules directly
-# since MCP tools are thin wrappers. These tests verify the wrappers
-# format output correctly.
+def _setup_project(tmp_project, monkeypatch):
+    """Monkeypatch config paths to use tmp_project directory."""
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.config, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(kb.config, "WIKI_LOG", wiki_dir / "log.md")
+    # Also patch feedback/review paths to use tmp
+    data_dir = tmp_project / ".data"
+    data_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(kb.config, "FEEDBACK_PATH", data_dir / "query_feedback.json")
+    monkeypatch.setattr(kb.config, "REVIEW_HISTORY_PATH", data_dir / "review_history.json")
 
-# ── kb_query_feedback ─────────────────────────────────────────
+    # Patch module-level imports that were bound at import time
+    monkeypatch.setattr(kb.review.context, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.review.context, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(kb.review.refiner, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.review.refiner, "REVIEW_HISTORY_PATH", data_dir / "review_history.json")
+    monkeypatch.setattr(kb.lint.semantic, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.feedback.store, "FEEDBACK_PATH", data_dir / "query_feedback.json")
+    monkeypatch.setattr(kb.compile.linker, "WIKI_DIR", wiki_dir)
 
-
-def test_kb_query_feedback_useful(tmp_path, monkeypatch):
-    """kb_query_feedback records useful rating."""
-    monkeypatch.setattr("kb.mcp_server.FEEDBACK_PATH_OVERRIDE", tmp_path / "fb.json", raising=False)
-    # Test the underlying function directly
-    from kb.feedback.store import add_feedback_entry
-
-    entry = add_feedback_entry(
-        "What is RAG?", "useful", ["concepts/rag"], path=tmp_path / "fb.json"
-    )
-    assert entry["rating"] == "useful"
-
-
-def test_kb_query_feedback_invalid_rating(tmp_path):
-    """Invalid rating raises ValueError."""
-    import pytest
-
-    from kb.feedback.store import add_feedback_entry
-
-    with pytest.raises(ValueError):
-        add_feedback_entry("Q", "bad", ["concepts/rag"], path=tmp_path / "fb.json")
-
-
-# ── kb_reliability_map ────────────────────────────────────────
-
-
-def test_kb_reliability_map_empty(tmp_path):
-    """reliability returns empty when no feedback."""
-    from kb.feedback.reliability import compute_trust_scores
-
-    scores = compute_trust_scores(tmp_path / "fb.json")
-    assert scores == {}
+    return wiki_dir, raw_dir
 
 
 # ── kb_review_page ────────────────────────────────────────────
 
 
-def test_kb_review_page_integration(tmp_project):
-    """kb_review_page returns context with checklist."""
-    wiki_dir = tmp_project / "wiki"
-    raw_dir = tmp_project / "raw"
+def test_kb_review_page_returns_context(tmp_project, monkeypatch):
+    """kb_review_page MCP tool returns review context with checklist."""
+    wiki_dir, raw_dir = _setup_project(tmp_project, monkeypatch)
     _create_page(wiki_dir, "concepts/rag", "RAG", "RAG is retrieval.", "raw/articles/rag.md")
     _create_source(tmp_project, "raw/articles/rag.md", "Full article.")
 
-    from kb.review.context import build_review_context
+    result = kb_review_page("concepts/rag")
+    assert "Review Checklist" in result
+    assert "RAG is retrieval." in result
+    assert "Full article." in result
 
-    context = build_review_context("concepts/rag", wiki_dir, raw_dir)
-    assert "Review Checklist" in context
-    assert "RAG is retrieval." in context
+
+def test_kb_review_page_missing_page(tmp_project, monkeypatch):
+    """kb_review_page returns error for non-existent page."""
+    _setup_project(tmp_project, monkeypatch)
+    result = kb_review_page("concepts/nonexistent")
+    assert "Error" in result
 
 
 # ── kb_refine_page ────────────────────────────────────────────
 
 
-def test_kb_refine_page_integration(tmp_project):
-    """kb_refine_page updates page and logs."""
-    wiki_dir = tmp_project / "wiki"
+def test_kb_refine_page_updates_content(tmp_project, monkeypatch):
+    """kb_refine_page MCP tool updates page and returns confirmation."""
+    wiki_dir, _ = _setup_project(tmp_project, monkeypatch)
     _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
 
-    from kb.review.refiner import refine_page
+    result = kb_refine_page("concepts/rag", "New content.", "Fixed claims")
+    assert "Refined: concepts/rag" in result
+    assert "Fixed claims" in result
+    # Verify file was actually updated
+    text = (wiki_dir / "concepts" / "rag.md").read_text(encoding="utf-8")
+    assert "New content." in text
 
-    result = refine_page(
-        "concepts/rag",
-        "New content.",
-        "Fixed claims",
-        wiki_dir=wiki_dir,
-        history_path=tmp_project / "history.json",
-    )
-    assert result["updated"] is True
-    log = (wiki_dir / "log.md").read_text(encoding="utf-8")
-    assert "concepts/rag" in log
+
+def test_kb_refine_page_missing_page(tmp_project, monkeypatch):
+    """kb_refine_page returns error for non-existent page."""
+    _setup_project(tmp_project, monkeypatch)
+    result = kb_refine_page("concepts/nonexistent", "Content.", "notes")
+    assert "Error" in result
 
 
 # ── kb_lint_deep ──────────────────────────────────────────────
 
 
-def test_kb_lint_deep_integration(tmp_project):
-    """kb_lint_deep returns fidelity check context."""
-    wiki_dir = tmp_project / "wiki"
-    raw_dir = tmp_project / "raw"
+def test_kb_lint_deep_returns_fidelity(tmp_project, monkeypatch):
+    """kb_lint_deep MCP tool returns fidelity check context."""
+    wiki_dir, raw_dir = _setup_project(tmp_project, monkeypatch)
     _create_page(wiki_dir, "concepts/rag", "RAG", "RAG content.", "raw/articles/rag.md")
     _create_source(tmp_project, "raw/articles/rag.md", "Source text.")
 
-    from kb.lint.semantic import build_fidelity_context
-
-    context = build_fidelity_context("concepts/rag", wiki_dir, raw_dir)
-    assert "Source Fidelity Check" in context
-
-
-# ── kb_affected_pages ─────────────────────────────────────────
+    result = kb_lint_deep("concepts/rag")
+    assert "Source Fidelity Check" in result
+    assert "RAG content." in result
 
 
-def test_kb_affected_pages_with_backlinks(tmp_project):
-    """kb_affected_pages finds pages that link to the given page."""
-    wiki_dir = tmp_project / "wiki"
-    _create_page(
-        wiki_dir,
-        "concepts/rag",
-        "RAG",
-        "Uses [[concepts/llm]] for generation.",
-        "raw/articles/rag.md",
-    )
+# ── kb_lint_consistency ───────────────────────────────────────
+
+
+def test_kb_lint_consistency_explicit_pages(tmp_project, monkeypatch):
+    """kb_lint_consistency with explicit page IDs returns grouped content."""
+    wiki_dir, _ = _setup_project(tmp_project, monkeypatch)
+    _create_page(wiki_dir, "concepts/rag", "RAG", "RAG content.", "raw/articles/rag.md")
     _create_page(wiki_dir, "concepts/llm", "LLM", "LLM content.", "raw/articles/llm.md")
 
-    from kb.compile.linker import build_backlinks
+    result = kb_lint_consistency("concepts/rag,concepts/llm")
+    assert "Cross-Page Consistency Check" in result
+    assert "RAG content." in result
+    assert "LLM content." in result
 
-    backlinks = build_backlinks(wiki_dir)
-    assert "concepts/llm" in backlinks
-    assert "concepts/rag" in backlinks["concepts/llm"]
+
+# ── kb_query_feedback ─────────────────────────────────────────
+
+
+def test_kb_query_feedback_useful(tmp_project, monkeypatch):
+    """kb_query_feedback MCP tool records feedback and returns confirmation."""
+    _setup_project(tmp_project, monkeypatch)
+    result = kb_query_feedback("What is RAG?", "useful", "concepts/rag")
+    assert "Feedback recorded: useful" in result
+    assert "Trust scores boosted" in result
+
+
+def test_kb_query_feedback_invalid_rating(tmp_project, monkeypatch):
+    """kb_query_feedback returns error for invalid rating."""
+    _setup_project(tmp_project, monkeypatch)
+    result = kb_query_feedback("Q", "bad_rating", "concepts/rag")
+    assert "Error" in result
+
+
+# ── kb_reliability_map ────────────────────────────────────────
+
+
+def test_kb_reliability_map_empty(tmp_project, monkeypatch):
+    """kb_reliability_map returns message when no feedback exists."""
+    _setup_project(tmp_project, monkeypatch)
+    result = kb_reliability_map()
+    assert "No feedback recorded" in result
+
+
+def test_kb_reliability_map_with_data(tmp_project, monkeypatch):
+    """kb_reliability_map shows scores after feedback."""
+    _setup_project(tmp_project, monkeypatch)
+    kb_query_feedback("Q1", "useful", "concepts/rag")
+    kb_query_feedback("Q2", "wrong", "concepts/rag")
+    result = kb_reliability_map()
+    assert "concepts/rag" in result
+    assert "trust=" in result
