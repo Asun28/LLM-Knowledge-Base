@@ -4,8 +4,6 @@ word-boundary search, term overlap filtering, cycle detection, log size warning.
 """
 
 import logging
-import re
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import anthropic
@@ -13,20 +11,15 @@ import pytest
 
 from kb.config import QUERY_CONTEXT_MAX_CHARS
 from kb.ingest.pipeline import (
-    _build_entity_content,
-    _build_summary_content,
     _extract_entity_context,
     _update_existing_page,
-    _write_wiki_page,
     ingest_source,
 )
 from kb.lint.checks import check_cycles, check_source_coverage
 from kb.lint.semantic import _group_by_term_overlap
 from kb.query.engine import _build_query_context, search_pages
 from kb.utils.llm import LLMError, call_llm
-from kb.utils.text import slugify
 from kb.utils.wiki_log import LOG_SIZE_WARNING_BYTES, append_wiki_log
-
 
 # ── Fix #1: LLM retry/timeout/error handling ────────────────────
 
@@ -295,7 +288,7 @@ def test_extract_entity_context_limits_to_3():
     }
 
     ctx = _extract_entity_context("RAG", extraction)
-    lines = [l for l in ctx.split("\n") if l.startswith("- ")]
+    lines = [line for line in ctx.split("\n") if line.startswith("- ")]
     assert len(lines) <= 3
 
 
@@ -328,7 +321,7 @@ def test_ingest_creates_entity_with_context(tmp_path):
         patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
     ):
-        result = ingest_source(source, "article", extraction=extraction)
+        ingest_source(source, "article", extraction=extraction)
 
     entity_page = wiki_dir / "entities" / "gpt-4.md"
     assert entity_page.exists()
@@ -449,7 +442,7 @@ def test_empty_slug_logs_warning(tmp_path, caplog):
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
         caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"),
     ):
-        result = ingest_source(source, "article", extraction=extraction)
+        ingest_source(source, "article", extraction=extraction)
 
     assert "Skipping entity with empty slug" in caplog.text
     assert not (wiki_dir / "entities" / ".md").exists()
