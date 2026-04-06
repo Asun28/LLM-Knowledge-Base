@@ -125,6 +125,7 @@ Checks for:
 - Stale pages (not updated in 90+ days)
 - Invalid frontmatter (missing required fields)
 - Uncovered raw sources (not referenced by any wiki page)
+- Low-trust pages flagged by query feedback
 
 ### Evolve
 
@@ -140,10 +141,11 @@ Reports:
 - Unlinked pages that share terms (connection opportunities)
 - Dead links that suggest new pages to create
 - Disconnected graph components
+- Coverage gaps from query feedback
 
 ### Claude Code Integration (MCP Server)
 
-The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **12 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
+The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **19 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
 
 ```bash
 # Start the MCP server standalone
@@ -166,7 +168,7 @@ python -m kb.mcp_server
 }
 ```
 
-After restarting Claude Code, you get 12 tools:
+After restarting Claude Code, you get 19 tools:
 
 #### Core Tools (Claude Code is the default LLM)
 
@@ -187,18 +189,30 @@ After restarting Claude Code, you get 12 tools:
 | `kb_list_pages` | List all pages, optionally filtered by type |
 | `kb_list_sources` | List all raw source files |
 | `kb_stats` | Page counts, graph metrics, coverage info |
-| `kb_lint` | Health checks (dead links, orphans, staleness) |
+| `kb_lint` | Health checks (dead links, orphans, staleness, low-trust pages) |
 | `kb_evolve` | Gap analysis and connection suggestions |
+
+#### Quality Tools (Phase 2)
+
+| Tool | Description |
+|------|-------------|
+| `kb_review_page` | Page + sources + checklist for quality review |
+| `kb_refine_page` | Update page preserving frontmatter, with audit trail |
+| `kb_lint_deep` | Source fidelity check (page vs raw source side-by-side) |
+| `kb_lint_consistency` | Cross-page contradiction check |
+| `kb_query_feedback` | Record query success/failure for trust scoring |
+| `kb_reliability_map` | Page trust scores from feedback history |
+| `kb_affected_pages` | Pages affected by a change (backlinks + shared sources) |
 
 **Workflows:**
 
 ```
 # Query (Claude Code answers directly)
-kb_query("What is RAG?")  → returns wiki context → Claude Code synthesizes answer
+kb_query("What is RAG?")  -> returns wiki context -> Claude Code synthesizes answer
 
 # Ingest a file in raw/
-kb_ingest("raw/articles/rag.md")                    → returns extraction prompt
-kb_ingest("raw/articles/rag.md", extraction_json=...) → creates wiki pages
+kb_ingest("raw/articles/rag.md")                    -> returns extraction prompt
+kb_ingest("raw/articles/rag.md", extraction_json=...) -> creates wiki pages
 
 # Ingest a URL (one-shot)
 1. Fetch content from URL
@@ -206,7 +220,12 @@ kb_ingest("raw/articles/rag.md", extraction_json=...) → creates wiki pages
 3. kb_ingest_content(content, "article-name", "article", extraction_json)
 
 # Batch compile
-kb_compile_scan()  → lists sources → kb_ingest each with extraction_json
+kb_compile_scan()  -> lists sources -> kb_ingest each with extraction_json
+
+# Quality review (Phase 2)
+kb_review_page("concepts/rag")  -> review context -> kb_refine_page if issues
+kb_lint_deep("concepts/rag")    -> fidelity check -> fix unsourced claims
+kb_query_feedback(question, "useful", "concepts/rag")  -> builds trust scores
 ```
 
 **Example prompts in Claude Code:**
@@ -215,6 +234,7 @@ kb_compile_scan()  → lists sources → kb_ingest each with extraction_json
 > "Ingest this article into my wiki" -> `kb_ingest` or `kb_ingest_content`
 > "Show me wiki health" -> `kb_lint`
 > "What sources need processing?" -> `kb_compile_scan`
+> "Review this wiki page for accuracy" -> `kb_review_page`
 
 ## Supported Source Types
 
@@ -229,7 +249,7 @@ kb_compile_scan()  → lists sources → kb_ingest each with extraction_json
 | Dataset | `templates/dataset.yaml` | Schema documentation |
 | Conversation | `templates/conversation.yaml` | Chat/interview transcript |
 
-Each template defines extraction fields and wiki output mappings. The LLM uses these to consistently extract structured data from any source type.
+Each template defines extraction fields and wiki output mappings. The LLM uses these to consistently extract structured data from any source type. Source types are validated against this whitelist before processing.
 
 ## Wiki Page Format
 
@@ -268,15 +288,27 @@ RAG combines retrieval with generation...
 
 **Confidence levels:** `stated` (directly from source), `inferred` (derived from multiple sources), `speculative` (LLM reasoning)
 
+## Quality System (Phase 2)
+
+The knowledge base includes a multi-layer quality system:
+
+**Trust scoring** — Bayesian page trust based on query feedback. "Wrong" answers penalized 2x vs "incomplete". Pages below the trust threshold are automatically flagged during lint.
+
+**Review workflow** — `kb_review_page` pairs wiki pages with their raw sources and a 6-item checklist (source fidelity, entity accuracy, wikilink validity, confidence match, no hallucination, title accuracy). Claude Code or a wiki-reviewer sub-agent evaluates and produces structured JSON reviews. Issues are fixed via `kb_refine_page` (max 2 rounds).
+
+**Semantic lint** — Deep fidelity checks (`kb_lint_deep`) compare page claims against source content. Consistency checks (`kb_lint_consistency`) group related pages and detect contradictions.
+
+**Affected page tracking** — After updating a page, `kb_affected_pages` identifies backlinks and shared-source pages that may need review.
+
 ## Model Tiering
 
 The system uses three Claude model tiers to balance cost and quality:
 
 | Tier | Model | Used For |
 |------|-------|----------|
-| `scan` | Claude Haiku | Index reads, link checks, file diffs |
-| `write` | Claude Sonnet | Article writing, extraction, summaries |
-| `orchestrate` | Claude Opus | Query answering, orchestration, verification |
+| `scan` | Claude Haiku 4.5 | Index reads, link checks, file diffs |
+| `write` | Claude Sonnet 4.6 | Article writing, extraction, summaries |
+| `orchestrate` | Claude Opus 4.6 | Query answering, orchestration, verification |
 
 ## Project Structure
 
@@ -293,32 +325,39 @@ LLM-Knowledge-Base/
     contradictions.md      # Conflict tracker
   research/                # Human-authored analysis
   templates/               # 8 YAML extraction schemas
-  src/kb/                  # Python package
+  src/kb/                  # Python package (~3,500 lines)
     cli.py                 # Click CLI (6 commands)
-    config.py              # Paths, model tiers, settings
-    mcp_server.py          # FastMCP server for Claude Code (12 tools)
-    models/                # WikiPage, RawSource, frontmatter
-    ingest/                # Pipeline + extractors
-    compile/               # Compiler + differ + linker
-    query/                 # Engine + citations
-    lint/                  # Checks + runner
-    evolve/                # Gap analyzer
-    graph/                 # NetworkX builder + pyvis visualizer
-    utils/                 # Hashing, markdown, LLM wrapper
-  tests/                   # 78 tests across 7 test files
+    config.py              # Paths, model tiers, tuning constants
+    mcp_server.py          # FastMCP server (19 tools)
+    models/                # WikiPage, RawSource, frontmatter validation
+    ingest/                # Pipeline + extractors (template-driven)
+    compile/               # Hash-based incremental compiler + linker
+    query/                 # Keyword search engine + citation extraction
+    lint/                  # 5 mechanical checks + semantic context builders
+    evolve/                # Coverage analysis + connection discovery
+    graph/                 # NetworkX graph builder + stats
+    feedback/              # Bayesian trust scoring + reliability analysis
+    review/                # Page-source pairing + frontmatter-preserving refiner
+    utils/                 # Shared: hashing, markdown, LLM, text, wiki_log, pages
+  tests/                   # 180 tests across 14 test files (2.4s)
 ```
 
 ## Development
 
 ```bash
-# Run tests
-python -m pytest -v
+# Activate venv (always use project .venv)
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # Unix
 
-# Lint
+# Install
+pip install -r requirements.txt && pip install -e .
+
+# Run tests
+python -m pytest
+
+# Lint & format
 ruff check src/ tests/
 ruff check src/ tests/ --fix
-
-# Format
 ruff format src/ tests/
 ```
 
@@ -326,9 +365,11 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 
 ## Roadmap
 
-- **Phase 1 (complete):** All 5 operations + MCP server working end-to-end, 78 tests, CLI wired
-- **Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop
-- **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages)
+- **Phase 1 (complete, v0.3.0):** 5 operations + graph + CLI + MCP server (12 tools), hash-based incremental compile, model tiering
+- **Phase 2 (complete, v0.4.0):** Quality system — feedback loop with Bayesian trust scoring, Actor-Critic review workflow, semantic lint (fidelity + consistency), page refiner with audit trail. 7 new MCP tools, wiki-reviewer agent
+- **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
+- **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
+- **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License
 
