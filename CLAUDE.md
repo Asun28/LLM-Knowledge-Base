@@ -10,22 +10,17 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 1 complete (v0.3.0).** All 5 operations, graph module, and MCP server are implemented, tested (78 tests), and wired to the CLI.
+**Phase 2 complete (v0.4.0).** 121 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint).
 
-**Implemented and tested:**
-- `kb.config` — paths, model tiers, page types, confidence levels
-- `kb.models` — WikiPage, RawSource dataclasses, frontmatter validation
-- `kb.utils` — hashing (SHA-256), markdown parsing (wikilinks, raw refs), LLM API wrapper (3-tier)
-- `kb.ingest` — pipeline (read raw source → LLM extraction → generate wiki pages → update indexes), extractors (template loading, prompt building)
-- `kb.compile` — compiler (hash-based incremental detection, batch orchestration), differ (unified diffs, dry-run), linker (wikilink resolution, backlinks)
-- `kb.query` — engine (keyword search with title boosting, LLM synthesis), citations (extraction, formatting)
-- `kb.lint` — checks (dead links, orphan pages, staleness, frontmatter validation, source coverage), runner (orchestrator, report formatting)
-- `kb.evolve` — analyzer (coverage analysis, connection opportunities, new page suggestions, evolution report)
-- `kb.graph` — builder (networkx DiGraph from wikilinks, statistics), visualize (pyvis HTML output)
-- `kb.mcp_server` — FastMCP server exposing all KB operations as Claude Code tools
-- CLI — all 6 commands fully wired: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`
+**Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
 
-**Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. Detailed architecture research is in `research/agent-architecture-research.md`.
+**Phase 2 modules:**
+- `kb.feedback` — query feedback store (Bayesian trust scoring), reliability analysis (flagged pages, coverage gaps)
+- `kb.review` — page-source pairing, review context/checklist builder, page refiner (frontmatter-preserving updates with audit trail)
+- `kb.lint.semantic` — fidelity, consistency, completeness context builders for LLM-powered evaluation
+- `.claude/agents/wiki-reviewer.md` — Actor-Critic reviewer agent definition
+
+**Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave. Research in `research/agent-architecture-research.md`.
 
 ## Development Commands
 
@@ -124,8 +119,9 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `conftest.py`:
 - `project_root` / `raw_dir` / `wiki_dir` — point to real project directories (read-only use)
 - `tmp_wiki(tmp_path)` — isolated wiki directory with all 5 subdirectories for tests that write wiki pages
+- `tmp_project(tmp_path)` — full project directory with wiki/ (5 subdirs + log.md) and raw/ (4 subdirs) for Phase 2 tests
 
-78 tests across 7 test files covering models, ingest, compile, query, lint, evolve, and graph modules.
+121 tests across 12 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (14), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (7).
 
 ## Phase 2 Workflows
 
@@ -213,22 +209,23 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
-- **kb** — The knowledge base MCP server (`kb.mcp_server`, 12 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
-  - `kb_query(question)` — returns wiki context; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
+- **kb** — The knowledge base MCP server (`kb.mcp_server`, 19 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
+  - `kb_query(question)` — returns wiki context with trust scores; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
   - `kb_ingest(path, extraction_json=...)` — creates wiki pages from Claude Code's extraction. Omit `extraction_json` to get the extraction prompt. Add `use_api=true` for API extraction.
   - `kb_ingest_content(content, filename, type, extraction_json)` — one-shot: saves content to `raw/` and creates wiki pages in one call.
   - `kb_save_source(content, filename)` — save content to `raw/` for later ingestion.
   - `kb_compile_scan()` — find changed sources, then `kb_ingest` each.
   - Browse: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`.
-  - Health: `kb_stats`, `kb_lint`, `kb_evolve`.
+  - Health: `kb_stats`, `kb_lint` (includes flagged pages), `kb_evolve` (includes coverage gaps).
+  - Quality (Phase 2): `kb_review_page`, `kb_refine_page`, `kb_lint_deep`, `kb_lint_consistency`, `kb_query_feedback`, `kb_reliability_map`, `kb_affected_pages`.
 - **memory** — Persistent knowledge graph in `.memory/memory.jsonl`. Track wiki entity relationships across sessions.
 - **arxiv** — Search/download papers to `raw/papers/`.
 - **sqlite** — Metadata DB at `.data/metadata.db`. For wikilink graph, ingestion history, lint results.
 
 ## Implementation Phases
 
-- **Phase 1 (Now):** Content-hash incremental compile, three index files, model tiering, structured lint output. Focus: get Ingest and Compile working end-to-end.
-- **Phase 2 (50+ pages):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile.
+- **Phase 1 (complete, v0.3.0):** Content-hash incremental compile, three index files, model tiering, structured lint output, 5 operations + graph + CLI.
+- **Phase 2 (complete, v0.4.0):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. 7 new MCP tools, 3 new modules, wiki-reviewer agent.
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.
