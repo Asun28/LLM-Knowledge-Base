@@ -74,9 +74,9 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 ### Five Operations Cycle: Ingest → Compile → Query → Lint → Evolve
 
 - **Ingest**: User adds source to `raw/`. LLM reads it, writes summary to `wiki/summaries/`, updates `wiki/index.md`, modifies relevant entity/concept pages, appends to `wiki/log.md`.
-- **Compile**: LLM builds/updates interlinked wiki pages. Uses hash-based incremental detection — only processes new/changed sources. Proposes diffs, not full rewrites.
-- **Query**: User asks questions. LLM searches wiki, synthesizes answers with inline citations to wiki pages and raw sources. Good answers become new wiki pages.
-- **Lint**: Health check — orphan pages, dead links, staleness, circular reasoning, coverage gaps, frontmatter validation. Produces a report, does not silently fix.
+- **Compile**: LLM builds/updates interlinked wiki pages. Uses hash-based incremental detection — only processes new/changed sources. Manifest saved after each source (crash-safe). Proposes diffs, not full rewrites.
+- **Query**: User asks questions. LLM searches wiki (word-boundary matching), synthesizes answers with inline citations to wiki pages and raw sources. Context truncated to 80K chars. Good answers become new wiki pages.
+- **Lint**: Health check — orphan pages, dead links, staleness, wikilink cycles, coverage gaps, frontmatter validation. Produces a report, does not silently fix.
 - **Evolve**: Gap analysis — what topics lack coverage, what concepts should be linked, what raw sources would fill gaps. User picks suggestions, LLM executes.
 
 ### Python Package (`src/kb/`)
@@ -86,7 +86,7 @@ Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init_
 All paths, model tiers, page types, and confidence levels are defined in `kb.config` — import from there, never hardcode. `PROJECT_ROOT` resolves from `config.py`'s location, so it works regardless of working directory.
 
 **Key APIs:**
-- `call_llm(prompt, tier="write")` — Anthropic API wrapper with model tiering. Validates non-empty response. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Defined in `kb.utils.llm`.
+- `call_llm(prompt, tier="write")` — Anthropic API wrapper with model tiering, retry (3 attempts, exponential backoff on rate limits/overload/timeout/connection errors), and `LLMError` exception class. Reusable client with 120s timeout. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Defined in `kb.utils.llm`.
 - `content_hash(path)` — SHA-256, 32-char hex. Accepts `Path | str`. For incremental compile change detection. In `kb.utils.hashing`.
 - `make_source_ref(source_path, raw_dir=None)` — Canonical source reference string (`raw/articles/foo.md`). Single source of truth for path→ref conversion. In `kb.utils.paths`.
 - `slugify(text)` / `yaml_escape(value)` — URL slug generation and YAML-safe string escaping (handles quotes, backslashes, newlines, tabs). In `kb.utils.text`. Single source of truth — imported everywhere, never duplicated.

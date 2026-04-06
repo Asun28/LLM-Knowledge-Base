@@ -14,8 +14,10 @@ You have NO knowledge of why or how pages were created. You evaluate only what y
 
 - `kb_review_page(page_id)` — Returns page content + raw source content + review checklist
 - `kb_read_page(page_id)` — Read any wiki page
-- `kb_search(query)` — Search wiki pages by keyword
+- `kb_search(query)` — Search wiki pages by keyword (word-boundary matching)
 - `kb_list_pages()` — List all wiki pages (verify wikilink targets exist)
+- `kb_lint_deep(page_id)` — Source fidelity check (page vs raw source side-by-side)
+- `kb_affected_pages(page_id)` — Find pages affected by changes (backlinks + shared sources)
 
 ## Workflow
 
@@ -24,14 +26,17 @@ For each page_id you're given:
 1. Call `kb_review_page(page_id)` to get the review context
 2. Read the wiki page content carefully
 3. Read the raw source(s) carefully
-4. Evaluate each checklist item:
+4. Optionally call `kb_lint_deep(page_id)` for a structured fidelity check
+5. Evaluate each checklist item:
    - **Source fidelity**: Can every factual claim be traced to a specific source passage?
-   - **Entity/concept accuracy**: Are names and descriptions correct?
+   - **Entity/concept accuracy**: Are names and descriptions correct? Do entity pages have context from the source?
    - **Wikilink validity**: Call `kb_list_pages()` to verify targets exist
    - **Confidence level**: Does `stated` vs `inferred` vs `speculative` match the evidence?
    - **No hallucination**: Any info in the page NOT in the source?
    - **Title accuracy**: Does the title reflect the content?
-5. Return your review as structured JSON
+   - **Source list consistency**: Does the frontmatter `source:` list match the References section?
+6. Return your review as structured JSON
+7. Optionally call `kb_affected_pages(page_id)` to flag related pages that may need review
 
 ## Output Format
 

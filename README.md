@@ -37,7 +37,7 @@ raw/                    wiki/
 | **Ingest** | Read a raw source, extract structured data via LLM, generate summary + entity + concept pages, update indexes |
 | **Compile** | Scan all raw sources, detect changes via content hashes, batch-ingest new/modified sources |
 | **Query** | Search wiki pages, synthesize answers with inline citations using Claude |
-| **Lint** | Health checks: dead links, orphan pages, staleness, frontmatter validation, source coverage |
+| **Lint** | Health checks: dead links, orphan pages, staleness, frontmatter validation, source coverage, wikilink cycles |
 | **Evolve** | Gap analysis: under-linked concepts, missing page types, connection opportunities, new page suggestions |
 
 ## Quick Start
@@ -83,9 +83,10 @@ The ingest pipeline:
 1. Reads the raw source
 2. Calls Claude (Sonnet) to extract title, key claims, entities, concepts
 3. Creates `wiki/summaries/article-name.md`
-4. Creates/updates entity pages in `wiki/entities/`
-5. Creates/updates concept pages in `wiki/concepts/`
+4. Creates/updates entity pages in `wiki/entities/` (with context from extraction data)
+5. Creates/updates concept pages in `wiki/concepts/` (with context from extraction data)
 6. Updates `wiki/index.md`, `wiki/_sources.md`, `wiki/log.md`
+7. Detects and warns on slug collisions (e.g., "GPT 4" and "GPT-4" both → `gpt-4`)
 
 Source type is auto-detected from the `raw/` subdirectory, or specify with `--type`:
 `article`, `paper`, `repo`, `video`, `podcast`, `book`, `dataset`, `conversation`
@@ -99,7 +100,7 @@ kb compile              # Incremental (only new/changed sources)
 kb compile --full       # Full recompile
 ```
 
-Uses SHA-256 content hashes stored in `.data/hashes.json` to detect changes.
+Uses SHA-256 content hashes stored in `.data/hashes.json` to detect changes. Manifest is saved after each successful source ingest (crash-safe).
 
 ### Query
 
@@ -109,7 +110,7 @@ Ask questions and get answers with citations:
 kb query "What is compile-not-retrieve?"
 ```
 
-Searches wiki pages by keyword relevance, builds context, and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
+Searches wiki pages by word-boundary keyword matching, builds context (truncated to 80K chars), and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
 
 ### Lint
 
@@ -124,7 +125,8 @@ Checks for:
 - Orphan pages (no incoming links)
 - Stale pages (not updated in 90+ days)
 - Invalid frontmatter (missing required fields)
-- Uncovered raw sources (not referenced by any wiki page)
+- Uncovered raw sources (not referenced by any wiki page, exact path matching)
+- Wikilink cycles (A → B → C → A)
 - Low-trust pages flagged by query feedback
 
 ### Evolve
@@ -294,11 +296,13 @@ The knowledge base includes a multi-layer quality system:
 
 **Trust scoring** — Bayesian page trust based on query feedback. "Wrong" answers penalized 2x vs "incomplete". Pages below the trust threshold are automatically flagged during lint.
 
-**Review workflow** — `kb_review_page` pairs wiki pages with their raw sources and a 6-item checklist (source fidelity, entity accuracy, wikilink validity, confidence match, no hallucination, title accuracy). Claude Code or a wiki-reviewer sub-agent evaluates and produces structured JSON reviews. Issues are fixed via `kb_refine_page` (max 2 rounds).
+**Review workflow** — `kb_review_page` pairs wiki pages with their raw sources and a 6-item checklist (source fidelity, entity accuracy, wikilink validity, confidence match, no hallucination, title accuracy). Claude Code or a wiki-reviewer sub-agent evaluates and produces structured JSON reviews. Issues are fixed via `kb_refine_page` (max 2 rounds). Review history tracks content length and status for auditability.
 
-**Semantic lint** — Deep fidelity checks (`kb_lint_deep`) compare page claims against source content. Consistency checks (`kb_lint_consistency`) group related pages and detect contradictions.
+**Semantic lint** — Deep fidelity checks (`kb_lint_deep`) compare page claims against source content. Consistency checks (`kb_lint_consistency`) group related pages by shared sources, wikilinks, and significant term overlap (with frontmatter stripping and common-word filtering) to detect contradictions.
 
 **Affected page tracking** — After updating a page, `kb_affected_pages` identifies backlinks and shared-source pages that may need review.
+
+**LLM resilience** — All API calls retry up to 3 times with exponential backoff on rate limits, overload, connection errors, and timeouts. Non-retryable errors (401/403) raise immediately with descriptive `LLMError`.
 
 ## Model Tiering
 
@@ -331,15 +335,15 @@ LLM-Knowledge-Base/
     mcp_server.py          # FastMCP server (19 tools)
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline + extractors (template-driven)
-    compile/               # Hash-based incremental compiler + linker
-    query/                 # Keyword search engine + citation extraction
-    lint/                  # 5 mechanical checks + semantic context builders
+    compile/               # Hash-based incremental compiler (crash-safe) + linker
+    query/                 # Word-boundary keyword search + context truncation + citations
+    lint/                  # 6 mechanical checks (+ cycles) + semantic context builders
     evolve/                # Coverage analysis + connection discovery
     graph/                 # NetworkX graph builder + stats
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
-    utils/                 # Shared: hashing, markdown, LLM, text, wiki_log, pages
-  tests/                   # 180 tests across 14 test files (2.4s)
+    utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
+  tests/                   # 206 tests across 15 test files (2.5s)
 ```
 
 ## Development
@@ -369,6 +373,7 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2 (complete, v0.4.0):** Quality system — feedback loop with Bayesian trust scoring, Actor-Critic review workflow, semantic lint (fidelity + consistency), page refiner with audit trail. 7 new MCP tools, wiki-reviewer agent
 - **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
+- **Phase 2.3 (complete, v0.7.0):** Robustness overhaul — LLM retry with exponential backoff and `LLMError`, frontmatter source list sync, query context truncation (80K chars), entity/concept pages populated with context from extraction, crash-safe manifest (saved per source), slug collision detection, word-boundary keyword search, exact path matching in source coverage, term overlap filtering (frontmatter stripping + common words), wikilink cycle detection, review history context tracking, log size warning, dead code removal. 206 tests
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License
