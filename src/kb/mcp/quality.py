@@ -111,10 +111,14 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         page_ids: Comma-separated page IDs (e.g., 'concepts/rag,concepts/llm').
                   Empty = auto-select groups.
     """
-    from kb.lint.semantic import build_consistency_context
+    try:
+        from kb.lint.semantic import build_consistency_context
 
-    ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
-    return build_consistency_context(ids)
+        ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
+        return build_consistency_context(ids)
+    except Exception as e:
+        logger.exception("Error running consistency check")
+        return f"Error running consistency check: {e}"
 
 
 @mcp.tool()
@@ -186,23 +190,30 @@ def kb_affected_pages(page_id: str) -> str:
     Args:
         page_id: Page that was changed (e.g., 'concepts/rag').
     """
-    from kb.compile.linker import build_backlinks
+    try:
+        from kb.compile.linker import build_backlinks
 
-    backlinks_map = build_backlinks()
-    back = backlinks_map.get(page_id, [])
+        backlinks_map = build_backlinks()
+        back = backlinks_map.get(page_id, [])
+    except Exception as e:
+        logger.exception("Error building backlinks for %s", page_id)
+        return f"Error computing affected pages: {e}"
 
     # Find pages sharing same sources using the shared page loader
     shared_source_pages: list[str] = []
-    all_pages = load_all_pages()
-    this_page = next((p for p in all_pages if p["id"] == page_id), None)
+    try:
+        all_pages = load_all_pages()
+        this_page = next((p for p in all_pages if p["id"] == page_id), None)
 
-    if this_page:
-        page_sources = this_page["sources"]
-        for other in all_pages:
-            if other["id"] == page_id:
-                continue
-            if set(page_sources) & set(other["sources"]):
-                shared_source_pages.append(other["id"])
+        if this_page:
+            page_sources = this_page["sources"]
+            for other in all_pages:
+                if other["id"] == page_id:
+                    continue
+                if set(page_sources) & set(other["sources"]):
+                    shared_source_pages.append(other["id"])
+    except Exception as e:
+        logger.warning("Failed to compute shared sources for %s: %s", page_id, e)
 
     all_affected = sorted(set(back + shared_source_pages))
 
@@ -306,6 +317,8 @@ def kb_create_page(
     # Validate page_id format
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
+    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+        return f"Error: Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
 
     page_path = WIKI_DIR / f"{page_id}.md"
     if page_path.exists():

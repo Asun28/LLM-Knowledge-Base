@@ -1,9 +1,12 @@
 """Browse & stats MCP tools — search, read, list, stats."""
 
+import logging
 
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.mcp.app import mcp
 from kb.utils.pages import load_all_pages
+
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
@@ -14,6 +17,8 @@ def kb_search(query: str, max_results: int = 10) -> str:
         query: Search terms (space-separated keywords).
         max_results: Maximum results to return (default 10).
     """
+    max_results = max(1, min(max_results, 100))
+
     from kb.query.engine import search_pages
 
     results = search_pages(query, max_results=max_results)
@@ -38,7 +43,13 @@ def kb_read_page(page_id: str) -> str:
     Args:
         page_id: Page identifier like 'concepts/rag' or 'summaries/my-article'.
     """
+    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+        return f"Error: Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
     page_path = WIKI_DIR / f"{page_id}.md"
+    try:
+        page_path.resolve().relative_to(WIKI_DIR.resolve())
+    except ValueError:
+        return f"Error: Invalid page_id: {page_id}. Path escapes wiki directory."
     if not page_path.exists():
         parts = page_id.split("/", 1)
         if len(parts) == 2:
@@ -106,12 +117,16 @@ def kb_list_sources() -> str:
 @mcp.tool()
 def kb_stats() -> str:
     """Get wiki statistics: page counts by type, graph metrics, coverage info."""
-    from kb.evolve.analyzer import analyze_coverage
-    from kb.graph.builder import build_graph, graph_stats
+    try:
+        from kb.evolve.analyzer import analyze_coverage
+        from kb.graph.builder import build_graph, graph_stats
 
-    coverage = analyze_coverage()
-    graph = build_graph()
-    stats = graph_stats(graph)
+        coverage = analyze_coverage()
+        graph = build_graph()
+        stats = graph_stats(graph)
+    except Exception as e:
+        logger.exception("Error computing wiki stats")
+        return f"Error computing wiki stats: {e}"
 
     lines = [
         "# Wiki Statistics\n",

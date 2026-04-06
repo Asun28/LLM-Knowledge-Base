@@ -302,6 +302,7 @@ def ingest_source(
     # Track created/updated pages
     pages_created = []
     pages_updated = []
+    pages_skipped = []
 
     # 1. Create summary page
     title = extraction.get("title") or extraction.get("name") or source_path.stem
@@ -328,6 +329,7 @@ def ingest_source(
                     "Slug collision: %r and %r both slug to %r",
                     prev, entity, entity_slug,
                 )
+                pages_skipped.append(f"entities/{entity_slug} (collision: {entity!r})")
             continue
         seen_entity_slugs[entity_slug] = entity
         entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
@@ -357,6 +359,7 @@ def ingest_source(
                     "Slug collision: %r and %r both slug to %r",
                     prev, concept, concept_slug,
                 )
+                pages_skipped.append(f"concepts/{concept_slug} (collision: {concept!r})")
             continue
         seen_concept_slugs[concept_slug] = concept
         concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
@@ -397,4 +400,5 @@ def ingest_source(
         "content_hash": source_hash,
         "pages_created": pages_created,
         "pages_updated": pages_updated,
+        "pages_skipped": pages_skipped,
     }

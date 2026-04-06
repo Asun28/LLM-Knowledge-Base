@@ -21,7 +21,12 @@ mcp = FastMCP(
         "- kb_ingest_content: one-shot for content not yet saved to raw/.\n"
         "- kb_compile_scan: find changed sources, then kb_ingest each.\n"
         "- kb_search, kb_read_page, kb_list_pages, kb_list_sources: browse wiki.\n"
-        "- kb_lint, kb_evolve, kb_stats: health and gap analysis."
+        "- kb_lint, kb_evolve, kb_stats: health and gap analysis.\n"
+        "- kb_review_page, kb_refine_page, kb_lint_deep, kb_lint_consistency: quality review.\n"
+        "- kb_query_feedback, kb_reliability_map: feedback and trust scoring.\n"
+        "- kb_affected_pages: find pages impacted by a change.\n"
+        "- kb_save_lint_verdict: persist lint/review verdicts.\n"
+        "- kb_create_page: create comparison/synthesis/any wiki page directly."
     ),
 )
 
@@ -36,7 +41,13 @@ def _rel(path: Path) -> str:
 
 def _validate_page_id(page_id: str) -> str | None:
     """Validate that a page ID exists. Returns error message or None."""
+    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+        return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
     page_path = WIKI_DIR / f"{page_id}.md"
+    try:
+        page_path.resolve().relative_to(WIKI_DIR.resolve())
+    except ValueError:
+        return f"Invalid page_id: {page_id}. Path escapes wiki directory."
     if not page_path.exists():
         return f"Page not found: {page_id}. Use kb_list_pages to see available pages."
     return None

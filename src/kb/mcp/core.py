@@ -25,6 +25,8 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         max_results: Maximum pages to search (default 10).
         use_api: If true, call the Anthropic API for synthesis. Default false.
     """
+    max_results = max(1, min(max_results, 100))
+
     if use_api:
         from kb.query.citations import format_citations
         from kb.query.engine import query_wiki
@@ -287,42 +289,48 @@ def kb_compile_scan(incremental: bool = True) -> str:
     Args:
         incremental: If True (default), only new/changed sources. If False, all.
     """
-    from kb.compile.compiler import find_changed_sources, scan_raw_sources
+    try:
+        from kb.compile.compiler import find_changed_sources, scan_raw_sources
+    except Exception as e:
+        return f"Error loading compile module: {e}"
 
-    if incremental:
-        new_sources, changed_sources = find_changed_sources()
-        if not new_sources and not changed_sources:
-            return "No new or changed sources found. Wiki is up to date."
+    try:
+        if incremental:
+            new_sources, changed_sources = find_changed_sources()
+            if not new_sources and not changed_sources:
+                return "No new or changed sources found. Wiki is up to date."
 
-        lines = ["# Compile Scan (incremental)\n"]
-        if new_sources:
-            lines.append(f"## New sources ({len(new_sources)})\n")
-            for s in new_sources:
+            lines = ["# Compile Scan (incremental)\n"]
+            if new_sources:
+                lines.append(f"## New sources ({len(new_sources)})\n")
+                for s in new_sources:
+                    lines.append(f"- {_rel(s)}")
+            if changed_sources:
+                lines.append(f"\n## Changed sources ({len(changed_sources)})\n")
+                for s in changed_sources:
+                    lines.append(f"- {_rel(s)}")
+
+            total = len(new_sources) + len(changed_sources)
+            lines.append(
+                f"\n**Total: {total} source(s) to process.** "
+                "For each: call kb_ingest(source_path) to get the extraction prompt, "
+                "then call kb_ingest(source_path, extraction_json=...) with your extraction."
+            )
+        else:
+            all_sources = scan_raw_sources()
+            if not all_sources:
+                return "No source files found in raw/."
+            lines = [
+                "# Compile Scan (full)\n",
+                f"**Total: {len(all_sources)} source(s)**\n",
+            ]
+            for s in all_sources:
                 lines.append(f"- {_rel(s)}")
-        if changed_sources:
-            lines.append(f"\n## Changed sources ({len(changed_sources)})\n")
-            for s in changed_sources:
-                lines.append(f"- {_rel(s)}")
-
-        total = len(new_sources) + len(changed_sources)
-        lines.append(
-            f"\n**Total: {total} source(s) to process.** "
-            "For each: call kb_ingest(source_path) to get the extraction prompt, "
-            "then call kb_ingest(source_path, extraction_json=...) with your extraction."
-        )
-    else:
-        all_sources = scan_raw_sources()
-        if not all_sources:
-            return "No source files found in raw/."
-        lines = [
-            "# Compile Scan (full)\n",
-            f"**Total: {len(all_sources)} source(s)**\n",
-        ]
-        for s in all_sources:
-            lines.append(f"- {_rel(s)}")
-        lines.append(
-            "\nFor each: call kb_ingest(source_path) to get the extraction prompt, "
-            "then call kb_ingest(source_path, extraction_json=...) with your extraction."
-        )
+            lines.append(
+                "\nFor each: call kb_ingest(source_path) to get the extraction prompt, "
+                "then call kb_ingest(source_path, extraction_json=...) with your extraction."
+            )
+    except Exception as e:
+        return f"Error scanning sources: {e}"
 
     return "\n".join(lines)

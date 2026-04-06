@@ -13,7 +13,7 @@ def extract_citations(text: str) -> list[dict]:
     """
     citations = []
     # Match [source: path] or [ref: path] patterns
-    pattern = re.compile(r"\[(source|ref):\s*([\w/.-]+)\]")
+    pattern = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]")
     for match in pattern.finditer(text):
         cite_type = "wiki" if match.group(1) == "source" else "raw"
         citations.append(

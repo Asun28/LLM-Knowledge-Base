@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 @mcp.tool()
 def kb_lint() -> str:
     """Run health checks on the wiki. Reports dead links, orphans, staleness, etc."""
-    from kb.lint.runner import format_report, run_all_checks
+    try:
+        from kb.lint.runner import format_report, run_all_checks
 
-    report = run_all_checks()
-    result = format_report(report)
+        report = run_all_checks()
+        result = format_report(report)
+    except Exception as e:
+        logger.exception("Error running lint checks")
+        return f"Error running lint checks: {e}"
 
     # Append feedback-flagged pages (fail-safe)
     try:
@@ -36,10 +40,14 @@ def kb_lint() -> str:
 @mcp.tool()
 def kb_evolve() -> str:
     """Analyze knowledge gaps and suggest new connections, pages, and sources."""
-    from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
+    try:
+        from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
 
-    report = generate_evolution_report()
-    result = format_evolution_report(report)
+        report = generate_evolution_report()
+        result = format_evolution_report(report)
+    except Exception as e:
+        logger.exception("Error running evolution analysis")
+        return f"Error running evolution analysis: {e}"
 
     # Append coverage gaps from query feedback (fail-safe)
     try:
