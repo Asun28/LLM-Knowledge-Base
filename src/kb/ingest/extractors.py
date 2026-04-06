@@ -60,10 +60,13 @@ def extract_from_source(content: str, source_type: str) -> dict:
     cleaned = response.strip()
     if cleaned.startswith("```"):
         # Remove opening fence (```json or ```)
-        first_newline = cleaned.index("\n")
-        cleaned = cleaned[first_newline + 1 :]
+        try:
+            first_newline = cleaned.index("\n")
+            cleaned = cleaned[first_newline + 1 :]
+        except ValueError:
+            cleaned = cleaned[3:]  # No newline, just strip the fence marker
     if cleaned.endswith("```"):
-        cleaned = cleaned[: -3]
+        cleaned = cleaned[:-3]
     cleaned = cleaned.strip()
 
     try:
