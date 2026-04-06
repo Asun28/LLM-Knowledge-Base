@@ -1,11 +1,14 @@
 """Page-source pairing and review context builder."""
 
+import logging
 from pathlib import Path
 
 import frontmatter
 
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.utils.pages import normalize_sources
+
+logger = logging.getLogger(__name__)
 
 
 def pair_page_with_sources(
@@ -39,7 +42,20 @@ def pair_page_with_sources(
         # Resolve: "raw/articles/foo.md" -> project_root / "raw/articles/foo.md"
         # source_ref starts with "raw/" so we go to parent of raw_dir (= project root)
         project_root = raw_dir.parent
-        source_path = project_root / source_ref
+        source_path = (project_root / source_ref).resolve()
+        # Guard against path traversal — source must stay within project root
+        try:
+            source_path.relative_to(project_root.resolve())
+        except ValueError:
+            logger.warning("Source path escapes project root: %s", source_ref)
+            source_contents.append(
+                {
+                    "path": source_ref,
+                    "content": None,
+                    "error": f"Source path escapes project root: {source_ref}",
+                }
+            )
+            continue
         if source_path.exists():
             source_contents.append(
                 {

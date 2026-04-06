@@ -492,3 +492,83 @@ def test_graph_edges_match_normalized_links(tmp_wiki, create_wiki_page):
 
     graph = build_graph(tmp_wiki)
     assert graph.has_edge("concepts/rag", "concepts/llm")
+
+
+# ── 11. Source Path Traversal in review/context.py ──────────────────
+
+
+def test_pair_page_traversal_blocked(tmp_project, create_wiki_page):
+    """pair_page_with_sources blocks source refs with '..' that escape the project."""
+    from kb.review.context import pair_page_with_sources
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+
+    # Create a wiki page with a malicious source reference
+    create_wiki_page(
+        "concepts/evil",
+        wiki_dir=wiki_dir,
+        source_ref="../../etc/passwd",
+        content="Malicious page.",
+    )
+
+    result = pair_page_with_sources("concepts/evil", wiki_dir=wiki_dir, raw_dir=raw_dir)
+
+    assert "source_contents" in result
+    assert len(result["source_contents"]) == 1
+    entry = result["source_contents"][0]
+    assert entry["content"] is None
+    assert "error" in entry
+    assert "escapes project root" in entry["error"]
+
+
+def test_pair_page_absolute_path_blocked(tmp_project, create_wiki_page):
+    """pair_page_with_sources blocks absolute source paths that escape the project."""
+    from kb.review.context import pair_page_with_sources
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+
+    # Create a wiki page with an absolute path source reference
+    create_wiki_page(
+        "concepts/abs",
+        wiki_dir=wiki_dir,
+        source_ref="/etc/passwd",
+        content="Absolute path page.",
+    )
+
+    result = pair_page_with_sources("concepts/abs", wiki_dir=wiki_dir, raw_dir=raw_dir)
+
+    assert "source_contents" in result
+    assert len(result["source_contents"]) == 1
+    entry = result["source_contents"][0]
+    assert entry["content"] is None
+    assert "error" in entry
+    assert "escapes project root" in entry["error"]
+
+
+def test_pair_page_normal_source_works(tmp_project, create_wiki_page, create_raw_source):
+    """pair_page_with_sources reads normal source refs within the project correctly."""
+    from kb.review.context import pair_page_with_sources
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+
+    # Create source and wiki page
+    create_raw_source(
+        "raw/articles/good.md", content="Legitimate source content.", project_dir=tmp_project
+    )
+    create_wiki_page(
+        "concepts/good",
+        wiki_dir=wiki_dir,
+        source_ref="raw/articles/good.md",
+        content="A good page.",
+    )
+
+    result = pair_page_with_sources("concepts/good", wiki_dir=wiki_dir, raw_dir=raw_dir)
+
+    assert "source_contents" in result
+    assert len(result["source_contents"]) == 1
+    entry = result["source_contents"][0]
+    assert entry["content"] == "Legitimate source content."
+    assert "error" not in entry

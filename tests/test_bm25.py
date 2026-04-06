@@ -249,3 +249,11 @@ def test_bm25_multi_term_ranking(tmp_wiki, create_wiki_page):
     results = search_pages("vector search embeddings", tmp_wiki)
     assert len(results) >= 2
     assert results[0]["id"] == "concepts/vector-search"
+
+
+def test_bm25_empty_docs_no_division_by_zero():
+    """BM25 should handle all-empty documents without division by zero."""
+    index = BM25Index([[], [], []])
+    scores = index.score(["test"])
+    assert len(scores) == 3
+    assert all(s == 0.0 for s in scores)
