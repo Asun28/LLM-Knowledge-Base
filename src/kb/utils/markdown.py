@@ -6,8 +6,12 @@ WIKILINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 
 
 def extract_wikilinks(text: str) -> list[str]:
-    """Extract all [[wikilink]] targets from markdown text."""
-    return WIKILINK_PATTERN.findall(text)
+    """Extract all [[wikilink]] targets from markdown text.
+
+    Normalizes targets: strips whitespace, removes trailing .md.
+    """
+    raw = WIKILINK_PATTERN.findall(text)
+    return [link.strip().removesuffix(".md") for link in raw]
 
 
 def extract_raw_refs(text: str) -> list[str]:

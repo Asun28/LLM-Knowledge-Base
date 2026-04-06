@@ -62,7 +62,13 @@ def refine_page(
 
     # Update the 'updated' date in frontmatter
     today = date.today().isoformat()
-    frontmatter_text = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", frontmatter_text)
+    if re.search(r"updated: \d{4}-\d{2}-\d{2}", frontmatter_text):
+        frontmatter_text = re.sub(
+            r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", frontmatter_text
+        )
+    else:
+        # Add updated field if missing
+        frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
 
     # Reconstruct page
     new_text = f"---{frontmatter_text}---\n\n{updated_content}\n"

@@ -104,7 +104,9 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     ]
 
     if not terms:
-        terms = [w.lower().strip("?.,!") for w in question.split()]
+        # All words were stopwords — use the full question as a substring match
+        # instead of individual common words that would match everything
+        terms = [question.lower().strip("?.,!")]
 
     scored = []
     for page in pages:

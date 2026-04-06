@@ -26,6 +26,6 @@ def test_content_hash(tmp_path):
     f.write_text("hello world")
     h = content_hash(f)
     assert isinstance(h, str)
-    assert len(h) == 16
+    assert len(h) == 32
     # Same content → same hash
     assert content_hash(f) == h
