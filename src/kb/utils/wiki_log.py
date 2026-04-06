@@ -9,10 +9,13 @@ from kb.config import WIKI_LOG
 logger = logging.getLogger(__name__)
 
 
+LOG_SIZE_WARNING_BYTES = 500_000  # Warn when log exceeds ~500KB
+
+
 def append_wiki_log(operation: str, message: str, log_path: Path | None = None) -> None:
     """Append a timestamped entry to wiki/log.md.
 
-    Creates the log file if it does not exist.
+    Creates the log file if it does not exist. Warns when log exceeds size threshold.
 
     Args:
         operation: Operation name (e.g., 'ingest', 'compile', 'lint', 'refine').
@@ -27,3 +30,9 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
     content = log_path.read_text(encoding="utf-8")
     content += entry
     log_path.write_text(content, encoding="utf-8")
+
+    if log_path.stat().st_size > LOG_SIZE_WARNING_BYTES:
+        logger.warning(
+            "wiki/log.md is %.0f KB — consider archiving old entries",
+            log_path.stat().st_size / 1024,
+        )

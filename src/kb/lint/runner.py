@@ -54,6 +54,10 @@ def run_all_checks(
     all_issues.extend(coverage)
     checks_run.append({"name": "source_coverage", "issues": len(coverage)})
 
+    cycles = check_cycles(wiki_dir)
+    all_issues.extend(cycles)
+    checks_run.append({"name": "wikilink_cycles", "issues": len(cycles)})
+
     # Summarize by severity
     severity_counts = {"error": 0, "warning": 0, "info": 0}
     for issue in all_issues:

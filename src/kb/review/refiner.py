@@ -76,13 +76,15 @@ def refine_page(
     new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
     page_path.write_text(new_text, encoding="utf-8")
 
-    # Append to review history
+    # Append to review history with context
     history = load_review_history(history_path)
     history.append(
         {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "page_id": page_id,
             "revision_notes": revision_notes,
+            "content_length": len(updated_content),
+            "status": "applied",
         }
     )
     save_review_history(history, history_path)

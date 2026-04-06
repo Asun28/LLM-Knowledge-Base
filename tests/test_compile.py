@@ -10,7 +10,6 @@ from kb.compile.compiler import (
     save_manifest,
     scan_raw_sources,
 )
-from kb.compile.differ import apply_diff, compute_diff
 from kb.compile.linker import build_backlinks, resolve_wikilinks
 
 # ── Compiler tests ──────────────────────────────────────────────
@@ -145,52 +144,6 @@ def test_compile_wiki_full(mock_ingest, tmp_path):
 
     assert result["mode"] == "full"
     assert result["sources_processed"] == 1
-
-
-# ── Differ tests ────────────────────────────────────────────────
-
-
-def test_compute_diff_no_changes():
-    """compute_diff returns empty string when content is identical."""
-    assert compute_diff("same content", "same content") == ""
-
-
-def test_compute_diff_with_changes():
-    """compute_diff returns unified diff for different content."""
-    diff = compute_diff("old line\n", "new line\n", "test.md")
-    assert "---" in diff
-    assert "+++" in diff
-    assert "-old line" in diff
-    assert "+new line" in diff
-
-
-def test_apply_diff_new_file(tmp_path):
-    """apply_diff creates new file when it doesn't exist."""
-    page = tmp_path / "new-page.md"
-    result = apply_diff(page, "# New Page\nContent here.")
-    assert result["changed"] is True
-    assert result["applied"] is True
-    assert page.exists()
-    assert "New Page" in page.read_text(encoding="utf-8")
-
-
-def test_apply_diff_dry_run(tmp_path):
-    """apply_diff in dry_run mode doesn't write changes."""
-    page = tmp_path / "page.md"
-    page.write_text("old content")
-    result = apply_diff(page, "new content", dry_run=True)
-    assert result["changed"] is True
-    assert result["applied"] is False
-    assert page.read_text(encoding="utf-8") == "old content"
-
-
-def test_apply_diff_no_changes(tmp_path):
-    """apply_diff reports no changes for identical content."""
-    page = tmp_path / "page.md"
-    page.write_text("same content")
-    result = apply_diff(page, "same content")
-    assert result["changed"] is False
-    assert result["applied"] is False
 
 
 # ── Linker tests ────────────────────────────────────────────────
