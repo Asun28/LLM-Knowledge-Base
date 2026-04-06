@@ -95,3 +95,66 @@ def test_add_feedback_entry_multiple_pages(tmp_path):
     assert "entities/openai" in data["page_scores"]
     assert data["page_scores"]["concepts/rag"]["useful"] == 1
     assert data["page_scores"]["entities/openai"]["useful"] == 1
+
+
+from kb.feedback.reliability import (
+    compute_trust_scores,
+    get_coverage_gaps,
+    get_flagged_pages,
+)
+
+
+# ── Reliability tests ─────────────────────────────────────────
+
+
+def test_compute_trust_scores_empty(tmp_path):
+    """compute_trust_scores returns empty dict when no feedback exists."""
+    path = tmp_path / "feedback.json"
+    assert compute_trust_scores(path) == {}
+
+
+def test_compute_trust_scores(tmp_path):
+    """compute_trust_scores returns page scores from feedback."""
+    path = tmp_path / "feedback.json"
+    add_feedback_entry("Q1", "useful", ["concepts/rag"], path=path)
+    scores = compute_trust_scores(path)
+    assert "concepts/rag" in scores
+    assert scores["concepts/rag"]["useful"] == 1
+
+
+def test_get_flagged_pages(tmp_path):
+    """get_flagged_pages returns pages below trust threshold."""
+    path = tmp_path / "feedback.json"
+    add_feedback_entry("Q1", "wrong", ["concepts/rag"], path=path)
+    # trust = (0+1)/(1+2) = 0.333 < 0.4 threshold
+    flagged = get_flagged_pages(path)
+    assert "concepts/rag" in flagged
+
+
+def test_get_flagged_pages_empty(tmp_path):
+    """get_flagged_pages returns empty list when no pages are flagged."""
+    path = tmp_path / "feedback.json"
+    add_feedback_entry("Q1", "useful", ["concepts/rag"], path=path)
+    # trust = (1+1)/(1+2) = 0.667 > 0.4
+    flagged = get_flagged_pages(path)
+    assert flagged == []
+
+
+def test_get_coverage_gaps(tmp_path):
+    """get_coverage_gaps returns questions with 'incomplete' rating."""
+    path = tmp_path / "feedback.json"
+    add_feedback_entry("Q1", "useful", ["concepts/rag"], path=path)
+    add_feedback_entry(
+        "Q2", "incomplete", ["concepts/llm"], notes="Missing fine-tuning info", path=path
+    )
+    gaps = get_coverage_gaps(path)
+    assert len(gaps) == 1
+    assert gaps[0]["question"] == "Q2"
+    assert gaps[0]["notes"] == "Missing fine-tuning info"
+
+
+def test_get_coverage_gaps_empty(tmp_path):
+    """get_coverage_gaps returns empty list when no incomplete ratings."""
+    path = tmp_path / "feedback.json"
+    add_feedback_entry("Q1", "useful", ["concepts/rag"], path=path)
+    assert get_coverage_gaps(path) == []
