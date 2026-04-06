@@ -1,10 +1,7 @@
 """Tests for v0.5.0 fixes — trust formula, paths, fence stripping, validation, slugify."""
 
-import json
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from kb.compile.compiler import _canonical_rel_path
 from kb.config import (
@@ -18,7 +15,6 @@ from kb.config import (
 from kb.feedback.store import add_feedback_entry, load_feedback
 from kb.ingest.pipeline import _yaml_escape, slugify
 from kb.utils.paths import make_source_ref
-
 
 # ── C2: Canonical path computation ──────────────────────────────
 
@@ -187,8 +183,7 @@ def test_refine_page_with_dashes_in_content(tmp_path):
 
     history_path = tmp_path / "history.json"
     result = refine_page(
-        "concepts/test", "Updated content", "test fix",
-        wiki_dir=wiki, history_path=history_path
+        "concepts/test", "Updated content", "test fix", wiki_dir=wiki, history_path=history_path
     )
     assert result.get("error") is None
     assert result["updated"] is True
@@ -277,9 +272,11 @@ def test_extraction_validation_missing_title(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with patch("kb.mcp_server.PROJECT_ROOT", tmp_path), \
-         patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"), \
-         patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"):
+    with (
+        patch("kb.mcp_server.PROJECT_ROOT", tmp_path),
+        patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"),
+        patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"),
+    ):
         result = kb_ingest(str(source), "article", '{"entities_mentioned": []}')
     assert "Error" in result
     assert "title" in result.lower()
@@ -293,9 +290,11 @@ def test_extraction_validation_non_dict(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with patch("kb.mcp_server.PROJECT_ROOT", tmp_path), \
-         patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"), \
-         patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"):
+    with (
+        patch("kb.mcp_server.PROJECT_ROOT", tmp_path),
+        patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"),
+        patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"),
+    ):
         result = kb_ingest(str(source), "article", '["not", "a", "dict"]')
     assert "Error" in result
     assert "object" in result.lower()

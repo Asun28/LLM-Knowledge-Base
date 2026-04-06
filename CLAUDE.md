@@ -10,12 +10,12 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 2 complete (v0.4.0).** 126 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint).
+**Phase 2.1 complete (v0.5.0).** 147 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes (trust formula, path canonicalization, validation, config-driven tuning).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
 
 **Phase 2 modules:**
-- `kb.feedback` — query feedback store (Bayesian trust scoring), reliability analysis (flagged pages, coverage gaps)
+- `kb.feedback` — query feedback store (weighted Bayesian trust scoring — "wrong" penalized 2x vs "incomplete"), reliability analysis (flagged pages, coverage gaps)
 - `kb.review` — page-source pairing, review context/checklist builder, page refiner (frontmatter-preserving updates with audit trail)
 - `kb.lint.semantic` — fidelity, consistency, completeness context builders for LLM-powered evaluation
 - `.claude/agents/wiki-reviewer.md` — Actor-Critic reviewer agent definition
@@ -88,6 +88,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 **Key APIs:**
 - `call_llm(prompt, tier="write")` — Anthropic API wrapper with model tiering. Validates non-empty response. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Defined in `kb.utils.llm`.
 - `content_hash(path)` — SHA-256, 32-char hex. Accepts `Path | str`. For incremental compile change detection. In `kb.utils.hashing`.
+- `make_source_ref(source_path, raw_dir=None)` — Canonical source reference string (`raw/articles/foo.md`). Single source of truth for path→ref conversion. In `kb.utils.paths`.
 - `extract_wikilinks(text)` / `extract_raw_refs(text)` — Regex extraction of `[[wikilinks]]` (normalized: stripped, no `.md` suffix) and `raw/...` references. In `kb.utils.markdown`.
 - `load_page(path)` / `validate_frontmatter(post)` — Parse and validate wiki page YAML frontmatter. In `kb.models.frontmatter`. Required fields: `title`, `source`, `created`, `updated`, `type`, `confidence`.
 - `WikiPage` / `RawSource` — Dataclasses in `kb.models.page`.
@@ -121,15 +122,17 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `tmp_wiki(tmp_path)` — isolated wiki directory with all 5 subdirectories for tests that write wiki pages
 - `tmp_project(tmp_path)` — full project directory with wiki/ (5 subdirs + log.md) and raw/ (4 subdirs) for Phase 2 tests
 
-126 tests across 12 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10).
+147 tests across 13 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21).
 
 ### Error Handling Patterns
 
 All modules use `logging.getLogger(__name__)` for warnings on skipped pages or failed operations.
 
-- **MCP tools**: Return `"Error: ..."` strings on failure — never raise exceptions to the MCP client. Phase 2 tools (`kb_review_page`, `kb_lint_deep`) wrap calls in `try/except`. Fail-safe integrations (trust scores in `kb_query`, flagged pages in `kb_lint`) use `try/except` with `logger.debug` since failure is expected when feedback data doesn't exist yet.
-- **LLM responses**: `call_llm()` validates non-empty `response.content`. `extract_from_source()` strips markdown code fences before `json.loads()` and wraps `JSONDecodeError` in `ValueError` with context.
-- **Frontmatter**: `_write_wiki_page()` quotes `source_ref` in YAML to handle special characters. `refine_page()` adds `updated:` field if missing, auto-creates `log.md` if absent.
+- **MCP tools**: Return `"Error: ..."` strings on failure — never raise exceptions to the MCP client. Phase 2 tools (`kb_review_page`, `kb_lint_deep`) catch `FileNotFoundError` specifically, then broad `Exception` with `logger.exception()` for stack traces. Page ID validation via `_validate_page_id()` before processing. Extraction JSON validated for required `title`/`name` field. Fail-safe integrations (trust scores in `kb_query`, flagged pages in `kb_lint`) use `try/except` with `logger.debug` since failure is expected when feedback data doesn't exist yet.
+- **LLM responses**: `call_llm()` validates non-empty `response.content`. `extract_from_source()` strips markdown code fences before `json.loads()` — handles edge cases where ```` has no newline. Wraps `JSONDecodeError` in `ValueError` with context.
+- **Frontmatter**: `_write_wiki_page()` escapes quotes and backslashes in title/source via `_yaml_escape()`. `refine_page()` uses regex-based frontmatter splitting (handles `---` inside content). Adds `updated:` field if missing, auto-creates `log.md` if absent.
+- **Graph builder**: Only adds edges to nodes that exist in the graph (no dangling edges to nonexistent pages).
+- **Slugify**: Empty slugify results (all-punctuation names) are skipped during entity/concept creation.
 - **Page loading loops**: All `except Exception` blocks in page-scanning loops (query engine, lint checks, graph builder, MCP server) log warnings with file path and error, then `continue`.
 
 ## Phase 2 Workflows
@@ -235,6 +238,7 @@ Key usage:
 
 - **Phase 1 (complete, v0.3.0):** Content-hash incremental compile, three index files, model tiering, structured lint output, 5 operations + graph + CLI.
 - **Phase 2 (complete, v0.4.0):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. 7 new MCP tools, 3 new modules, wiki-reviewer agent.
+- **Phase 2.1 (complete, v0.5.0):** Quality and robustness fixes — weighted Bayesian trust scoring (wrong penalized 2x), canonical path utilities (`make_source_ref`, `_canonical_rel_path`), YAML injection protection, extraction JSON validation, regex-based frontmatter parsing, graph edge invariant enforcement, empty slug guards, config-driven tuning constants (`STALENESS_MAX_DAYS`, `SEARCH_TITLE_WEIGHT`, etc.), improved MCP error handling with logging.
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.

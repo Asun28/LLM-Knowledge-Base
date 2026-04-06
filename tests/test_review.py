@@ -245,8 +245,11 @@ def test_refine_page_missing_updated_field(tmp_project):
     page_path.write_text(fm, encoding="utf-8")
 
     refine_page(
-        "concepts/rag", "New.", "test",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New.",
+        "test",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     text = page_path.read_text(encoding="utf-8")
     assert f"updated: {date.today().isoformat()}" in text
@@ -262,8 +265,11 @@ def test_refine_page_creates_log_when_missing(tmp_project):
     assert not log_path.exists()
 
     refine_page(
-        "concepts/rag", "New.", "test",
-        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+        "concepts/rag",
+        "New.",
+        "test",
+        wiki_dir=wiki_dir,
+        history_path=tmp_project / "history.json",
     )
     assert log_path.exists()
     log = log_path.read_text(encoding="utf-8")
