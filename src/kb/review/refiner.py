@@ -53,12 +53,13 @@ def refine_page(
 
     text = page_path.read_text(encoding="utf-8")
 
-    # Split frontmatter from content: ---\n<fm>\n---\n<body>
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    # Split frontmatter from content using regex for robust --- matching
+    # Matches: start-of-file, optional whitespace, ---, newline, content, ---, rest
+    fm_match = re.match(r"\A\s*---\n(.*?\n)---\n?(.*)", text, re.DOTALL)
+    if not fm_match:
         return {"error": f"Invalid frontmatter format in {page_id}"}
 
-    frontmatter_text = parts[1]
+    frontmatter_text = fm_match.group(1)
 
     # Update the 'updated' date in frontmatter
     today = date.today().isoformat()
@@ -71,7 +72,7 @@ def refine_page(
         frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
 
     # Reconstruct page
-    new_text = f"---{frontmatter_text}---\n\n{updated_content}\n"
+    new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
     page_path.write_text(new_text, encoding="utf-8")
 
     # Append to review history
