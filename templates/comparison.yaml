@@ -1,0 +1,17 @@
+name: comparison
+description: Side-by-side comparison of two or more approaches, tools, or concepts.
+extract:
+  - "title (str): Title of the comparison (e.g., 'RAG vs Fine-tuning')"
+  - "subjects (list[str]): Items being compared"
+  - "dimensions (list[str]): Comparison dimensions or criteria"
+  - "findings (list[str]): Key findings or conclusions"
+  - "recommendation (str): Overall recommendation or guidance"
+  - "entities_mentioned (list[str]): People, organizations, tools mentioned"
+  - "concepts_mentioned (list[str]): Technical concepts discussed"
+wiki_outputs:
+  - type: comparison
+    subdir: comparisons
+  - type: entity
+    subdir: entities
+  - type: concept
+    subdir: concepts

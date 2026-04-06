@@ -11,6 +11,7 @@ from kb.lint.checks import (
     check_source_coverage,
     check_staleness,
 )
+from kb.lint.verdicts import get_verdict_summary
 
 
 def run_all_checks(
@@ -64,11 +65,21 @@ def run_all_checks(
         sev = issue.get("severity", "info")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
+    # Include verdict audit trail summary (fail-safe)
+    try:
+        verdict_summary = get_verdict_summary()
+        verdict_history = verdict_summary
+    except Exception:
+        verdict_history = None
+
+    summary = severity_counts
+    summary["verdict_history"] = verdict_history
+
     return {
         "checks_run": checks_run,
         "total_issues": len(all_issues),
         "issues": all_issues,
-        "summary": severity_counts,
+        "summary": summary,
     }
 
 
@@ -109,5 +120,18 @@ def format_report(report: dict) -> str:
                 lines.append("")
     else:
         lines.append("No issues found. Wiki is healthy!\n")
+
+    # Verdict audit trail
+    vh = report["summary"].get("verdict_history")
+    if vh and vh["total"] > 0:
+        lines.append("\n## Verdict Audit Trail\n")
+        lines.append(f"**Total verdicts:** {vh['total']}")
+        lines.append(
+            f"  Pass: {vh['by_verdict']['pass']}, "
+            f"Fail: {vh['by_verdict']['fail']}, "
+            f"Warning: {vh['by_verdict']['warning']}"
+        )
+        if vh["pages_with_failures"]:
+            lines.append(f"\n**Pages with failures:** {', '.join(vh['pages_with_failures'])}")
 
     return "\n".join(lines)

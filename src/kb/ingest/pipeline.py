@@ -160,10 +160,13 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
     return "\n".join(lines)
 
 
-def _update_existing_page(page_path: Path, source_ref: str) -> None:
+def _update_existing_page(
+    page_path: Path, source_ref: str, name: str = "", extraction: dict | None = None
+) -> None:
     """Add a new source reference to an existing wiki page.
 
     Updates both the YAML frontmatter source: list and the References section.
+    When name and extraction are provided, enriches page with context from the new source.
     """
     content = page_path.read_text(encoding="utf-8")
     if source_ref in content:
@@ -195,6 +198,18 @@ def _update_existing_page(page_path: Path, source_ref: str) -> None:
     # 3. Update the 'updated' date in frontmatter
     today = date.today().isoformat()
     content = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", content)
+
+    # 4. Enrich with context from new source (if extraction provided)
+    if name and extraction:
+        ctx = _extract_entity_context(name, extraction)
+        if ctx and ctx not in content:
+            # Add context before References section, or at end
+            if "## References" in content:
+                content = content.replace(
+                    "## References", f"{ctx}\n\n## References", 1
+                )
+            else:
+                content += f"\n{ctx}\n"
 
     page_path.write_text(content, encoding="utf-8")
 
@@ -317,7 +332,7 @@ def ingest_source(
         seen_entity_slugs[entity_slug] = entity
         entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
         if entity_path.exists():
-            _update_existing_page(entity_path, source_ref)
+            _update_existing_page(entity_path, source_ref, name=entity, extraction=extraction)
             pages_updated.append(f"entities/{entity_slug}")
         else:
             ctx = _extract_entity_context(entity, extraction)
@@ -346,7 +361,7 @@ def ingest_source(
         seen_concept_slugs[concept_slug] = concept
         concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
         if concept_path.exists():
-            _update_existing_page(concept_path, source_ref)
+            _update_existing_page(concept_path, source_ref, name=concept, extraction=extraction)
             pages_updated.append(f"concepts/{concept_slug}")
         else:
             ctx = _extract_entity_context(concept, extraction)

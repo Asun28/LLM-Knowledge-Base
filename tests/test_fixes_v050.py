@@ -266,17 +266,13 @@ def test_graph_no_dangling_edges(tmp_wiki):
 
 def test_extraction_validation_missing_title(tmp_path):
     """kb_ingest rejects extraction without title."""
-    from kb.mcp_server import kb_ingest
+    from kb.mcp.core import kb_ingest
 
     source = tmp_path / "raw" / "articles" / "test.md"
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with (
-        patch("kb.mcp_server.PROJECT_ROOT", tmp_path),
-        patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"),
-        patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"),
-    ):
+    with patch("kb.mcp.core.PROJECT_ROOT", tmp_path):
         result = kb_ingest(str(source), "article", '{"entities_mentioned": []}')
     assert "Error" in result
     assert "title" in result.lower()
@@ -284,17 +280,13 @@ def test_extraction_validation_missing_title(tmp_path):
 
 def test_extraction_validation_non_dict(tmp_path):
     """kb_ingest rejects non-dict extraction JSON."""
-    from kb.mcp_server import kb_ingest
+    from kb.mcp.core import kb_ingest
 
     source = tmp_path / "raw" / "articles" / "test.md"
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with (
-        patch("kb.mcp_server.PROJECT_ROOT", tmp_path),
-        patch("kb.mcp_server.RAW_DIR", tmp_path / "raw"),
-        patch("kb.mcp_server.WIKI_DIR", tmp_path / "wiki"),
-    ):
+    with patch("kb.mcp.core.PROJECT_ROOT", tmp_path):
         result = kb_ingest(str(source), "article", '["not", "a", "dict"]')
     assert "Error" in result
     assert "object" in result.lower()

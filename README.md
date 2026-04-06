@@ -147,7 +147,7 @@ Reports:
 
 ### Claude Code Integration (MCP Server)
 
-The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **19 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
+The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **21 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
 
 ```bash
 # Start the MCP server standalone
@@ -170,7 +170,7 @@ python -m kb.mcp_server
 }
 ```
 
-After restarting Claude Code, you get 19 tools:
+After restarting Claude Code, you get 21 tools:
 
 #### Core Tools (Claude Code is the default LLM)
 
@@ -205,6 +205,8 @@ After restarting Claude Code, you get 19 tools:
 | `kb_query_feedback` | Record query success/failure for trust scoring |
 | `kb_reliability_map` | Page trust scores from feedback history |
 | `kb_affected_pages` | Pages affected by a change (backlinks + shared sources) |
+| `kb_save_lint_verdict` | Record lint/review verdict for persistent audit trail |
+| `kb_create_page` | Create comparison/synthesis/any wiki page directly |
 
 **Workflows:**
 
@@ -228,6 +230,12 @@ kb_compile_scan()  -> lists sources -> kb_ingest each with extraction_json
 kb_review_page("concepts/rag")  -> review context -> kb_refine_page if issues
 kb_lint_deep("concepts/rag")    -> fidelity check -> fix unsourced claims
 kb_query_feedback(question, "useful", "concepts/rag")  -> builds trust scores
+
+# Create comparison/synthesis pages
+kb_create_page("comparisons/rag-vs-finetuning", "RAG vs Fine-tuning", content)
+
+# Record lint verdicts for audit trail
+kb_save_lint_verdict("concepts/rag", "fidelity", "pass", notes="All claims traced")
 ```
 
 **Example prompts in Claude Code:**
@@ -329,10 +337,10 @@ LLM-Knowledge-Base/
     contradictions.md      # Conflict tracker
   research/                # Human-authored analysis
   templates/               # 8 YAML extraction schemas
-  src/kb/                  # Python package (~3,500 lines)
+  src/kb/                  # Python package (~4,000 lines)
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, tuning constants
-    mcp_server.py          # FastMCP server (19 tools)
+    mcp_server.py          # FastMCP server (21 tools)
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline + extractors (template-driven)
     compile/               # Hash-based incremental compiler (crash-safe) + linker
@@ -343,7 +351,7 @@ LLM-Knowledge-Base/
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
     utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
-  tests/                   # 206 tests across 15 test files (2.5s)
+  tests/                   # 230+ tests across 15 test files (2.5s)
 ```
 
 ## Development
@@ -373,7 +381,7 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2 (complete, v0.4.0):** Quality system — feedback loop with Bayesian trust scoring, Actor-Critic review workflow, semantic lint (fidelity + consistency), page refiner with audit trail. 7 new MCP tools, wiki-reviewer agent
 - **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
-- **Phase 2.3 (complete, v0.7.0):** Robustness overhaul — LLM retry with exponential backoff and `LLMError`, frontmatter source list sync, query context truncation (80K chars), entity/concept pages populated with context from extraction, crash-safe manifest (saved per source), slug collision detection, word-boundary keyword search, exact path matching in source coverage, term overlap filtering (frontmatter stripping + common words), wikilink cycle detection, review history context tracking, log size warning, dead code removal. 206 tests
+- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 230+ tests
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License

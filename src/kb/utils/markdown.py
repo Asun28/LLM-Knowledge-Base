@@ -11,7 +11,7 @@ def extract_wikilinks(text: str) -> list[str]:
     Normalizes targets: strips whitespace, removes trailing .md.
     """
     raw = WIKILINK_PATTERN.findall(text)
-    return [link.strip().removesuffix(".md") for link in raw]
+    return [link.strip().removesuffix(".md").lower() for link in raw]
 
 
 def extract_raw_refs(text: str) -> list[str]:

@@ -78,6 +78,21 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     # Weakly connected components (treating directed graph as undirected)
     n_components = nx.number_weakly_connected_components(graph)
 
+    # Top 10 pages by PageRank
+    try:
+        pr = nx.pagerank(graph)
+        pagerank = sorted(pr.items(), key=lambda x: x[1], reverse=True)[:10]
+    except nx.PowerIterationFailedConvergence:
+        pagerank = []
+
+    # Top 10 pages by betweenness centrality (bridge nodes)
+    bc = nx.betweenness_centrality(graph)
+    bridge_nodes = sorted(
+        ((n, c) for n, c in bc.items() if c > 0),
+        key=lambda x: x[1],
+        reverse=True,
+    )[:10]
+
     return {
         "nodes": graph.number_of_nodes(),
         "edges": graph.number_of_edges(),
@@ -85,4 +100,6 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         "orphans": orphans,
         "isolated": isolated,
         "most_linked": most_linked,
+        "pagerank": pagerank,
+        "bridge_nodes": bridge_nodes,
     }

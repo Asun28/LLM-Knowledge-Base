@@ -9,7 +9,7 @@ import kb.lint.semantic
 import kb.review.context
 import kb.review.refiner
 import kb.utils.wiki_log
-from kb.mcp_server import (
+from kb.mcp.quality import (
     kb_lint_consistency,
     kb_lint_deep,
     kb_query_feedback,

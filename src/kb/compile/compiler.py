@@ -3,13 +3,24 @@
 import json
 from pathlib import Path
 
-from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS
+from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, TEMPLATES_DIR
+from kb.ingest.extractors import VALID_SOURCE_TYPES
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.wiki_log import append_wiki_log
 
 # Hash manifest location (git-ignored)
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
+
+
+def _template_hashes() -> dict[str, str]:
+    """Compute content hashes for all extraction templates."""
+    hashes = {}
+    if not TEMPLATES_DIR.exists():
+        return hashes
+    for tpl in sorted(TEMPLATES_DIR.glob("*.yaml")):
+        hashes[f"_template/{tpl.stem}"] = content_hash(tpl)
+    return hashes
 
 
 def _canonical_rel_path(source: Path, raw_dir: Path) -> str:
@@ -93,6 +104,35 @@ def find_changed_sources(
         elif manifest[rel_path] != current_hash:
             changed_sources.append(source)
 
+    # Check for template changes — flag all sources of that type for recompilation
+    current_tpl_hashes = _template_hashes()
+    changed_source_set = {s.resolve() for s in new_sources + changed_sources}
+    effective_raw_dir = raw_dir or RAW_DIR
+
+    for key, current_hash in current_tpl_hashes.items():
+        stored_hash = manifest.get(key)
+        if stored_hash != current_hash:
+            # Template changed — determine source type from key (_template/<type>)
+            source_type = key.split("/", 1)[1]
+            if source_type not in VALID_SOURCE_TYPES:
+                continue
+            type_dir = effective_raw_dir / SOURCE_TYPE_DIRS[source_type].name
+            if not type_dir.exists():
+                continue
+            for f in sorted(type_dir.iterdir()):
+                if (
+                    f.is_file()
+                    and f.suffix in (".md", ".txt", ".pdf", ".json", ".yaml")
+                    and f.name != ".gitkeep"
+                    and f.resolve() not in changed_source_set
+                ):
+                    changed_sources.append(f)
+                    changed_source_set.add(f.resolve())
+
+    # Update manifest with current template hashes
+    manifest.update(current_tpl_hashes)
+    save_manifest(manifest, manifest_path)
+
     return new_sources, changed_sources
 
 
@@ -145,6 +185,10 @@ def compile_wiki(
             save_manifest(manifest, manifest_path)
         except Exception as e:
             results["errors"].append({"source": str(source), "error": str(e)})
+
+    # Save template hashes
+    manifest.update(_template_hashes())
+    save_manifest(manifest, manifest_path)
 
     # Append to log
     append_wiki_log(

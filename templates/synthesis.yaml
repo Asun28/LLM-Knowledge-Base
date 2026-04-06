@@ -1,0 +1,17 @@
+name: synthesis
+description: Cross-source synthesis drawing conclusions from multiple sources or perspectives.
+extract:
+  - "title (str): Title of the synthesis"
+  - "source_themes (list[str]): Key themes identified across sources"
+  - "conclusions (list[str]): Synthesized conclusions"
+  - "open_questions (list[str]): Unresolved questions or tensions"
+  - "implications (list[str]): Practical implications"
+  - "entities_mentioned (list[str]): People, organizations, tools mentioned"
+  - "concepts_mentioned (list[str]): Technical concepts discussed"
+wiki_outputs:
+  - type: synthesis
+    subdir: synthesis
+  - type: entity
+    subdir: entities
+  - type: concept
+    subdir: concepts

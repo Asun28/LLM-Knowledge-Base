@@ -374,7 +374,9 @@ def test_compile_saves_manifest_per_source(mock_ingest, tmp_path):
 
     assert result["sources_processed"] == 2
     final_manifest = load_manifest(manifest_path)
-    assert len(final_manifest) == 2
+    # Manifest has 2 source entries + template hash entries
+    source_entries = {k: v for k, v in final_manifest.items() if not k.startswith("_template/")}
+    assert len(source_entries) == 2
 
 
 # ── Fix #6: Slug collision warnings ─────────────────────────────

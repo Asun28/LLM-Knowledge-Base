@@ -10,15 +10,16 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 2.3 complete (v0.7.0).** 206 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 robustness overhaul (LLM retry/timeout, frontmatter source sync, context truncation, entity context population, crash-safe manifest, slug collision detection, word-boundary search, cycle detection, dead code removal).
+**Phase 2.3 complete (v0.7.0).** 230+ tests, 21 MCP tools, 11 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools).
 
-**Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
+**Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
 **Phase 2 modules:**
 - `kb.feedback` — query feedback store (weighted Bayesian trust scoring — "wrong" penalized 2x vs "incomplete"), reliability analysis (flagged pages, coverage gaps)
 - `kb.review` — page-source pairing, review context/checklist builder, page refiner (frontmatter-preserving updates with audit trail)
 - `kb.lint.semantic` — fidelity, consistency, completeness context builders for LLM-powered evaluation
 - `.claude/agents/wiki-reviewer.md` — Actor-Critic reviewer agent definition
+- `kb.lint.verdicts` — persistent lint/review verdict storage (pass/fail/warning with audit trail)
 
 **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave. Research in `research/agent-architecture-research.md`.
 
@@ -81,7 +82,7 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 
 ### Python Package (`src/kb/`)
 
-Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init__.py`. MCP server entry: `python -m kb.mcp_server` or `kb mcp`.
+Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init__.py`. MCP server entry: `python -m kb.mcp_server` or `kb mcp`. MCP package: `kb.mcp` (split from monolithic `mcp_server.py`).
 
 All paths, model tiers, page types, and confidence levels are defined in `kb.config` — import from there, never hardcode. `PROJECT_ROOT` resolves from `config.py`'s location, so it works regardless of working directory.
 
@@ -96,6 +97,8 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `extract_wikilinks(text)` / `extract_raw_refs(text)` — Regex extraction of `[[wikilinks]]` (normalized: stripped, no `.md` suffix) and `raw/...` references. In `kb.utils.markdown`.
 - `load_page(path)` / `validate_frontmatter(post)` — Parse and validate wiki page YAML frontmatter. In `kb.models.frontmatter`. Required fields: `title`, `source`, `created`, `updated`, `type`, `confidence`.
 - `ingest_source(path, source_type=None, extraction=None)` — Core ingest function. Accepts optional pre-extracted dict to skip LLM call (used by MCP server in Claude Code mode). In `kb.ingest.pipeline`.
+- `add_verdict(page_id, verdict_type, verdict, issues, notes)` — Store lint/review verdict persistently. In `kb.lint.verdicts`.
+- `get_verdict_summary()` — Aggregate verdict statistics. In `kb.lint.verdicts`.
 - `WikiPage` / `RawSource` — Dataclasses in `kb.models.page`.
 
 ### Wiki Index Files
@@ -129,7 +132,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-206 tests across 15 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31).
+230+ tests across 15 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31). v0.7.0 tests: `test_v070.py` (~30 tests).
 
 ### Error Handling Patterns
 
@@ -178,6 +181,8 @@ All modules use `logging.getLogger(__name__)` for warnings on skipped pages or f
 | `kb_query_feedback(question, rating, pages, notes)` | Record query success/failure |
 | `kb_reliability_map()` | Page trust scores from feedback |
 | `kb_affected_pages(page_id)` | Pages affected by a change |
+| `kb_save_lint_verdict(page_id, verdict_type, verdict, issues, notes)` | Record lint/review verdict persistently |
+| `kb_create_page(page_id, title, content, page_type, confidence, source_refs)` | Create comparison/synthesis/any wiki page |
 
 ## Conventions
 
@@ -229,7 +234,7 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
-- **kb** — The knowledge base MCP server (`kb.mcp_server`, 19 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
+- **kb** — The knowledge base MCP server (`kb.mcp_server`, 21 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
   - `kb_query(question)` — returns wiki context with trust scores; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
   - `kb_ingest(path, extraction_json=...)` — creates wiki pages from Claude Code's extraction. Omit `extraction_json` to get the extraction prompt. Add `use_api=true` for API extraction.
   - `kb_ingest_content(content, filename, type, extraction_json)` — one-shot: saves content to `raw/` and creates wiki pages in one call.
@@ -248,7 +253,7 @@ Key usage:
 - **Phase 2 (complete, v0.4.0):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. 7 new MCP tools, 3 new modules, wiki-reviewer agent.
 - **Phase 2.1 (complete, v0.5.0):** Quality and robustness fixes — weighted Bayesian trust scoring (wrong penalized 2x), canonical path utilities (`make_source_ref`, `_canonical_rel_path`), YAML injection protection, extraction JSON validation, regex-based frontmatter parsing, graph edge invariant enforcement, empty slug guards, config-driven tuning constants (`STALENESS_MAX_DAYS`, `SEARCH_TITLE_WEIGHT`, etc.), improved MCP error handling with logging.
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor and code quality — shared utilities (`kb.utils.text`, `kb.utils.wiki_log`, `kb.utils.pages`) eliminated all code duplication (slugify 2x→1x, page loading 2x→1x, log appending 4x→1x, page_id 3x→1x). MCP server's `_apply_extraction` (80 lines) replaced by `ingest_source(extraction=...)`. Source type whitelist validation in extractors. `normalize_sources()` ensures consistent list format across all modules. YAML escape extended for newlines/tabs. Auto-create wiki/log.md on first write. Consolidated test fixtures (`create_wiki_page`, `create_raw_source`). 33 new parametrized edge case tests (180 total).
-- **Phase 2.3 (complete, v0.7.0):** Robustness overhaul — `call_llm()` retry with exponential backoff (rate limits, timeouts, connection errors; `LLMError` exception class), reusable client. `_update_existing_page()` now syncs YAML `source:` list alongside References section. Query context truncation (`QUERY_CONTEXT_MAX_CHARS=80K`). Entity/concept pages populated with context from extraction data (`_extract_entity_context`). Crash-safe compile (manifest saved after each source). Slug collision detection with logging. Word-boundary regex in keyword search. Exact path matching in source coverage lint. Term overlap grouping strips frontmatter and common words. Wikilink cycle detection (`check_cycles`). Review history tracks `content_length` and `status`. Log size warning at 500KB. Dead code removed (`visualize.py`, `differ.py`). 31 new tests (206 total).
+- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split into `kb.mcp` package (5 modules from 810-line monolith), graph analysis with PageRank and betweenness centrality, entity/concept enrichment on multi-source ingestion, persistent lint verdict storage with audit trail, case-insensitive wikilink resolution, trust threshold boundary fix (< to <=), template hash change detection for compile, comparison/synthesis extraction templates, 2 new MCP tools (`kb_create_page`, `kb_save_lint_verdict`). 21 MCP tools, 230+ tests.
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.

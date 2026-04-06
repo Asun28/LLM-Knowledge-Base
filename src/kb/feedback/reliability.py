@@ -28,7 +28,7 @@ def get_flagged_pages(path: Path | None = None, threshold: float | None = None) 
     """
     threshold = threshold if threshold is not None else LOW_TRUST_THRESHOLD
     scores = compute_trust_scores(path)
-    return sorted(pid for pid, s in scores.items() if s.get("trust", 0.5) < threshold)
+    return sorted(pid for pid, s in scores.items() if s.get("trust", 0.5) <= threshold)
 
 
 def get_coverage_gaps(path: Path | None = None) -> list[dict]:
