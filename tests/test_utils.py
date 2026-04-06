@@ -1,6 +1,5 @@
 """Tests for shared utility modules — text, wiki_log, pages, normalize_sources."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from kb.utils.pages import normalize_sources
 from kb.utils.text import slugify, yaml_escape
 from kb.utils.wiki_log import append_wiki_log
-
 
 # ── slugify edge cases ────────────────────────────────────────────
 

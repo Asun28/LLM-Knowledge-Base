@@ -13,8 +13,8 @@ from kb.config import (
     STALENESS_MAX_DAYS,
 )
 from kb.feedback.store import add_feedback_entry, load_feedback
-from kb.utils.text import slugify, yaml_escape
 from kb.utils.paths import make_source_ref
+from kb.utils.text import slugify, yaml_escape
 
 # ── C2: Canonical path computation ──────────────────────────────
 
