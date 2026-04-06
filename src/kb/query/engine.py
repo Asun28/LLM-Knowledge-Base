@@ -5,11 +5,11 @@ from pathlib import Path
 
 import frontmatter
 
-logger = logging.getLogger(__name__)
-
 from kb.config import WIKI_DIR
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
+
+logger = logging.getLogger(__name__)
 
 
 def _load_wiki_pages(wiki_dir: Path | None = None) -> list[dict]:
