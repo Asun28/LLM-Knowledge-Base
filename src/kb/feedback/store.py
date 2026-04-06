@@ -70,6 +70,7 @@ def add_feedback_entry(
     data["entries"].append(entry)
 
     # Update page scores with Bayesian smoothing
+    # "wrong" is weighted 2x because incorrect information is worse than incomplete
     for page_id in cited_pages:
         if page_id not in data["page_scores"]:
             data["page_scores"][page_id] = {
@@ -80,8 +81,10 @@ def add_feedback_entry(
             }
         scores = data["page_scores"][page_id]
         scores[rating] += 1
-        total = scores["useful"] + scores["wrong"] + scores["incomplete"]
-        scores["trust"] = round((scores["useful"] + 1) / (total + 2), 4)
+        weighted_negative = 2 * scores["wrong"] + scores["incomplete"]
+        scores["trust"] = round(
+            (scores["useful"] + 1) / (scores["useful"] + weighted_negative + 2), 4
+        )
 
     save_feedback(data, path)
     return entry

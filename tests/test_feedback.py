@@ -49,14 +49,14 @@ def test_add_feedback_entry_useful(tmp_path):
 
 
 def test_add_feedback_entry_wrong(tmp_path):
-    """add_feedback_entry with 'wrong' rating lowers trust score."""
+    """add_feedback_entry with 'wrong' rating lowers trust score heavily."""
     path = tmp_path / "feedback.json"
     add_feedback_entry("What is RAG?", "wrong", ["concepts/rag"], path=path)
     data = load_feedback(path)
     scores = data["page_scores"]["concepts/rag"]
     assert scores["wrong"] == 1
-    # trust = (0 + 1) / (1 + 2) = 0.3333
-    assert abs(scores["trust"] - 0.3333) < 0.001
+    # trust = (0 + 1) / (0 + 2*1 + 2) = 1/4 = 0.25  (wrong weighted 2x)
+    assert abs(scores["trust"] - 0.25) < 0.001
 
 
 def test_add_feedback_entry_multiple(tmp_path):
@@ -70,8 +70,8 @@ def test_add_feedback_entry_multiple(tmp_path):
     scores = data["page_scores"]["concepts/rag"]
     assert scores["useful"] == 2
     assert scores["wrong"] == 1
-    # trust = (2 + 1) / (3 + 2) = 0.6
-    assert abs(scores["trust"] - 0.6) < 0.001
+    # trust = (2 + 1) / (2 + 2*1 + 2) = 3/6 = 0.5  (wrong weighted 2x)
+    assert abs(scores["trust"] - 0.5) < 0.001
 
 
 def test_add_feedback_entry_invalid_rating(tmp_path):
@@ -116,7 +116,7 @@ def test_get_flagged_pages(tmp_path):
     """get_flagged_pages returns pages below trust threshold."""
     path = tmp_path / "feedback.json"
     add_feedback_entry("Q1", "wrong", ["concepts/rag"], path=path)
-    # trust = (0+1)/(1+2) = 0.333 < 0.4 threshold
+    # trust = (0+1)/(0+2*1+2) = 0.25 < 0.4 threshold
     flagged = get_flagged_pages(path)
     assert "concepts/rag" in flagged
 
