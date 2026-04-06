@@ -118,3 +118,102 @@ def test_build_review_checklist():
     assert "Confidence level" in checklist
     assert "No hallucination" in checklist
     assert "Title accuracy" in checklist
+
+
+from kb.review.refiner import load_review_history, refine_page, save_review_history
+
+
+# ── refine_page ───────────────────────────────────────────────
+
+
+def test_refine_page(tmp_project):
+    """refine_page updates content while preserving frontmatter."""
+    wiki_dir = tmp_project / "wiki"
+    _create_page(wiki_dir, "concepts/rag", "RAG", "Old content.", "raw/articles/rag.md")
+
+    result = refine_page(
+        "concepts/rag", "New improved content.", "Fixed unsourced claim",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    assert result["updated"] is True
+
+    # Verify content changed but frontmatter preserved
+    text = (wiki_dir / "concepts" / "rag.md").read_text(encoding="utf-8")
+    assert "New improved content." in text
+    assert 'title: "RAG"' in text
+    assert f"updated: {date.today().isoformat()}" in text
+    assert "Old content." not in text
+
+
+def test_refine_page_preserves_frontmatter_format(tmp_project):
+    """refine_page preserves exact frontmatter key order and formatting."""
+    wiki_dir = tmp_project / "wiki"
+    _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
+
+    refine_page(
+        "concepts/rag", "New.", "test",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    text = (wiki_dir / "concepts" / "rag.md").read_text(encoding="utf-8")
+    # Frontmatter should still have source field intact
+    assert "raw/articles/rag.md" in text
+    assert "type: concept" in text
+    assert "confidence: stated" in text
+
+
+def test_refine_page_logs_to_wiki_log(tmp_project):
+    """refine_page appends entry to wiki/log.md."""
+    wiki_dir = tmp_project / "wiki"
+    _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
+
+    refine_page(
+        "concepts/rag", "New.", "Fixed claim",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    log = (wiki_dir / "log.md").read_text(encoding="utf-8")
+    assert "refine" in log
+    assert "concepts/rag" in log
+    assert "Fixed claim" in log
+
+
+def test_refine_page_saves_review_history(tmp_project):
+    """refine_page appends to review history JSON."""
+    wiki_dir = tmp_project / "wiki"
+    history_path = tmp_project / "history.json"
+    _create_page(wiki_dir, "concepts/rag", "RAG", "Old.", "raw/articles/rag.md")
+
+    refine_page(
+        "concepts/rag", "New.", "Fixed claim",
+        wiki_dir=wiki_dir, history_path=history_path,
+    )
+    history = load_review_history(history_path)
+    assert len(history) == 1
+    assert history[0]["page_id"] == "concepts/rag"
+    assert history[0]["revision_notes"] == "Fixed claim"
+
+
+def test_refine_page_not_found(tmp_project):
+    """refine_page returns error for non-existent page."""
+    wiki_dir = tmp_project / "wiki"
+    result = refine_page(
+        "concepts/nonexistent", "Content.", "notes",
+        wiki_dir=wiki_dir, history_path=tmp_project / "history.json",
+    )
+    assert "error" in result
+
+
+# ── Review history ────────────────────────────────────────────
+
+
+def test_load_review_history_empty(tmp_path):
+    """load_review_history returns empty list when file doesn't exist."""
+    assert load_review_history(tmp_path / "history.json") == []
+
+
+def test_save_and_load_review_history(tmp_path):
+    """Round-trip: save then load review history."""
+    history_path = tmp_path / "history.json"
+    history = [{"page_id": "concepts/rag", "revision_notes": "test"}]
+    save_review_history(history, history_path)
+    loaded = load_review_history(history_path)
+    assert loaded == history
