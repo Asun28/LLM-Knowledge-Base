@@ -1,5 +1,7 @@
 """Tests for the lint verdicts module (persistent verdict storage)."""
 
+import pytest
+
 from kb.lint.verdicts import (
     add_verdict,
     get_page_verdicts,
@@ -7,9 +9,6 @@ from kb.lint.verdicts import (
     load_verdicts,
     save_verdicts,
 )
-
-import pytest
-
 
 # ── load_verdicts ────────────────────────────────────────────────
 

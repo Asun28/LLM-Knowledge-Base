@@ -39,8 +39,17 @@ def _rel(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
-def _validate_page_id(page_id: str) -> str | None:
-    """Validate that a page ID exists. Returns error message or None."""
+def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
+    """Validate a page ID for security and optionally existence.
+
+    Args:
+        page_id: Page identifier (e.g., 'concepts/rag').
+        check_exists: If True (default), also verify the page file exists.
+            Set False when the caller handles existence separately.
+
+    Returns:
+        Error message string, or None if valid.
+    """
     if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
         return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
     page_path = WIKI_DIR / f"{page_id}.md"
@@ -48,7 +57,7 @@ def _validate_page_id(page_id: str) -> str | None:
         page_path.resolve().relative_to(WIKI_DIR.resolve())
     except ValueError:
         return f"Invalid page_id: {page_id}. Path escapes wiki directory."
-    if not page_path.exists():
+    if check_exists and not page_path.exists():
         return f"Page not found: {page_id}. Use kb_list_pages to see available pages."
     return None
 

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from kb.config import FEEDBACK_PATH
 
+MAX_FEEDBACK_ENTRIES = 10_000
+
 
 def _default_feedback() -> dict:
     """Return empty feedback structure."""
@@ -69,7 +71,6 @@ def add_feedback_entry(
     }
     data["entries"].append(entry)
     # Retain only the most recent entries to prevent unbounded growth
-    MAX_FEEDBACK_ENTRIES = 10000
     if len(data["entries"]) > MAX_FEEDBACK_ENTRIES:
         data["entries"] = data["entries"][-MAX_FEEDBACK_ENTRIES:]
 

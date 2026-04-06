@@ -43,7 +43,7 @@ def kb_read_page(page_id: str) -> str:
     Args:
         page_id: Page identifier like 'concepts/rag' or 'summaries/my-article'.
     """
-    err = _validate_page_id(page_id)
+    err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
     page_path = WIKI_DIR / f"{page_id}.md"

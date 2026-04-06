@@ -7,6 +7,7 @@ from pathlib import Path
 from kb.config import PROJECT_ROOT
 
 VERDICTS_PATH = PROJECT_ROOT / ".data" / "lint_verdicts.json"
+MAX_VERDICTS = 10_000
 
 
 def load_verdicts(path: Path | None = None) -> list[dict]:
@@ -70,7 +71,6 @@ def add_verdict(
     }
     verdicts.append(entry)
     # Retain only the most recent verdicts to prevent unbounded growth
-    MAX_VERDICTS = 10000
     if len(verdicts) > MAX_VERDICTS:
         verdicts = verdicts[-MAX_VERDICTS:]
     save_verdicts(verdicts, path)

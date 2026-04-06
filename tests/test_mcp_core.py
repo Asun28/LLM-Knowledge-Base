@@ -1,10 +1,7 @@
 """Tests for MCP core tools — kb_save_source, kb_ingest_content, kb_compile_scan."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 import kb.config
 from kb.mcp.core import kb_compile_scan, kb_ingest_content, kb_save_source

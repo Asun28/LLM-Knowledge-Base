@@ -54,7 +54,10 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "raw_content": post.content.lower(),
                     }
                 )
-            except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
+            except (
+                OSError, ValueError, TypeError, AttributeError,
+                yaml.YAMLError, UnicodeDecodeError,
+            ) as e:
                 logger.warning("Skipping page %s: %s", page_path, e)
                 continue
     return pages

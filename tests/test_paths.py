@@ -1,10 +1,8 @@
 """Tests for kb.utils.paths — canonical source reference computation."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 from kb.utils.paths import make_source_ref
-
 
 # ── Basic usage ──────────────────────────────────────────────────
 

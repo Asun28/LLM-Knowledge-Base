@@ -123,6 +123,20 @@ def test_kb_read_page_traversal_blocked(tmp_project, monkeypatch):
     assert "Error" in result or "Invalid" in result
 
 
+def test_kb_read_page_case_insensitive_fallback(tmp_project, monkeypatch, create_wiki_page):
+    """kb_read_page falls back to case-insensitive match when exact path missing."""
+    wiki_dir, _ = _setup_browse_dirs(tmp_project, monkeypatch)
+    create_wiki_page(
+        "entities/openai", title="OpenAI", content="About OpenAI.",
+        page_type="entity", wiki_dir=wiki_dir,
+    )
+
+    # Request with different case — should still find entities/openai.md
+    result = kb_read_page("entities/OpenAI")
+    assert "OpenAI" in result
+    assert "Error" not in result
+
+
 # ── kb_list_pages ────────────────────────────────────────────────
 
 
