@@ -323,6 +323,15 @@ def kb_ingest(
         except json.JSONDecodeError as e:
             return f"Error: Invalid JSON — {e}"
 
+        # Validate required extraction fields
+        if not isinstance(extraction, dict):
+            return "Error: extraction_json must be a JSON object."
+        if not extraction.get("title") and not extraction.get("name"):
+            return (
+                "Error: extraction_json must contain 'title' (or 'name'). "
+                "Required keys: title, entities_mentioned, concepts_mentioned."
+            )
+
         source_hash = content_hash(path)
         source_ref = make_source_ref(path)
 
@@ -397,6 +406,14 @@ def kb_ingest_content(
         extraction = json.loads(extraction_json)
     except json.JSONDecodeError as e:
         return f"Error: Invalid extraction JSON — {e}"
+
+    if not isinstance(extraction, dict):
+        return "Error: extraction_json must be a JSON object."
+    if not extraction.get("title") and not extraction.get("name"):
+        return (
+            "Error: extraction_json must contain 'title' (or 'name'). "
+            "Required keys: title, entities_mentioned, concepts_mentioned."
+        )
 
     source_ref = _rel(file_path)
     result = _apply_extraction(source_ref, file_path, source_type, extraction)
