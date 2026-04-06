@@ -6,7 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from kb.ingest.extractors import build_extraction_prompt, extract_from_source, load_template
-from kb.ingest.pipeline import detect_source_type, ingest_source, slugify
+from kb.ingest.pipeline import detect_source_type, ingest_source
+from kb.utils.text import slugify
 
 # -- Extractors tests -----------------------------------------------------------
 
@@ -21,8 +22,8 @@ def test_load_template(project_root):
 
 
 def test_load_template_missing():
-    """load_template raises FileNotFoundError for unknown types."""
-    with pytest.raises(FileNotFoundError):
+    """load_template raises ValueError for unknown source types."""
+    with pytest.raises(ValueError, match="Invalid source type"):
         load_template("nonexistent_type")
 
 
@@ -128,7 +129,7 @@ def test_ingest_source(mock_extract, tmp_path):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.ingest.pipeline.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
     ):
         result = ingest_source(source, source_type="article")
 

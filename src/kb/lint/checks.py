@@ -11,6 +11,7 @@ from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.markdown import extract_raw_refs
+from kb.utils.pages import normalize_sources
 
 logger = logging.getLogger(__name__)
 
@@ -170,11 +171,7 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
     for page_path in pages:
         try:
             post = frontmatter.load(str(page_path))
-            sources = post.metadata.get("source", [])
-            if isinstance(sources, list):
-                all_raw_refs.update(sources)
-            elif isinstance(sources, str):
-                all_raw_refs.add(sources)
+            all_raw_refs.update(normalize_sources(post.metadata.get("source")))
         except Exception as e:
             logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
             continue

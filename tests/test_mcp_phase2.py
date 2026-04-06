@@ -8,6 +8,7 @@ import kb.feedback.store
 import kb.lint.semantic
 import kb.review.context
 import kb.review.refiner
+import kb.utils.wiki_log
 from kb.mcp_server import (
     kb_lint_consistency,
     kb_lint_deep,
@@ -58,6 +59,7 @@ def _setup_project(tmp_project, monkeypatch):
     monkeypatch.setattr(kb.lint.semantic, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.feedback.store, "FEEDBACK_PATH", data_dir / "query_feedback.json")
     monkeypatch.setattr(kb.compile.linker, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.utils.wiki_log, "WIKI_LOG", wiki_dir / "log.md")
 
     return wiki_dir, raw_dir
 

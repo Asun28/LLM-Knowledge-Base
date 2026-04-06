@@ -4,12 +4,24 @@ import json
 
 import yaml
 
-from kb.config import TEMPLATES_DIR
+from kb.config import SOURCE_TYPE_DIRS, TEMPLATES_DIR
 from kb.utils.llm import call_llm
+
+VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
 
 
 def load_template(source_type: str) -> dict:
-    """Load extraction template YAML for a given source type."""
+    """Load extraction template YAML for a given source type.
+
+    Raises:
+        ValueError: If source_type is not in the whitelist.
+        FileNotFoundError: If template file is missing.
+    """
+    if source_type not in VALID_SOURCE_TYPES:
+        raise ValueError(
+            f"Invalid source type: {source_type!r}. "
+            f"Valid types: {', '.join(sorted(VALID_SOURCE_TYPES))}"
+        )
     template_path = TEMPLATES_DIR / f"{source_type}.yaml"
     if not template_path.exists():
         raise FileNotFoundError(f"No template for source type: {source_type}")

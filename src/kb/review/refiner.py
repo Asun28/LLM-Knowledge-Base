@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from kb.config import REVIEW_HISTORY_PATH, WIKI_DIR
+from kb.utils.wiki_log import append_wiki_log
 
 
 def load_review_history(path: Path | None = None) -> list[dict]:
@@ -86,15 +87,9 @@ def refine_page(
     )
     save_review_history(history, history_path)
 
-    # Append to wiki/log.md (create if missing)
+    # Append to wiki/log.md (auto-creates if missing)
     log_path = wiki_dir / "log.md"
-    if not log_path.exists():
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
-    log_content = log_path.read_text(encoding="utf-8")
-    entry = f"- {today} | refine | Refined {page_id}: {revision_notes}\n"
-    log_content += entry
-    log_path.write_text(log_content, encoding="utf-8")
+    append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)
 
     return {
         "page_id": page_id,

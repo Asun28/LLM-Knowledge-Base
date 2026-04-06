@@ -9,20 +9,13 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
     WIKI_INDEX,
-    WIKI_LOG,
     WIKI_SOURCES,
 )
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
 from kb.utils.paths import make_source_ref
-
-
-def slugify(text: str) -> str:
-    """Convert text to a URL-friendly slug."""
-    text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-")
+from kb.utils.text import slugify, yaml_escape
+from kb.utils.wiki_log import append_wiki_log
 
 
 def detect_source_type(source_path: Path) -> str:
@@ -36,18 +29,13 @@ def detect_source_type(source_path: Path) -> str:
     raise ValueError(f"Cannot detect source type from path: {source_path}")
 
 
-def _yaml_escape(value: str) -> str:
-    """Escape a string for safe YAML quoting (double-quote style)."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _write_wiki_page(
     path: Path, title: str, page_type: str, source_ref: str, confidence: str, content: str
 ) -> None:
     """Write a wiki page with proper YAML frontmatter."""
     today = date.today().isoformat()
-    safe_title = _yaml_escape(title)
-    safe_source = _yaml_escape(source_ref)
+    safe_title = yaml_escape(title)
+    safe_source = yaml_escape(source_ref)
     frontmatter = f'''---
 title: "{safe_title}"
 source:
@@ -160,16 +148,6 @@ def _update_existing_page(page_path: Path, source_ref: str) -> None:
     page_path.write_text(content, encoding="utf-8")
 
 
-def _append_to_log(message: str) -> None:
-    """Append an entry to wiki/log.md."""
-    today = date.today().isoformat()
-    entry = f"- {today} | ingest | {message}\n"
-    if WIKI_LOG.exists():
-        content = WIKI_LOG.read_text(encoding="utf-8")
-        content += entry
-        WIKI_LOG.write_text(content, encoding="utf-8")
-
-
 def _update_sources_mapping(source_ref: str, wiki_pages: list[str]) -> None:
     """Update wiki/_sources.md with the source -> wiki page mapping."""
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
@@ -222,12 +200,17 @@ def _update_index(page_type: str, slug: str, title: str) -> None:
     WIKI_INDEX.write_text(content, encoding="utf-8")
 
 
-def ingest_source(source_path: Path, source_type: str | None = None) -> dict:
+def ingest_source(
+    source_path: Path,
+    source_type: str | None = None,
+    extraction: dict | None = None,
+) -> dict:
     """Ingest a single raw source into the knowledge base.
 
     Args:
         source_path: Path to the raw source file.
         source_type: Source type (auto-detected from path if omitted).
+        extraction: Pre-extracted data dict. If None, calls LLM to extract.
 
     Returns:
         dict with keys: source_path, source_type, content_hash, pages_created, pages_updated
@@ -243,8 +226,9 @@ def ingest_source(source_path: Path, source_type: str | None = None) -> dict:
     raw_content = source_path.read_text(encoding="utf-8")
     source_hash = content_hash(source_path)
 
-    # Extract structured data via LLM
-    extraction = extract_from_source(raw_content, source_type)
+    # Extract structured data via LLM (or use pre-extracted)
+    if extraction is None:
+        extraction = extract_from_source(raw_content, source_type)
 
     # Build source reference (canonical relative path)
     source_ref = make_source_ref(source_path)
@@ -311,9 +295,10 @@ def ingest_source(source_path: Path, source_type: str | None = None) -> dict:
     _update_sources_mapping(source_ref, all_pages)
 
     # 6. Append to log
-    _append_to_log(
+    append_wiki_log(
+        "ingest",
         f"Ingested {source_ref} → created {len(pages_created)} pages, "
-        f"updated {len(pages_updated)} pages"
+        f"updated {len(pages_updated)} pages",
     )
 
     return {

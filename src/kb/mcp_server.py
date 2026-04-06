@@ -12,15 +12,14 @@ Claude Code is the default LLM. No API key needed for any operation.
 
 import json
 import logging
-import re
 from datetime import date
 from pathlib import Path
 
-import frontmatter
 from fastmcp import FastMCP
 
 from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
-from kb.utils.paths import make_source_ref
+from kb.utils.pages import load_all_pages
+from kb.utils.text import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -49,141 +48,12 @@ def _rel(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
-def _slugify(text: str) -> str:
-    """Convert text to a URL-friendly slug."""
-    text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-")
-
-
 def _validate_page_id(page_id: str) -> str | None:
     """Validate that a page ID exists. Returns error message or None."""
     page_path = WIKI_DIR / f"{page_id}.md"
     if not page_path.exists():
         return f"Page not found: {page_id}. Use kb_list_pages to see available pages."
     return None
-
-
-def _load_all_pages() -> list[dict]:
-    """Load all wiki pages with metadata."""
-    pages = []
-    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
-        subdir_path = WIKI_DIR / subdir
-        if not subdir_path.exists():
-            continue
-        for page_path in sorted(subdir_path.glob("*.md")):
-            try:
-                post = frontmatter.load(str(page_path))
-                page_id = (
-                    str(page_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
-                )
-                pages.append(
-                    {
-                        "id": page_id,
-                        "title": post.metadata.get("title", page_path.stem),
-                        "type": post.metadata.get("type", "unknown"),
-                        "confidence": post.metadata.get("confidence", "unknown"),
-                        "sources": post.metadata.get("source", []),
-                        "created": str(post.metadata.get("created", "")),
-                        "updated": str(post.metadata.get("updated", "")),
-                        "path": _rel(page_path),
-                        "content": post.content,
-                    }
-                )
-            except Exception as e:
-                logger.warning("Skipping page %s: %s", page_path, e)
-                continue
-    return pages
-
-
-def _apply_extraction(
-    source_ref: str,
-    source_path: Path,
-    source_type: str,
-    extraction: dict,
-) -> dict:
-    """Shared logic: apply an extraction dict to create wiki pages.
-
-    Returns dict with pages_created, pages_updated lists.
-    """
-    from kb.ingest.pipeline import (
-        _append_to_log,
-        _build_concept_content,
-        _build_entity_content,
-        _build_summary_content,
-        _update_existing_page,
-        _update_index,
-        _update_sources_mapping,
-        _write_wiki_page,
-        slugify,
-    )
-
-    pages_created = []
-    pages_updated = []
-
-    # 1. Summary page
-    title = extraction.get("title") or extraction.get("name") or source_path.stem
-    summary_slug = slugify(title)
-    summary_path = WIKI_DIR / "summaries" / f"{summary_slug}.md"
-    summary_content = _build_summary_content(extraction, source_type)
-    _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
-    pages_created.append(f"summaries/{summary_slug}")
-
-    # 2. Entity pages
-    for entity in extraction.get("entities_mentioned") or []:
-        if not entity or not entity.strip():
-            continue
-        entity_slug = slugify(entity)
-        if not entity_slug:
-            continue
-        entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
-        if entity_path.exists():
-            _update_existing_page(entity_path, source_ref)
-            pages_updated.append(f"entities/{entity_slug}")
-        else:
-            entity_content = _build_entity_content(entity, source_ref, "")
-            _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
-            pages_created.append(f"entities/{entity_slug}")
-
-    # 3. Concept pages
-    for concept in extraction.get("concepts_mentioned") or []:
-        if not concept or not concept.strip():
-            continue
-        concept_slug = slugify(concept)
-        if not concept_slug:
-            continue
-        concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
-        if concept_path.exists():
-            _update_existing_page(concept_path, source_ref)
-            pages_updated.append(f"concepts/{concept_slug}")
-        else:
-            concept_content = _build_concept_content(concept, source_ref, "")
-            _write_wiki_page(
-                concept_path, concept, "concept", source_ref, "stated", concept_content
-            )
-            pages_created.append(f"concepts/{concept_slug}")
-
-    # 4. Update indexes
-    _update_index("summary", summary_slug, title)
-    for entity in extraction.get("entities_mentioned") or []:
-        if entity and entity.strip():
-            _update_index("entity", slugify(entity), entity)
-    for concept in extraction.get("concepts_mentioned") or []:
-        if concept and concept.strip():
-            _update_index("concept", slugify(concept), concept)
-
-    # 5. Update _sources.md
-    all_pages = pages_created + pages_updated
-    _update_sources_mapping(source_ref, all_pages)
-
-    # 6. Log
-    _append_to_log(
-        f"Ingested {source_ref} → "
-        f"created {len(pages_created)} pages, updated {len(pages_updated)} pages"
-    )
-
-    return {"pages_created": pages_created, "pages_updated": pages_updated}
 
 
 def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, result: dict) -> str:
@@ -297,8 +167,6 @@ def kb_ingest(
             Omit to get the extraction prompt instead.
         use_api: If true, use the Anthropic API for extraction. Default false.
     """
-    from kb.utils.hashing import content_hash
-
     path = Path(source_path)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -344,11 +212,12 @@ def kb_ingest(
                 "Required keys: title, entities_mentioned, concepts_mentioned."
             )
 
-        source_hash = content_hash(path)
-        source_ref = make_source_ref(path)
+        from kb.ingest.pipeline import ingest_source
 
-        result = _apply_extraction(source_ref, path, source_type, extraction)
-        return _format_ingest_result(_rel(path), source_type, source_hash, result)
+        result = ingest_source(path, source_type, extraction=extraction)
+        return _format_ingest_result(
+            _rel(path), result["source_type"], result["content_hash"], result
+        )
 
     # ── Claude Code mode: without extraction → return prompt ──
     from kb.ingest.extractors import build_extraction_prompt, load_template
@@ -395,9 +264,7 @@ def kb_ingest_content(
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
         url: Optional source URL for metadata.
     """
-    from kb.utils.hashing import content_hash
-
-    slug = _slugify(filename) or "untitled"
+    slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
@@ -427,12 +294,13 @@ def kb_ingest_content(
             "Required keys: title, entities_mentioned, concepts_mentioned."
         )
 
+    from kb.ingest.pipeline import ingest_source
+
+    result = ingest_source(file_path, source_type, extraction=extraction)
     source_ref = _rel(file_path)
-    result = _apply_extraction(source_ref, file_path, source_type, extraction)
-    source_hash = content_hash(file_path)
 
     return f"Saved source: {source_ref} ({len(save_content)} chars)\n" + _format_ingest_result(
-        source_ref, source_type, source_hash, result
+        source_ref, result["source_type"], result["content_hash"], result
     )
 
 
@@ -453,7 +321,7 @@ def kb_save_source(
         source_type: Determines which raw/ subdirectory. Default 'article'.
         url: Optional source URL to include as metadata.
     """
-    slug = _slugify(filename) or "untitled"
+    slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
@@ -582,7 +450,7 @@ def kb_list_pages(page_type: str = "") -> str:
         page_type: Filter: 'entities', 'concepts', 'comparisons', 'summaries',
                    'synthesis'. Empty returns all.
     """
-    pages = _load_all_pages()
+    pages = load_all_pages()
     if page_type:
         pages = [p for p in pages if p["id"].startswith(page_type)]
 
@@ -890,40 +758,23 @@ def kb_affected_pages(page_id: str) -> str:
     Args:
         page_id: Page that was changed (e.g., 'concepts/rag').
     """
-    import frontmatter as fm
-
     from kb.compile.linker import build_backlinks
-    from kb.graph.builder import scan_wiki_pages
 
     backlinks_map = build_backlinks()
     back = backlinks_map.get(page_id, [])
 
-    # Find pages sharing same sources
-    page_path = WIKI_DIR / f"{page_id}.md"
+    # Find pages sharing same sources using the shared page loader
     shared_source_pages: list[str] = []
-    if page_path.exists():
-        post = fm.load(str(page_path))
-        page_sources = post.metadata.get("source", [])
-        if isinstance(page_sources, str):
-            page_sources = [page_sources]
+    all_pages = load_all_pages()
+    this_page = next((p for p in all_pages if p["id"] == page_id), None)
 
-        # Scan all pages for matching sources
-        for other_path in scan_wiki_pages():
-            try:
-                other_post = fm.load(str(other_path))
-                other_id = (
-                    str(other_path.relative_to(WIKI_DIR)).replace("\\", "/").removesuffix(".md")
-                )
-                if other_id == page_id:
-                    continue
-                other_sources = other_post.metadata.get("source", [])
-                if isinstance(other_sources, str):
-                    other_sources = [other_sources]
-                if set(page_sources) & set(other_sources):
-                    shared_source_pages.append(other_id)
-            except Exception as e:
-                logger.warning("Skipping page %s in affected scan: %s", other_path, e)
+    if this_page:
+        page_sources = this_page["sources"]
+        for other in all_pages:
+            if other["id"] == page_id:
                 continue
+            if set(page_sources) & set(other["sources"]):
+                shared_source_pages.append(other["id"])
 
     all_affected = sorted(set(back + shared_source_pages))
 

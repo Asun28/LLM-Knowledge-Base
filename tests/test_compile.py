@@ -103,7 +103,7 @@ def test_compile_wiki_incremental(mock_ingest, tmp_path):
     log_path = wiki_dir / "log.md"
     log_path.write_text("---\ntitle: Log\nupdated: 2026-04-06\n---\n\n# Log\n")
 
-    with patch("kb.compile.compiler.WIKI_LOG", log_path):
+    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
         result = compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
 
     assert result["mode"] == "incremental"
@@ -140,7 +140,7 @@ def test_compile_wiki_full(mock_ingest, tmp_path):
     log_path = wiki_dir / "log.md"
     log_path.write_text("---\ntitle: Log\nupdated: 2026-04-06\n---\n\n# Log\n")
 
-    with patch("kb.compile.compiler.WIKI_LOG", log_path):
+    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
         result = compile_wiki(incremental=False, raw_dir=raw_dir, manifest_path=manifest_path)
 
     assert result["mode"] == "full"

@@ -13,7 +13,7 @@ from kb.config import (
     STALENESS_MAX_DAYS,
 )
 from kb.feedback.store import add_feedback_entry, load_feedback
-from kb.ingest.pipeline import _yaml_escape, slugify
+from kb.utils.text import slugify, yaml_escape
 from kb.utils.paths import make_source_ref
 
 # ── C2: Canonical path computation ──────────────────────────────
@@ -84,19 +84,19 @@ def test_trust_mixed_feedback(tmp_path):
 # ── C5: YAML escape ────────────────────────────────────────────
 
 
-def test_yaml_escape_quotes():
-    """_yaml_escape escapes double quotes."""
-    assert _yaml_escape('He said "hello"') == 'He said \\"hello\\"'
+def testyaml_escape_quotes():
+    """yaml_escape escapes double quotes."""
+    assert yaml_escape('He said "hello"') == 'He said \\"hello\\"'
 
 
-def test_yaml_escape_backslash():
-    """_yaml_escape escapes backslashes."""
-    assert _yaml_escape("path\\to\\file") == "path\\\\to\\\\file"
+def testyaml_escape_backslash():
+    """yaml_escape escapes backslashes."""
+    assert yaml_escape("path\\to\\file") == "path\\\\to\\\\file"
 
 
-def test_yaml_escape_clean():
-    """_yaml_escape leaves clean strings unchanged."""
-    assert _yaml_escape("normal title") == "normal title"
+def testyaml_escape_clean():
+    """yaml_escape leaves clean strings unchanged."""
+    assert yaml_escape("normal title") == "normal title"
 
 
 # ── H1: make_source_ref utility ─────────────────────────────────

@@ -1,9 +1,8 @@
 """Lint orchestrator — run all checks, produce report."""
 
-from datetime import date
 from pathlib import Path
 
-from kb.config import RAW_DIR, WIKI_DIR, WIKI_LOG
+from kb.config import RAW_DIR, WIKI_DIR
 from kb.lint.checks import (
     check_dead_links,
     check_frontmatter,
@@ -107,18 +106,3 @@ def format_report(report: dict) -> str:
         lines.append("No issues found. Wiki is healthy!\n")
 
     return "\n".join(lines)
-
-
-def _append_lint_log(report: dict) -> None:
-    """Append lint results to wiki/log.md."""
-    entry = (
-        f"- {date.today().isoformat()} | lint | "
-        f"{report['total_issues']} issues "
-        f"({report['summary'].get('error', 0)} errors, "
-        f"{report['summary'].get('warning', 0)} warnings, "
-        f"{report['summary'].get('info', 0)} info)\n"
-    )
-    if WIKI_LOG.exists():
-        content = WIKI_LOG.read_text(encoding="utf-8")
-        content += entry
-        WIKI_LOG.write_text(content, encoding="utf-8")

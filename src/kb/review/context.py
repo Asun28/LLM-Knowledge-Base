@@ -5,6 +5,7 @@ from pathlib import Path
 import frontmatter
 
 from kb.config import RAW_DIR, WIKI_DIR
+from kb.utils.pages import normalize_sources
 
 
 def pair_page_with_sources(
@@ -31,9 +32,7 @@ def pair_page_with_sources(
     post = frontmatter.load(str(page_path))
 
     # Get source paths from frontmatter
-    sources_meta = post.metadata.get("source", [])
-    if isinstance(sources_meta, str):
-        sources_meta = [sources_meta]
+    sources_meta = normalize_sources(post.metadata.get("source"))
 
     source_contents = []
     for source_ref in sources_meta:

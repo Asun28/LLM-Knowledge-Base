@@ -1,50 +1,11 @@
 """Query engine — search wiki, synthesize answers with citations."""
 
-import logging
 from pathlib import Path
 
-import frontmatter
-
-from kb.config import SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT, WIKI_DIR
+from kb.config import SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
-
-logger = logging.getLogger(__name__)
-
-
-def _load_wiki_pages(wiki_dir: Path | None = None) -> list[dict]:
-    """Load all wiki pages with their metadata and content.
-
-    Returns:
-        List of dicts with keys: path, id, title, type, confidence, content, raw_content.
-    """
-    wiki_dir = wiki_dir or WIKI_DIR
-    pages = []
-    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
-        subdir_path = wiki_dir / subdir
-        if not subdir_path.exists():
-            continue
-        for page_path in sorted(subdir_path.glob("*.md")):
-            try:
-                post = frontmatter.load(str(page_path))
-                page_id = (
-                    str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md")
-                )
-                pages.append(
-                    {
-                        "path": str(page_path),
-                        "id": page_id,
-                        "title": post.metadata.get("title", page_path.stem),
-                        "type": post.metadata.get("type", "unknown"),
-                        "confidence": post.metadata.get("confidence", "unknown"),
-                        "content": post.content,
-                        "raw_content": post.content.lower(),
-                    }
-                )
-            except Exception as e:
-                logger.warning("Failed to load wiki page %s: %s", page_path, e)
-                continue
-    return pages
+from kb.utils.pages import load_all_pages
 
 
 def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
@@ -61,7 +22,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     Returns:
         List of matching page dicts sorted by relevance score (descending).
     """
-    pages = _load_wiki_pages(wiki_dir)
+    pages = load_all_pages(wiki_dir)
     if not pages:
         return []
 

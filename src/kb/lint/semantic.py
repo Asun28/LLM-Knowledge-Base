@@ -8,6 +8,7 @@ import frontmatter
 from kb.config import MAX_CONSISTENCY_GROUP_SIZE, MIN_SHARED_TERMS, WIKI_DIR
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages
 from kb.review.context import pair_page_with_sources
+from kb.utils.pages import normalize_sources
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,7 @@ def _group_by_shared_sources(wiki_dir: Path) -> list[list[str]]:
         try:
             post = frontmatter.load(str(page_path))
             pid = page_id(page_path, wiki_dir)
-            sources = post.metadata.get("source", [])
-            if isinstance(sources, str):
-                sources = [sources]
+            sources = normalize_sources(post.metadata.get("source"))
             for src in sources:
                 source_to_pages.setdefault(src, []).append(pid)
         except Exception as e:

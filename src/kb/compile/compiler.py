@@ -3,9 +3,10 @@
 import json
 from pathlib import Path
 
-from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, WIKI_LOG
+from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
+from kb.utils.wiki_log import append_wiki_log
 
 # Hash manifest location (git-ignored)
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
@@ -148,23 +149,12 @@ def compile_wiki(
     save_manifest(manifest, manifest_path)
 
     # Append to log
-    _append_compile_log(results)
-
-    return results
-
-
-def _append_compile_log(results: dict) -> None:
-    """Append compile results to wiki/log.md."""
-    from datetime import date
-
-    entry = (
-        f"- {date.today().isoformat()} | compile | "
+    append_wiki_log(
+        "compile",
         f"{results['mode']} compile: {results['sources_processed']} sources, "
         f"{len(results['pages_created'])} pages created, "
         f"{len(results['pages_updated'])} pages updated, "
-        f"{len(results['errors'])} errors\n"
+        f"{len(results['errors'])} errors",
     )
-    if WIKI_LOG.exists():
-        content = WIKI_LOG.read_text(encoding="utf-8")
-        content += entry
-        WIKI_LOG.write_text(content, encoding="utf-8")
+
+    return results
