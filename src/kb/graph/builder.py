@@ -46,15 +46,16 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
         pid = page_id(page_path, wiki_dir)
         graph.add_node(pid, path=str(page_path))
 
-    # Add edges from wikilinks
+    # Add edges from wikilinks (only to existing nodes)
+    existing_ids = set(graph.nodes())
     for page_path in pages:
         content = page_path.read_text(encoding="utf-8")
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
         for link in links:
-            # Normalize the link target (remove .md suffix if present)
             target = link.removesuffix(".md")
-            graph.add_edge(source_id, target)
+            if target in existing_ids:
+                graph.add_edge(source_id, target)
 
     return graph
 
