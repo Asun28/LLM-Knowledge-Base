@@ -36,7 +36,7 @@ raw/                    wiki/
 |-----------|-------------|
 | **Ingest** | Read a raw source, extract structured data via LLM, generate summary + entity + concept pages, update indexes |
 | **Compile** | Scan all raw sources, detect changes via content hashes, batch-ingest new/modified sources |
-| **Query** | Search wiki pages, synthesize answers with inline citations using Claude |
+| **Query** | Search wiki pages using BM25 ranking, synthesize answers with inline citations using Claude |
 | **Lint** | Health checks: dead links, orphan pages, staleness, frontmatter validation, source coverage, wikilink cycles |
 | **Evolve** | Gap analysis: under-linked concepts, missing page types, connection opportunities, new page suggestions |
 
@@ -110,7 +110,7 @@ Ask questions and get answers with citations:
 kb query "What is compile-not-retrieve?"
 ```
 
-Searches wiki pages by word-boundary keyword matching, builds context (truncated to 80K chars), and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
+Searches wiki pages using BM25 ranking (term frequency saturation, inverse document frequency, document length normalization), builds context (truncated to 80K chars), and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
 
 ### Lint
 
@@ -344,14 +344,14 @@ LLM-Knowledge-Base/
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline + extractors (template-driven)
     compile/               # Hash-based incremental compiler (crash-safe) + linker
-    query/                 # Word-boundary keyword search + context truncation + citations
+    query/                 # BM25 ranking search + context truncation + citations
     lint/                  # 6 mechanical checks (+ cycles) + semantic context builders
     evolve/                # Coverage analysis + connection discovery
     graph/                 # NetworkX graph builder + stats
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
     utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
-  tests/                   # 230+ tests across 15 test files (2.5s)
+  tests/                   # 250+ tests across 16 test files (2.5s)
 ```
 
 ## Development
@@ -382,7 +382,8 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
 - **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 230+ tests
-- **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
+- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words keyword matching with BM25 ranking (TF saturation, IDF, length normalization), custom tokenizer with stopword filtering, configurable parameters. 250+ tests
+- **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License
 

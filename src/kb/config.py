@@ -81,6 +81,10 @@ MIN_SHARED_TERMS = 3
 SEARCH_TITLE_WEIGHT = 3
 SEARCH_CONTENT_WEIGHT = 1
 
+# ── BM25 search parameters ─────────────────────────────────
+BM25_K1 = 1.5    # Term frequency saturation (1.2-2.0 typical)
+BM25_B = 0.75    # Document length normalization (0.0-1.0)
+
 # ── Query context limits ───────────────────────────────────
 # Approximate character budget for query context sent to LLM.
 # ~4 chars/token, 100k context window → conservative 80k char limit.

@@ -1,19 +1,24 @@
-"""Query engine — search wiki, synthesize answers with citations."""
+"""Query engine — BM25 search + LLM synthesis with citations."""
 
-import re
 from pathlib import Path
 
-from kb.config import QUERY_CONTEXT_MAX_CHARS, SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT
+from kb.config import (
+    BM25_B,
+    BM25_K1,
+    QUERY_CONTEXT_MAX_CHARS,
+    SEARCH_TITLE_WEIGHT,
+)
+from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
 from kb.utils.pages import load_all_pages
 
 
 def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
-    """Search wiki pages by keyword matching.
+    """Search wiki pages using BM25 ranking.
 
-    Simple keyword-based search: splits the question into words and scores pages
-    by how many question words appear in their content.
+    Builds a BM25 index over all wiki pages, with title tokens boosted by
+    SEARCH_TITLE_WEIGHT. Returns pages ranked by BM25 relevance score.
 
     Args:
         question: The search query.
@@ -27,75 +32,31 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     if not pages:
         return []
 
-    # Tokenize question into search terms
-    stop_words = {
-        "the",
-        "a",
-        "an",
-        "is",
-        "are",
-        "was",
-        "were",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "of",
-        "and",
-        "or",
-        "not",
-        "with",
-        "by",
-        "from",
-        "what",
-        "how",
-        "why",
-        "when",
-        "where",
-        "which",
-        "who",
-        "does",
-        "do",
-        "can",
-        "will",
-        "should",
-        "would",
-        "it",
-    }
-    terms = [
-        w.lower().strip("?.,!")
-        for w in question.split()
-        if w.lower().strip("?.,!") not in stop_words
-    ]
+    # Tokenize query
+    query_tokens = tokenize(question)
+    if not query_tokens:
+        # All words were stopwords — use raw lowercased terms as fallback
+        query_tokens = [w.lower().strip("?.,!") for w in question.split() if len(w) > 1]
+    if not query_tokens:
+        return []
 
-    if not terms:
-        # All words were stopwords — use the full question as a substring match
-        # instead of individual common words that would match everything
-        terms = [question.lower().strip("?.,!")]
-
-    # Pre-compile word-boundary patterns for each term
-    term_patterns = []
-    for term in terms:
-        escaped = re.escape(term)
-        try:
-            term_patterns.append(re.compile(rf"\b{escaped}\b"))
-        except re.error:
-            term_patterns.append(re.compile(re.escape(term)))
-
-    scored = []
+    # Build document corpus: title tokens (boosted) + content tokens
+    documents = []
     for page in pages:
-        score = 0
-        content_lower = page["raw_content"]
-        title_lower = page["title"].lower()
-        for pattern in term_patterns:
-            if pattern.search(title_lower):
-                score += SEARCH_TITLE_WEIGHT
-            if pattern.search(content_lower):
-                score += SEARCH_CONTENT_WEIGHT
+        title_tokens = tokenize(page["title"]) * SEARCH_TITLE_WEIGHT
+        content_tokens = tokenize(page["raw_content"])
+        documents.append(title_tokens + content_tokens)
+
+    # Score with BM25
+    index = BM25Index(documents)
+    scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
+
+    # Pair scores with pages, filter zero scores
+    scored = []
+    for i, score in enumerate(scores):
         if score > 0:
-            page["score"] = score
-            scored.append(page)
+            pages[i]["score"] = round(score, 4)
+            scored.append(pages[i])
 
     scored.sort(key=lambda p: p["score"], reverse=True)
     return scored[:max_results]

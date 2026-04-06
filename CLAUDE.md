@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 2.3 complete (v0.7.0).** 230+ tests, 21 MCP tools, 11 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools).
+**Phase 3.0 complete (v0.8.0).** 250+ tests, 21 MCP tools, 11 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -21,7 +21,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 - `.claude/agents/wiki-reviewer.md` — Actor-Critic reviewer agent definition
 - `kb.lint.verdicts` — persistent lint/review verdict storage (pass/fail/warning with audit trail)
 
-**Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave. Research in `research/agent-architecture-research.md`.
+**Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave. Research in `research/agent-architecture-research.md`.
 
 ## Development Commands
 
@@ -76,7 +76,7 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 
 - **Ingest**: User adds source to `raw/`. LLM reads it, writes summary to `wiki/summaries/`, updates `wiki/index.md`, modifies relevant entity/concept pages, appends to `wiki/log.md`.
 - **Compile**: LLM builds/updates interlinked wiki pages. Uses hash-based incremental detection — only processes new/changed sources. Manifest saved after each source (crash-safe). Proposes diffs, not full rewrites.
-- **Query**: User asks questions. LLM searches wiki (word-boundary matching), synthesizes answers with inline citations to wiki pages and raw sources. Context truncated to 80K chars. Good answers become new wiki pages.
+- **Query**: User asks questions. LLM searches wiki using BM25 ranking (term frequency saturation, IDF weighting, length normalization), synthesizes answers with inline citations to wiki pages and raw sources. Title tokens boosted by `SEARCH_TITLE_WEIGHT` (repeated N times before indexing). Context truncated to 80K chars. Good answers become new wiki pages.
 - **Lint**: Health check — orphan pages, dead links, staleness, wikilink cycles, coverage gaps, frontmatter validation. Produces a report, does not silently fix.
 - **Evolve**: Gap analysis — what topics lack coverage, what concepts should be linked, what raw sources would fill gaps. User picks suggestions, LLM executes.
 
@@ -99,6 +99,8 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `ingest_source(path, source_type=None, extraction=None)` — Core ingest function. Accepts optional pre-extracted dict to skip LLM call (used by MCP server in Claude Code mode). In `kb.ingest.pipeline`.
 - `add_verdict(page_id, verdict_type, verdict, issues, notes)` — Store lint/review verdict persistently. In `kb.lint.verdicts`.
 - `get_verdict_summary()` — Aggregate verdict statistics. In `kb.lint.verdicts`.
+- `BM25Index(documents)` / `index.score(query_tokens, k1, b)` — BM25 ranking index. In `kb.query.bm25`.
+- `tokenize(text)` — BM25-aware tokenizer (stopword filtering, hyphen preservation). In `kb.query.bm25`.
 - `WikiPage` / `RawSource` — Dataclasses in `kb.models.page`.
 
 ### Wiki Index Files
@@ -132,7 +134,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-230+ tests across 15 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31). v0.7.0 tests: `test_v070.py` (~30 tests).
+250+ tests across 16 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31). v0.7.0 tests: `test_v070.py` (~30 tests). v0.8.0 BM25 tests: `test_bm25.py` (18).
 
 ### Error Handling Patterns
 
@@ -254,7 +256,8 @@ Key usage:
 - **Phase 2.1 (complete, v0.5.0):** Quality and robustness fixes — weighted Bayesian trust scoring (wrong penalized 2x), canonical path utilities (`make_source_ref`, `_canonical_rel_path`), YAML injection protection, extraction JSON validation, regex-based frontmatter parsing, graph edge invariant enforcement, empty slug guards, config-driven tuning constants (`STALENESS_MAX_DAYS`, `SEARCH_TITLE_WEIGHT`, etc.), improved MCP error handling with logging.
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor and code quality — shared utilities (`kb.utils.text`, `kb.utils.wiki_log`, `kb.utils.pages`) eliminated all code duplication (slugify 2x→1x, page loading 2x→1x, log appending 4x→1x, page_id 3x→1x). MCP server's `_apply_extraction` (80 lines) replaced by `ingest_source(extraction=...)`. Source type whitelist validation in extractors. `normalize_sources()` ensures consistent list format across all modules. YAML escape extended for newlines/tabs. Auto-create wiki/log.md on first write. Consolidated test fixtures (`create_wiki_page`, `create_raw_source`). 33 new parametrized edge case tests (180 total).
 - **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split into `kb.mcp` package (5 modules from 810-line monolith), graph analysis with PageRank and betweenness centrality, entity/concept enrichment on multi-source ingestion, persistent lint verdict storage with audit trail, case-insensitive wikilink resolution, trust threshold boundary fix (< to <=), template hash change detection for compile, comparison/synthesis extraction templates, 2 new MCP tools (`kb_create_page`, `kb_save_lint_verdict`). 21 MCP tools, 230+ tests.
-- **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
+- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced naive bag-of-words keyword matching with BM25 ranking algorithm (term frequency saturation, inverse document frequency, document length normalization). Title boosting via token repetition. Configurable BM25_K1/BM25_B parameters. Custom tokenizer with stopword filtering and hyphen preservation. NOT RAG — searches pre-compiled wiki pages, not raw chunks. 250+ tests.
+- **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.
 
