@@ -177,15 +177,14 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
-- **kb** — The knowledge base itself as an MCP server (`kb.mcp_server`, 15 tools). Start with `kb mcp` or `python -m kb.mcp_server`. This is the primary way Claude Code interacts with the wiki. Three modes:
-  - **Claude Code Max** (RECOMMENDED, no API key — Claude Code IS the LLM):
-    - `kb_ingest_content` — one-shot: provide content + extraction JSON, source saved and wiki pages created in one call.
-    - `kb_save_source` — save fetched/pasted content to `raw/` for later ingestion.
-    - `kb_query_context` — get wiki search context, synthesize the answer yourself.
-    - `kb_ingest_prepare`/`kb_ingest_apply` — two-step for files already in `raw/`.
-    - `kb_compile_scan` — find sources needing processing, loop prepare/apply.
-  - **API mode** (needs `ANTHROPIC_API_KEY`): `kb_ingest`, `kb_query` — call the Anthropic API directly.
-  - **Always local** (no API key): `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`, `kb_stats`, `kb_lint`, `kb_evolve`.
+- **kb** — The knowledge base MCP server (`kb.mcp_server`, 12 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
+  - `kb_query(question)` — returns wiki context; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
+  - `kb_ingest(path, extraction_json=...)` — creates wiki pages from Claude Code's extraction. Omit `extraction_json` to get the extraction prompt. Add `use_api=true` for API extraction.
+  - `kb_ingest_content(content, filename, type, extraction_json)` — one-shot: saves content to `raw/` and creates wiki pages in one call.
+  - `kb_save_source(content, filename)` — save content to `raw/` for later ingestion.
+  - `kb_compile_scan()` — find changed sources, then `kb_ingest` each.
+  - Browse: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`.
+  - Health: `kb_stats`, `kb_lint`, `kb_evolve`.
 - **memory** — Persistent knowledge graph in `.memory/memory.jsonl`. Track wiki entity relationships across sessions.
 - **arxiv** — Search/download papers to `raw/papers/`.
 - **sqlite** — Metadata DB at `.data/metadata.db`. For wikilink graph, ingestion history, lint results.
