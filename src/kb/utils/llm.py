@@ -30,4 +30,6 @@ def call_llm(
         kwargs["system"] = system
 
     response = client.messages.create(**kwargs)
+    if not response.content:
+        raise ValueError(f"Empty response from {model} — check API key and quota")
     return response.content[0].text

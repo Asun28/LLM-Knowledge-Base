@@ -55,4 +55,21 @@ def extract_from_source(content: str, source_type: str) -> dict:
     prompt = build_extraction_prompt(content, template)
     system_msg = "You are a precise information extractor. Return only valid JSON."
     response = call_llm(prompt, tier="write", system=system_msg)
-    return json.loads(response)
+
+    # Strip markdown code fences if present
+    cleaned = response.strip()
+    if cleaned.startswith("```"):
+        # Remove opening fence (```json or ```)
+        first_newline = cleaned.index("\n")
+        cleaned = cleaned[first_newline + 1 :]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[: -3]
+    cleaned = cleaned.strip()
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"LLM returned invalid JSON for {source_type} extraction: {e}\n"
+            f"Response (first 200 chars): {response[:200]}"
+        ) from e
