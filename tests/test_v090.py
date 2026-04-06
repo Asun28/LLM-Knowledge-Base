@@ -497,6 +497,45 @@ def test_graph_edges_match_normalized_links(tmp_wiki, create_wiki_page):
 # ── 11. Source Path Traversal in review/context.py ──────────────────
 
 
+# ── 11b. yaml_escape Improvements ───────────────────────────────────
+
+
+def test_yaml_escape_carriage_return():
+    """yaml_escape escapes carriage return characters."""
+    from kb.utils.text import yaml_escape
+
+    assert yaml_escape("line1\rline2") == "line1\\rline2"
+
+
+def test_yaml_escape_null_byte():
+    """yaml_escape strips null bytes."""
+    from kb.utils.text import yaml_escape
+
+    assert yaml_escape("before\0after") == "beforeafter"
+
+
+# ── 11c. kb_create_page Confidence Validation ───────────────────────
+
+
+def test_kb_create_page_invalid_confidence(tmp_path):
+    """kb_create_page rejects invalid confidence levels."""
+    from kb.mcp.quality import kb_create_page
+
+    wiki = tmp_path / "wiki"
+    (wiki / "concepts").mkdir(parents=True)
+
+    with patch("kb.mcp.quality.WIKI_DIR", wiki):
+        result = kb_create_page(
+            "concepts/test-page", "Test", "content", "concept", confidence="bad"
+        )
+    assert "Error" in result
+    assert "Invalid confidence" in result
+    assert "bad" in result
+
+
+# ── 12. Source Path Traversal in review/context.py ──────────────────
+
+
 def test_pair_page_traversal_blocked(tmp_project, create_wiki_page):
     """pair_page_with_sources blocks source refs with '..' that escape the project."""
     from kb.review.context import pair_page_with_sources

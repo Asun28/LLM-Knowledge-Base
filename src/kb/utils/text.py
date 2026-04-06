@@ -18,11 +18,13 @@ def slugify(text: str) -> str:
 def yaml_escape(value: str) -> str:
     """Escape a string for safe YAML double-quote style.
 
-    Handles backslashes, double quotes, newlines, and tabs.
+    Handles backslashes, double quotes, newlines, tabs, carriage returns, and null bytes.
     """
     return (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')
         .replace("\n", "\\n")
+        .replace("\r", "\\r")
         .replace("\t", "\\t")
+        .replace("\0", "")
     )

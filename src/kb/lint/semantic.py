@@ -105,7 +105,7 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
         "often", "other", "point", "right", "since", "small", "state",
         "still", "their", "there", "these", "thing", "those", "through",
         "title", "under", "until", "using", "value", "where", "which",
-        "while", "would", "could", "should", "above", "below", "might",
+        "while", "would", "should", "above", "below", "might",
         "source", "content", "created", "updated", "stated", "inferred",
         "confidence", "speculative", "entity", "concept", "summary",
     }

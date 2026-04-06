@@ -3,7 +3,7 @@
 import logging
 
 from kb.config import RAW_DIR, WIKI_DIR
-from kb.mcp.app import mcp
+from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
@@ -43,13 +43,10 @@ def kb_read_page(page_id: str) -> str:
     Args:
         page_id: Page identifier like 'concepts/rag' or 'summaries/my-article'.
     """
-    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
-        return f"Error: Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+    err = _validate_page_id(page_id)
+    if err:
+        return f"Error: {err}"
     page_path = WIKI_DIR / f"{page_id}.md"
-    try:
-        page_path.resolve().relative_to(WIKI_DIR.resolve())
-    except ValueError:
-        return f"Error: Invalid page_id: {page_id}. Path escapes wiki directory."
     if not page_path.exists():
         parts = page_id.split("/", 1)
         if len(parts) == 2:

@@ -21,7 +21,7 @@ def load_feedback(path: Path | None = None) -> dict:
     if path.exists():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, KeyError):
+        except json.JSONDecodeError:
             return _default_feedback()
     return _default_feedback()
 
@@ -68,6 +68,10 @@ def add_feedback_entry(
         "notes": notes,
     }
     data["entries"].append(entry)
+    # Retain only the most recent entries to prevent unbounded growth
+    MAX_FEEDBACK_ENTRIES = 10000
+    if len(data["entries"]) > MAX_FEEDBACK_ENTRIES:
+        data["entries"] = data["entries"][-MAX_FEEDBACK_ENTRIES:]
 
     # Update page scores with Bayesian smoothing
     # "wrong" is weighted 2x because incorrect information is worse than incomplete

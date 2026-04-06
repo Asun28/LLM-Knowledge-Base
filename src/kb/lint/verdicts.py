@@ -69,6 +69,10 @@ def add_verdict(
         "notes": notes,
     }
     verdicts.append(entry)
+    # Retain only the most recent verdicts to prevent unbounded growth
+    MAX_VERDICTS = 10000
+    if len(verdicts) > MAX_VERDICTS:
+        verdicts = verdicts[-MAX_VERDICTS:]
     save_verdicts(verdicts, path)
     return entry
 

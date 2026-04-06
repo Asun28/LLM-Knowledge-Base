@@ -3,7 +3,7 @@
 import logging
 from datetime import date
 
-from kb.config import PAGE_TYPES, WIKI_DIR
+from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
@@ -343,6 +343,10 @@ def kb_create_page(
 
     if page_type not in PAGE_TYPES:
         return f"Error: Invalid page_type '{page_type}'. Use one of: {', '.join(PAGE_TYPES)}"
+
+    if confidence not in CONFIDENCE_LEVELS:
+        valid = ", ".join(CONFIDENCE_LEVELS)
+        return f"Error: Invalid confidence '{confidence}'. Use one of: {valid}"
 
     # Build source list
     sources = [s.strip() for s in source_refs.split(",") if s.strip()] if source_refs else []
