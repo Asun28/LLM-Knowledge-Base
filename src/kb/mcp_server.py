@@ -1,18 +1,13 @@
 """MCP server — expose the knowledge base as tools for Claude Code.
 
-Three modes of operation:
+Claude Code is the default LLM. No API key needed for any operation.
 
-1. **Claude Code Max mode** (RECOMMENDED, no API key): Claude Code IS the LLM.
-   - kb_save_source: save fetched/pasted content to raw/
-   - kb_ingest_content: one-shot — provide content + your extraction JSON, wiki pages created
-   - kb_query_context: get wiki context, synthesize the answer yourself
-   - kb_ingest_prepare/apply: two-step for existing files
-   - kb_compile_scan: find sources needing processing
-
-2. **API mode** (requires ANTHROPIC_API_KEY): kb_ingest, kb_query call the API directly.
-
-3. **Local tools** (always work): kb_search, kb_read_page, kb_list_pages, kb_list_sources,
-   kb_stats, kb_lint, kb_evolve.
+- kb_query: returns wiki context; Claude Code synthesizes the answer (add use_api=true to
+  call the Anthropic API instead).
+- kb_ingest: accepts extraction_json from Claude Code to create wiki pages (add use_api=true
+  to have the Anthropic API do the extraction instead).
+- kb_ingest_content: one-shot — provide raw content + extraction JSON, saves source and
+  creates wiki pages in a single call.
 """
 
 import json
@@ -29,15 +24,15 @@ mcp = FastMCP(
     "LLM Knowledge Base",
     instructions=(
         "Knowledge base tools for a structured wiki compiled from raw sources. "
-        "You (Claude Code) ARE the LLM — no API key needed for any operation.\n\n"
-        "RECOMMENDED WORKFLOW (Claude Code Max):\n"
-        "- Query: kb_query_context → read context → answer the question yourself\n"
-        "- Ingest URL/text: kb_ingest_content (one-shot — you provide content + extraction)\n"
-        "- Ingest file: kb_ingest_prepare → extract JSON → kb_ingest_apply\n"
-        "- Batch: kb_compile_scan → prepare/apply each source\n"
-        "- Browse: kb_search, kb_read_page, kb_list_pages, kb_list_sources\n"
-        "- Health: kb_lint, kb_evolve, kb_stats\n\n"
-        "FALLBACK (with ANTHROPIC_API_KEY): kb_query, kb_ingest call the API directly."
+        "You (Claude Code) ARE the LLM — no API key needed.\n\n"
+        "WORKFLOW:\n"
+        "- kb_query: returns wiki context for you to synthesize an answer.\n"
+        "- kb_ingest: pass source_path + your extraction_json to create wiki pages. "
+        "Omit extraction_json to get the extraction prompt first.\n"
+        "- kb_ingest_content: one-shot for content not yet saved to raw/.\n"
+        "- kb_compile_scan: find changed sources, then kb_ingest each.\n"
+        "- kb_search, kb_read_page, kb_list_pages, kb_list_sources: browse wiki.\n"
+        "- kb_lint, kb_evolve, kb_stats: health and gap analysis."
     ),
 )
 
@@ -167,22 +162,333 @@ def _apply_extraction(
 
     # 6. Log
     _append_to_log(
-        f"Ingested {source_ref} (via Claude Code) → "
+        f"Ingested {source_ref} → "
         f"created {len(pages_created)} pages, updated {len(pages_updated)} pages"
     )
 
     return {"pages_created": pages_created, "pages_updated": pages_updated}
 
 
-# ── Local Tools (always work, no API key) ────────────────────────────
+def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, result: dict) -> str:
+    """Format ingest result as readable text."""
+    lines = [
+        f"Ingested: {rel_path}",
+        f"Type: {source_type}",
+        f"Hash: {source_hash}",
+        f"Pages created ({len(result['pages_created'])}):",
+    ]
+    for p in result["pages_created"]:
+        lines.append(f"  + {p}")
+    lines.append(f"Pages updated ({len(result['pages_updated'])}):")
+    for p in result["pages_updated"]:
+        lines.append(f"  ~ {p}")
+    return "\n".join(lines)
+
+
+# ── Core Tools ───────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str:
+    """Query the knowledge base.
+
+    Default (Claude Code mode): returns wiki search results with full page
+    content. You (Claude Code) synthesize the answer and cite sources with
+    [source: page_id] format.
+
+    With use_api=true: calls the Anthropic API to synthesize the answer
+    (requires ANTHROPIC_API_KEY).
+
+    Args:
+        question: Natural language question.
+        max_results: Maximum pages to search (default 10).
+        use_api: If true, call the Anthropic API for synthesis. Default false.
+    """
+    if use_api:
+        from kb.query.citations import format_citations
+        from kb.query.engine import query_wiki
+
+        result = query_wiki(question)
+        parts = [result["answer"]]
+        if result["citations"]:
+            parts.append("\n" + format_citations(result["citations"]))
+        parts.append(f"\n[Searched {len(result['source_pages'])} pages]")
+        return "\n".join(parts)
+
+    # Default: Claude Code mode — return context for synthesis
+    from kb.query.engine import search_pages
+
+    results = search_pages(question, max_results=max_results)
+    if not results:
+        return (
+            "No relevant wiki pages found for this question. "
+            "The knowledge base may not have content on this topic yet."
+        )
+
+    lines = [
+        f"# Query Context for: {question}\n",
+        f"Found {len(results)} relevant page(s). "
+        "Synthesize an answer using this context. "
+        "Cite sources with [source: page_id] format.\n",
+    ]
+    for r in results:
+        lines.append(
+            f"--- Page: {r['id']} (type: {r['type']}, "
+            f"confidence: {r['confidence']}, score: {r['score']}) ---\n"
+            f"Title: {r['title']}\n\n{r['content']}\n"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_ingest(
+    source_path: str,
+    source_type: str = "",
+    extraction_json: str = "",
+    use_api: bool = False,
+) -> str:
+    """Ingest a raw source file into the knowledge base.
+
+    Default (Claude Code mode):
+    - With extraction_json: creates wiki pages immediately using your extraction.
+    - Without extraction_json: returns the extraction prompt. Read it, extract
+      the JSON, then call kb_ingest again with extraction_json.
+
+    With use_api=true: calls the Anthropic API for extraction (requires
+    ANTHROPIC_API_KEY). Ignores extraction_json.
+
+    Args:
+        source_path: Path to source file (absolute or relative to project root).
+        source_type: One of: article, paper, repo, video, podcast, book, dataset,
+                     conversation. Auto-detected from path if empty.
+        extraction_json: JSON string with extracted fields. Required keys:
+            title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
+            Optional: author, core_argument, key_claims, abstract, evidence.
+            Omit to get the extraction prompt instead.
+        use_api: If true, use the Anthropic API for extraction. Default false.
+    """
+    from kb.utils.hashing import content_hash
+
+    path = Path(source_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve()
+
+    if not path.exists():
+        return f"Error: Source file not found: {path}"
+
+    # ── API mode ──
+    if use_api:
+        from kb.ingest.pipeline import ingest_source
+
+        result = ingest_source(path, source_type or None)
+        return _format_ingest_result(
+            _rel(Path(result["source_path"])),
+            result["source_type"],
+            result["content_hash"],
+            result,
+        )
+
+    # ── Detect source type ──
+    if not source_type:
+        from kb.ingest.pipeline import detect_source_type
+
+        try:
+            source_type = detect_source_type(path)
+        except ValueError as e:
+            return f"Error: {e}. Please specify source_type."
+
+    # ── Claude Code mode: with extraction → apply ──
+    if extraction_json:
+        try:
+            extraction = json.loads(extraction_json)
+        except json.JSONDecodeError as e:
+            return f"Error: Invalid JSON — {e}"
+
+        source_hash = content_hash(path)
+        try:
+            source_ref = str(path.relative_to(RAW_DIR.resolve().parent)).replace("\\", "/")
+        except ValueError:
+            source_ref = f"raw/{path.name}"
+
+        result = _apply_extraction(source_ref, path, source_type, extraction)
+        return _format_ingest_result(_rel(path), source_type, source_hash, result)
+
+    # ── Claude Code mode: without extraction → return prompt ──
+    from kb.ingest.extractors import build_extraction_prompt, load_template
+
+    try:
+        template = load_template(source_type)
+    except FileNotFoundError as e:
+        return f"Error: {e}"
+
+    content = path.read_text(encoding="utf-8")
+    prompt = build_extraction_prompt(content, template)
+
+    return (
+        f"# Extraction needed for: {_rel(path)}\n\n"
+        f"**Type:** {source_type}\n"
+        f"**Template:** {template['name']} — {template['description']}\n\n"
+        f"Read the source below, extract the JSON, then call kb_ingest again with:\n"
+        f"  source_path=\"{_rel(path)}\"\n"
+        f"  source_type=\"{source_type}\"\n"
+        f"  extraction_json=<your JSON>\n\n"
+        f"---\n\n{prompt}"
+    )
+
+
+@mcp.tool()
+def kb_ingest_content(
+    content: str,
+    filename: str,
+    source_type: str,
+    extraction_json: str,
+    url: str = "",
+) -> str:
+    """One-shot ingest: save raw content + create wiki pages in a single call.
+
+    Use this when you have content that isn't saved to raw/ yet (fetched URL,
+    pasted text, etc.). Saves the source and creates all wiki pages.
+
+    Args:
+        content: The full raw source text.
+        filename: Filename slug (e.g., 'karpathy-llm-knowledge-bases').
+        source_type: One of: article, paper, repo, video, podcast, book, dataset,
+                     conversation.
+        extraction_json: JSON string with extracted fields. Required keys:
+            title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
+        url: Optional source URL for metadata.
+    """
+    from kb.utils.hashing import content_hash
+
+    slug = _slugify(filename) or "untitled"
+    type_dir = SOURCE_TYPE_DIRS.get(source_type)
+    if not type_dir:
+        return (
+            f"Error: Unknown source_type '{source_type}'. "
+            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+        )
+
+    type_dir.mkdir(parents=True, exist_ok=True)
+    file_path = type_dir / f"{slug}.md"
+
+    save_content = content
+    if url:
+        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
+        save_content = header + content
+
+    file_path.write_text(save_content, encoding="utf-8")
+
+    try:
+        extraction = json.loads(extraction_json)
+    except json.JSONDecodeError as e:
+        return f"Error: Invalid extraction JSON — {e}"
+
+    source_ref = _rel(file_path)
+    result = _apply_extraction(source_ref, file_path, source_type, extraction)
+    source_hash = content_hash(file_path)
+
+    return (
+        f"Saved source: {source_ref} ({len(save_content)} chars)\n"
+        + _format_ingest_result(source_ref, source_type, source_hash, result)
+    )
+
+
+@mcp.tool()
+def kb_save_source(
+    content: str,
+    filename: str,
+    source_type: str = "article",
+    url: str = "",
+) -> str:
+    """Save content to raw/ as a source file without ingesting.
+
+    Use when you want to save content now and ingest later.
+
+    Args:
+        content: The full text content to save.
+        filename: Filename without extension (e.g., 'karpathy-llm-knowledge-bases').
+        source_type: Determines which raw/ subdirectory. Default 'article'.
+        url: Optional source URL to include as metadata.
+    """
+    slug = _slugify(filename) or "untitled"
+    type_dir = SOURCE_TYPE_DIRS.get(source_type)
+    if not type_dir:
+        return (
+            f"Error: Unknown source_type '{source_type}'. "
+            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+        )
+
+    type_dir.mkdir(parents=True, exist_ok=True)
+    file_path = type_dir / f"{slug}.md"
+
+    if url:
+        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
+        content = header + content
+
+    file_path.write_text(content, encoding="utf-8")
+    return (
+        f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
+        f"To ingest: kb_ingest(\"{_rel(file_path)}\", \"{source_type}\")"
+    )
+
+
+@mcp.tool()
+def kb_compile_scan(incremental: bool = True) -> str:
+    """Scan for new/changed raw sources that need ingestion.
+
+    Returns source files to process. For each, call kb_ingest with extraction_json.
+
+    Args:
+        incremental: If True (default), only new/changed sources. If False, all.
+    """
+    from kb.compile.compiler import find_changed_sources, scan_raw_sources
+
+    if incremental:
+        new_sources, changed_sources = find_changed_sources()
+        if not new_sources and not changed_sources:
+            return "No new or changed sources found. Wiki is up to date."
+
+        lines = ["# Compile Scan (incremental)\n"]
+        if new_sources:
+            lines.append(f"## New sources ({len(new_sources)})\n")
+            for s in new_sources:
+                lines.append(f"- {_rel(s)}")
+        if changed_sources:
+            lines.append(f"\n## Changed sources ({len(changed_sources)})\n")
+            for s in changed_sources:
+                lines.append(f"- {_rel(s)}")
+
+        total = len(new_sources) + len(changed_sources)
+        lines.append(
+            f"\n**Total: {total} source(s) to process.** "
+            "For each: call kb_ingest(source_path) to get the extraction prompt, "
+            "then call kb_ingest(source_path, extraction_json=...) with your extraction."
+        )
+    else:
+        all_sources = scan_raw_sources()
+        if not all_sources:
+            return "No source files found in raw/."
+        lines = [
+            "# Compile Scan (full)\n",
+            f"**Total: {len(all_sources)} source(s)**\n",
+        ]
+        for s in all_sources:
+            lines.append(f"- {_rel(s)}")
+        lines.append(
+            "\nFor each: call kb_ingest(source_path) to get the extraction prompt, "
+            "then call kb_ingest(source_path, extraction_json=...) with your extraction."
+        )
+
+    return "\n".join(lines)
+
+
+# ── Browse & Health Tools ────────────────────────────────────────────
 
 
 @mcp.tool()
 def kb_search(query: str, max_results: int = 10) -> str:
     """Search wiki pages by keyword. Returns matching pages ranked by relevance.
-
-    Use this as the primary way to find information in the knowledge base.
-    Results include page ID, title, type, and a content snippet.
 
     Args:
         query: Search terms (space-separated keywords).
@@ -209,8 +515,6 @@ def kb_search(query: str, max_results: int = 10) -> str:
 def kb_read_page(page_id: str) -> str:
     """Read a wiki page by its ID (e.g., 'concepts/rag', 'entities/openai').
 
-    Returns the full page content including YAML frontmatter.
-
     Args:
         page_id: Page identifier like 'concepts/rag' or 'summaries/my-article'.
     """
@@ -234,8 +538,8 @@ def kb_list_pages(page_type: str = "") -> str:
     """List all wiki pages, optionally filtered by type.
 
     Args:
-        page_type: Filter by type: 'entities', 'concepts', 'comparisons',
-                   'summaries', 'synthesis'. Empty string returns all.
+        page_type: Filter: 'entities', 'concepts', 'comparisons', 'summaries',
+                   'synthesis'. Empty returns all.
     """
     pages = _load_all_pages()
     if page_type:
@@ -330,369 +634,6 @@ def kb_evolve() -> str:
 
     report = generate_evolution_report()
     return format_evolution_report(report)
-
-
-# ── Claude Code Max Mode (RECOMMENDED — Claude Code IS the LLM) ─────
-
-
-@mcp.tool()
-def kb_save_source(
-    content: str,
-    filename: str,
-    source_type: str = "article",
-    url: str = "",
-) -> str:
-    """Save content to raw/ as a source file. Use after fetching a URL or receiving pasted text.
-
-    Claude Code workflow:
-    1. Fetch/receive content (URL, paste, screenshot OCR, etc.)
-    2. Call kb_save_source to save it to raw/
-    3. Call kb_ingest_prepare on the saved file, or use kb_ingest_content instead
-
-    Args:
-        content: The full text content to save.
-        filename: Filename without extension (e.g., 'karpathy-llm-knowledge-bases').
-                  Will be saved as {filename}.md in the appropriate raw/ subdirectory.
-        source_type: One of: article, paper, repo, video, podcast, book, dataset,
-                     conversation. Determines which raw/ subdirectory to use.
-        url: Optional source URL to include as metadata at the top of the file.
-    """
-    slug = _slugify(filename) or "untitled"
-    type_dir = SOURCE_TYPE_DIRS.get(source_type)
-    if not type_dir:
-        return f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
-
-    type_dir.mkdir(parents=True, exist_ok=True)
-    file_path = type_dir / f"{slug}.md"
-
-    # Prepend URL metadata if provided
-    if url:
-        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
-        content = header + content
-
-    file_path.write_text(content, encoding="utf-8")
-    return (
-        f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
-        f"Next: call kb_ingest_prepare(\"{_rel(file_path)}\", \"{source_type}\") "
-        f"to get the extraction prompt, or use kb_ingest_content for one-shot ingestion."
-    )
-
-
-@mcp.tool()
-def kb_ingest_content(
-    content: str,
-    filename: str,
-    source_type: str,
-    extraction_json: str,
-    url: str = "",
-) -> str:
-    """One-shot ingest: save raw content + create wiki pages in a single call.
-
-    This is the RECOMMENDED tool for Claude Code Max users. You (Claude Code)
-    read the content, extract structured data, and pass both here. No API key needed.
-
-    Workflow:
-    1. You have content (fetched URL, pasted text, etc.)
-    2. You extract: title, key_claims, entities_mentioned, concepts_mentioned, etc.
-    3. Call this tool with both the content and your extraction JSON.
-
-    Args:
-        content: The full raw source text.
-        filename: Filename slug (e.g., 'karpathy-llm-knowledge-bases').
-        source_type: One of: article, paper, repo, video, podcast, book, dataset,
-                     conversation.
-        extraction_json: JSON string with extracted fields. Required keys:
-            - title (str): Title of the source
-            - entities_mentioned (list[str]): People, orgs, tools
-            - concepts_mentioned (list[str]): Ideas, methods, frameworks
-            Optional: author, core_argument, key_claims, abstract, evidence, etc.
-        url: Optional source URL for metadata.
-    """
-    # 1. Save the raw source
-    slug = _slugify(filename) or "untitled"
-    type_dir = SOURCE_TYPE_DIRS.get(source_type)
-    if not type_dir:
-        return f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
-
-    type_dir.mkdir(parents=True, exist_ok=True)
-    file_path = type_dir / f"{slug}.md"
-
-    save_content = content
-    if url:
-        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
-        save_content = header + content
-
-    file_path.write_text(save_content, encoding="utf-8")
-
-    # 2. Parse extraction
-    try:
-        extraction = json.loads(extraction_json)
-    except json.JSONDecodeError as e:
-        return f"Error: Invalid extraction JSON — {e}"
-
-    # 3. Build source reference
-    source_ref = _rel(file_path)
-
-    # 4. Apply extraction to create wiki pages
-    from kb.utils.hashing import content_hash
-
-    result = _apply_extraction(source_ref, file_path, source_type, extraction)
-    source_hash = content_hash(file_path)
-
-    lines = [
-        f"Saved source: {source_ref} ({len(save_content)} chars)",
-        f"Type: {source_type}",
-        f"Hash: {source_hash}",
-        f"Pages created ({len(result['pages_created'])}):",
-    ]
-    for p in result["pages_created"]:
-        lines.append(f"  + {p}")
-    lines.append(f"Pages updated ({len(result['pages_updated'])}):")
-    for p in result["pages_updated"]:
-        lines.append(f"  ~ {p}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def kb_query_context(question: str, max_results: int = 10) -> str:
-    """Search the wiki and return full page context for a question.
-
-    RECOMMENDED for Claude Code Max: Instead of calling the API, this returns
-    the matched wiki pages. You (Claude Code) synthesize the answer directly.
-    Cite sources using [source: page_id] format.
-
-    Args:
-        question: Natural language question.
-        max_results: Maximum pages to include in context (default 10).
-    """
-    from kb.query.engine import search_pages
-
-    results = search_pages(question, max_results=max_results)
-    if not results:
-        return (
-            "No relevant wiki pages found for this question. "
-            "The knowledge base may not have content on this topic yet."
-        )
-
-    lines = [
-        f"# Query Context for: {question}\n",
-        f"Found {len(results)} relevant page(s). "
-        "Synthesize an answer using this context. "
-        "Cite sources with [source: page_id] format.\n",
-    ]
-    for r in results:
-        lines.append(
-            f"--- Page: {r['id']} (type: {r['type']}, "
-            f"confidence: {r['confidence']}, score: {r['score']}) ---\n"
-            f"Title: {r['title']}\n\n{r['content']}\n"
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def kb_ingest_prepare(source_path: str, source_type: str = "") -> str:
-    """Read a raw source file and return the extraction prompt for Claude Code.
-
-    Step 1 of two-step ingestion for files already in raw/.
-    After receiving the prompt, extract the JSON and call kb_ingest_apply.
-
-    Args:
-        source_path: Path to the source file (absolute or relative to project root).
-        source_type: Source type. Auto-detected from path if empty.
-    """
-    from kb.ingest.extractors import build_extraction_prompt, load_template
-    from kb.ingest.pipeline import detect_source_type
-
-    path = Path(source_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    path = path.resolve()
-
-    if not path.exists():
-        return f"Error: Source file not found: {path}"
-
-    content = path.read_text(encoding="utf-8")
-
-    if not source_type:
-        try:
-            source_type = detect_source_type(path)
-        except ValueError as e:
-            return f"Error: {e}. Please specify source_type."
-
-    try:
-        template = load_template(source_type)
-    except FileNotFoundError as e:
-        return f"Error: {e}"
-
-    prompt = build_extraction_prompt(content, template)
-
-    return (
-        f"# Ingest Preparation\n\n"
-        f"**Source:** {_rel(path)}\n"
-        f"**Type:** {source_type}\n"
-        f"**Template:** {template['name']} — {template['description']}\n\n"
-        f"## Extraction Prompt\n\n"
-        f"Extract the following as a JSON object and then call `kb_ingest_apply` "
-        f"with source_path=\"{_rel(path)}\", source_type=\"{source_type}\", "
-        f"and extraction_json set to your JSON result.\n\n"
-        f"---\n\n{prompt}"
-    )
-
-
-@mcp.tool()
-def kb_ingest_apply(source_path: str, source_type: str, extraction_json: str) -> str:
-    """Apply an extraction result to create wiki pages.
-
-    Step 2 of two-step ingestion. After extracting structured data from a source
-    (via kb_ingest_prepare), call this with the JSON to write wiki pages.
-
-    Args:
-        source_path: Path to the source file (must match kb_ingest_prepare).
-        source_type: Source type (must match kb_ingest_prepare).
-        extraction_json: JSON string with extracted fields. Required:
-            title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
-    """
-    from kb.utils.hashing import content_hash
-
-    path = Path(source_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    path = path.resolve()
-
-    if not path.exists():
-        return f"Error: Source file not found: {path}"
-
-    try:
-        extraction = json.loads(extraction_json)
-    except json.JSONDecodeError as e:
-        return f"Error: Invalid JSON — {e}"
-
-    source_hash = content_hash(path)
-
-    try:
-        source_ref = str(path.relative_to(RAW_DIR.resolve().parent)).replace("\\", "/")
-    except ValueError:
-        source_ref = f"raw/{path.name}"
-
-    result = _apply_extraction(source_ref, path, source_type, extraction)
-
-    lines = [
-        f"Ingested: {_rel(path)}",
-        f"Type: {source_type}",
-        f"Hash: {source_hash}",
-        f"Pages created ({len(result['pages_created'])}):",
-    ]
-    for p in result["pages_created"]:
-        lines.append(f"  + {p}")
-    lines.append(f"Pages updated ({len(result['pages_updated'])}):")
-    for p in result["pages_updated"]:
-        lines.append(f"  ~ {p}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def kb_compile_scan(incremental: bool = True) -> str:
-    """Scan for new/changed raw sources that need ingestion.
-
-    Returns a list of source files to process. For each one,
-    use kb_ingest_prepare → extract → kb_ingest_apply.
-
-    Args:
-        incremental: If True (default), only new/changed sources. If False, all sources.
-    """
-    from kb.compile.compiler import find_changed_sources, scan_raw_sources
-
-    if incremental:
-        new_sources, changed_sources = find_changed_sources()
-        lines = ["# Compile Scan (incremental)\n"]
-        if not new_sources and not changed_sources:
-            return "No new or changed sources found. Wiki is up to date."
-
-        if new_sources:
-            lines.append(f"## New sources ({len(new_sources)})\n")
-            for s in new_sources:
-                lines.append(f"- {_rel(s)}")
-        if changed_sources:
-            lines.append(f"\n## Changed sources ({len(changed_sources)})\n")
-            for s in changed_sources:
-                lines.append(f"- {_rel(s)}")
-
-        total = len(new_sources) + len(changed_sources)
-        lines.append(
-            f"\n**Total: {total} source(s) to process.** "
-            "For each source, call kb_ingest_prepare, extract the JSON, "
-            "then call kb_ingest_apply."
-        )
-    else:
-        all_sources = scan_raw_sources()
-        lines = ["# Compile Scan (full)\n"]
-        if not all_sources:
-            return "No source files found in raw/."
-        lines.append(f"**Total: {len(all_sources)} source(s)**\n")
-        for s in all_sources:
-            lines.append(f"- {_rel(s)}")
-        lines.append(
-            "\nFor each source, call kb_ingest_prepare, extract the JSON, "
-            "then call kb_ingest_apply."
-        )
-
-    return "\n".join(lines)
-
-
-# ── API Mode (requires ANTHROPIC_API_KEY) ────────────────────────────
-
-
-@mcp.tool()
-def kb_query(question: str) -> str:
-    """Ask a question and get an LLM-synthesized answer with citations.
-
-    Requires ANTHROPIC_API_KEY. Prefer kb_query_context with Claude Code Max.
-
-    Args:
-        question: Natural language question about the knowledge base content.
-    """
-    from kb.query.citations import format_citations
-    from kb.query.engine import query_wiki
-
-    result = query_wiki(question)
-    parts = [result["answer"]]
-    if result["citations"]:
-        parts.append("\n" + format_citations(result["citations"]))
-    parts.append(f"\n[Searched {len(result['source_pages'])} pages]")
-    return "\n".join(parts)
-
-
-@mcp.tool()
-def kb_ingest(source_path: str, source_type: str = "") -> str:
-    """Ingest a raw source file using the Anthropic API for extraction.
-
-    Requires ANTHROPIC_API_KEY. Prefer kb_ingest_content or
-    kb_ingest_prepare/apply with Claude Code Max.
-
-    Args:
-        source_path: Path to the source file (absolute or relative to project root).
-        source_type: Source type. Auto-detected from path if empty.
-    """
-    from kb.ingest.pipeline import ingest_source
-
-    path = Path(source_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    path = path.resolve()
-
-    result = ingest_source(path, source_type or None)
-    lines = [
-        f"Ingested: {_rel(Path(result['source_path']))}",
-        f"Type: {result['source_type']}",
-        f"Hash: {result['content_hash']}",
-        f"Pages created ({len(result['pages_created'])}):",
-    ]
-    for p in result["pages_created"]:
-        lines.append(f"  + {p}")
-    lines.append(f"Pages updated ({len(result['pages_updated'])}):")
-    for p in result["pages_updated"]:
-        lines.append(f"  ~ {p}")
-    return "\n".join(lines)
 
 
 def main():
