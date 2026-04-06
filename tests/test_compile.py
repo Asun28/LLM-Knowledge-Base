@@ -70,8 +70,8 @@ def test_find_changed_sources(tmp_path):
     (articles / "new.md").write_text("new content")
 
     manifest_path = tmp_path / "hashes.json"
-    # Manifest only knows about existing.md with a different hash
-    manifest = {str(articles / "existing.md").replace("\\", "/"): "oldhash12345678"}
+    # Manifest uses canonical relative paths (raw/articles/existing.md)
+    manifest = {"raw/articles/existing.md": "oldhash12345678"}
     save_manifest(manifest, manifest_path)
 
     new, changed = find_changed_sources(raw_dir, manifest_path)
