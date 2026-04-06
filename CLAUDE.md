@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 3.0 complete (v0.8.0).** 250+ tests, 21 MCP tools, 11 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization).
+**Phase 3.0 complete (v0.8.0).** 252 tests, 21 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -123,7 +123,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 
 ### Extraction Templates (`templates/`)
 
-8 YAML schemas (article, paper, video, repo, podcast, book, dataset, conversation). Each defines `extract:` fields and `wiki_outputs:` mapping to wiki subdirectories. All follow the same output pattern: summaries → entities → concepts. Used by the ingest pipeline to drive consistent extraction.
+10 YAML schemas (article, paper, video, repo, podcast, book, dataset, conversation, comparison, synthesis). Each defines `extract:` fields and `wiki_outputs:` mapping to wiki subdirectories. All follow the same output pattern: summaries → entities → concepts. Used by the ingest pipeline to drive consistent extraction.
 
 ### Testing
 
@@ -134,7 +134,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-250+ tests across 16 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31). v0.7.0 tests: `test_v070.py` (~30 tests). v0.8.0 BM25 tests: `test_bm25.py` (18).
+252 tests across 17 test files. Core tests: `test_compile.py` (11), `test_evolve.py` (11), `test_graph.py` (8), `test_ingest.py` (8), `test_lint.py` (14), `test_models.py` (4), `test_query.py` (12), `test_cli.py` (5). Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). Fix/upgrade tests: `test_fixes_v050.py` (21), `test_fixes_v060.py` (31), `test_utils.py` (33), `test_v070.py` (28), `test_bm25.py` (18).
 
 ### Error Handling Patterns
 
@@ -255,8 +255,8 @@ Key usage:
 - **Phase 2 (complete, v0.4.0):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. 7 new MCP tools, 3 new modules, wiki-reviewer agent.
 - **Phase 2.1 (complete, v0.5.0):** Quality and robustness fixes — weighted Bayesian trust scoring (wrong penalized 2x), canonical path utilities (`make_source_ref`, `_canonical_rel_path`), YAML injection protection, extraction JSON validation, regex-based frontmatter parsing, graph edge invariant enforcement, empty slug guards, config-driven tuning constants (`STALENESS_MAX_DAYS`, `SEARCH_TITLE_WEIGHT`, etc.), improved MCP error handling with logging.
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor and code quality — shared utilities (`kb.utils.text`, `kb.utils.wiki_log`, `kb.utils.pages`) eliminated all code duplication (slugify 2x→1x, page loading 2x→1x, log appending 4x→1x, page_id 3x→1x). MCP server's `_apply_extraction` (80 lines) replaced by `ingest_source(extraction=...)`. Source type whitelist validation in extractors. `normalize_sources()` ensures consistent list format across all modules. YAML escape extended for newlines/tabs. Auto-create wiki/log.md on first write. Consolidated test fixtures (`create_wiki_page`, `create_raw_source`). 33 new parametrized edge case tests (180 total).
-- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split into `kb.mcp` package (5 modules from 810-line monolith), graph analysis with PageRank and betweenness centrality, entity/concept enrichment on multi-source ingestion, persistent lint verdict storage with audit trail, case-insensitive wikilink resolution, trust threshold boundary fix (< to <=), template hash change detection for compile, comparison/synthesis extraction templates, 2 new MCP tools (`kb_create_page`, `kb_save_lint_verdict`). 21 MCP tools, 230+ tests.
-- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced naive bag-of-words keyword matching with BM25 ranking algorithm (term frequency saturation, inverse document frequency, document length normalization). Title boosting via token repetition. Configurable BM25_K1/BM25_B parameters. Custom tokenizer with stopword filtering and hyphen preservation. NOT RAG — searches pre-compiled wiki pages, not raw chunks. 250+ tests.
+- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split into `kb.mcp` package (5 modules from 810-line monolith), graph analysis with PageRank and betweenness centrality, entity/concept enrichment on multi-source ingestion, persistent lint verdict storage with audit trail, case-insensitive wikilink resolution, trust threshold boundary fix (< to <=), template hash change detection for compile, comparison/synthesis extraction templates, 2 new MCP tools (`kb_create_page`, `kb_save_lint_verdict`). 21 MCP tools, 234 tests.
+- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced naive bag-of-words keyword matching with BM25 ranking algorithm (term frequency saturation, inverse document frequency, document length normalization). Title boosting via token repetition. Configurable BM25_K1/BM25_B parameters. Custom tokenizer with stopword filtering and hyphen preservation. NOT RAG — searches pre-compiled wiki pages, not raw chunks. 252 tests.
 - **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.

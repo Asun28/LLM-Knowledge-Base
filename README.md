@@ -258,6 +258,8 @@ kb_save_lint_verdict("concepts/rag", "fidelity", "pass", notes="All claims trace
 | Book | `templates/book.yaml` | Manual notes or `markitdown` |
 | Dataset | `templates/dataset.yaml` | Schema documentation |
 | Conversation | `templates/conversation.yaml` | Chat/interview transcript |
+| Comparison | `templates/comparison.yaml` | Created via `kb_create_page` (multi-source) |
+| Synthesis | `templates/synthesis.yaml` | Created via `kb_create_page` (cross-source) |
 
 Each template defines extraction fields and wiki output mappings. The LLM uses these to consistently extract structured data from any source type. Source types are validated against this whitelist before processing.
 
@@ -336,22 +338,23 @@ LLM-Knowledge-Base/
     log.md                 # Activity log
     contradictions.md      # Conflict tracker
   research/                # Human-authored analysis
-  templates/               # 8 YAML extraction schemas
-  src/kb/                  # Python package (~4,000 lines)
+  templates/               # 10 YAML extraction schemas
+  src/kb/                  # Python package (~4,100 lines)
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, tuning constants
-    mcp_server.py          # FastMCP server (21 tools)
+    mcp_server.py          # MCP entry point (thin wrapper)
+    mcp/                   # FastMCP server package (21 tools: core, browse, health, quality)
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline + extractors (template-driven)
     compile/               # Hash-based incremental compiler (crash-safe) + linker
-    query/                 # BM25 ranking search + context truncation + citations
+    query/                 # BM25 ranking search (bm25.py) + context truncation + citations
     lint/                  # 6 mechanical checks (+ cycles) + semantic context builders
     evolve/                # Coverage analysis + connection discovery
     graph/                 # NetworkX graph builder + stats
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
     utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
-  tests/                   # 250+ tests across 16 test files (2.5s)
+  tests/                   # 252 tests across 17 test files (2.5s)
 ```
 
 ## Development
@@ -381,8 +384,8 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2 (complete, v0.4.0):** Quality system — feedback loop with Bayesian trust scoring, Actor-Critic review workflow, semantic lint (fidelity + consistency), page refiner with audit trail. 7 new MCP tools, wiki-reviewer agent
 - **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
-- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 230+ tests
-- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words keyword matching with BM25 ranking (TF saturation, IDF, length normalization), custom tokenizer with stopword filtering, configurable parameters. 250+ tests
+- **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 234 tests
+- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words keyword matching with BM25 ranking (TF saturation, IDF, length normalization), custom tokenizer with stopword filtering, configurable parameters. 252 tests
 - **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
 
 ## License
