@@ -717,7 +717,10 @@ def kb_review_page(page_id: str) -> str:
         from kb.review.context import build_review_context
 
         return build_review_context(page_id)
+    except FileNotFoundError as e:
+        return f"Error reviewing {page_id}: {e}"
     except Exception as e:
+        logger.exception("Unexpected error reviewing %s", page_id)
         return f"Error reviewing {page_id}: {e}"
 
 
@@ -773,7 +776,10 @@ def kb_lint_deep(page_id: str) -> str:
         from kb.lint.semantic import build_fidelity_context
 
         return build_fidelity_context(page_id)
+    except FileNotFoundError as e:
+        return f"Error checking fidelity for {page_id}: {e}"
     except Exception as e:
+        logger.exception("Unexpected error in lint_deep for %s", page_id)
         return f"Error checking fidelity for {page_id}: {e}"
 
 
