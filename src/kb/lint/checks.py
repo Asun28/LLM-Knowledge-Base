@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import frontmatter
+import networkx as nx
 
 from kb.compile.linker import resolve_wikilinks
 from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
@@ -73,6 +74,31 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
                 "message": f"Isolated page (no links at all): {isolated}",
             }
         )
+
+    return issues
+
+
+def check_cycles(wiki_dir: Path | None = None) -> list[dict]:
+    """Find circular wikilink chains (A → B → C → A).
+
+    Returns:
+        List of dicts: {cycle, message}.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    graph = build_graph(wiki_dir)
+    issues = []
+
+    for cycle in nx.simple_cycles(graph):
+        if len(cycle) >= 2:
+            cycle_str = " → ".join(cycle + [cycle[0]])
+            issues.append(
+                {
+                    "check": "wikilink_cycle",
+                    "severity": "info",
+                    "cycle": cycle,
+                    "message": f"Wikilink cycle detected: {cycle_str}",
+                }
+            )
 
     return issues
 

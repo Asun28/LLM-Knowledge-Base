@@ -95,13 +95,30 @@ def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
 
 def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
     """Group pages with high term overlap (>= 3 shared significant terms)."""
+    # Common English words that pass the length filter but carry no semantic signal
+    common_words = {
+        "about", "after", "again", "along", "based", "because", "before",
+        "being", "between", "called", "could", "different", "during", "early",
+        "every", "example", "first", "found", "great", "https", "index",
+        "known", "large", "later", "level", "likely", "model", "never",
+        "often", "other", "point", "right", "since", "small", "state",
+        "still", "their", "there", "these", "thing", "those", "through",
+        "title", "under", "until", "using", "value", "where", "which",
+        "while", "would", "could", "should", "above", "below", "might",
+        "source", "content", "created", "updated", "stated", "inferred",
+        "confidence", "speculative", "entity", "concept", "summary",
+    }
     pages = scan_wiki_pages(wiki_dir)
     page_terms: dict[str, set[str]] = {}
 
     for page_path in pages:
         content = page_path.read_text(encoding="utf-8").lower()
         pid = page_id(page_path, wiki_dir)
-        words = {w.strip(".,!?()[]{}\"'") for w in content.split() if len(w) > 4}
+        words = {
+            w.strip(".,!?()[]{}\"'")
+            for w in content.split()
+            if len(w) > 4
+        } - common_words
         page_terms[pid] = words
 
     groups = []

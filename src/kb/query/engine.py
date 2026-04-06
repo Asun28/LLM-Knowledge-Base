@@ -1,5 +1,6 @@
 """Query engine — search wiki, synthesize answers with citations."""
 
+import re
 from pathlib import Path
 
 from kb.config import QUERY_CONTEXT_MAX_CHARS, SEARCH_CONTENT_WEIGHT, SEARCH_TITLE_WEIGHT
@@ -73,15 +74,24 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         # instead of individual common words that would match everything
         terms = [question.lower().strip("?.,!")]
 
+    # Pre-compile word-boundary patterns for each term
+    term_patterns = []
+    for term in terms:
+        escaped = re.escape(term)
+        try:
+            term_patterns.append(re.compile(rf"\b{escaped}\b"))
+        except re.error:
+            term_patterns.append(re.compile(re.escape(term)))
+
     scored = []
     for page in pages:
         score = 0
         content_lower = page["raw_content"]
         title_lower = page["title"].lower()
-        for term in terms:
-            if term in title_lower:
+        for pattern in term_patterns:
+            if pattern.search(title_lower):
                 score += SEARCH_TITLE_WEIGHT
-            if term in content_lower:
+            if pattern.search(content_lower):
                 score += SEARCH_CONTENT_WEIGHT
         if score > 0:
             page["score"] = score

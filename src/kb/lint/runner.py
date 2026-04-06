@@ -4,6 +4,7 @@ from pathlib import Path
 
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.lint.checks import (
+    check_cycles,
     check_dead_links,
     check_frontmatter,
     check_orphan_pages,
