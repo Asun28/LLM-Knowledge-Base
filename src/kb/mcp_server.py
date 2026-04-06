@@ -225,6 +225,18 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
             "The knowledge base may not have content on this topic yet."
         )
 
+    # Merge trust scores from feedback (fail-safe)
+    try:
+        from kb.feedback.reliability import compute_trust_scores
+
+        scores = compute_trust_scores()
+        for r in results:
+            trust_data = scores.get(r["id"], {})
+            r["trust"] = trust_data.get("trust", 0.5)
+    except Exception:
+        for r in results:
+            r["trust"] = 0.5
+
     lines = [
         f"# Query Context for: {question}\n",
         f"Found {len(results)} relevant page(s). "
@@ -232,9 +244,10 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         "Cite sources with [source: page_id] format.\n",
     ]
     for r in results:
+        trust_label = f", trust: {r['trust']:.2f}" if r.get("trust", 0.5) != 0.5 else ""
         lines.append(
             f"--- Page: {r['id']} (type: {r['type']}, "
-            f"confidence: {r['confidence']}, score: {r['score']}) ---\n"
+            f"confidence: {r['confidence']}, score: {r['score']}{trust_label}) ---\n"
             f"Title: {r['title']}\n\n{r['content']}\n"
         )
     return "\n".join(lines)
@@ -624,7 +637,24 @@ def kb_lint() -> str:
     from kb.lint.runner import format_report, run_all_checks
 
     report = run_all_checks()
-    return format_report(report)
+    result = format_report(report)
+
+    # Append feedback-flagged pages (fail-safe)
+    try:
+        from kb.feedback.reliability import get_flagged_pages
+
+        flagged = get_flagged_pages()
+        if flagged:
+            result += (
+                "\n## Low-Trust Pages (from query feedback)\n\n"
+                f"{len(flagged)} page(s) with trust score below threshold:\n"
+            )
+            for p in flagged:
+                result += f"- {p} — run `kb_lint_deep(\"{p}\")` for fidelity check\n"
+    except Exception:
+        pass
+
+    return result
 
 
 @mcp.tool()
@@ -633,7 +663,25 @@ def kb_evolve() -> str:
     from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
 
     report = generate_evolution_report()
-    return format_evolution_report(report)
+    result = format_evolution_report(report)
+
+    # Append coverage gaps from query feedback (fail-safe)
+    try:
+        from kb.feedback.reliability import get_coverage_gaps
+
+        gaps = get_coverage_gaps()
+        if gaps:
+            result += (
+                "\n## Coverage Gaps (from query feedback)\n\n"
+                f"{len(gaps)} query/queries returned incomplete answers:\n"
+            )
+            for g in gaps:
+                notes = f" — {g['notes']}" if g["notes"] else ""
+                result += f"- \"{g['question']}\"{notes}\n"
+    except Exception:
+        pass
+
+    return result
 
 
 # ── Phase 2: Quality Tools ──────────────────────────────────────────
