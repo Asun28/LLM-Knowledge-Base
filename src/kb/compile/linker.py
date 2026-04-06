@@ -28,7 +28,7 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
 
         for link in links:
             total += 1
-            target = link.removesuffix(".md")
+            target = link
             if target in existing_ids:
                 resolved += 1
             else:
@@ -53,7 +53,7 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
         source_id = page_id(page_path, wiki_dir)
 
         for link in links:
-            target = link.removesuffix(".md")
+            target = link
             if target not in backlinks:
                 backlinks[target] = []
             if source_id not in backlinks[target]:

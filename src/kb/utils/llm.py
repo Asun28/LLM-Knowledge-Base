@@ -22,7 +22,7 @@ def get_client() -> anthropic.Anthropic:
     """Get a reusable Anthropic client (uses ANTHROPIC_API_KEY env var)."""
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(timeout=REQUEST_TIMEOUT)
+        _client = anthropic.Anthropic(timeout=REQUEST_TIMEOUT, max_retries=0)
     return _client
 
 

@@ -53,7 +53,7 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
         for link in links:
-            target = link.removesuffix(".md")
+            target = link
             if target in existing_ids:
                 graph.add_edge(source_id, target)
 

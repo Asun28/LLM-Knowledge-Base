@@ -1,6 +1,6 @@
 """Tests for v0.9.0 hardening — path traversal rejection, citation regex fix,
 slug collision tracking, JSON fence hardening, MCP error handling,
-max_results bounds, MCP instructions update."""
+max_results bounds, MCP instructions update, SDK retry fix, wikilink normalization."""
 
 from unittest.mock import patch
 
@@ -427,3 +427,68 @@ def test_format_ingest_result_handles_missing_skipped():
     }
     text = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
     assert "summaries/test" in text
+
+
+# ── 9. SDK Retry Fix (Context7) ──────────────────────────────────
+
+
+def test_anthropic_client_disables_sdk_retries():
+    """Anthropic client has max_retries=0 to avoid double retry."""
+    import kb.utils.llm as llm_mod
+    from kb.utils.llm import get_client
+
+    old_client = llm_mod._client
+    llm_mod._client = None
+    try:
+        client = get_client()
+        assert client.max_retries == 0
+    finally:
+        llm_mod._client = old_client
+
+
+# ── 10. Wikilink Normalization Consistency (Context7) ─────────────
+
+
+def test_extract_wikilinks_already_strips_md():
+    """extract_wikilinks strips .md suffix — linker/graph should not double-strip."""
+    from kb.utils.markdown import extract_wikilinks
+
+    text = "See [[concepts/rag.md]] and [[entities/openai]]"
+    links = extract_wikilinks(text)
+    assert "concepts/rag" in links
+    assert "entities/openai" in links
+    # Verify .md is already stripped (no double stripping needed)
+    assert all(not link.endswith(".md") for link in links)
+
+
+def test_extract_wikilinks_lowercases():
+    """extract_wikilinks lowercases targets for case-insensitive matching."""
+    from kb.utils.markdown import extract_wikilinks
+
+    text = "See [[Concepts/RAG]] and [[Entities/OpenAI]]"
+    links = extract_wikilinks(text)
+    assert "concepts/rag" in links
+    assert "entities/openai" in links
+
+
+def test_linker_resolve_uses_normalized_links(tmp_wiki, create_wiki_page):
+    """Linker resolves wikilinks correctly with normalized (lowered, no .md) IDs."""
+    from kb.compile.linker import resolve_wikilinks
+
+    create_wiki_page("concepts/rag", wiki_dir=tmp_wiki, content="See [[entities/openai]]")
+    create_wiki_page("entities/openai", wiki_dir=tmp_wiki, content="An entity.")
+
+    result = resolve_wikilinks(tmp_wiki)
+    assert result["resolved"] == 1
+    assert result["broken"] == []
+
+
+def test_graph_edges_match_normalized_links(tmp_wiki, create_wiki_page):
+    """Graph builder creates edges using normalized wikilink targets."""
+    from kb.graph.builder import build_graph
+
+    create_wiki_page("concepts/rag", wiki_dir=tmp_wiki, content="See [[concepts/llm]]")
+    create_wiki_page("concepts/llm", wiki_dir=tmp_wiki, content="An LLM concept.")
+
+    graph = build_graph(tmp_wiki)
+    assert graph.has_edge("concepts/rag", "concepts/llm")
