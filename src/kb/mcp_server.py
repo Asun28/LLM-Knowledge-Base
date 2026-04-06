@@ -20,6 +20,7 @@ import frontmatter
 from fastmcp import FastMCP
 
 from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, WIKI_DIR
+from kb.utils.paths import make_source_ref
 
 logger = logging.getLogger(__name__)
 
@@ -323,10 +324,7 @@ def kb_ingest(
             return f"Error: Invalid JSON — {e}"
 
         source_hash = content_hash(path)
-        try:
-            source_ref = str(path.relative_to(RAW_DIR.resolve().parent)).replace("\\", "/")
-        except ValueError:
-            source_ref = f"raw/{path.name}"
+        source_ref = make_source_ref(path)
 
         result = _apply_extraction(source_ref, path, source_type, extraction)
         return _format_ingest_result(_rel(path), source_type, source_hash, result)

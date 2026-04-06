@@ -14,6 +14,7 @@ from kb.config import (
 )
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
+from kb.utils.paths import make_source_ref
 
 
 def slugify(text: str) -> str:
@@ -245,11 +246,8 @@ def ingest_source(source_path: Path, source_type: str | None = None) -> dict:
     # Extract structured data via LLM
     extraction = extract_from_source(raw_content, source_type)
 
-    # Build source reference (relative path from project root)
-    try:
-        source_ref = str(source_path.relative_to(RAW_DIR.resolve().parent)).replace("\\", "/")
-    except ValueError:
-        source_ref = f"raw/{source_path.name}"
+    # Build source reference (canonical relative path)
+    source_ref = make_source_ref(source_path)
 
     # Track created/updated pages
     pages_created = []
