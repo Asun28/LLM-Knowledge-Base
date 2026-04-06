@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 2.2 complete (v0.6.0).** 180 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor (shared utilities, eliminated code duplication, source type validation, source field normalization).
+**Phase 2.3 complete (v0.7.0).** 206 tests, 19 MCP tools, 10 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 robustness overhaul (LLM retry/timeout, frontmatter source sync, context truncation, entity context population, crash-safe manifest, slug collision detection, word-boundary search, cycle detection, dead code removal).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
 
@@ -129,17 +129,18 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-180 tests across 14 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33).
+206 tests across 15 test files. Phase 2 tests: `test_feedback.py` (14), `test_review.py` (16), `test_lint_semantic.py` (8), `test_mcp_phase2.py` (10). v0.5.0 fix tests: `test_fixes_v050.py` (21). v0.6.0 utility tests: `test_utils.py` (33). v0.7.0 robustness tests: `test_fixes_v060.py` (31).
 
 ### Error Handling Patterns
 
 All modules use `logging.getLogger(__name__)` for warnings on skipped pages or failed operations.
 
 - **MCP tools**: Return `"Error: ..."` strings on failure — never raise exceptions to the MCP client. Phase 2 tools (`kb_review_page`, `kb_lint_deep`) catch `FileNotFoundError` specifically, then broad `Exception` with `logger.exception()` for stack traces. Page ID validation via `_validate_page_id()` before processing. Extraction JSON validated for required `title`/`name` field. Fail-safe integrations (trust scores in `kb_query`, flagged pages in `kb_lint`) use `try/except` with `logger.debug` since failure is expected when feedback data doesn't exist yet.
-- **LLM responses**: `call_llm()` validates non-empty `response.content`. `extract_from_source()` strips markdown code fences before `json.loads()` — handles edge cases where ```` has no newline. Wraps `JSONDecodeError` in `ValueError` with context.
-- **Frontmatter**: `_write_wiki_page()` escapes quotes and backslashes in title/source via `_yaml_escape()`. `refine_page()` uses regex-based frontmatter splitting (handles `---` inside content). Adds `updated:` field if missing, auto-creates `log.md` if absent.
+- **LLM responses**: `call_llm()` retries up to 3 times with exponential backoff on rate limits, overload (429/500/502/503/529), connection errors, and timeouts. Raises `LLMError` after exhaustion or on non-retryable errors (401/403). Reusable client with 120s timeout. `extract_from_source()` strips markdown code fences before `json.loads()` — handles edge cases where ```` has no newline. Wraps `JSONDecodeError` in `ValueError` with context.
+- **Frontmatter**: `_write_wiki_page()` escapes quotes, backslashes, newlines, and tabs via `yaml_escape()`. `_update_existing_page()` syncs both YAML `source:` list and References section. `refine_page()` uses regex-based frontmatter splitting (handles `---` inside content). Adds `updated:` field if missing, auto-creates `log.md` if absent.
 - **Graph builder**: Only adds edges to nodes that exist in the graph (no dangling edges to nonexistent pages).
-- **Slugify**: Empty slugify results (all-punctuation names) are skipped during entity/concept creation.
+- **Slugify**: Empty slugify results (all-punctuation names) are skipped with warning logged during entity/concept creation. Slug collisions within a single ingest are detected and logged.
+- **Compile**: Manifest saved after each successful source ingest (crash-safe).
 - **Page loading loops**: All `except Exception` blocks in page-scanning loops (query engine, lint checks, graph builder, MCP server) log warnings with file path and error, then `continue`.
 
 ## Phase 2 Workflows
@@ -247,6 +248,7 @@ Key usage:
 - **Phase 2 (complete, v0.4.0):** Multi-loop supervision for Lint, Actor-Critic compile, query feedback loop, Self-Refine on Compile. 7 new MCP tools, 3 new modules, wiki-reviewer agent.
 - **Phase 2.1 (complete, v0.5.0):** Quality and robustness fixes — weighted Bayesian trust scoring (wrong penalized 2x), canonical path utilities (`make_source_ref`, `_canonical_rel_path`), YAML injection protection, extraction JSON validation, regex-based frontmatter parsing, graph edge invariant enforcement, empty slug guards, config-driven tuning constants (`STALENESS_MAX_DAYS`, `SEARCH_TITLE_WEIGHT`, etc.), improved MCP error handling with logging.
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor and code quality — shared utilities (`kb.utils.text`, `kb.utils.wiki_log`, `kb.utils.pages`) eliminated all code duplication (slugify 2x→1x, page loading 2x→1x, log appending 4x→1x, page_id 3x→1x). MCP server's `_apply_extraction` (80 lines) replaced by `ingest_source(extraction=...)`. Source type whitelist validation in extractors. `normalize_sources()` ensures consistent list format across all modules. YAML escape extended for newlines/tabs. Auto-create wiki/log.md on first write. Consolidated test fixtures (`create_wiki_page`, `create_raw_source`). 33 new parametrized edge case tests (180 total).
+- **Phase 2.3 (complete, v0.7.0):** Robustness overhaul — `call_llm()` retry with exponential backoff (rate limits, timeouts, connection errors; `LLMError` exception class), reusable client. `_update_existing_page()` now syncs YAML `source:` list alongside References section. Query context truncation (`QUERY_CONTEXT_MAX_CHARS=80K`). Entity/concept pages populated with context from extraction data (`_extract_entity_context`). Crash-safe compile (manifest saved after each source). Slug collision detection with logging. Word-boundary regex in keyword search. Exact path matching in source coverage lint. Term overlap grouping strips frontmatter and common words. Wikilink cycle detection (`check_cycles`). Review history tracks `content_length` and `status`. Log size warning at 500KB. Dead code removed (`visualize.py`, `differ.py`). 31 new tests (206 total).
 - **Phase 3 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages).
 
 **Local-only directories** (git-ignored): `.claude/`, `.tools/`, `.memory/`, `.data/`, `openspec/`, `.mcp.json`. The `others/` directory holds misc files like screenshots.
