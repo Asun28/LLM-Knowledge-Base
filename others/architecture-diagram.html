@@ -14,7 +14,7 @@
     color: #c9d1d9;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     padding: 48px 40px;
-    min-width: 1400px;
+    min-width: 1440px;
   }
 
   /* ── Title ── */
@@ -43,15 +43,6 @@
     margin-top: 4px;
   }
 
-  /* ── Main Grid (4 columns) ── */
-  .main-grid {
-    display: grid;
-    grid-template-columns: 220px 300px 300px 320px;
-    gap: 28px;
-    margin-bottom: 36px;
-    align-items: start;
-  }
-
   /* ── Column Headers ── */
   .col-header {
     font-size: 11px;
@@ -73,122 +64,118 @@
     margin-bottom: 14px;
     position: relative;
   }
-  .card h3 {
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-  .card .desc {
-    font-size: 12px;
-    color: #8b949e;
-    line-height: 1.5;
-  }
-  .card .mono {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-  }
+  .card h3 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .card .desc { font-size: 12px; color: #8b949e; line-height: 1.5; }
+  .card .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 
-  /* Card color schemes */
-  .card.raw-main {
-    background: rgba(249, 117, 131, 0.08);
-    border: 1.5px dashed rgba(249, 117, 131, 0.4);
-  }
+  .card.raw-main { background: rgba(249, 117, 131, 0.08); border: 1.5px dashed rgba(249, 117, 131, 0.4); }
   .card.raw-main h3 { color: #f97583; }
-
-  .card.raw-item {
-    background: rgba(249, 117, 131, 0.05);
-    border: 1px solid rgba(249, 117, 131, 0.15);
-    padding: 10px 14px;
-    margin-bottom: 8px;
-  }
+  .card.raw-item { background: rgba(249, 117, 131, 0.05); border: 1px solid rgba(249, 117, 131, 0.15); padding: 10px 14px; margin-bottom: 8px; }
   .card.raw-item h3 { color: #ffa198; font-size: 13px; }
   .card.raw-item .desc { font-size: 11px; }
 
-  .card.compile-main {
-    background: rgba(121, 192, 255, 0.08);
-    border: 1.5px solid rgba(121, 192, 255, 0.3);
-  }
+  .card.compile-main { background: rgba(121, 192, 255, 0.08); border: 1.5px solid rgba(121, 192, 255, 0.3); }
   .card.compile-main h3 { color: #79c0ff; }
-
-  .card.compile-steps {
-    background: rgba(121, 192, 255, 0.05);
-    border: 1px solid rgba(121, 192, 255, 0.2);
-  }
+  .card.compile-steps { background: rgba(121, 192, 255, 0.05); border: 1px solid rgba(121, 192, 255, 0.2); }
   .card.compile-steps h3 { color: #79c0ff; }
 
-  .card.wiki-main {
-    background: rgba(126, 231, 135, 0.08);
-    border: 1.5px solid rgba(126, 231, 135, 0.3);
-  }
+  .card.wiki-main { background: rgba(126, 231, 135, 0.08); border: 1.5px solid rgba(126, 231, 135, 0.3); }
   .card.wiki-main h3 { color: #7ee787; }
-
-  .card.wiki-layer {
-    background: rgba(126, 231, 135, 0.05);
-    border: 1px solid rgba(126, 231, 135, 0.2);
-    padding: 12px 14px;
-    margin-bottom: 8px;
-  }
+  .card.wiki-layer { background: rgba(126, 231, 135, 0.05); border: 1px solid rgba(126, 231, 135, 0.2); padding: 12px 14px; margin-bottom: 8px; }
   .card.wiki-layer h3 { color: #7ee787; font-size: 13px; font-weight: 600; }
   .card.wiki-layer .desc { font-size: 11px; }
 
-  .card.runtime-main {
-    background: rgba(210, 168, 255, 0.08);
-    border: 1.5px solid rgba(210, 168, 255, 0.3);
-  }
+  .card.runtime-main { background: rgba(210, 168, 255, 0.08); border: 1.5px solid rgba(210, 168, 255, 0.3); }
   .card.runtime-main h3 { color: #d2a8ff; }
-
-  .card.runtime-inner {
-    background: rgba(210, 168, 255, 0.05);
-    border: 1px solid rgba(210, 168, 255, 0.2);
-    padding: 12px 14px;
-    margin-bottom: 8px;
-  }
+  .card.runtime-inner { background: rgba(210, 168, 255, 0.05); border: 1px solid rgba(210, 168, 255, 0.2); padding: 12px 14px; margin-bottom: 8px; }
   .card.runtime-inner h3 { color: #d2a8ff; font-size: 13px; font-weight: 600; }
   .card.runtime-inner .desc { font-size: 11px; }
 
-  /* Gate / barrier cards */
-  .card.gate {
-    background: rgba(249, 117, 131, 0.12);
-    border: 2px solid rgba(249, 117, 131, 0.5);
-    text-align: center;
-    padding: 10px;
-  }
+  .card.gate { background: rgba(249, 117, 131, 0.12); border: 2px solid rgba(249, 117, 131, 0.5); text-align: center; padding: 10px; }
   .card.gate h3 { color: #f97583; font-size: 13px; }
-
-  .card.commit-barrier {
-    background: rgba(249, 117, 131, 0.12);
-    border: 2px solid rgba(249, 117, 131, 0.5);
-    text-align: center;
-    padding: 10px;
-  }
+  .card.commit-barrier { background: rgba(249, 117, 131, 0.12); border: 2px solid rgba(249, 117, 131, 0.5); text-align: center; padding: 10px; }
   .card.commit-barrier h3 { color: #f97583; font-size: 13px; }
 
-  /* ── Arrows between columns ── */
-  .arrow-col {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: 0 4px;
+  /* ── Main Grid ── */
+  .grid-with-arrows {
+    display: grid;
+    grid-template-columns: 230px 60px 290px 60px 290px 60px 310px;
+    gap: 0;
+    margin-bottom: 20px;
+    align-items: start;
   }
 
-  /* ── Flow arrows (inline SVG or CSS) ── */
-  .flow-arrow {
+  /* ── Horizontal arrow columns ── */
+  .arrow-spacer {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    height: 100%;
-    min-height: 40px;
+    justify-content: flex-start;
+    padding-top: 60px;
+    gap: 16px;
   }
-  .flow-arrow svg { overflow: visible; }
+
+  .h-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .h-arrow .arrow-line {
+    position: relative;
+    height: 3px;
+    width: 44px;
+    border-radius: 2px;
+  }
+  .h-arrow .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0; height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+  }
+  .h-arrow .arrow-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  /* Forward arrows (solid) */
+  .h-arrow.forward .arrow-line { background: currentColor; }
+  .h-arrow.forward .arrow-line::after { border-left: 8px solid currentColor; }
+
+  /* Return arrows (dashed) */
+  .h-arrow.return .arrow-line {
+    background: repeating-linear-gradient(90deg, currentColor 0px, currentColor 5px, transparent 5px, transparent 9px);
+    height: 2px;
+  }
+  .h-arrow.return .arrow-line::after {
+    border-left: none;
+    border-right: 7px solid currentColor;
+    left: -1px;
+    right: auto;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+  }
+
+  .h-arrow.blue { color: #79c0ff; }
+  .h-arrow.green { color: #7ee787; }
+  .h-arrow.purple { color: #d2a8ff; }
+  .h-arrow.gold { color: #e3b341; }
 
   /* ── Support Layer ── */
   .support-layer {
     border: 1.5px dashed rgba(255, 215, 0, 0.3);
     border-radius: 12px;
-    padding: 24px 28px;
-    margin-top: 16px;
+    padding: 24px 28px 20px;
+    margin-top: 0;
     background: rgba(255, 215, 0, 0.02);
+    position: relative;
   }
   .support-layer .layer-title {
     font-size: 11px;
@@ -209,16 +196,66 @@
     border-radius: 10px;
     padding: 16px 18px;
   }
-  .support-card h3 {
-    font-size: 14px;
-    font-weight: 700;
-    color: #e3b341;
-    margin-bottom: 6px;
+  .support-card h3 { font-size: 14px; font-weight: 700; color: #e3b341; margin-bottom: 6px; }
+  .support-card .desc { font-size: 12px; color: #8b949e; line-height: 1.5; }
+
+  /* ── Vertical arrows between main grid and support layer ── */
+  .vertical-arrows-row {
+    display: grid;
+    grid-template-columns: 230px 60px 290px 60px 290px 60px 310px;
+    gap: 0;
+    height: 48px;
+    margin-bottom: 0;
   }
-  .support-card .desc {
-    font-size: 12px;
-    color: #8b949e;
-    line-height: 1.5;
+  .v-arrow-cell {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+  }
+  .v-arrow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  .v-arrow .v-line {
+    width: 2px;
+    height: 32px;
+    position: relative;
+  }
+  .v-arrow .v-line.dashed {
+    background: repeating-linear-gradient(180deg, #e3b341 0px, #e3b341 5px, transparent 5px, transparent 9px);
+  }
+  /* Upward arrowhead */
+  .v-arrow .v-line.up::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 7px solid #e3b341;
+  }
+  /* Downward arrowhead */
+  .v-arrow .v-line.down::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid #e3b341;
+  }
+  .v-arrow .v-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #e3b341;
+    white-space: nowrap;
   }
 
   /* ── Model Tier Badge ── */
@@ -237,13 +274,7 @@
   .tier-orchestrate { background: rgba(210, 168, 255, 0.15); color: #d2a8ff; }
 
   /* ── Italic tagline ── */
-  .tagline {
-    font-style: italic;
-    font-size: 12px;
-    color: #7ee787;
-    margin-top: 8px;
-    text-align: center;
-  }
+  .tagline { font-style: italic; font-size: 12px; color: #7ee787; margin-top: 8px; text-align: center; }
   .tagline.blue { color: #79c0ff; }
   .tagline.purple { color: #d2a8ff; }
   .tagline.red { color: #f97583; }
@@ -275,62 +306,26 @@
     letter-spacing: 1.5px;
     margin-right: 8px;
   }
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: #8b949e;
-  }
-  .legend-swatch {
-    width: 28px;
-    height: 4px;
-    border-radius: 2px;
-  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b949e; }
+  .legend-swatch { width: 28px; height: 4px; border-radius: 2px; }
   .legend-swatch.solid-green { background: #7ee787; }
   .legend-swatch.solid-blue { background: #79c0ff; }
+  .legend-swatch.solid-purple { background: #d2a8ff; }
   .legend-swatch.dashed-gold {
     background: repeating-linear-gradient(90deg, #e3b341 0px, #e3b341 6px, transparent 6px, transparent 10px);
     height: 3px;
   }
-  .legend-dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
-  }
+  .legend-dot { width: 14px; height: 14px; border-radius: 3px; }
   .legend-dot.red { background: rgba(249, 117, 131, 0.3); border: 1.5px dashed #f97583; }
   .legend-dot.green { background: rgba(126, 231, 135, 0.3); border: 1.5px solid #7ee787; }
 
-  .credits {
-    margin-top: 24px;
-    font-size: 13px;
-    color: #484f58;
-    text-align: right;
-  }
+  .credits { margin-top: 24px; font-size: 13px; color: #484f58; text-align: right; }
   .credits a { color: #58a6ff; text-decoration: none; }
   .credits a:hover { text-decoration: underline; }
 
-  /* ── Step Numbers ── */
-  .step {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #8b949e;
-    margin-bottom: 3px;
-  }
-
   /* ── Numbered list ── */
-  .steps-list {
-    list-style: none;
-    padding: 0;
-    margin: 8px 0 0 0;
-  }
-  .steps-list li {
-    font-size: 12px;
-    color: #c9d1d9;
-    padding: 3px 0;
-    padding-left: 20px;
-    position: relative;
-  }
+  .steps-list { list-style: none; padding: 0; margin: 8px 0 0 0; }
+  .steps-list li { font-size: 12px; color: #c9d1d9; padding: 3px 0; padding-left: 20px; position: relative; }
   .steps-list li::before {
     content: attr(data-n) ".";
     position: absolute;
@@ -341,30 +336,8 @@
     font-weight: 600;
   }
 
-  /* ── Horizontal arrows between columns ── */
-  .grid-with-arrows {
-    display: grid;
-    grid-template-columns: 220px 40px 300px 40px 300px 40px 320px;
-    gap: 0;
-    margin-bottom: 36px;
-    align-items: start;
-  }
-
-  .arrow-spacer {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-top: 120px;
-  }
-  .arrow-spacer svg { overflow: visible; }
-
   /* ── Stat badge ── */
-  .stat-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-  }
+  .stat-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .stat {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
@@ -376,13 +349,7 @@
   }
 
   /* ── Operations cycle ring ── */
-  .cycle-ring {
-    display: flex;
-    justify-content: center;
-    gap: 6px;
-    margin: 16px 0 8px;
-    flex-wrap: wrap;
-  }
+  .cycle-ring { display: flex; justify-content: center; gap: 6px; margin: 16px 0 8px; flex-wrap: wrap; }
   .cycle-step {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -396,12 +363,7 @@
   .cycle-step.query { color: #d2a8ff; border-color: rgba(210,168,255,0.4); background: rgba(210,168,255,0.08); }
   .cycle-step.lint { color: #e3b341; border-color: rgba(227,179,65,0.4); background: rgba(227,179,65,0.08); }
   .cycle-step.evolve { color: #7ee787; border-color: rgba(126,231,135,0.4); background: rgba(126,231,135,0.08); }
-  .cycle-arrow {
-    color: #484f58;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-  }
+  .cycle-arrow { color: #484f58; font-size: 14px; display: flex; align-items: center; }
 </style>
 </head>
 <body>
@@ -468,16 +430,17 @@
     </div>
   </div>
 
-  <!-- Arrow 1→2 -->
+  <!-- ──── Arrow 1→2: Raw → Compile ──── -->
   <div class="arrow-spacer">
-    <svg width="40" height="24" viewBox="0 0 40 24">
-      <defs>
-        <marker id="ah1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#79c0ff"/>
-        </marker>
-      </defs>
-      <line x1="0" y1="12" x2="30" y2="12" stroke="#79c0ff" stroke-width="2" marker-end="url(#ah1)"/>
-    </svg>
+    <div class="h-arrow forward blue">
+      <div class="arrow-label" style="color: #79c0ff;">ingest</div>
+      <div class="arrow-line"></div>
+    </div>
+    <div style="height: 80px;"></div>
+    <div class="h-arrow forward blue">
+      <div class="arrow-label" style="color: #79c0ff;">compile</div>
+      <div class="arrow-line"></div>
+    </div>
   </div>
 
   <!-- ──────────────── COL 2: COMPILE & STAGE ──────────────── -->
@@ -517,16 +480,17 @@
     <div class="tagline blue">Silent, smart backend</div>
   </div>
 
-  <!-- Arrow 2→3 -->
+  <!-- ──── Arrow 2→3: Compile → Wiki ──── -->
   <div class="arrow-spacer">
-    <svg width="40" height="24" viewBox="0 0 40 24">
-      <defs>
-        <marker id="ah2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#7ee787"/>
-        </marker>
-      </defs>
-      <line x1="0" y1="12" x2="30" y2="12" stroke="#7ee787" stroke-width="2" marker-end="url(#ah2)"/>
-    </svg>
+    <div class="h-arrow forward green">
+      <div class="arrow-label" style="color: #7ee787;">publish</div>
+      <div class="arrow-line"></div>
+    </div>
+    <div style="height: 120px;"></div>
+    <div class="h-arrow return gold">
+      <div class="arrow-label" style="color: #e3b341;">drift detect</div>
+      <div class="arrow-line"></div>
+    </div>
   </div>
 
   <!-- ──────────────── COL 3: PUBLISHED WIKI ──────────────── -->
@@ -565,16 +529,22 @@
     <div class="tagline">No Vector DB needed</div>
   </div>
 
-  <!-- Arrow 3→4 -->
+  <!-- ──── Arrow 3→4: Wiki → Runtime ──── -->
   <div class="arrow-spacer">
-    <svg width="40" height="24" viewBox="0 0 40 24">
-      <defs>
-        <marker id="ah3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#d2a8ff"/>
-        </marker>
-      </defs>
-      <line x1="0" y1="12" x2="30" y2="12" stroke="#d2a8ff" stroke-width="2" marker-end="url(#ah3)"/>
-    </svg>
+    <div class="h-arrow forward purple">
+      <div class="arrow-label" style="color: #d2a8ff;">search</div>
+      <div class="arrow-line"></div>
+    </div>
+    <div style="height: 60px;"></div>
+    <div class="h-arrow forward purple">
+      <div class="arrow-label" style="color: #d2a8ff;">context</div>
+      <div class="arrow-line"></div>
+    </div>
+    <div style="height: 60px;"></div>
+    <div class="h-arrow return gold">
+      <div class="arrow-label" style="color: #e3b341;">refine</div>
+      <div class="arrow-line"></div>
+    </div>
   </div>
 
   <!-- ──────────────── COL 4: AGENT RUNTIME ──────────────── -->
@@ -621,6 +591,41 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
+     VERTICAL ARROWS: Main Grid → Support Layer
+     ════════════════════════════════════════════════════════ -->
+<div class="vertical-arrows-row">
+  <!-- col1: raw — empty -->
+  <div class="v-arrow-cell"></div>
+  <!-- spacer -->
+  <div class="v-arrow-cell"></div>
+  <!-- col2: compile — lint feeds back -->
+  <div class="v-arrow-cell">
+    <div class="v-arrow">
+      <div class="v-line dashed up"></div>
+      <span class="v-label">lint fixes</span>
+    </div>
+  </div>
+  <!-- spacer -->
+  <div class="v-arrow-cell"></div>
+  <!-- col3: wiki — verdicts feed in -->
+  <div class="v-arrow-cell">
+    <div class="v-arrow">
+      <div class="v-line dashed up"></div>
+      <span class="v-label">verdicts</span>
+    </div>
+  </div>
+  <!-- spacer -->
+  <div class="v-arrow-cell"></div>
+  <!-- col4: runtime — feedback comes down -->
+  <div class="v-arrow-cell">
+    <div class="v-arrow">
+      <div class="v-line dashed down"></div>
+      <span class="v-label">feedback</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
      SUPPORT LAYER
      ════════════════════════════════════════════════════════ -->
 <div class="support-layer">
@@ -663,29 +668,6 @@
     </div>
 
   </div>
-
-  <!-- Feedback arrows (dashed, back to columns) -->
-  <div style="display: flex; justify-content: center; gap: 12px; margin-top: 16px;">
-    <svg width="820" height="32" viewBox="0 0 820 32">
-      <defs>
-        <marker id="ahf1" markerWidth="7" markerHeight="5" refX="0" refY="2.5" orient="auto">
-          <polygon points="7 0, 0 2.5, 7 5" fill="#e3b341"/>
-        </marker>
-        <marker id="ahf2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
-          <polygon points="0 0, 7 2.5, 0 5" fill="#e3b341"/>
-        </marker>
-      </defs>
-      <!-- Feedback arrow left (to compile) -->
-      <line x1="200" y1="8" x2="200" y2="24" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf1)"/>
-      <text x="208" y="20" fill="#e3b341" font-size="10" font-family="Inter">to compile</text>
-      <!-- Feedback arrow center (to wiki) -->
-      <line x1="420" y1="8" x2="420" y2="24" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf1)"/>
-      <text x="428" y="20" fill="#e3b341" font-size="10" font-family="Inter">to wiki</text>
-      <!-- Feedback arrow right (to runtime) -->
-      <line x1="640" y1="24" x2="640" y2="8" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf2)"/>
-      <text x="648" y="20" fill="#e3b341" font-size="10" font-family="Inter">from runtime</text>
-    </svg>
-  </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════
@@ -701,6 +683,10 @@
     <div class="legend-item">
       <span class="legend-swatch solid-green"></span>
       Published Truth
+    </div>
+    <div class="legend-item">
+      <span class="legend-swatch solid-purple"></span>
+      Query / Context
     </div>
     <div class="legend-item">
       <span class="legend-swatch dashed-gold"></span>
