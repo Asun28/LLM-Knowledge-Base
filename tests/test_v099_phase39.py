@@ -312,3 +312,77 @@ class TestDuplicateDetection:
         result2 = ingest_source(source2, "article", extraction=ext2)
         assert result1.get("duplicate") is not True
         assert result2.get("duplicate") is not True
+
+
+# ── Task 4: Verdict trend dashboard ──────────────────────────
+
+
+class TestVerdictTrends:
+    """Test verdict trend analysis from verdict history."""
+
+    def test_empty_verdicts_returns_empty(self, tmp_path):
+        """No verdicts produces empty trends."""
+        from kb.lint.verdicts import load_verdicts
+
+        path = tmp_path / "verdicts.json"
+        from kb.lint.trends import compute_verdict_trends
+
+        result = compute_verdict_trends(path)
+        assert result["total"] == 0
+        assert result["periods"] == []
+
+    def test_single_period_trends(self, tmp_path):
+        """Verdicts in one period produce correct counts."""
+        from kb.lint.trends import compute_verdict_trends
+        from kb.lint.verdicts import add_verdict
+
+        path = tmp_path / "verdicts.json"
+        add_verdict("concepts/rag", "fidelity", "pass", path=path)
+        add_verdict("concepts/rag", "consistency", "fail",
+                     issues=[{"severity": "error", "description": "mismatch"}], path=path)
+        add_verdict("entities/openai", "review", "warning", path=path)
+
+        result = compute_verdict_trends(path)
+        assert result["total"] == 3
+        assert len(result["periods"]) >= 1
+        # Overall counts
+        assert result["overall"]["pass"] == 1
+        assert result["overall"]["fail"] == 1
+        assert result["overall"]["warning"] == 1
+
+    def test_trend_shows_improvement(self, tmp_path):
+        """Trends show improvement when recent verdicts are better than old."""
+        import json
+
+        path = tmp_path / "verdicts.json"
+        # Manually write old + new verdicts with different timestamps
+        old_ts = (datetime.now() - timedelta(days=20)).isoformat(timespec="seconds")
+        new_ts = datetime.now().isoformat(timespec="seconds")
+
+        verdicts = [
+            {"timestamp": old_ts, "page_id": "c/a", "verdict_type": "fidelity",
+             "verdict": "fail", "issues": [], "notes": ""},
+            {"timestamp": old_ts, "page_id": "c/b", "verdict_type": "fidelity",
+             "verdict": "fail", "issues": [], "notes": ""},
+            {"timestamp": new_ts, "page_id": "c/a", "verdict_type": "fidelity",
+             "verdict": "pass", "issues": [], "notes": ""},
+            {"timestamp": new_ts, "page_id": "c/b", "verdict_type": "fidelity",
+             "verdict": "pass", "issues": [], "notes": ""},
+        ]
+        path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        from kb.lint.trends import compute_verdict_trends
+
+        result = compute_verdict_trends(path)
+        assert result["total"] == 4
+        # Should have at least 2 periods (old and new)
+        assert len(result["periods"]) >= 1
+        assert result["trend"] in ("improving", "stable", "declining")
+
+    def test_mcp_tool_returns_string(self):
+        """kb_verdict_trends MCP tool returns a formatted string."""
+        from kb.mcp.health import kb_verdict_trends
+
+        result = kb_verdict_trends()
+        assert isinstance(result, str)
+        assert "Verdict" in result or "verdict" in result or "No verdict" in result

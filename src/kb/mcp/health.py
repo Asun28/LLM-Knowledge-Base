@@ -69,6 +69,23 @@ def kb_evolve() -> str:
 
 
 @mcp.tool()
+def kb_verdict_trends() -> str:
+    """Show verdict quality trends over time.
+
+    Analyzes the verdict history to show pass/fail/warning rates by week
+    and whether quality is improving, stable, or declining.
+    """
+    try:
+        from kb.lint.trends import compute_verdict_trends, format_verdict_trends
+
+        trends = compute_verdict_trends()
+        return format_verdict_trends(trends)
+    except Exception as e:
+        logger.error("Error computing verdict trends: %s", e)
+        return f"Error computing verdict trends: {e}"
+
+
+@mcp.tool()
 def kb_detect_drift() -> str:
     """Detect wiki pages that may be stale due to raw source changes.
 
