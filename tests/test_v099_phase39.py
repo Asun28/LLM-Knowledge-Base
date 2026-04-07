@@ -658,3 +658,104 @@ class TestContentLengthIngestTiering:
         from kb.config import SMALL_SOURCE_THRESHOLD
         assert isinstance(SMALL_SOURCE_THRESHOLD, int)
         assert SMALL_SOURCE_THRESHOLD > 0
+
+
+# ── Task 8: Cascade update on ingest ─────────────────────────
+
+
+class TestCascadeUpdateOnIngest:
+    """Test that ingest returns affected_pages for cascade updates."""
+
+    def _setup_project(self, tmp_path):
+        """Create project structure with existing pages."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+        return wiki_dir, raw_dir, data_dir
+
+    def test_ingest_returns_affected_pages(self, tmp_path, monkeypatch):
+        """Ingest result includes affected_pages from shared sources/backlinks."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Create existing page that references the same source
+        _make_wiki_page(
+            wiki_dir, "concepts", "existing-concept",
+            "Existing Concept",
+            "Content about existing concept. See [[summaries/new-article]].",
+            source_ref="raw/articles/shared-source.md",
+        )
+
+        # Now ingest a new article
+        source = raw_dir / "articles" / "new-article.md"
+        source.write_text("# New Article\n\nSome content here.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "New Article",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+
+        # Result should include affected_pages key
+        assert "affected_pages" in result
+        assert isinstance(result["affected_pages"], list)
+
+    def test_ingest_affected_pages_includes_backlinks(self, tmp_path, monkeypatch):
+        """Pages that link to the new summary are listed as affected."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Create page that links to a page that will be created by ingest
+        _make_wiki_page(
+            wiki_dir, "concepts", "linker",
+            "Linker Page",
+            "This page references [[entities/test-entity]].",
+        )
+
+        source = raw_dir / "articles" / "test-article.md"
+        source.write_text("# Test Article\n\nContent about test entity.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Test Article",
+            "entities_mentioned": ["Test Entity"],
+            "concepts_mentioned": [],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+        # linker page links to entities/test-entity which was just created
+        affected = result.get("affected_pages", [])
+        assert "concepts/linker" in affected

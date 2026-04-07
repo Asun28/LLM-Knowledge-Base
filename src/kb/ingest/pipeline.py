@@ -28,6 +28,48 @@ from kb.utils.wiki_log import append_wiki_log
 logger = logging.getLogger(__name__)
 
 
+def _find_affected_pages(page_ids: list[str]) -> list[str]:
+    """Find existing pages affected by newly created/updated pages.
+
+    Checks backlinks (pages that link to the new pages) and shared sources.
+    Returns a deduplicated, sorted list of affected page IDs.
+    """
+    if not page_ids:
+        return []
+
+    affected: set[str] = set()
+    try:
+        from kb.compile.linker import build_backlinks
+
+        backlinks_map = build_backlinks()
+        for pid in page_ids:
+            for linker in backlinks_map.get(pid, []):
+                if linker not in page_ids:
+                    affected.add(linker)
+    except Exception as e:
+        logger.debug("Failed to compute backlinks for cascade: %s", e)
+
+    try:
+        from kb.utils.pages import load_all_pages
+
+        all_pages = load_all_pages()
+        # Collect sources for the new/updated pages
+        new_sources: set[str] = set()
+        for page in all_pages:
+            if page["id"] in page_ids:
+                new_sources.update(page["sources"])
+
+        # Find other pages sharing those sources
+        if new_sources:
+            for page in all_pages:
+                if page["id"] not in page_ids and set(page["sources"]) & new_sources:
+                    affected.add(page["id"])
+    except Exception as e:
+        logger.debug("Failed to compute shared sources for cascade: %s", e)
+
+    return sorted(affected)
+
+
 def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     """Check if a source with this content hash was already ingested.
 
@@ -494,6 +536,9 @@ def ingest_source(
         f"updated {len(pages_updated)} pages",
     )
 
+    # 8. Compute affected pages (cascade update detection)
+    affected_pages = _find_affected_pages(pages_created + pages_updated)
+
     result = {
         "source_path": str(source_path),
         "source_type": source_type,
@@ -501,6 +546,7 @@ def ingest_source(
         "pages_created": pages_created,
         "pages_updated": pages_updated,
         "pages_skipped": pages_skipped,
+        "affected_pages": affected_pages,
     }
     if is_small_source:
         result["deferred_entities"] = True
