@@ -68,7 +68,7 @@ def kb_read_page(page_id: str) -> str:
         return f"Page not found: {page_id}"
     try:
         return page_path.read_text(encoding="utf-8")
-    except (OSError, PermissionError) as e:
+    except OSError as e:
         logger.error("Error reading page %s: %s", page_id, e)
         return f"Error: Could not read page {page_id}: {e}"
 
@@ -122,7 +122,7 @@ def kb_list_sources() -> str:
 
         lines.insert(1, f"**Total:** {total} source file(s)")
         return "\n".join(lines)
-    except (OSError, PermissionError) as e:
+    except OSError as e:
         logger.error("Error listing sources: %s", e)
         return f"Error: Could not list sources: {e}"
 
