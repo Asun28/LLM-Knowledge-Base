@@ -90,3 +90,37 @@ class TestMcpBrowseSafety:
             result = browse.kb_list_sources()
 
         assert result.startswith("Error:"), f"Expected error string, got: {result!r}"
+
+
+# ── Task 4: fix_dead_links no phantom entries ─────────────────────
+
+
+class TestFixDeadLinksNoPhantom:
+    """fix_dead_links must not append audit entries for targets absent from page text."""
+
+    def test_no_phantom_entry_when_pattern_does_not_match(self, tmp_wiki):
+        """If broken link record exists but text lacks it, no fix entry is produced."""
+        from unittest.mock import patch
+
+        from kb.lint.checks import fix_dead_links
+
+        # Create a page with NO [[wikilinks]] at all
+        page = tmp_wiki / "concepts" / "clean.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            "---\ntitle: Clean\nsource:\n  - raw/articles/a.md\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nNo links here.",
+            encoding="utf-8",
+        )
+
+        # Inject a fake broken-link record pointing at this page
+        # with a target NOT present in the page body
+        fake_result = {
+            "total_links": 1,
+            "resolved": 0,
+            "broken": [{"source": "concepts/clean", "target": "nonexistent/page"}],
+        }
+        with patch("kb.lint.checks.resolve_wikilinks", return_value=fake_result):
+            fixes = fix_dead_links(tmp_wiki)
+
+        assert fixes == [], f"Expected no phantom fixes, got: {fixes}"

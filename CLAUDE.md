@@ -392,6 +392,9 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
 - `utils/pages.py:14` `WIKI_SUBDIRS` hardcodes subdirectory names instead of deriving from config constants; adding a new page type subdir without updating this tuple causes `load_all_pages` to silently miss it
 - `evolve/analyzer.py:228` `except Exception: pass` in `generate_evolution_report` too broad; real bugs in `get_flagged_pages` are swallowed with no log output (should at least `logger.debug`)
 - `feedback/reliability.py:31` `get_flagged_pages` docstring says "below threshold" but code uses `<=`; pages at exactly `LOW_TRUST_THRESHOLD` are flagged but the docstring misleadingly implies they are not
+- `mcp/browse.py` `kb_search` and `kb_list_pages` missing outer `try/except` (same backlog pattern as `kb_read_page`/`kb_list_sources` but not yet documented); `kb_list_sources` also calls `f.stat()` inside its loop with no error handling — deleted file between `glob()` and `stat()` propagates `OSError` out of the entire function
+- `mcp/app.py` `_format_ingest_result` dict-branch for `affected` is dead code since v0.5.0 (pipeline returns flat `list[str]`); backlink vs shared-source distinction is silently lost in the `~ ` prefix output
+- `mcp/core.py` `kb_compile_scan(incremental=False)` full-scan branch (`scan_raw_sources()` path) has zero test coverage; only the incremental=True path has tests
 
 **Phase 4 next:** Two-phase compile pipeline (batch cross-source merging before writing), pre-publish validation gate, iterative multi-hop retrieve/trace loop (BM25 + graph traversal), answer trace enforcement (reject uncited claims), conversation→KB promotion (positively-rated query answers → wiki pages), DSPy Teacher-Student optimization, RAGAS evaluation.
 

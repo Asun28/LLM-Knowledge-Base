@@ -67,28 +67,33 @@ def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
         modified = False
 
         for target in targets:
+            old_content = content
+
             # Match [[target|display]] or [[target]]
             # Use re.IGNORECASE since extract_wikilinks lowercases targets
             pattern = re.compile(r"\[\[" + re.escape(target) + r"\|([^\]]+)\]\]", re.IGNORECASE)
             if pattern.search(content):
                 content = pattern.sub(r"\1", content)
-                modified = True
             else:
                 # No display text — replace [[target]] with target basename
-                pattern_plain = re.compile(r"\[\[" + re.escape(target) + r"\]\]", re.IGNORECASE)
+                pattern_plain = re.compile(
+                    r"\[\[" + re.escape(target) + r"\]\]", re.IGNORECASE
+                )
                 display = target.split("/")[-1] if "/" in target else target
                 content = pattern_plain.sub(display, content)
-                modified = True
 
-            fixes.append(
-                {
-                    "check": "dead_link_fixed",
-                    "severity": "info",
-                    "page": source_pid,
-                    "target": target,
-                    "message": f"Fixed broken wikilink [[{target}]] in {source_pid}",
-                }
-            )
+            # Only record a fix if the content actually changed
+            if content != old_content:
+                modified = True
+                fixes.append(
+                    {
+                        "check": "dead_link_fixed",
+                        "severity": "info",
+                        "page": source_pid,
+                        "target": target,
+                        "message": f"Fixed broken wikilink [[{target}]] in {source_pid}",
+                    }
+                )
 
         if modified:
             page_path.write_text(content, encoding="utf-8")
