@@ -259,10 +259,10 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.11). Format: [Kee
 
 ## Automation
 
-Auto-commit hooks are configured in `.claude/settings.local.json` with API-based code review gates (`scripts/hook_review.py`):
-- **Stop hook** — pytest → `git add -A` → **pre-commit review** (Haiku API) → commit → **post-commit review** (Haiku API) → push. Timeout 300s.
-- **PostToolUse (Bash)** — Same flow, triggered when a Bash command contains `pytest` with "passed" in output. Timeout 180s.
+Auto-commit hooks are configured in `.claude/settings.local.json` using `claude -p` with native skills (no external API calls):
+- **Stop hook** — pytest → `git add -A` → `claude -p` invokes `everything-claude-code:code-review` skill → commit + push if review passes. Timeout 300s.
+- **PostToolUse (Bash)** — triggers when a Bash command contains `pytest` with "passed" in output → same skill-based review → commit + push. Timeout 180s.
 
-Review script (`scripts/hook_review.py`) calls `claude-haiku-4-5` via Anthropic API. Two modes: `pre` (bugs/security/breaking changes gate commit) and `post` (coding standards/correctness gate push). On API error, reviews are skipped gracefully. Change `REVIEW_MODEL` in the script for deeper reviews.
+Both hooks call `claude -p "... invoke Skill for everything-claude-code:code-review ..." --allowedTools "Skill,Bash,Read,Grep"`. Claude uses its native skill to gate commits — no raw API calls, no external script. Swap `everything-claude-code:code-review` for `superpowers:requesting-code-review` to use the actor-critic reviewer instead.
 
 All tools are auto-approved for this project (permissions in `settings.local.json`).
