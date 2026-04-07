@@ -18,7 +18,6 @@ from kb.config import (
     WIKI_INDEX,
     WIKI_SOURCES,
 )
-from kb.compile.linker import inject_wikilinks
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
 from kb.utils.pages import normalize_sources
@@ -548,12 +547,17 @@ def ingest_source(
 
     # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
     wikilinks_injected: list[str] = []
-    for pid, ptitle in new_pages_with_titles:
-        try:
-            updated = inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
-            wikilinks_injected.extend(updated)
-        except Exception as e:
-            logger.debug("inject_wikilinks failed for %s: %s", pid, e)
+    try:
+        from kb.compile.linker import inject_wikilinks as _inject_wikilinks
+
+        for pid, ptitle in new_pages_with_titles:
+            try:
+                updated = _inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
+                wikilinks_injected.extend(updated)
+            except Exception as e:
+                logger.debug("inject_wikilinks failed for %s: %s", pid, e)
+    except ImportError as e:
+        logger.debug("inject_wikilinks import failed: %s", e)
 
     result = {
         "source_path": str(source_path),
