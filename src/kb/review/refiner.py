@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime
 from pathlib import Path
 
-from kb.config import REVIEW_HISTORY_PATH, WIKI_DIR
+from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
 from kb.utils.wiki_log import append_wiki_log
 
 
@@ -93,6 +93,8 @@ def refine_page(
             "status": "applied",
         }
     )
+    if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
+        history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
     save_review_history(history, history_path)
 
     # Append to wiki/log.md (auto-creates if missing)
