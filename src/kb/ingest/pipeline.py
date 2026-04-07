@@ -537,7 +537,7 @@ def ingest_source(
     )
 
     # 8. Compute affected pages (cascade update detection)
-    affected_pages = _find_affected_pages(pages_created + pages_updated)
+    affected_pages = _find_affected_pages(pages_created + pages_updated, WIKI_DIR)
 
     result = {
         "source_path": str(source_path),
