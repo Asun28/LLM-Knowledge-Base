@@ -419,6 +419,44 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 3.9 (complete, v0.9.9):** Content growth infrastructure — env-configurable model tiers, PageRank-blended search, hash-based duplicate detection, verdict trend dashboard (`kb_verdict_trends`), Mermaid graph export (`kb_graph_viz`), retroactive wikilink injection, content-length ingest tiering, cascade update detection. 3 new MCP tools (26 total), 32 new tests (550 total)
 - **Phase 4 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave, Pydantic extraction validation, arxiv MCP integration, semantic dependency tracking, URL-based smart routing. Research in `research/agent-architecture-research.md`
 
+## Special Thanks
+
+This project stands on the shoulders of these ideas, tools, and people:
+
+### Origin
+
+| Project | Author | Contribution |
+|---------|--------|-------------|
+| [LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | Andrej Karpathy | The original "compile, don't retrieve" pattern that started it all |
+
+### Architecture Inspiration
+
+| Project | What we learned |
+|---------|----------------|
+| [DocMason](https://github.com/JetXu-LLM/DocMason) | Architecture diagram style, pre-publish validation gate, iterative retrieve/trace loop, answer trace enforcement, structured knowledge index |
+| [llm-wiki-compiler](https://github.com/ussumant/llm-wiki-compiler) | Two-phase compile pipeline (extract across all sources before writing) |
+| [Graphify](https://github.com/safishamsi/graphify) | Leiden community detection, health report generation, surprise scoring, per-claim confidence markers, deterministic pre-extraction |
+| [rvk7895/llm-knowledge-bases](https://github.com/rvk7895/llm-knowledge-bases) | Reference Claude Code plugin implementing compile/query/lint cycle for Obsidian |
+
+### Knowledge System Patterns
+
+| Project | What we learned |
+|---------|----------------|
+| [Ars Contexta](https://github.com/agenticnotetaking/arscontexta) | Individualized knowledge system generation through conversation |
+| [Remember.md](https://github.com/remember-md/remember) | Session knowledge extraction, YAML frontmatter + wikilinks for Obsidian compatibility |
+| [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills) | Agent skills for working with Obsidian vaults |
+| [lean-ctx](https://github.com/yvgude/lean-ctx) | Hybrid context optimization techniques for reducing token consumption |
+| [DSPy optimization patterns](https://github.com/KazKozDev/dspy-optimization-patterns) | Teacher-Student optimization for prompt tuning |
+
+### Ecosystem & Research
+
+| Project | What we learned |
+|---------|----------------|
+| [awesome-llm-knowledge-bases](https://github.com/SingggggYee/awesome-llm-knowledge-bases) | Curated tool list for LLM-powered personal knowledge bases |
+| [qmd](https://github.com/tobi/qmd) | Markdown-native querying patterns |
+| [Quartz](https://github.com/jackyzha0/quartz) | Static site generation from wiki content |
+| [Microsoft GraphRAG](https://github.com/microsoft/graphrag) | Graph-based retrieval augmented generation patterns |
+
 ## License
 
 [MIT License](LICENSE)
