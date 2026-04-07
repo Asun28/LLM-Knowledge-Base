@@ -4,10 +4,9 @@ import logging
 import re
 from pathlib import Path
 
-import frontmatter
-
 from kb.config import WIKI_DIR
-from kb.graph.builder import build_graph, page_id, scan_wiki_pages
+from kb.graph.builder import build_graph
+from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +22,9 @@ def _sanitize_label(text: str) -> str:
     return re.sub(r'["\[\]{}|<>]', "", text).strip()
 
 
-def _get_page_titles(wiki_dir: Path) -> dict[str, str]:
-    """Load title from frontmatter for each wiki page."""
-    titles = {}
-    for page_path in scan_wiki_pages(wiki_dir):
-        pid = page_id(page_path, wiki_dir)
-        try:
-            post = frontmatter.load(str(page_path))
-            titles[pid] = post.metadata.get("title", pid.split("/")[-1])
-        except Exception:
-            titles[pid] = pid.split("/")[-1]
-    return titles
+def _safe_node_id(node: str) -> str:
+    """Convert a page ID to a Mermaid-safe node identifier."""
+    return node.replace("/", "_").replace("-", "_")
 
 
 def export_mermaid(
@@ -58,8 +49,8 @@ def export_mermaid(
     if graph.number_of_nodes() == 0:
         return "graph LR\n  %% No pages in wiki"
 
-    # Load page titles for labels
-    titles = _get_page_titles(wiki_dir)
+    # Load page titles from the already-scanned pages (avoids double disk scan)
+    titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir)}
 
     # Auto-prune if needed
     nodes_to_include: set[str]
@@ -88,15 +79,12 @@ def export_mermaid(
         lines.append(f"  subgraph {page_type}")
         for node in nodes:
             title = _sanitize_label(titles.get(node, node.split("/")[-1]))
-            safe_id = node.replace("/", "_").replace("-", "_")
-            lines.append(f'    {safe_id}["{title}"]')
+            lines.append(f'    {_safe_node_id(node)}["{title}"]')
         lines.append("  end")
 
     # Define edges (only between included nodes)
     for source, target in graph.edges():
         if source in nodes_to_include and target in nodes_to_include:
-            safe_source = source.replace("/", "_").replace("-", "_")
-            safe_target = target.replace("/", "_").replace("-", "_")
-            lines.append(f"  {safe_source} --> {safe_target}")
+            lines.append(f"  {_safe_node_id(source)} --> {_safe_node_id(target)}")
 
     return "\n".join(lines)

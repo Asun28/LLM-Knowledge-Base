@@ -4,6 +4,10 @@ A personal, LLM-maintained knowledge wiki that **compiles** raw sources into str
 
 Inspired by [Karpathy's LLM Knowledge Bases pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
+## Architecture
+
+![LLM Knowledge Base Architecture](others/architecture-diagram.png)
+
 ## How It Works
 
 ```

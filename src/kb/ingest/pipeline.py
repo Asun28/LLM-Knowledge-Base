@@ -37,6 +37,7 @@ def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> l
     if not page_ids:
         return []
 
+    page_id_set = set(page_ids)
     affected: set[str] = set()
     try:
         from kb.compile.linker import build_backlinks
@@ -44,7 +45,7 @@ def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> l
         backlinks_map = build_backlinks(wiki_dir)
         for pid in page_ids:
             for linker in backlinks_map.get(pid, []):
-                if linker not in page_ids:
+                if linker not in page_id_set:
                     affected.add(linker)
     except Exception as e:
         logger.debug("Failed to compute backlinks for cascade: %s", e)
@@ -53,16 +54,14 @@ def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> l
         from kb.utils.pages import load_all_pages
 
         all_pages = load_all_pages(wiki_dir)
-        # Collect sources for the new/updated pages
         new_sources: set[str] = set()
         for page in all_pages:
-            if page["id"] in page_ids:
+            if page["id"] in page_id_set:
                 new_sources.update(page["sources"])
 
-        # Find other pages sharing those sources
         if new_sources:
             for page in all_pages:
-                if page["id"] not in page_ids and set(page["sources"]) & new_sources:
+                if page["id"] not in page_id_set and set(page["sources"]) & new_sources:
                     affected.add(page["id"])
     except Exception as e:
         logger.debug("Failed to compute shared sources for cascade: %s", e)
@@ -411,9 +410,7 @@ def ingest_source(
         )
 
     # 2. Create or update entity pages (skip for small sources)
-    entities = extraction.get("entities_mentioned") or []
-    if is_small_source:
-        entities = []  # Defer entity page creation for small sources
+    entities = [] if is_small_source else (extraction.get("entities_mentioned") or [])
     if not isinstance(entities, list):
         logger.warning(
             "entities_mentioned is not a list (%s), skipping entities",
@@ -458,9 +455,7 @@ def ingest_source(
             pages_created.append(f"entities/{entity_slug}")
 
     # 3. Create or update concept pages (skip for small sources)
-    concepts = extraction.get("concepts_mentioned") or []
-    if is_small_source:
-        concepts = []  # Defer concept page creation for small sources
+    concepts = [] if is_small_source else (extraction.get("concepts_mentioned") or [])
     if not isinstance(concepts, list):
         logger.warning(
             "concepts_mentioned is not a list (%s), skipping concepts",
