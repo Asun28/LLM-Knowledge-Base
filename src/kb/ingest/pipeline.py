@@ -31,8 +31,11 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     """Check if a source with this content hash was already ingested.
 
     Compares against the compile manifest to detect duplicate content
-    from different file paths. Skips template entries.
+    from different file paths. Skips template entries. Only flags as
+    duplicate if the other source file still exists on disk.
     """
+    from kb.config import PROJECT_ROOT
+
     try:
         from kb.compile.compiler import load_manifest
 
@@ -41,7 +44,10 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
             if ref.startswith("_template/"):
                 continue
             if stored_hash == source_hash and ref != source_ref:
-                return True
+                # Verify the other source still exists (avoid stale manifest entries)
+                other_path = PROJECT_ROOT / ref
+                if other_path.exists():
+                    return True
     except Exception as e:
         logger.debug("Duplicate check skipped: %s", e)
     return False
