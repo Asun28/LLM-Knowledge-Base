@@ -132,34 +132,42 @@ def test_make_source_ref_fallback(tmp_path):
 # ── H3: Fence stripping edge cases ─────────────────────────────
 
 
-def test_fence_stripping_no_newline():
-    """Fence stripping handles ``` with no newline."""
+def test_extract_structured_output_basic():
+    """extract_from_source uses tool_use for structured output."""
     from kb.ingest.extractors import extract_from_source
 
-    with patch("kb.ingest.extractors.call_llm") as mock_llm:
-        mock_llm.return_value = '```{"title": "test"}```'
+    with patch("kb.ingest.extractors.call_llm_json") as mock_llm_json:
+        mock_llm_json.return_value = {"title": "test"}
         result = extract_from_source("content", "article")
         assert result["title"] == "test"
+        mock_llm_json.assert_called_once()
 
 
-def test_fence_stripping_normal():
-    """Fence stripping handles normal ```json\\n...``` format."""
+def test_extract_structured_output_with_lists():
+    """extract_from_source returns lists from structured output."""
     from kb.ingest.extractors import extract_from_source
 
-    with patch("kb.ingest.extractors.call_llm") as mock_llm:
-        mock_llm.return_value = '```json\n{"title": "test"}\n```'
+    with patch("kb.ingest.extractors.call_llm_json") as mock_llm_json:
+        mock_llm_json.return_value = {
+            "title": "test",
+            "entities_mentioned": ["OpenAI", "Google"],
+            "concepts_mentioned": ["RAG"],
+        }
         result = extract_from_source("content", "article")
         assert result["title"] == "test"
+        assert result["entities_mentioned"] == ["OpenAI", "Google"]
 
 
-def test_fence_stripping_no_fences():
-    """Clean JSON without fences passes through."""
+def test_extract_structured_output_schema_passed():
+    """extract_from_source passes schema to call_llm_json."""
     from kb.ingest.extractors import extract_from_source
 
-    with patch("kb.ingest.extractors.call_llm") as mock_llm:
-        mock_llm.return_value = '{"title": "test"}'
-        result = extract_from_source("content", "article")
-        assert result["title"] == "test"
+    with patch("kb.ingest.extractors.call_llm_json") as mock_llm_json:
+        mock_llm_json.return_value = {"title": "test"}
+        extract_from_source("content", "article")
+        call_kwargs = mock_llm_json.call_args
+        assert "schema" in call_kwargs.kwargs
+        assert "properties" in call_kwargs.kwargs["schema"]
 
 
 # ── H8: Frontmatter split edge case ────────────────────────────

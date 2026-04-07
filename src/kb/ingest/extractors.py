@@ -1,13 +1,37 @@
 """Source-type-specific extraction logic (article, paper, video, etc.)."""
 
-import json
+import re
 
 import yaml
 
 from kb.config import SOURCE_TYPE_DIRS, TEMPLATES_DIR
-from kb.utils.llm import call_llm
+from kb.utils.llm import call_llm_json
 
 VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
+
+# Fields that are always lists across all extraction templates.
+# Used as fallback when template specs lack explicit type annotations.
+KNOWN_LIST_FIELDS = frozenset({
+    # Common across all templates
+    "entities_mentioned", "concepts_mentioned",
+    # Article
+    "key_claims", "evidence",
+    # Paper
+    "authors", "citations_relevant", "results", "limitations",
+    # Video
+    "key_points", "claims_with_timestamps", "action_items",
+    # Podcast
+    "speakers", "topics_by_timestamp", "speaker_claims",
+    "agreements", "disagreements",
+    # Repo
+    "dependencies", "usage_patterns",
+    # Book
+    "chapters", "key_themes",
+    # Dataset
+    "columns", "use_cases",
+    # Conversation
+    "participants", "topic_segments", "key_exchanges",
+})
 
 
 def load_template(source_type: str) -> dict:
@@ -26,6 +50,75 @@ def load_template(source_type: str) -> dict:
     if not template_path.exists():
         raise FileNotFoundError(f"No template for source type: {source_type}")
     return yaml.safe_load(template_path.read_text(encoding="utf-8"))
+
+
+def _parse_field_spec(spec: str) -> tuple[str, str, bool]:
+    """Parse a template field spec into (name, description, is_list).
+
+    Handles two formats:
+    - Simple: "field_name" or "field_name  # comment"
+    - Annotated: "field_name (type): description"
+    """
+    spec = spec.strip().strip('"')
+
+    # Strip YAML-style inline comments
+    if " #" in spec:
+        spec = spec[: spec.index(" #")].strip()
+
+    # Check for annotated format: "name (type): description"
+    annotated = re.match(r"^(\w+)\s*\(([^)]+)\)\s*:\s*(.+)$", spec)
+    if annotated:
+        name = annotated.group(1)
+        type_hint = annotated.group(2).strip()
+        desc = annotated.group(3).strip()
+        is_list = "list" in type_hint.lower()
+        return name, desc, is_list
+
+    # Simple format: "field_name" or "field_name: description"
+    if ":" in spec:
+        name, desc = spec.split(":", 1)
+        name = name.strip()
+        desc = desc.strip()
+    else:
+        name = spec.strip()
+        desc = ""
+
+    is_list = name in KNOWN_LIST_FIELDS
+    return name, desc, is_list
+
+
+def build_extraction_schema(template: dict) -> dict:
+    """Build JSON Schema from extraction template fields for tool_use.
+
+    Parses template field specs into a JSON Schema object that can be
+    used with Claude's tool_use feature for guaranteed structured output.
+    """
+    properties = {}
+    required = []
+
+    for field_spec in template["extract"]:
+        name, desc, is_list = _parse_field_spec(field_spec)
+
+        if is_list:
+            properties[name] = {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": desc or name.replace("_", " "),
+            }
+        else:
+            properties[name] = {
+                "type": "string",
+                "description": desc or name.replace("_", " "),
+            }
+
+        if name in ("title", "name"):
+            required.append(name)
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
 
 
 def build_extraction_prompt(content: str, template: dict) -> str:
@@ -56,6 +149,9 @@ SOURCE DOCUMENT:
 def extract_from_source(content: str, source_type: str) -> dict:
     """Call the LLM to extract structured data from raw source content.
 
+    Uses Claude's tool_use feature for guaranteed valid JSON output,
+    eliminating JSON parsing errors from code fences or malformed text.
+
     Args:
         content: The raw source text.
         source_type: One of: article, paper, repo, video, podcast, book, dataset, conversation.
@@ -65,29 +161,14 @@ def extract_from_source(content: str, source_type: str) -> dict:
     """
     template = load_template(source_type)
     prompt = build_extraction_prompt(content, template)
-    system_msg = "You are a precise information extractor. Return only valid JSON."
-    response = call_llm(prompt, tier="write", system=system_msg)
+    schema = build_extraction_schema(template)
+    system_msg = "You are a precise information extractor."
 
-    # Strip markdown code fences if present
-    cleaned = response.strip()
-    if cleaned.startswith("```"):
-        # Remove opening fence (```json or ```)
-        newline_pos = cleaned.find("\n")
-        if newline_pos != -1:
-            cleaned = cleaned[newline_pos + 1 :]
-        else:
-            # Single-line: strip opening ``` or ```json prefix
-            cleaned = cleaned[3:].lstrip()
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
-
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"LLM returned invalid JSON for {source_type} extraction: {e}\n"
-            f"Response (first 200 chars): {response[:200]}"
-        ) from e
+    return call_llm_json(
+        prompt,
+        tier="write",
+        system=system_msg,
+        schema=schema,
+        tool_name="extract",
+        tool_description=f"Extract structured data from a {source_type} document.",
+    )

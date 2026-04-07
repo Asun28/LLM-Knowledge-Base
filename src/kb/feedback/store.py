@@ -102,7 +102,9 @@ def add_feedback_entry(
 
     # Update page scores with Bayesian smoothing
     # "wrong" is weighted 2x because incorrect information is worse than incomplete
-    for page_id in cited_pages:
+    # Deduplicate cited_pages to prevent inflated trust scores
+    unique_cited = list(dict.fromkeys(cited_pages))
+    for page_id in unique_cited:
         if page_id not in data["page_scores"]:
             data["page_scores"][page_id] = {
                 "useful": 0,

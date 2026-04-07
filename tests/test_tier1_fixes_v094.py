@@ -130,40 +130,44 @@ class TestSuggestNewPagesNoRedundantSuffix:
 # ===========================================================================
 # Fix 4 — JSON fence stripping handles whitespace after opening fence
 # ===========================================================================
-class TestJsonFenceStripping:
-    """extract_from_source should handle various JSON fence formats."""
+class TestStructuredExtraction:
+    """extract_from_source uses tool_use for structured output."""
 
-    @patch("kb.ingest.extractors.call_llm")
-    def test_multiline_fence_with_whitespace(self, mock_llm):
-        """Standard multiline ```json fence with indented content."""
+    @patch("kb.ingest.extractors.call_llm_json")
+    def test_basic_extraction(self, mock_llm_json):
+        """Structured output returns dict directly without JSON parsing."""
         from kb.ingest.extractors import extract_from_source
 
-        mock_llm.return_value = '```json\n  {"title": "test", "summary": "ok"}\n```'
+        mock_llm_json.return_value = {"title": "test", "summary": "ok"}
 
         result = extract_from_source("Some content", "article")
 
         assert result["title"] == "test"
         assert result["summary"] == "ok"
 
-    @patch("kb.ingest.extractors.call_llm")
-    def test_single_line_fence(self, mock_llm):
-        """Single-line ```json{...}``` fence (no newline)."""
+    @patch("kb.ingest.extractors.call_llm_json")
+    def test_extraction_with_complex_data(self, mock_llm_json):
+        """Structured output handles complex nested data."""
         from kb.ingest.extractors import extract_from_source
 
-        mock_llm.return_value = '```json{"title":"test","summary":"ok"}```'
+        mock_llm_json.return_value = {
+            "title": "test",
+            "key_claims": ["claim1", "claim2"],
+            "entities_mentioned": ["OpenAI"],
+        }
 
         result = extract_from_source("Some content", "article")
 
         assert result["title"] == "test"
-        assert result["summary"] == "ok"
+        assert len(result["key_claims"]) == 2
 
-    @patch("kb.ingest.extractors.call_llm")
-    def test_single_line_fence_with_space_before_json(self, mock_llm):
-        """Single-line ``` json{...}``` — space between ``` and json."""
+    @patch("kb.ingest.extractors.call_llm_json")
+    def test_extraction_uses_write_tier(self, mock_llm_json):
+        """Structured extraction uses the 'write' model tier."""
         from kb.ingest.extractors import extract_from_source
 
-        mock_llm.return_value = '``` json{"title":"test"}```'
+        mock_llm_json.return_value = {"title": "test"}
 
-        result = extract_from_source("Some content", "article")
+        extract_from_source("Some content", "article")
 
-        assert result["title"] == "test"
+        assert mock_llm_json.call_args.kwargs["tier"] == "write"

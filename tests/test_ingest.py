@@ -37,21 +37,19 @@ def test_build_extraction_prompt():
     assert "JSON" in prompt
 
 
-@patch("kb.ingest.extractors.call_llm")
-def test_extract_from_source(mock_llm):
-    """extract_from_source calls LLM and returns parsed JSON."""
-    mock_llm.return_value = json.dumps(
-        {
-            "title": "Test Article",
-            "author": "Test Author",
-            "entities_mentioned": ["GPT-4"],
-            "concepts_mentioned": ["RAG"],
-        }
-    )
+@patch("kb.ingest.extractors.call_llm_json")
+def test_extract_from_source(mock_llm_json):
+    """extract_from_source calls LLM with tool_use and returns structured data."""
+    mock_llm_json.return_value = {
+        "title": "Test Article",
+        "author": "Test Author",
+        "entities_mentioned": ["GPT-4"],
+        "concepts_mentioned": ["RAG"],
+    }
     result = extract_from_source("Some article content", "article")
     assert result["title"] == "Test Article"
     assert "GPT-4" in result["entities_mentioned"]
-    mock_llm.assert_called_once()
+    mock_llm_json.assert_called_once()
 
 
 # -- Pipeline tests -------------------------------------------------------------

@@ -225,54 +225,57 @@ def test_ingest_no_skipped_without_collisions(tmp_path):
 # ── 4. JSON Fence Hardening ──────────────────────────────────────
 
 
-def test_fence_strip_normal():
-    """Standard ```json ... ``` fencing is stripped."""
+def test_extract_structured_output():
+    """extract_from_source uses tool_use for guaranteed structured output."""
     from kb.ingest.extractors import extract_from_source
 
-    response_text = '```json\n{"title": "Test"}\n```'
-    with patch("kb.ingest.extractors.call_llm", return_value=response_text):
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"title": "Test"}):
         result = extract_from_source("content", "article")
     assert result["title"] == "Test"
 
 
-def test_fence_strip_no_newline():
-    """Single-line ```json{...}``` without newline is handled."""
+def test_extract_structured_with_entities():
+    """extract_from_source returns entity lists from structured output."""
     from kb.ingest.extractors import extract_from_source
 
-    response_text = '```json{"title": "Test"}```'
-    with patch("kb.ingest.extractors.call_llm", return_value=response_text):
+    data = {"title": "Test", "entities_mentioned": ["OpenAI"], "concepts_mentioned": ["RAG"]}
+    with patch("kb.ingest.extractors.call_llm_json", return_value=data):
         result = extract_from_source("content", "article")
-    assert result["title"] == "Test"
+    assert result["entities_mentioned"] == ["OpenAI"]
 
 
-def test_fence_strip_bare_backticks():
-    """Bare ``` ... ``` without json label is handled."""
+def test_extract_structured_passes_schema():
+    """extract_from_source builds and passes schema to call_llm_json."""
     from kb.ingest.extractors import extract_from_source
 
-    response_text = '```\n{"title": "Test"}\n```'
-    with patch("kb.ingest.extractors.call_llm", return_value=response_text):
-        result = extract_from_source("content", "article")
-    assert result["title"] == "Test"
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"title": "Test"}) as mock:
+        extract_from_source("content", "article")
+    kwargs = mock.call_args.kwargs
+    assert "schema" in kwargs
+    schema = kwargs["schema"]
+    assert "title" in schema["properties"]
+    assert "title" in schema["required"]
 
 
-def test_fence_strip_no_fence():
-    """Plain JSON without fences works."""
+def test_extract_structured_paper_type():
+    """extract_from_source works with paper source type."""
     from kb.ingest.extractors import extract_from_source
 
-    response_text = '{"title": "Test"}'
-    with patch("kb.ingest.extractors.call_llm", return_value=response_text):
-        result = extract_from_source("content", "article")
-    assert result["title"] == "Test"
+    data = {"title": "Paper", "authors": ["Author A"], "abstract": "Summary"}
+    with patch("kb.ingest.extractors.call_llm_json", return_value=data):
+        result = extract_from_source("content", "paper")
+    assert result["title"] == "Paper"
+    assert result["authors"] == ["Author A"]
 
 
-def test_fence_strip_single_line_bare():
-    """Single-line ```{...}``` without json label."""
+def test_extract_structured_repo_name_required():
+    """extract_from_source schema requires 'name' for repo type."""
     from kb.ingest.extractors import extract_from_source
 
-    response_text = '```{"title": "Test"}```'
-    with patch("kb.ingest.extractors.call_llm", return_value=response_text):
-        result = extract_from_source("content", "article")
-    assert result["title"] == "Test"
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"name": "proj"}) as mock:
+        extract_from_source("content", "repo")
+    schema = mock.call_args.kwargs["schema"]
+    assert "name" in schema["required"]
 
 
 # ── 5. MCP Error Handling ────────────────────────────────────────

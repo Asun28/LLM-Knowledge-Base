@@ -111,6 +111,12 @@ def kb_ingest(
         path = PROJECT_ROOT / path
     path = path.resolve()
 
+    # Validate source path stays within project directory
+    try:
+        path.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        return f"Error: Source path must be within the project directory: {source_path}"
+
     if not path.exists():
         return f"Error: Source file not found: {path}"
 

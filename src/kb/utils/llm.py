@@ -30,38 +30,17 @@ def get_client() -> anthropic.Anthropic:
     return _client
 
 
-def call_llm(
-    prompt: str,
-    *,
-    tier: str = "write",
-    system: str = "",
-    max_tokens: int = 4096,
-) -> str:
-    """Call Claude with the appropriate model tier.
+def _make_api_call(kwargs: dict, model: str):
+    """Execute an API call with retry logic on transient errors.
 
-    Tiers: "scan" (Haiku), "write" (Sonnet), "orchestrate" (Opus).
-
-    Retries up to MAX_RETRIES times on transient errors (rate limits,
-    overload, network) with exponential backoff. Wraps API errors in
-    a descriptive LLMError.
+    Retries up to MAX_RETRIES on rate limits, overload, connection errors,
+    and timeouts with exponential backoff. Returns the raw API response.
     """
     client = get_client()
-    if tier not in MODEL_TIERS:
-        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
-    model = MODEL_TIERS[tier]
-
-    messages = [{"role": "user", "content": prompt}]
-    kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
-    if system:
-        kwargs["system"] = system
-
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.messages.create(**kwargs)
-            if not response.content:
-                raise LLMError(f"Empty response from {model} — check API key and quota")
-            return response.content[0].text
+            return client.messages.create(**kwargs)
 
         except anthropic.RateLimitError as e:
             last_error = e
@@ -119,6 +98,94 @@ def call_llm(
     else:
         msg = f"Failed after {MAX_RETRIES} retries calling {model}: {last_error}"
     raise LLMError(msg) from last_error
+
+
+def call_llm(
+    prompt: str,
+    *,
+    tier: str = "write",
+    system: str = "",
+    max_tokens: int = 4096,
+) -> str:
+    """Call Claude with the appropriate model tier.
+
+    Tiers: "scan" (Haiku), "write" (Sonnet), "orchestrate" (Opus).
+
+    Retries up to MAX_RETRIES times on transient errors (rate limits,
+    overload, network) with exponential backoff. Wraps API errors in
+    a descriptive LLMError.
+    """
+    if tier not in MODEL_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
+    model = MODEL_TIERS[tier]
+
+    messages = [{"role": "user", "content": prompt}]
+    kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
+    if system:
+        kwargs["system"] = system
+
+    response = _make_api_call(kwargs, model)
+    if not response.content:
+        raise LLMError(f"Empty response from {model} — check API key and quota")
+    return response.content[0].text
+
+
+def call_llm_json(
+    prompt: str,
+    *,
+    tier: str = "write",
+    system: str = "",
+    schema: dict,
+    tool_name: str = "extract",
+    tool_description: str = "Extract structured data from the source document.",
+    max_tokens: int = 4096,
+) -> dict:
+    """Call Claude with forced tool_use for guaranteed structured JSON output.
+
+    Uses the Anthropic API's tool_use feature to get guaranteed valid JSON
+    matching the provided schema, eliminating JSON parsing errors.
+
+    Args:
+        prompt: The user message prompt.
+        tier: Model tier — "scan", "write", or "orchestrate".
+        system: Optional system message.
+        schema: JSON Schema for the expected output structure.
+        tool_name: Name for the virtual tool definition.
+        tool_description: Description for the virtual tool.
+        max_tokens: Maximum output tokens.
+
+    Returns:
+        Dict matching the provided schema.
+
+    Raises:
+        LLMError: On API failures after retries or missing tool_use block.
+        ValueError: On invalid tier.
+    """
+    if tier not in MODEL_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
+    model = MODEL_TIERS[tier]
+
+    tool_def = {
+        "name": tool_name,
+        "description": tool_description,
+        "input_schema": schema,
+    }
+    messages = [{"role": "user", "content": prompt}]
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+        "tools": [tool_def],
+        "tool_choice": {"type": "tool", "name": tool_name},
+    }
+    if system:
+        kwargs["system"] = system
+
+    response = _make_api_call(kwargs, model)
+    for block in response.content:
+        if block.type == "tool_use":
+            return block.input
+    raise LLMError(f"No tool_use block in response from {model}")
 
 
 class LLMError(Exception):
