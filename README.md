@@ -80,13 +80,16 @@ kb ingest raw/articles/article-name.md --type article
 ```
 
 The ingest pipeline:
-1. Reads the raw source
+1. Reads the raw source and checks for **duplicate content** (hash-based dedup against manifest)
 2. Calls Claude (Sonnet) to extract title, key claims, entities, concepts
 3. Creates `wiki/summaries/article-name.md`
 4. Creates/updates entity pages in `wiki/entities/` (with context from extraction data)
 5. Creates/updates concept pages in `wiki/concepts/` (with context from extraction data)
-6. Updates `wiki/index.md`, `wiki/_sources.md`, `wiki/log.md`
-7. Detects and warns on slug collisions (e.g., "GPT 4" and "GPT-4" both → `gpt-4`)
+6. **Injects retroactive wikilinks** into existing pages that mention newly created page titles
+7. Updates `wiki/index.md`, `wiki/_sources.md`, `wiki/log.md`
+8. Returns **affected pages** (backlinks + shared sources) for cascade review
+9. Detects and warns on slug collisions (e.g., "GPT 4" and "GPT-4" both → `gpt-4`)
+10. **Short sources** (<1000 chars) can defer entity/concept creation to prevent stub proliferation
 
 Source type is auto-detected from the `raw/` subdirectory, or specify with `--type`:
 `article`, `paper`, `repo`, `video`, `podcast`, `book`, `dataset`, `conversation`
@@ -110,22 +113,24 @@ Ask questions and get answers with citations:
 kb query "What is compile-not-retrieve?"
 ```
 
-Searches wiki pages using BM25 ranking (term frequency saturation, inverse document frequency, document length normalization), builds context (truncated to 80K chars), and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
+Searches wiki pages using BM25 ranking blended with PageRank (well-linked pages rank higher), builds context (truncated to 80K chars), and calls Claude (Opus) to synthesize an answer with `[source: page_id]` citations.
 
 ### Lint
 
 Run health checks:
 
 ```bash
-kb lint
+kb lint              # Report issues
+kb lint --fix        # Auto-fix dead links (replaces broken [[links]] with plain text)
 ```
 
 Checks for:
-- Dead wikilinks (broken `[[references]]`)
+- Dead wikilinks (broken `[[references]]`) — auto-fixable with `--fix`
 - Orphan pages (no incoming links)
 - Stale pages (not updated in 90+ days)
+- Stub pages (body content under 100 chars)
 - Invalid frontmatter (missing required fields)
-- Uncovered raw sources (not referenced by any wiki page, exact path matching)
+- Uncovered raw sources (not referenced by any wiki page)
 - Wikilink cycles (A → B → C → A)
 - Low-trust pages flagged by query feedback
 
@@ -147,7 +152,7 @@ Reports:
 
 ### Claude Code Integration (MCP Server)
 
-The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **21 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
+The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **26 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
 
 ```bash
 # Start the MCP server standalone
@@ -170,7 +175,7 @@ python -m kb.mcp_server
 }
 ```
 
-After restarting Claude Code, you get 21 tools:
+After restarting Claude Code, you get 26 tools:
 
 #### Core Tools (Claude Code is the default LLM)
 
@@ -186,13 +191,17 @@ After restarting Claude Code, you get 21 tools:
 
 | Tool | Description |
 |------|-------------|
-| `kb_search` | Keyword search across wiki pages |
+| `kb_search` | Keyword search across wiki pages (BM25 + PageRank blending) |
 | `kb_read_page` | Read a specific wiki page by ID |
 | `kb_list_pages` | List all pages, optionally filtered by type |
 | `kb_list_sources` | List all raw source files |
 | `kb_stats` | Page counts, graph metrics, coverage info |
-| `kb_lint` | Health checks (dead links, orphans, staleness, low-trust pages) |
+| `kb_lint` | Health checks (dead links, orphans, staleness, stubs, low-trust pages) |
 | `kb_evolve` | Gap analysis and connection suggestions |
+| `kb_detect_drift` | Find wiki pages stale due to raw source changes |
+| `kb_compile` | Compile wiki from raw sources (incremental or full) |
+| `kb_graph_viz` | Export knowledge graph as Mermaid diagram (auto-prunes large graphs) |
+| `kb_verdict_trends` | Show weekly quality trends from verdict history |
 
 #### Quality Tools (Phase 2)
 
@@ -236,6 +245,11 @@ kb_create_page("comparisons/rag-vs-finetuning", "RAG vs Fine-tuning", content)
 
 # Record lint verdicts for audit trail
 kb_save_lint_verdict("concepts/rag", "fidelity", "pass", notes="All claims traced")
+
+# Visualize and monitor
+kb_graph_viz(max_nodes=30)          -> Mermaid diagram of knowledge graph
+kb_verdict_trends()                 -> weekly quality improvement dashboard
+kb_detect_drift()                   -> find wiki pages stale due to source changes
 ```
 
 **Example prompts in Claude Code:**
@@ -245,6 +259,8 @@ kb_save_lint_verdict("concepts/rag", "fidelity", "pass", notes="All claims trace
 > "Show me wiki health" -> `kb_lint`
 > "What sources need processing?" -> `kb_compile_scan`
 > "Review this wiki page for accuracy" -> `kb_review_page`
+> "Show me the knowledge graph" -> `kb_graph_viz`
+> "How is wiki quality trending?" -> `kb_verdict_trends`
 
 ## Supported Source Types
 
@@ -310,19 +326,23 @@ The knowledge base includes a multi-layer quality system:
 
 **Semantic lint** — Deep fidelity checks (`kb_lint_deep`) compare page claims against source content. Consistency checks (`kb_lint_consistency`) group related pages by shared sources, wikilinks, and significant term overlap (with frontmatter stripping and common-word filtering) to detect contradictions.
 
-**Affected page tracking** — After updating a page, `kb_affected_pages` identifies backlinks and shared-source pages that may need review.
+**Affected page tracking** — After updating a page, `kb_affected_pages` identifies backlinks and shared-source pages that may need review. The ingest pipeline now returns `affected_pages` automatically for cascade review.
+
+**Verdict trends** — `kb_verdict_trends` analyzes verdict history to show weekly pass/fail/warning rates and whether quality is improving, stable, or declining.
+
+**Graph visualization** — `kb_graph_viz` exports the knowledge graph as a Mermaid diagram, auto-pruning to the most-connected nodes for large graphs. Compatible with Obsidian, GitHub, and VS Code.
 
 **LLM resilience** — All API calls retry up to 3 times with exponential backoff on rate limits, overload, connection errors, and timeouts. Non-retryable errors (401/403) raise immediately with descriptive `LLMError`.
 
 ## Model Tiering
 
-The system uses three Claude model tiers to balance cost and quality:
+The system uses three Claude model tiers to balance cost and quality. Override via environment variables:
 
-| Tier | Model | Used For |
-|------|-------|----------|
-| `scan` | Claude Haiku 4.5 | Index reads, link checks, file diffs |
-| `write` | Claude Sonnet 4.6 | Article writing, extraction, summaries |
-| `orchestrate` | Claude Opus 4.6 | Query answering, orchestration, verification |
+| Tier | Model | Env Override | Used For |
+|------|-------|-------------|----------|
+| `scan` | Claude Haiku 4.5 | `CLAUDE_SCAN_MODEL` | Index reads, link checks, file diffs |
+| `write` | Claude Sonnet 4.6 | `CLAUDE_WRITE_MODEL` | Article writing, extraction, summaries |
+| `orchestrate` | Claude Opus 4.6 | `CLAUDE_ORCHESTRATE_MODEL` | Query answering, orchestration, verification |
 
 ## Project Structure
 
@@ -343,18 +363,18 @@ LLM-Knowledge-Base/
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, tuning constants
     mcp_server.py          # MCP entry point (thin wrapper)
-    mcp/                   # FastMCP server package (21 tools: core, browse, health, quality)
+    mcp/                   # FastMCP server package (26 tools: core, browse, health, quality)
     models/                # WikiPage, RawSource, frontmatter validation
-    ingest/                # Pipeline + extractors (template-driven)
-    compile/               # Hash-based incremental compiler (crash-safe) + linker
-    query/                 # BM25 ranking search (bm25.py) + context truncation + citations
-    lint/                  # 6 mechanical checks (+ cycles) + semantic context builders
+    ingest/                # Pipeline (dedup, cascade, tiering) + extractors (template-driven)
+    compile/               # Hash-based incremental compiler (crash-safe) + linker (wikilink injection)
+    query/                 # BM25 + PageRank blended search + context truncation + citations
+    lint/                  # 8 mechanical checks + semantic context builders + verdict trends
     evolve/                # Coverage analysis + connection discovery
-    graph/                 # NetworkX graph builder + stats
+    graph/                 # NetworkX graph builder + stats + Mermaid export
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
-    utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages
-  tests/                   # 382 tests across 24 test files (~4s)
+    utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages, io
+  tests/                   # 550 tests across 37 test files (~34s)
 ```
 
 ## Development
@@ -385,13 +405,15 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 2.1 (complete, v0.5.0):** Robustness — weighted trust formula, path canonicalization, YAML injection protection, extraction validation, config-driven tuning
 - **Phase 2.2 (complete, v0.6.0):** DRY refactor — shared utilities eliminated all code duplication, source type validation, source field normalization, consolidated test fixtures. 180 tests
 - **Phase 2.3 (complete, v0.7.0):** S+++ upgrade — MCP server split, graph PageRank/centrality, entity enrichment, persistent lint verdicts, case-insensitive wikilinks, template hash detection, comparison/synthesis templates, 2 new tools. 21 MCP tools, 234 tests
-- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words keyword matching with BM25 ranking (TF saturation, IDF, length normalization), custom tokenizer with stopword filtering, configurable parameters. 252 tests
-- **Phase 3.1 (complete, v0.9.0):** Hardening — path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling for all tools, max_results bounds, MCP Phase 2 instructions, SDK double-retry fix, wikilink normalization cleanup. 289 tests
-- **Phase 3.2 (complete, v0.9.1):** Comprehensive audit — BM25 div-by-zero fix, source path traversal protection, thread-safe LLM client, O(1) wiki log append, narrowed exception handling, frontmatter-aware source collision detection, consistent MCP validation, confidence/yaml_escape/retention fixes. 93 new tests (382 total), MCP tool coverage 41%→95%
-- **Phase 3.3 (complete, v0.9.2):** Audit fixes — 15 bug fixes across ingest pipeline (finditer regex, logging, pages_skipped), semantic lint (domain terms, consistency chunking), query engine (truncation logging), MCP (path validation), input validation (feedback limits, severity enum, refiner guard). 32 new tests (414 total)
-- **Phase 3.4 (complete, v0.9.3):** Feature completion — `kb_compile` MCP tool (22 tools total), `kb lint --fix` (auto-fixes dead links), `MAX_SEARCH_RESULTS` config constant. 17 new tests (431 total)
-- **Phase 3.5 (complete, v0.9.4):** Code fixes + new features — backlinks filter broken links, coverage detection uses parent dir, JSON fence whitespace handling. Stub page detection in lint (flags pages with <100 chars body). Content drift detection (`kb_detect_drift` MCP tool, 23 tools total). 21 new tests (452 total)
-- **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave (backward propagation of new knowledge through existing pages). Research in `research/agent-architecture-research.md`
+- **Phase 3.0 (complete, v0.8.0):** BM25 search engine — replaced bag-of-words with BM25 ranking. 252 tests
+- **Phase 3.1 (complete, v0.9.0):** Hardening — path traversal, citation regex, MCP error handling, SDK fixes. 289 tests
+- **Phase 3.2 (complete, v0.9.1):** Comprehensive audit — 93 new tests, MCP coverage 41%→95%. 382 tests
+- **Phase 3.3 (complete, v0.9.2):** 15 bug fixes, input validation hardening. 414 tests
+- **Phase 3.4 (complete, v0.9.3):** `kb_compile` + `kb lint --fix`. 431 tests
+- **Phase 3.5–3.8 (complete, v0.9.4–v0.9.7):** Stub detection, drift detection, tier audits, observability. 490 tests
+- **Phase 3.9a (complete, v0.9.8):** Structured outputs (`call_llm_json`), shared retry, atomic writes, extraction schema builder. 518 tests
+- **Phase 3.9 (complete, v0.9.9):** Content growth infrastructure — env-configurable model tiers, PageRank-blended search, hash-based duplicate detection, verdict trend dashboard (`kb_verdict_trends`), Mermaid graph export (`kb_graph_viz`), retroactive wikilink injection, content-length ingest tiering, cascade update detection. 3 new MCP tools (26 total), 32 new tests (550 total)
+- **Phase 4 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave, Pydantic extraction validation, arxiv MCP integration, semantic dependency tracking, URL-based smart routing. Research in `research/agent-architecture-research.md`
 
 ## License
 
