@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 import frontmatter
+import yaml
 
 from kb.config import (
     RAW_DIR,
@@ -178,24 +179,19 @@ def _update_existing_page(
         existing_sources = normalize_sources(post.metadata.get("source"))
         if source_ref in existing_sources:
             return  # Already referenced in frontmatter
-    except Exception:
-        pass  # If frontmatter parse fails, proceed with update
+    except (OSError, ValueError, AttributeError, yaml.YAMLError) as e:
+        logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
 
     # 1. Update frontmatter source: list
     safe_ref = yaml_escape(source_ref)
     # Insert new source entry after the last existing source line
-    if re.search(r'^  - ".*"$', content, re.MULTILINE):
-        content = re.sub(
-            r'(^  - "[^"]*"$)(?![\s\S]*^  - ")',
-            rf'\1\n  - "{safe_ref}"',
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
+    source_line_pattern = re.compile(r'^  - ".*"$', re.MULTILINE)
+    matches = list(source_line_pattern.finditer(content))
+    if matches:
+        last_match = matches[-1]
+        content = content[: last_match.end()] + f'\n  - "{safe_ref}"' + content[last_match.end() :]
     elif "source:" in content:
-        content = content.replace(
-            "source:\n", f'source:\n  - "{safe_ref}"\n', 1
-        )
+        content = content.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
 
     # 2. Append to References section
     ref_line = f"- Mentioned in {source_ref}"
@@ -214,9 +210,7 @@ def _update_existing_page(
         if ctx and ctx not in content:
             # Add context before References section, or at end
             if "## References" in content:
-                content = content.replace(
-                    "## References", f"{ctx}\n\n## References", 1
-                )
+                content = content.replace("## References", f"{ctx}\n\n## References", 1)
             else:
                 content += f"\n{ctx}\n"
 
@@ -336,7 +330,9 @@ def ingest_source(
             if prev != entity:
                 logger.warning(
                     "Slug collision: %r and %r both slug to %r",
-                    prev, entity, entity_slug,
+                    prev,
+                    entity,
+                    entity_slug,
                 )
                 pages_skipped.append(f"entities/{entity_slug} (collision: {entity!r})")
             continue
@@ -366,7 +362,9 @@ def ingest_source(
             if prev != concept:
                 logger.warning(
                     "Slug collision: %r and %r both slug to %r",
-                    prev, concept, concept_slug,
+                    prev,
+                    concept,
+                    concept_slug,
                 )
                 pages_skipped.append(f"concepts/{concept_slug} (collision: {concept!r})")
             continue

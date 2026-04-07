@@ -48,6 +48,10 @@ def ingest(source_path: str, source_type: str | None):
         click.echo(f"  Pages updated: {len(result['pages_updated'])}")
         for page in result["pages_updated"]:
             click.echo(f"    ~ {page}")
+        if result.get("pages_skipped"):
+            click.echo(f"  Pages skipped: {len(result['pages_skipped'])}")
+            for page in result["pages_skipped"]:
+                click.echo(f"    ! {page}")
         click.echo("Done.")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

@@ -75,4 +75,8 @@ def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, res
     lines.append(f"Pages updated ({len(result['pages_updated'])}):")
     for p in result["pages_updated"]:
         lines.append(f"  ~ {p}")
+    if result.get("pages_skipped"):
+        lines.append(f"Pages skipped ({len(result['pages_skipped'])}):")
+        for p in result["pages_skipped"]:
+            lines.append(f"  ! {p}")
     return "\n".join(lines)
