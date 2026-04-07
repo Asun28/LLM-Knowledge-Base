@@ -69,6 +69,26 @@ def kb_evolve() -> str:
 
 
 @mcp.tool()
+def kb_graph_viz(max_nodes: int = 30) -> str:
+    """Export the wiki knowledge graph as a Mermaid diagram.
+
+    Renders the knowledge graph as a Mermaid flowchart (graph LR).
+    Auto-prunes to the most-connected nodes when graph exceeds max_nodes.
+    Compatible with Obsidian, GitHub, VS Code Mermaid previews.
+
+    Args:
+        max_nodes: Maximum nodes to include (default 30). Set 0 for all.
+    """
+    try:
+        from kb.graph.export import export_mermaid
+
+        return export_mermaid(max_nodes=max_nodes)
+    except Exception as e:
+        logger.error("Error exporting graph: %s", e)
+        return f"Error exporting graph: {e}"
+
+
+@mcp.tool()
 def kb_verdict_trends() -> str:
     """Show verdict quality trends over time.
 

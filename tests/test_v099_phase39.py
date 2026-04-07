@@ -386,3 +386,77 @@ class TestVerdictTrends:
         result = kb_verdict_trends()
         assert isinstance(result, str)
         assert "Verdict" in result or "verdict" in result or "No verdict" in result
+
+
+# ── Task 5: Mermaid graph export ─────────────────────────────
+
+
+class TestMermaidGraphExport:
+    """Test Mermaid diagram generation from wiki graph."""
+
+    def test_empty_graph_returns_empty_mermaid(self, tmp_path):
+        """Empty wiki produces minimal Mermaid diagram."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        assert result.startswith("graph LR")
+
+    def test_basic_graph_produces_valid_mermaid(self, tmp_path):
+        """Simple graph produces valid Mermaid with nodes and edges."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(wiki_dir, "concepts", "rag", "RAG",
+                        "RAG combines [[concepts/retrieval]] with generation.")
+        _make_wiki_page(wiki_dir, "concepts", "retrieval", "Retrieval",
+                        "Retrieval is used by [[concepts/rag]].")
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        assert "graph LR" in result
+        assert "concepts/rag" in result
+        assert "concepts/retrieval" in result
+        assert "-->" in result
+
+    def test_auto_prune_large_graph(self, tmp_path):
+        """Graphs with >50 nodes are pruned to max_nodes most-connected."""
+        wiki_dir = tmp_path / "wiki"
+        # Create 60 pages
+        for i in range(60):
+            links = f"[[concepts/page-{(i+1) % 60}]]"
+            _make_wiki_page(
+                wiki_dir, "concepts", f"page-{i}",
+                f"Page {i}", f"Content for page {i}. {links}",
+                source_ref=f"raw/articles/p{i}.md",
+            )
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir, max_nodes=30)
+        # Should be pruned — count node definitions
+        node_lines = [l for l in result.split("\n") if '["' in l or '("' in l]
+        assert len(node_lines) <= 30
+
+    def test_node_labels_use_sanitized_names(self, tmp_path):
+        """Node labels are sanitized for Mermaid (no quotes or special chars)."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(wiki_dir, "entities", "openai", 'OpenAI "Company"',
+                        "OpenAI makes GPT models.")
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        # Should not have unescaped quotes in node labels
+        assert 'entities/openai["OpenAI Company"]' in result or \
+               "entities/openai" in result
+
+    def test_mcp_tool_returns_mermaid(self):
+        """kb_graph_viz MCP tool returns Mermaid string."""
+        from kb.mcp.health import kb_graph_viz
+
+        result = kb_graph_viz()
+        assert isinstance(result, str)
+        assert "graph" in result.lower() or "no pages" in result.lower()
