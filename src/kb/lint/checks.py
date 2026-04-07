@@ -7,6 +7,7 @@ from pathlib import Path
 
 import frontmatter
 import networkx as nx
+import yaml
 
 from kb.compile.linker import resolve_wikilinks
 from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
@@ -202,7 +203,7 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
                         "message": f"Stale page (last updated {updated}): {pid}",
                     }
                 )
-        except Exception as e:
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Failed to load wiki page %s: %s", page_path, e)
             continue
 

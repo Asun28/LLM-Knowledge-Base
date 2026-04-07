@@ -1,11 +1,14 @@
 """Gap analysis, connection discovery, and source suggestions."""
 
+import logging
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
 from kb.config import MAX_PAGES_FOR_TERM, MIN_PAGES_FOR_TERM, MIN_SHARED_TERMS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.utils.markdown import extract_wikilinks
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_coverage(wiki_dir: Path | None = None) -> dict:
@@ -59,7 +62,11 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
     # Build term index: which terms appear in which pages
     term_index: dict[str, list[str]] = {}
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8").lower()
+        try:
+            content = page_path.read_text(encoding="utf-8").lower()
+        except (OSError, UnicodeDecodeError):
+            logger.warning("Skipping unreadable page %s in connection analysis", page_path)
+            continue
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
         words = set(w.strip(".,!?()[]{}\"'") for w in content.split() if len(w) > 4)
@@ -122,7 +129,11 @@ def suggest_new_pages(wiki_dir: Path | None = None) -> list[dict]:
     # Find all targets that don't exist (dead links = page opportunities)
     suggestions: dict[str, dict] = {}
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8")
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            logger.warning("Skipping unreadable page %s in page suggestions", page_path)
+            continue
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
         for link in links:
