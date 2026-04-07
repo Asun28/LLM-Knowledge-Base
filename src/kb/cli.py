@@ -108,8 +108,12 @@ def lint(fix: bool):
 
     click.echo("Running lint checks...")
     try:
-        report = run_all_checks()
+        report = run_all_checks(fix=fix)
         click.echo(format_report(report))
+        if report.get("fixes_applied"):
+            click.echo(f"\nAuto-fixed {len(report['fixes_applied'])} issue(s):")
+            for f in report["fixes_applied"]:
+                click.echo(f"  Fixed: {f['message']}")
         if report["summary"].get("error", 0) > 0:
             raise SystemExit(1)
     except SystemExit:

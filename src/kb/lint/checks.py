@@ -1,6 +1,7 @@
 """Individual lint checks: orphans, dead links, staleness, circular refs, coverage gaps."""
 
 import logging
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -37,6 +38,62 @@ def check_dead_links(wiki_dir: Path | None = None) -> list[dict]:
             }
         )
     return issues
+
+
+def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
+    """Fix broken wikilinks by replacing them with plain text.
+
+    ``[[broken/link]]`` becomes ``broken/link`` (basename if path contains ``/``).
+    ``[[broken/link|Display Text]]`` becomes ``Display Text``.
+
+    Returns:
+        List of dicts: {check, severity, page, target, message} for each fix applied.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    result = resolve_wikilinks(wiki_dir)
+    fixes: list[dict] = []
+
+    # Group broken links by source page
+    broken_by_page: dict[str, list[str]] = {}
+    for broken in result["broken"]:
+        broken_by_page.setdefault(broken["source"], []).append(broken["target"])
+
+    for source_pid, targets in broken_by_page.items():
+        page_path = wiki_dir / f"{source_pid}.md"
+        if not page_path.exists():
+            continue
+
+        content = page_path.read_text(encoding="utf-8")
+        modified = False
+
+        for target in targets:
+            # Match [[target|display]] or [[target]]
+            # Use re.IGNORECASE since extract_wikilinks lowercases targets
+            pattern = re.compile(r"\[\[" + re.escape(target) + r"\|([^\]]+)\]\]", re.IGNORECASE)
+            if pattern.search(content):
+                content = pattern.sub(r"\1", content)
+                modified = True
+            else:
+                # No display text — replace [[target]] with target basename
+                pattern_plain = re.compile(r"\[\[" + re.escape(target) + r"\]\]", re.IGNORECASE)
+                display = target.split("/")[-1] if "/" in target else target
+                content = pattern_plain.sub(display, content)
+                modified = True
+
+            fixes.append(
+                {
+                    "check": "dead_link_fixed",
+                    "severity": "info",
+                    "page": source_pid,
+                    "target": target,
+                    "message": f"Fixed broken wikilink [[{target}]] in {source_pid}",
+                }
+            )
+
+        if modified:
+            page_path.write_text(content, encoding="utf-8")
+
+    return fixes
 
 
 def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
@@ -213,8 +270,7 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
                 rel_path = f"raw/{type_dir.name}/{f.name}"
                 # Check if this source is referenced (exact path or ends with filename)
                 referenced = any(
-                    ref == rel_path or ref.endswith(f"/{f.name}")
-                    for ref in all_raw_refs
+                    ref == rel_path or ref.endswith(f"/{f.name}") for ref in all_raw_refs
                 )
                 if not referenced:
                     issues.append(

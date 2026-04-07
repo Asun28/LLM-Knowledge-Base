@@ -10,6 +10,7 @@ from kb.lint.checks import (
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
+    fix_dead_links,
 )
 from kb.lint.verdicts import get_verdict_summary
 
@@ -17,15 +18,18 @@ from kb.lint.verdicts import get_verdict_summary
 def run_all_checks(
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
+    fix: bool = False,
 ) -> dict:
     """Run all lint checks and produce a structured report.
 
     Args:
         wiki_dir: Path to wiki directory.
         raw_dir: Path to raw directory.
+        fix: If True, auto-fix dead links by replacing with plain text.
 
     Returns:
-        dict with keys: checks_run, total_issues, issues (list), summary (by severity).
+        dict with keys: checks_run, total_issues, issues (list), summary (by severity),
+        fixes_applied (list of fix dicts, empty if fix=False).
     """
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
@@ -38,6 +42,11 @@ def run_all_checks(
     dead_links = check_dead_links(wiki_dir)
     all_issues.extend(dead_links)
     checks_run.append({"name": "dead_links", "issues": len(dead_links)})
+
+    # Auto-fix dead links if requested
+    fixes_applied: list[dict] = []
+    if fix and dead_links:
+        fixes_applied = fix_dead_links(wiki_dir)
 
     orphans = check_orphan_pages(wiki_dir)
     all_issues.extend(orphans)
@@ -80,6 +89,7 @@ def run_all_checks(
         "total_issues": len(all_issues),
         "issues": all_issues,
         "summary": summary,
+        "fixes_applied": fixes_applied,
     }
 
 
@@ -120,6 +130,14 @@ def format_report(report: dict) -> str:
                 lines.append("")
     else:
         lines.append("No issues found. Wiki is healthy!\n")
+
+    # Fixes applied
+    fixes = report.get("fixes_applied", [])
+    if fixes:
+        lines.append(f"\n## Auto-Fixes Applied ({len(fixes)})\n")
+        for fix_item in fixes:
+            lines.append(f"- {fix_item['message']}")
+        lines.append("")
 
     # Verdict audit trail
     vh = report["summary"].get("verdict_history")
