@@ -2,7 +2,7 @@
 
 import logging
 
-from kb.config import RAW_DIR, WIKI_DIR
+from kb.config import MAX_SEARCH_RESULTS, RAW_DIR, WIKI_DIR
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 
@@ -17,7 +17,7 @@ def kb_search(query: str, max_results: int = 10) -> str:
         query: Search terms (space-separated keywords).
         max_results: Maximum results to return (default 10).
     """
-    max_results = max(1, min(max_results, 100))
+    max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
     from kb.query.engine import search_pages
 

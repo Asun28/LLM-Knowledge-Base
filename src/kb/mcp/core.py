@@ -1,12 +1,15 @@
 """Core MCP tools — query, ingest, compile."""
 
 import json
+import logging
 from datetime import date
 from pathlib import Path
 
-from kb.config import PROJECT_ROOT, SOURCE_TYPE_DIRS
+from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, SOURCE_TYPE_DIRS
 from kb.mcp.app import _format_ingest_result, _rel, mcp
 from kb.utils.text import slugify
+
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
@@ -25,7 +28,7 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         max_results: Maximum pages to search (default 10).
         use_api: If true, call the Anthropic API for synthesis. Default false.
     """
-    max_results = max(1, min(max_results, 100))
+    max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
     if use_api:
         from kb.query.citations import format_citations
@@ -204,8 +207,7 @@ def kb_ingest_content(
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
-            f"Error: Unknown source_type '{source_type}'. "
-            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+            f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
         )
 
     type_dir.mkdir(parents=True, exist_ok=True)
@@ -262,8 +264,7 @@ def kb_save_source(
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (
-            f"Error: Unknown source_type '{source_type}'. "
-            f"Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
+            f"Error: Unknown source_type '{source_type}'. Use one of: {', '.join(SOURCE_TYPE_DIRS)}"
         )
 
     type_dir.mkdir(parents=True, exist_ok=True)
@@ -333,4 +334,48 @@ def kb_compile_scan(incremental: bool = True) -> str:
     except Exception as e:
         return f"Error scanning sources: {e}"
 
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_compile(incremental: bool = True) -> str:
+    """Compile wiki pages from raw sources.
+
+    In incremental mode, only processes new and changed sources.
+    In full mode, recompiles everything.
+
+    Note: Each source requires LLM extraction (ANTHROPIC_API_KEY needed).
+    For Claude Code mode, use kb_compile_scan() to get the list, then
+    kb_ingest() each source with your own extraction.
+
+    Args:
+        incremental: If True (default), only new/changed sources. If False, all.
+    """
+    try:
+        from kb.compile.compiler import compile_wiki
+
+        result = compile_wiki(incremental=incremental)
+    except Exception as e:
+        logger.exception("Error running compile")
+        return f"Error running compile: {e}"
+
+    mode = result["mode"]
+    lines = [
+        f"# Compile Complete ({mode})\n",
+        f"**Sources processed:** {result['sources_processed']}",
+        f"**Pages created:** {len(result['pages_created'])}",
+        f"**Pages updated:** {len(result['pages_updated'])}",
+    ]
+    if result["pages_created"]:
+        lines.append("\n## Created")
+        for p in result["pages_created"]:
+            lines.append(f"  + {p}")
+    if result["pages_updated"]:
+        lines.append("\n## Updated")
+        for p in result["pages_updated"]:
+            lines.append(f"  ~ {p}")
+    if result["errors"]:
+        lines.append(f"\n## Errors ({len(result['errors'])})")
+        for err in result["errors"]:
+            lines.append(f"  ! {err['source']}: {err['error']}")
     return "\n".join(lines)
