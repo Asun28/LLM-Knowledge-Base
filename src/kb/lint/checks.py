@@ -260,21 +260,21 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
     raw_dir = raw_dir or RAW_DIR
     pages = scan_wiki_pages(wiki_dir)
 
-    # Collect all raw references across wiki pages
+    # Collect all raw references across wiki pages (single pass per file)
     all_raw_refs = set()
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8")
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Failed to read page %s: %s", page_path, e)
+            continue
         refs = extract_raw_refs(content)
         all_raw_refs.update(refs)
-
-    # Also check frontmatter source fields
-    for page_path in pages:
         try:
-            post = frontmatter.load(str(page_path))
+            post = frontmatter.loads(content)
             all_raw_refs.update(normalize_sources(post.metadata.get("source")))
-        except Exception as e:
-            logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
-            continue
+        except (ValueError, AttributeError, yaml.YAMLError) as e:
+            logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
 
     # Find raw sources not referenced
     issues = []

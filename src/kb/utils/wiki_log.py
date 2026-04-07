@@ -30,8 +30,9 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
     with log_path.open("a", encoding="utf-8") as f:
         f.write(entry)
 
-    if log_path.stat().st_size > LOG_SIZE_WARNING_BYTES:
+    log_stat = log_path.stat()
+    if log_stat.st_size > LOG_SIZE_WARNING_BYTES:
         logger.warning(
             "wiki/log.md is %.0f KB — consider archiving old entries",
-            log_path.stat().st_size / 1024,
+            log_stat.st_size / 1024,
         )
