@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from kb.config import VERDICT_TREND_THRESHOLD
 from kb.lint.verdicts import load_verdicts
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,9 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
     if len(sorted_periods) >= 2:
         recent = sorted_periods[-1]["pass_rate"]
         previous = sorted_periods[-2]["pass_rate"]
-        if recent > previous + 0.1:
+        if recent > previous + VERDICT_TREND_THRESHOLD:
             trend = "improving"
-        elif recent < previous - 0.1:
+        elif recent < previous - VERDICT_TREND_THRESHOLD:
             trend = "declining"
 
     return {

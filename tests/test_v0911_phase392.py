@@ -220,3 +220,27 @@ class TestCompileWikiPropagatesFields:
         assert result["wikilinks_injected"] == ["summaries/baz"]
         assert result["affected_pages"] == ["concepts/qux"]
         assert result["duplicates"] == 0
+
+
+# ── Task 8: VERDICT_TREND_THRESHOLD config constant ──────────────
+
+
+class TestVerdictTrendThreshold:
+    """trends.py uses VERDICT_TREND_THRESHOLD from config, not hardcoded 0.1."""
+
+    def test_threshold_constant_exists_and_is_correct(self):
+        """VERDICT_TREND_THRESHOLD is 0.1 and importable from config."""
+        from kb.config import VERDICT_TREND_THRESHOLD
+        assert VERDICT_TREND_THRESHOLD == 0.1
+
+    def test_trends_module_imports_threshold_from_config(self):
+        """compute_verdict_trends uses the config constant (not hardcoded 0.1)."""
+        import inspect
+        from kb.lint import trends as trends_module
+
+        source = inspect.getsource(trends_module)
+        assert "VERDICT_TREND_THRESHOLD" in source, (
+            "trends.py must reference VERDICT_TREND_THRESHOLD, not hardcode 0.1"
+        )
+        assert "previous + 0.1" not in source, "Hardcoded 0.1 must be removed"
+        assert "previous - 0.1" not in source, "Hardcoded 0.1 must be removed"
