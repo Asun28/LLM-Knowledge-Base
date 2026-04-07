@@ -8,6 +8,7 @@ from kb.config import PROJECT_ROOT
 
 VERDICTS_PATH = PROJECT_ROOT / ".data" / "lint_verdicts.json"
 MAX_VERDICTS = 10_000
+VALID_SEVERITIES = ("error", "warning", "info")
 
 
 def load_verdicts(path: Path | None = None) -> list[dict]:
@@ -59,6 +60,17 @@ def add_verdict(
             f"Invalid verdict_type: {verdict_type}. "
             "Must be 'fidelity', 'consistency', 'completeness', or 'review'"
         )
+
+    if issues:
+        for issue in issues:
+            if not isinstance(issue, dict):
+                raise ValueError(f"Each issue must be a dict, got {type(issue).__name__}")
+            severity = issue.get("severity", "")
+            if severity and severity not in VALID_SEVERITIES:
+                raise ValueError(
+                    f"Invalid issue severity '{severity}'. "
+                    f"Must be one of: {', '.join(VALID_SEVERITIES)}"
+                )
 
     verdicts = load_verdicts(path)
     entry = {

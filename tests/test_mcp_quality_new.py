@@ -180,8 +180,8 @@ def test_kb_save_lint_verdict_with_issues_json(tmp_path, monkeypatch):
     _setup_quality_paths(tmp_path, monkeypatch)
 
     issues = json.dumps([
-        {"severity": "high", "description": "Missing citation for claim X"},
-        {"severity": "low", "description": "Minor formatting issue"},
+        {"severity": "error", "description": "Missing citation for claim X"},
+        {"severity": "info", "description": "Minor formatting issue"},
     ])
 
     result = kb_save_lint_verdict(
@@ -199,7 +199,7 @@ def test_kb_save_lint_verdict_with_issues_json(tmp_path, monkeypatch):
     verdicts_path = tmp_path / ".data" / "lint_verdicts.json"
     stored = json.loads(verdicts_path.read_text(encoding="utf-8"))
     assert len(stored[0]["issues"]) == 2
-    assert stored[0]["issues"][0]["severity"] == "high"
+    assert stored[0]["issues"][0]["severity"] == "error"
 
 
 # ── kb_create_page ───────────────────────────────────────────────

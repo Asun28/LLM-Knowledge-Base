@@ -69,14 +69,14 @@ def test_add_verdict_basic(tmp_path):
         page_id="concepts/rag",
         verdict_type="fidelity",
         verdict="pass",
-        issues=[{"severity": "low", "description": "minor style issue"}],
+        issues=[{"severity": "info", "description": "minor style issue"}],
         notes="Looks good overall",
         path=path,
     )
     assert entry["page_id"] == "concepts/rag"
     assert entry["verdict_type"] == "fidelity"
     assert entry["verdict"] == "pass"
-    assert entry["issues"] == [{"severity": "low", "description": "minor style issue"}]
+    assert entry["issues"] == [{"severity": "info", "description": "minor style issue"}]
     assert entry["notes"] == "Looks good overall"
     assert "timestamp" in entry
     # Timestamp should be an ISO string with seconds precision

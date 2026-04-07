@@ -72,6 +72,11 @@ def refine_page(
         # Add updated field if missing
         frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
 
+    # Ensure updated content doesn't start with frontmatter delimiters
+    stripped_content = updated_content.lstrip()
+    if stripped_content.startswith("---"):
+        return {"error": "Updated content must not start with '---' (frontmatter delimiter)"}
+
     # Reconstruct page
     new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
     page_path.write_text(new_text, encoding="utf-8")

@@ -7,6 +7,10 @@ from pathlib import Path
 from kb.config import FEEDBACK_PATH
 
 MAX_FEEDBACK_ENTRIES = 10_000
+MAX_QUESTION_LEN = 2000
+MAX_NOTES_LEN = 2000
+MAX_PAGE_ID_LEN = 200
+MAX_CITED_PAGES = 50
 
 
 def _default_feedback() -> dict:
@@ -59,6 +63,19 @@ def add_feedback_entry(
     """
     if rating not in ("useful", "wrong", "incomplete"):
         raise ValueError(f"Invalid rating: {rating}. Must be 'useful', 'wrong', or 'incomplete'")
+
+    # Input length validation
+    if len(question) > MAX_QUESTION_LEN:
+        raise ValueError(f"Question too long ({len(question)} chars). Maximum: {MAX_QUESTION_LEN}")
+    if len(notes) > MAX_NOTES_LEN:
+        raise ValueError(f"Notes too long ({len(notes)} chars). Maximum: {MAX_NOTES_LEN}")
+    if len(cited_pages) > MAX_CITED_PAGES:
+        raise ValueError(f"Too many cited pages ({len(cited_pages)}). Maximum: {MAX_CITED_PAGES}")
+    for page_id in cited_pages:
+        if len(page_id) > MAX_PAGE_ID_LEN:
+            raise ValueError(f"Page ID too long: {page_id[:50]}...")
+        if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+            raise ValueError(f"Invalid page ID: {page_id}")
 
     data = load_feedback(path)
 
