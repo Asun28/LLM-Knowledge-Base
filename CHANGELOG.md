@@ -25,6 +25,9 @@ Rules:
 - `mcp/browse.py`: simplified `except (OSError, PermissionError)` → `except OSError` in `kb_read_page` and `kb_list_sources` (`PermissionError` is a subclass of `OSError`)
 - `scripts/hook_review.py`: added `VALID_MODES` guard (fail-open on unknown mode); `_get_diff` now checks `returncode` and surfaces stderr on `git diff` failure; prints warning when diff is silently truncated at `MAX_DIFF_CHARS`
 
+### Removed
+- `docs/superpowers/specs/2026-04-06-phase2-multi-loop-quality-design.md`: deleted obsolete Phase 2 design spec (fully implemented as of v0.6.0)
+
 ---
 
 ## [0.9.11] — 2026-04-08 (Phase 3.92)
