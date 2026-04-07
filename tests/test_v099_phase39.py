@@ -600,15 +600,14 @@ class TestContentLengthIngestTiering:
         source = raw_dir / "articles" / "short.md"
         source.write_text("# Short\nBrief note.", encoding="utf-8")
 
-        # Mock LLM extraction so extraction=None triggers auto mode
-        mock_extraction = {
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
             "title": "Short Note",
             "entities_mentioned": ["BigEntity"],
             "concepts_mentioned": ["BigConcept"],
         }
-        with patch("kb.ingest.pipeline.extract_from_source", return_value=mock_extraction):
-            from kb.ingest.pipeline import ingest_source
-            result = ingest_source(source, "article")  # No extraction → auto mode
+        result = ingest_source(source, "article", extraction=extraction, defer_small=True)
 
         # Summary should be created
         assert any("summaries/" in p for p in result["pages_created"])

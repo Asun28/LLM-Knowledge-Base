@@ -302,6 +302,8 @@ def ingest_source(
     source_path: Path,
     source_type: str | None = None,
     extraction: dict | None = None,
+    *,
+    defer_small: bool = False,
 ) -> dict:
     """Ingest a single raw source into the knowledge base.
 
@@ -341,8 +343,7 @@ def ingest_source(
         }
 
     # Extract structured data via LLM (or use pre-extracted)
-    extraction_was_auto = extraction is None
-    if extraction_was_auto:
+    if extraction is None:
         extraction = extract_from_source(raw_content, source_type)
 
     # Track created/updated pages
@@ -358,10 +359,9 @@ def ingest_source(
     _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
     pages_created.append(f"summaries/{summary_slug}")
 
-    # Content-length-aware tiering: short sources with auto-extraction
-    # get summary only (entity/concept pages deferred to avoid stub proliferation).
-    # When extraction is pre-provided, respect the caller's intent.
-    is_small_source = extraction_was_auto and len(raw_content) < SMALL_SOURCE_THRESHOLD
+    # Content-length-aware tiering: short sources get summary only when
+    # defer_small is enabled (entity/concept pages deferred to avoid stub proliferation).
+    is_small_source = defer_small and len(raw_content) < SMALL_SOURCE_THRESHOLD
     if is_small_source:
         logger.info(
             "Small source (%d chars < %d threshold): deferring entity/concept pages",
