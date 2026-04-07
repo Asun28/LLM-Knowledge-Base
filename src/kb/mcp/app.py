@@ -29,7 +29,9 @@ mcp = FastMCP(
         "- kb_query_feedback, kb_reliability_map: feedback and trust scoring.\n"
         "- kb_affected_pages: find pages impacted by a change.\n"
         "- kb_save_lint_verdict: persist lint/review verdicts.\n"
-        "- kb_create_page: create comparison/synthesis/any wiki page directly."
+        "- kb_create_page: create comparison/synthesis/any wiki page directly.\n"
+        "- kb_graph_viz: export knowledge graph as Mermaid diagram.\n"
+        "- kb_verdict_trends: show weekly quality trends from verdict history."
     ),
 )
 
