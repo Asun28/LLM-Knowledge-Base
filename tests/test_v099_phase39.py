@@ -417,8 +417,8 @@ class TestMermaidGraphExport:
 
         result = export_mermaid(wiki_dir=wiki_dir)
         assert "graph LR" in result
-        assert "concepts/rag" in result
-        assert "concepts/retrieval" in result
+        assert "concepts_rag" in result  # sanitized node ID
+        assert "concepts_retrieval" in result
         assert "-->" in result
 
     def test_auto_prune_large_graph(self, tmp_path):
@@ -440,18 +440,17 @@ class TestMermaidGraphExport:
         node_lines = [l for l in result.split("\n") if '["' in l or '("' in l]
         assert len(node_lines) <= 30
 
-    def test_node_labels_use_sanitized_names(self, tmp_path):
-        """Node labels are sanitized for Mermaid (no quotes or special chars)."""
+    def test_node_labels_use_page_titles(self, tmp_path):
+        """Node labels use page titles from frontmatter."""
         wiki_dir = tmp_path / "wiki"
-        _make_wiki_page(wiki_dir, "entities", "openai", 'OpenAI "Company"',
+        _make_wiki_page(wiki_dir, "entities", "openai", "OpenAI",
                         "OpenAI makes GPT models.")
 
         from kb.graph.export import export_mermaid
 
         result = export_mermaid(wiki_dir=wiki_dir)
-        # Should not have unescaped quotes in node labels
-        assert 'entities/openai["OpenAI Company"]' in result or \
-               "entities/openai" in result
+        assert "entities_openai" in result
+        assert "OpenAI" in result  # title used as label
 
     def test_mcp_tool_returns_mermaid(self):
         """kb_graph_viz MCP tool returns Mermaid string."""
