@@ -209,7 +209,26 @@ All modules use `logging.getLogger(__name__)` for warnings on skipped pages or f
 - When updating wiki pages, prefer proposing diffs over full rewrites for auditability.
 - Keep `wiki/index.md` under 500 lines — use category groupings, one line per page.
 - Always install Python packages into the project `.venv`, never globally.
-- **Architecture diagram**: Source is `others/architecture-diagram.html`, rendered to `others/architecture-diagram.png` and embedded in `README.md`. Whenever the HTML diagram is modified, re-render the PNG (Playwright, 3x DPI) and ensure the README image stays current.
+- **Architecture diagram sync (MANDATORY)**: Source: `others/architecture-diagram.html` → Rendered: `others/architecture-diagram.png` → Displayed: `README.md` line 9. **Every time the HTML is modified**, you MUST re-render the PNG and commit it. Render command:
+  ```python
+  # Run from project root with .venv activated
+  .venv/Scripts/python -c "
+  import asyncio
+  from playwright.async_api import async_playwright
+  async def main():
+      async with async_playwright() as p:
+          browser = await p.chromium.launch()
+          page = await browser.new_page(viewport={'width': 1440, 'height': 900}, device_scale_factor=3)
+          await page.goto('file:///D:/Projects/LLM-Knowledge-Base/others/architecture-diagram.html')
+          await page.wait_for_timeout(1500)
+          dim = await page.evaluate('() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight })')
+          await page.set_viewport_size({'width': dim['w'], 'height': dim['h']})
+          await page.wait_for_timeout(500)
+          await page.screenshot(path='others/architecture-diagram.png', full_page=True, type='png')
+          await browser.close()
+  asyncio.run(main())
+  "
+  ```
 
 ## Wiki Page Frontmatter Template
 
