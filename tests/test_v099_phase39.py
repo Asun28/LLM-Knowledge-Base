@@ -258,6 +258,8 @@ class TestDuplicateDetection:
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
         monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+        # Patch RAW_DIR in paths module so make_source_ref resolves correctly
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
 
         content = "# Duplicate Article\n\nThis is duplicate content."
         source1 = raw_dir / "articles" / "original.md"
