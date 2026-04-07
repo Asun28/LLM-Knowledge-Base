@@ -582,7 +582,7 @@ class TestContentLengthIngestTiering:
         return wiki_dir, raw_dir, data_dir
 
     def test_short_source_creates_summary_only(self, tmp_path, monkeypatch):
-        """Source under SMALL_SOURCE_THRESHOLD creates summary but defers entities."""
+        """Source under SMALL_SOURCE_THRESHOLD with auto-extraction defers entities."""
         wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
         monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
         monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
@@ -600,14 +600,15 @@ class TestContentLengthIngestTiering:
         source = raw_dir / "articles" / "short.md"
         source.write_text("# Short\nBrief note.", encoding="utf-8")
 
-        from kb.ingest.pipeline import ingest_source
-
-        extraction = {
+        # Mock LLM extraction so extraction=None triggers auto mode
+        mock_extraction = {
             "title": "Short Note",
             "entities_mentioned": ["BigEntity"],
             "concepts_mentioned": ["BigConcept"],
         }
-        result = ingest_source(source, "article", extraction=extraction)
+        with patch("kb.ingest.pipeline.extract_from_source", return_value=mock_extraction):
+            from kb.ingest.pipeline import ingest_source
+            result = ingest_source(source, "article")  # No extraction → auto mode
 
         # Summary should be created
         assert any("summaries/" in p for p in result["pages_created"])
