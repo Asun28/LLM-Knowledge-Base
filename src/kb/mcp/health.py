@@ -16,7 +16,7 @@ def kb_lint() -> str:
         report = run_all_checks()
         result = format_report(report)
     except Exception as e:
-        logger.exception("Error running lint checks")
+        logger.error("Error running lint checks: %s", e)
         return f"Error running lint checks: {e}"
 
     # Append feedback-flagged pages (fail-safe)
@@ -46,7 +46,7 @@ def kb_evolve() -> str:
         report = generate_evolution_report()
         result = format_evolution_report(report)
     except Exception as e:
-        logger.exception("Error running evolution analysis")
+        logger.error("Error running evolution analysis: %s", e)
         return f"Error running evolution analysis: {e}"
 
     # Append coverage gaps from query feedback (fail-safe)

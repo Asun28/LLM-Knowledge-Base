@@ -54,6 +54,11 @@ def kb_read_page(page_id: str) -> str:
             if subdir.exists():
                 for f in subdir.glob("*.md"):
                     if f.stem.lower() == parts[1].lower():
+                        # Verify the resolved path stays within WIKI_DIR
+                        try:
+                            f.resolve().relative_to(WIKI_DIR.resolve())
+                        except ValueError:
+                            continue
                         page_path = f
                         break
     if not page_path.exists():

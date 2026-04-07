@@ -1,5 +1,6 @@
 """Query engine — BM25 search + LLM synthesis with citations."""
 
+import logging
 from pathlib import Path
 
 from kb.config import (
@@ -12,6 +13,8 @@ from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
 from kb.utils.pages import load_all_pages
+
+logger = logging.getLogger(__name__)
 
 
 def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
@@ -62,9 +65,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     return scored[:max_results]
 
 
-def _build_query_context(
-    pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS
-) -> str:
+def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> str:
     """Build context string from matching wiki pages for the LLM.
 
     Truncates to max_chars to avoid exceeding the model's context window.
@@ -82,8 +83,13 @@ def _build_query_context(
         )
         if total + len(section) > max_chars:
             remaining = max_chars - total
-            if remaining > 200:
+            if remaining > 100:
                 sections.append(section[:remaining] + "\n[...truncated]")
+                logger.debug(
+                    "Query context truncated at %d chars (page: %s)", max_chars, page["id"]
+                )
+            else:
+                logger.debug("Page excluded from query context due to limit: %s", page["id"])
             break
         sections.append(section)
         total += len(section)

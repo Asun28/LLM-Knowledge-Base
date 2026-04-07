@@ -9,22 +9,100 @@ chunks retrieved at query time. BM25 just improves how we find the most
 relevant compiled pages for a given question.
 """
 
+import logging
 import math
 import re
 from collections import Counter
 
+logger = logging.getLogger(__name__)
+
 # Words that appear in most documents and carry no discriminative signal
-STOP_WORDS = frozenset({
-    "a", "about", "after", "all", "also", "an", "and", "are", "as", "at",
-    "be", "been", "being", "but", "by", "can", "could", "did", "do", "does",
-    "each", "for", "from", "had", "has", "have", "how", "if", "in", "into",
-    "is", "it", "its", "just", "may", "more", "most", "new", "not", "of",
-    "on", "only", "or", "other", "our", "out", "over", "should", "so",
-    "some", "such", "than", "that", "the", "their", "them", "then", "there",
-    "these", "they", "this", "those", "through", "to", "too", "under",
-    "very", "was", "we", "were", "what", "when", "where", "which", "while",
-    "who", "why", "will", "with", "would", "you", "your",
-})
+STOP_WORDS = frozenset(
+    {
+        "a",
+        "about",
+        "after",
+        "all",
+        "also",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "can",
+        "could",
+        "did",
+        "do",
+        "does",
+        "each",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "just",
+        "may",
+        "more",
+        "most",
+        "new",
+        "not",
+        "of",
+        "on",
+        "only",
+        "or",
+        "other",
+        "our",
+        "out",
+        "over",
+        "should",
+        "so",
+        "some",
+        "such",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "to",
+        "too",
+        "under",
+        "very",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "who",
+        "why",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+    }
+)
 
 
 def tokenize(text: str) -> list[str]:
@@ -74,6 +152,9 @@ class BM25Index:
         self.avgdl = sum(self.doc_lengths) / self.n_docs if self.n_docs > 0 else 1.0
         if self.avgdl == 0:
             self.avgdl = 1.0
+            logger.warning(
+                "BM25 corpus has zero average document length — using fallback avgdl=1.0"
+            )
 
         # Pre-compute IDF for each term
         self.idf: dict[str, float] = {}

@@ -98,16 +98,66 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
     """Group pages with high term overlap (>= 3 shared significant terms)."""
     # Common English words that pass the length filter but carry no semantic signal
     common_words = {
-        "about", "after", "again", "along", "based", "because", "before",
-        "being", "between", "called", "could", "different", "during", "early",
-        "every", "example", "first", "found", "great", "https", "index",
-        "known", "large", "later", "level", "likely", "model", "never",
-        "often", "other", "point", "right", "since", "small", "state",
-        "still", "their", "there", "these", "thing", "those", "through",
-        "title", "under", "until", "using", "value", "where", "which",
-        "while", "would", "should", "above", "below", "might",
-        "source", "content", "created", "updated", "stated", "inferred",
-        "confidence", "speculative", "entity", "concept", "summary",
+        "about",
+        "after",
+        "again",
+        "along",
+        "based",
+        "because",
+        "before",
+        "being",
+        "between",
+        "called",
+        "could",
+        "different",
+        "during",
+        "early",
+        "every",
+        "example",
+        "first",
+        "found",
+        "great",
+        "https",
+        "index",
+        "known",
+        "large",
+        "later",
+        "level",
+        "likely",
+        "model",
+        "never",
+        "often",
+        "other",
+        "point",
+        "right",
+        "since",
+        "small",
+        "state",
+        "still",
+        "their",
+        "there",
+        "these",
+        "thing",
+        "those",
+        "through",
+        "title",
+        "under",
+        "until",
+        "using",
+        "value",
+        "where",
+        "which",
+        "while",
+        "would",
+        "should",
+        "above",
+        "below",
+        "might",
+        "source",
+        "content",
+        "created",
+        "updated",
+        "stated",
     }
     pages = scan_wiki_pages(wiki_dir)
     page_terms: dict[str, set[str]] = {}
@@ -119,9 +169,7 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
         fm_match = re.match(r"\A\s*---\n.*?\n---\n?(.*)", raw, re.DOTALL)
         body = fm_match.group(1) if fm_match else raw
         words = {
-            w.strip(".,!?()[]{}\"':-/")
-            for w in body.lower().split()
-            if len(w) > 4
+            w.strip(".,!?()[]{}\"':-/") for w in body.lower().split() if len(w) > 4
         } - common_words
         page_terms[pid] = words
 
@@ -157,7 +205,10 @@ def build_consistency_context(
     wiki_dir = wiki_dir or WIKI_DIR
 
     if page_ids:
-        groups = [page_ids[:MAX_CONSISTENCY_GROUP_SIZE]]
+        groups = [
+            page_ids[i : i + MAX_CONSISTENCY_GROUP_SIZE]
+            for i in range(0, len(page_ids), MAX_CONSISTENCY_GROUP_SIZE)
+        ]
     else:
         # Auto-select using three strategies (priority order per spec)
         all_groups: list[list[str]] = []
@@ -172,7 +223,7 @@ def build_consistency_context(
             key = tuple(sorted(group))
             if key not in seen:
                 seen.add(key)
-                groups.append(list(key)[:MAX_CONSISTENCY_GROUP_SIZE])
+                groups.append(list(key))
 
     if not groups:
         return "No page groups found for consistency checking."
