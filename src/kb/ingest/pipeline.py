@@ -12,6 +12,7 @@ from kb.config import (
     MAX_CONCEPTS_PER_INGEST,
     MAX_ENTITIES_PER_INGEST,
     RAW_DIR,
+    SMALL_SOURCE_THRESHOLD,
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
     WIKI_INDEX,
@@ -356,8 +357,18 @@ def ingest_source(
     _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
     pages_created.append(f"summaries/{summary_slug}")
 
-    # 2. Create or update entity pages
+    # Content-length-aware tiering: short sources get summary only
+    is_small_source = len(raw_content) < SMALL_SOURCE_THRESHOLD
+    if is_small_source:
+        logger.info(
+            "Small source (%d chars < %d threshold): deferring entity/concept pages",
+            len(raw_content), SMALL_SOURCE_THRESHOLD,
+        )
+
+    # 2. Create or update entity pages (skip for small sources)
     entities = extraction.get("entities_mentioned") or []
+    if is_small_source:
+        entities = []  # Defer entity page creation for small sources
     if not isinstance(entities, list):
         logger.warning(
             "entities_mentioned is not a list (%s), skipping entities",
@@ -401,8 +412,10 @@ def ingest_source(
             _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
             pages_created.append(f"entities/{entity_slug}")
 
-    # 3. Create or update concept pages
+    # 3. Create or update concept pages (skip for small sources)
     concepts = extraction.get("concepts_mentioned") or []
+    if is_small_source:
+        concepts = []  # Defer concept page creation for small sources
     if not isinstance(concepts, list):
         logger.warning(
             "concepts_mentioned is not a list (%s), skipping concepts",
@@ -478,7 +491,7 @@ def ingest_source(
         f"updated {len(pages_updated)} pages",
     )
 
-    return {
+    result = {
         "source_path": str(source_path),
         "source_type": source_type,
         "content_hash": source_hash,
@@ -486,3 +499,6 @@ def ingest_source(
         "pages_updated": pages_updated,
         "pages_skipped": pages_skipped,
     }
+    if is_small_source:
+        result["deferred_entities"] = True
+    return result

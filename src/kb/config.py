@@ -104,3 +104,8 @@ MAX_SEARCH_RESULTS = 100
 # ── Ingest limits ────────────────────────────────────────────
 MAX_ENTITIES_PER_INGEST = 50
 MAX_CONCEPTS_PER_INGEST = 50
+
+# ── Content-length ingest tiering ────────────────────────────
+# Sources under this character count get simplified processing:
+# summary page only, entity/concept pages deferred.
+SMALL_SOURCE_THRESHOLD = 1000

@@ -556,3 +556,105 @@ class TestRetroactiveWikilinkInjection:
             wiki_dir=wiki_dir,
         )
         assert len(injected) == 1
+
+
+# ── Task 7: Content-length-aware ingest tiering ──────────────
+
+
+class TestContentLengthIngestTiering:
+    """Test that short sources get simplified ingest (summary only)."""
+
+    def _setup_project(self, tmp_path):
+        """Create minimal project structure for ingest tests."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+        return wiki_dir, raw_dir, data_dir
+
+    def test_short_source_creates_summary_only(self, tmp_path, monkeypatch):
+        """Source under SMALL_SOURCE_THRESHOLD creates summary but defers entities."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Short source (under 1000 chars)
+        source = raw_dir / "articles" / "short.md"
+        source.write_text("# Short\nBrief note.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Short Note",
+            "entities_mentioned": ["BigEntity"],
+            "concepts_mentioned": ["BigConcept"],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+
+        # Summary should be created
+        assert any("summaries/" in p for p in result["pages_created"])
+        # Entity/concept pages should NOT be created (deferred)
+        entity_pages = [p for p in result["pages_created"] if p.startswith("entities/")]
+        concept_pages = [p for p in result["pages_created"] if p.startswith("concepts/")]
+        assert len(entity_pages) == 0
+        assert len(concept_pages) == 0
+        assert result.get("deferred_entities") is True
+
+    def test_long_source_creates_full_pages(self, tmp_path, monkeypatch):
+        """Source over SMALL_SOURCE_THRESHOLD creates full entities and concepts."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Long source (over 1000 chars)
+        long_content = "# Long Article\n\n" + "Some substantial content. " * 100
+        source = raw_dir / "articles" / "long.md"
+        source.write_text(long_content, encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Long Article",
+            "entities_mentioned": ["EntityA"],
+            "concepts_mentioned": ["ConceptB"],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+
+        # All pages should be created
+        assert any("summaries/" in p for p in result["pages_created"])
+        assert any("entities/" in p for p in result["pages_created"])
+        assert any("concepts/" in p for p in result["pages_created"])
+        assert result.get("deferred_entities") is not True
+
+    def test_config_threshold_exists(self):
+        """SMALL_SOURCE_THRESHOLD config constant exists."""
+        from kb.config import SMALL_SOURCE_THRESHOLD
+        assert isinstance(SMALL_SOURCE_THRESHOLD, int)
+        assert SMALL_SOURCE_THRESHOLD > 0
