@@ -229,10 +229,16 @@ class TestBuildExtractionSchema:
 
     def test_comparison_template_annotated_fields(self):
         """Comparison template with type annotations parses correctly."""
-        from kb.ingest.extractors import build_extraction_schema, load_template
+        import yaml
 
-        template = load_template("comparison")
-        schema = build_extraction_schema(template)
+        from kb.config import TEMPLATES_DIR
+        from kb.ingest.extractors import build_extraction_schema
+
+        # Load comparison template directly (not a source type, so skip load_template)
+        tpl = yaml.safe_load(
+            (TEMPLATES_DIR / "comparison.yaml").read_text(encoding="utf-8")
+        )
+        schema = build_extraction_schema(tpl)
 
         assert "title" in schema["required"]
         assert schema["properties"]["subjects"]["type"] == "array"
@@ -430,7 +436,9 @@ class TestMakeApiCall:
 
         tool_block = Mock(type="tool_use", input={"ok": True})
         mock_get_client.return_value.messages.create.side_effect = [
-            anthropic.APIConnectionError(message="network error"),
+            anthropic.APIConnectionError(
+                message="network error", request=Mock()
+            ),
             Mock(content=[tool_block]),
         ]
 
