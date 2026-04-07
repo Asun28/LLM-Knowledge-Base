@@ -128,7 +128,7 @@ def test_call_llm_max_retries_exceeded(mock_get_client, mock_sleep):
     mock_client.messages.create.side_effect = [rate_limit_err] * 3
     mock_get_client.return_value = mock_client
 
-    with pytest.raises(LLMError, match="Failed after 3 retries"):
+    with pytest.raises(LLMError, match="after 3 retries"):
         call_llm("Say hello")
 
     assert mock_client.messages.create.call_count == 3

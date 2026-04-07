@@ -589,12 +589,262 @@ Key patterns to adopt immediately:
 8. **Query feedback loop** — User ratings improve wiki reliability map
 9. **Self-Refine on Compile** — Generate/Critique/Refine bounded loop
 
-### Phase 3: Autonomy (At 200+ wiki pages)
+### Phase 3: Graph Intelligence (At 100+ wiki pages, Graphify-inspired)
 
-10. **DSPy optimization** — Teacher-Student for cost-efficient compilation
-11. **Evolve operation** — Proactive gap and connection discovery
-12. **RAGAS evaluation** — Automated faithfulness/recall scoring
-13. **Reweave** — Backward propagation of new knowledge through existing pages
+10. **Leiden community detection** — Topic clustering with cohesion scoring, auto-split oversized communities (from Graphify §8C)
+11. **Health report generation** — Single `WIKI_REPORT.md` combining stats, trust, communities, gaps, drift, suggested questions (from Graphify §8H)
+12. **Surprise scoring** — Composite score ranking unexpected cross-type/cross-community connections in Evolve (from Graphify §8E)
+13. **Per-claim confidence markers** — Per-edge confidence scores (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`) on graph relationships (from Graphify §8B)
+14. **Auto-generated category pages** — `wiki/_categories.md` computed from Leiden communities, not manual curation (from Graphify §8G)
+
+### Phase 4: Autonomy (At 200+ wiki pages)
+
+15. **DSPy optimization** — Teacher-Student for cost-efficient compilation
+16. **Hyperedges for group concepts** — First-class group relationships across 3+ entities (from Graphify §8D)
+17. **Deterministic pre-extraction** — Structural pass (headings, URLs, citations) before LLM enrichment (from Graphify §8C hybrid pattern)
+18. **RAGAS evaluation** — Automated faithfulness/recall scoring
+19. **Reweave** — Backward propagation of new knowledge through existing pages
+20. **Watch mode** — Two-tier file watching: structural changes instant, content changes flagged for LLM (from Graphify §8F)
+
+---
+
+## 8. Graphify: Knowledge Graph Construction Patterns
+
+*Analyzed 2026-04-07. Source: [safishamsi/graphify](https://github.com/safishamsi/graphify). Claude Code skill that transforms folders of code/docs/papers/images into queryable knowledge graphs.*
+
+### 8A. Architecture Overview
+
+Graphify uses a **two-pass extraction pipeline**:
+
+1. **Deterministic AST pass** — Tree-sitter parsers extract classes, functions, imports, call graphs from code. Zero LLM cost, instant, reproducible. Results tagged `confidence: "EXTRACTED"` (1.0).
+2. **LLM semantic pass** — Claude/GPT extracts cross-file relationships, conceptual links, design rationale from docs/papers/images. Results tagged `confidence: "INFERRED"` (0.0-1.0 score) or `"AMBIGUOUS"`.
+
+Results merge into a NetworkX graph → Leiden community detection → exports (interactive HTML, JSON, wiki markdown, GRAPH_REPORT.md).
+
+**Key design decisions:**
+- Build order matters: AST pass first, then semantic pass. Semantic labels override AST source locations (NetworkX `add_node` is idempotent, last write wins).
+- Three deduplication layers: within-file (`seen_ids` set), between-file (NetworkX idempotency), semantic merge (explicit `seen` set before `build()`).
+- Lazy imports via `__getattr__` — heavy dependencies (tree-sitter) loaded only when needed.
+
+### 8B. Three-Tier Confidence System
+
+Every edge carries mandatory confidence metadata:
+
+| Level | Meaning | Score | Source |
+|-------|---------|-------|--------|
+| `EXTRACTED` | Explicitly stated in source | 1.0 (fixed) | AST parsing, direct citations |
+| `INFERRED` | Reasoned by LLM | 0.0-1.0 (variable) | Cross-file relationships, design rationale |
+| `AMBIGUOUS` | Uncertain, needs human review | N/A | Conflicting signals, unclear references |
+
+**Critical pattern**: AMBIGUOUS edges are **surfaced explicitly** in reports as knowledge gaps requiring human review — never silently dropped or auto-resolved.
+
+Report generation computes confidence breakdown per community:
+```python
+ext_pct = round(confidences.count("EXTRACTED") / total * 100)
+# Output: "EXTRACTED 75% · INFERRED 20% · AMBIGUOUS 5%"
+```
+
+**How it maps to our cycle**:
+- Our page-level `stated | inferred | speculative` is coarser-grained. Graphify tracks confidence **per edge/relationship**, not just per page.
+- Adopt per-claim confidence markers in wiki content (inline `[INFERRED: 0.8]` tags on specific claims).
+- Surface AMBIGUOUS items in lint reports as "needs human verification" items.
+- Add `confidence_score` float to graph edges alongside existing wikilink connections.
+
+### 8C. Leiden Community Detection
+
+Uses `graspologic.partition.leiden` with fallback to `nx.community.louvain_communities`:
+
+```python
+def _partition(G: nx.Graph) -> dict[str, int]:
+    try:
+        from graspologic.partition import leiden
+        return leiden(G)
+    except ImportError:
+        communities = nx.community.louvain_communities(G, seed=42)
+        return {node: cid for cid, nodes in enumerate(communities) for node in nodes}
+```
+
+**Intelligent splitting**: Communities larger than 25% of graph OR >10 nodes get a **second Leiden pass** on the subgraph. Prevents giant catch-all clusters.
+
+**Cohesion scoring**: Ratio of actual intra-community edges to maximum possible edges:
+```python
+def cohesion_score(G, community_nodes):
+    n = len(community_nodes)
+    actual = G.subgraph(community_nodes).number_of_edges()
+    possible = n * (n - 1) / 2
+    return round(actual / possible, 2)
+```
+
+Low cohesion (< 0.15 for clusters with 5+ nodes) triggers a "should this be split?" flag in the report.
+
+**How it maps to our cycle**:
+- Add Leiden clustering to `kb.graph.builder`. Communities become topic clusters.
+- Auto-generate `wiki/_categories.md` from Leiden communities instead of manual curation.
+- Feed community structure to Evolve: "Community X has low cohesion (0.08) — consider splitting into sub-topics" or "Communities X and Y have many cross-links — consider merging."
+- New MCP tool `kb_communities` returns community listing with cohesion scores.
+- Use communities to improve query: boost pages in the same community as top search results.
+
+### 8D. Hyperedges for Group Relationships
+
+Hyperedges represent relationships involving 3+ nodes as first-class objects:
+
+```python
+# Stored in graph metadata, not as pairwise edges
+G.graph["hyperedges"] = [
+    {
+        "id": "mvc-pattern",
+        "label": "MVC Architecture",
+        "nodes": ["Model", "View", "Controller"],
+        "confidence": "INFERRED",
+        "confidence_score": 0.92,
+        "source_file": "docs/architecture.md"
+    }
+]
+```
+
+This avoids the **pairwise explosion** problem: a 5-node group concept would need 10 pairwise edges, losing the "this is one concept" semantics.
+
+**How it maps to our cycle**:
+- Add `hyperedges` to our graph model for concepts that link 3+ entities as a group (e.g., "Transformer attention involves Q, K, V, softmax, multi-head").
+- Surface in Evolve as "concept clusters" — groups of pages that belong together.
+- Could power comparison/synthesis page generation: "These 4 entities share a hyperedge — generate a comparison page?"
+
+### 8E. God Nodes and Surprise Scoring
+
+**God nodes** = most-connected entities after filtering synthetic hubs:
+
+```python
+def god_nodes(G, top_n=10):
+    for node_id, deg in sorted(G.degree(), key=lambda x: x[1], reverse=True):
+        if _is_file_node(G, node_id):  # Skip file-level hubs
+            continue
+        if _is_concept_node(G, node_id):  # Skip synthetic nodes
+            continue
+        result.append({"id": node_id, "label": ..., "edges": deg})
+```
+
+**Surprising connections** use a **composite surprise score**:
+
+| Factor | Bonus | Rationale |
+|--------|-------|-----------|
+| Confidence weight | AMBIGUOUS=3, INFERRED=2, EXTRACTED=1 | Uncertain links are more surprising |
+| Cross file-type | +2 (code↔paper) | Cross-domain connections unexpected |
+| Cross-repo | +2 (different top-level dir) | Cross-project links unusual |
+| Cross-community | +1 (Leiden says distant) | Topology-distant connections novel |
+| Peripheral→hub | +1 (low-degree → god node) | Surprising reach |
+
+**How it maps to our cycle**:
+- Our PageRank gives importance but not *surprise*. Add surprise scoring to `kb.evolve.analyzer`.
+- Filter summary pages from "god nodes" (they're hubs by design, not by earned centrality).
+- Rank evolve suggestions by surprise score: "Entity X (concepts/) unexpectedly connects to Entity Y (entities/) through 2 shared sources — no wikilink exists."
+- Cross-type surprises: an entity page and a concept page sharing sources but not linked.
+
+### 8F. Watch Mode: Two-Tier Incremental Rebuild
+
+Code and documentation changes handled differently:
+
+| Change Type | Action | LLM Cost |
+|-------------|--------|----------|
+| Code file changed | Instant AST rebuild (no LLM) | Zero |
+| Doc/paper/image changed | Flag for manual LLM re-extraction | Deferred |
+
+**Debouncing**: 3-second window batches rapid changes before triggering rebuild.
+
+**Incremental detection** uses file mtimes (fast) for change detection, while content hashes (SHA256) key the extraction cache:
+
+```python
+def detect_incremental(root, manifest_path):
+    # mtime comparison for speed
+    for f in current_files:
+        if current_mtime > stored_mtime:
+            new_files.append(f)  # Re-extract
+        else:
+            unchanged_files.append(f)  # Use cache
+    # Also track deleted files → orphaned graph nodes
+    deleted_files = [f for f in manifest if f not in current_files]
+```
+
+**How it maps to our cycle**:
+- We already have `kb_detect_drift` and `kb_compile_scan`. Watch mode would wrap these with a file watcher.
+- Two-tier pattern maps cleanly: frontmatter/structural changes (cheap, deterministic) vs content changes (expensive, LLM).
+- Deletion tracking → mark wiki pages whose sole source was deleted as "orphaned source" in lint.
+- Phase 4 feature — the pattern is well-defined when we need it.
+
+### 8G. Wiki Generation from Graph Structure
+
+Three tiers of auto-generated wiki:
+
+1. **index.md** — Catalog with community listing and god nodes
+2. **Community articles** — One per Leiden cluster, with cohesion score, key concepts, cross-community links, and confidence audit trail
+3. **God node articles** — Most-connected entities with connections grouped by relation type
+
+**Critical design difference**: Graphify generates wiki *from* the graph. Our wiki pages *are* the knowledge (prose, citations, analysis). Graph is derived from wiki, not the reverse.
+
+**Partial adoption**: Auto-generate structural/index pages from graph communities while keeping content pages human-curated/LLM-written:
+- `wiki/_categories.md` computed from Leiden communities
+- `wiki/index.md` enriched with community structure and god node highlighting
+- Community-level summary pages auto-generated as synthesis pages
+
+### 8H. GRAPH_REPORT.md: Structured Health Report
+
+Graphify generates a comprehensive health report with these sections:
+
+1. **Corpus check** — file count, word count, size verdict
+2. **Summary** — node/edge counts, confidence breakdown, token cost
+3. **God nodes** — ranked by degree, filtered for synthetic hubs
+4. **Surprising connections** — ranked by composite score with explanations
+5. **Hyperedges** — group relationships with confidence
+6. **Communities** — Leiden clusters with cohesion scores and confidence breakdown
+7. **Ambiguous edges** — items flagged for human review
+8. **Knowledge gaps** — isolated nodes, thin clusters, high ambiguity areas
+9. **Suggested questions** — actionable questions the graph uniquely answers
+
+**How it maps to our cycle**:
+- Add a `kb_health_report` MCP tool / `kb health` CLI command that generates `WIKI_REPORT.md` combining:
+  - Stats (pages, sources, coverage) from `kb_stats`
+  - Trust distribution from `kb_reliability_map`
+  - Community structure from Leiden clustering
+  - Knowledge gaps from `kb_evolve`
+  - Stale pages from `kb_detect_drift`
+  - Stub pages from lint
+  - Suggested questions for gap-filling
+- This becomes the single "state of the wiki" document for planning ingest priorities.
+
+### 8I. Security and Sensitive File Detection
+
+Graphify skips files matching sensitive patterns (`.env`, `.pem`, credentials) during detection. Also uses heuristic content analysis:
+
+```python
+def _looks_like_paper(content):
+    # Scan first 3000 chars for academic signals
+    # arXiv IDs, "we propose", citation patterns
+```
+
+URL classification by content type (tweet, arxiv, PDF, webpage) before fetch.
+
+**How it maps to our cycle**:
+- We already have path traversal protection. Could add sensitive file detection to `kb ingest` — warn if user tries to ingest `.env` or credential files.
+- Content-type heuristics could auto-detect source type instead of requiring `--type` flag.
+
+---
+
+### 8J. Borrowing Priority for Phase 3+
+
+| Priority | Feature | Graphify Pattern | Effort | Phase |
+|----------|---------|-----------------|--------|-------|
+| **P0** | Leiden community detection | `cluster.py` — partition + cohesion scoring | Medium | 3.8 |
+| **P0** | Health report generation | `report.py` — structured GRAPH_REPORT.md | Medium | 3.8 |
+| **P1** | Surprise scoring in evolve | `analyze.py` — composite surprise score | Small | 3.9 |
+| **P1** | Per-claim confidence markers | Edge confidence model with scores | Medium | 3.9 |
+| **P2** | Hyperedges for group concepts | `build.py` — first-class hyperedge objects | Small | 4.0 |
+| **P2** | Deterministic pre-extraction | `extract.py` — structural pass before LLM | Medium | 4.0 |
+| **P3** | Watch mode | `watch.py` — two-tier rebuild with debounce | Large | 4.1 |
+| **P3** | Auto-generated category pages | `wiki.py` — communities → wiki articles | Small | 3.8 (after Leiden) |
+
+**Biggest wins**: Leiden communities (transforms evolve from "find gaps" to "understand structure") and health reports (single doc showing wiki health). Both are directly inspired by Graphify's strongest patterns.
+
+Sources:
+- [safishamsi/graphify](https://github.com/safishamsi/graphify)
 
 ---
 
@@ -617,3 +867,4 @@ Key patterns to adopt immediately:
 | Claude Code sub-agents | https://claudefa.st/blog/guide/agents/sub-agent-best-practices | Parallel/sequential patterns |
 | Claude Code multi-agent | https://claudelab.net/en/articles/claude-code/claude-code-multi-agent-advanced | Worktree isolation |
 | Compile don't search | https://dev.to/rotiferdev/compile-your-knowledge-dont-search-it-what-llm-knowledge-bases-reveal-about-agent-memory-32pg | Agent memory philosophy |
+| safishamsi/graphify | https://github.com/safishamsi/graphify | Knowledge graph construction with Leiden clustering, confidence tracking, surprise scoring |

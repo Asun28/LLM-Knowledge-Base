@@ -84,7 +84,7 @@ def test_call_llm_raises_after_max_retries(mock_get_client, mock_sleep):
     mock_client.messages.create.side_effect = rate_error
     mock_get_client.return_value = mock_client
 
-    with pytest.raises(LLMError, match="Failed after"):
+    with pytest.raises(LLMError, match="after 3 retries"):
         call_llm("test prompt")
     assert mock_sleep.call_count == 3
 

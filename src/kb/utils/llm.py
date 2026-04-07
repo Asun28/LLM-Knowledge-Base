@@ -104,9 +104,21 @@ def call_llm(
             )
             time.sleep(delay)
 
-    raise LLMError(
-        f"Failed after {MAX_RETRIES} retries calling {model}: {last_error}"
-    ) from last_error
+    # Provide a specific error message based on the last error type
+    if isinstance(last_error, anthropic.APITimeoutError):
+        msg = f"Timeout after {MAX_RETRIES} retries calling {model} (timeout={REQUEST_TIMEOUT}s)"
+    elif isinstance(last_error, anthropic.RateLimitError):
+        msg = f"Rate limited after {MAX_RETRIES} retries calling {model}"
+    elif isinstance(last_error, anthropic.APIConnectionError):
+        msg = f"Connection failed after {MAX_RETRIES} retries calling {model}"
+    elif isinstance(last_error, anthropic.APIStatusError):
+        msg = (
+            f"API error {last_error.status_code} after {MAX_RETRIES} retries "
+            f"calling {model}: {last_error.message}"
+        )
+    else:
+        msg = f"Failed after {MAX_RETRIES} retries calling {model}: {last_error}"
+    raise LLMError(msg) from last_error
 
 
 class LLMError(Exception):

@@ -214,7 +214,7 @@ def kb_affected_pages(page_id: str) -> str:
                 if set(page_sources) & set(other["sources"]):
                     shared_source_pages.append(other["id"])
     except Exception as e:
-        logger.warning("Failed to compute shared sources for %s: %s", page_id, e)
+        logger.debug("Failed to compute shared sources for %s: %s", page_id, e)
 
     all_affected = sorted(set(back + shared_source_pages))
 

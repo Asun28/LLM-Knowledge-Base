@@ -39,6 +39,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     query_tokens = tokenize(question)
     if not query_tokens:
         # All words were stopwords — use raw lowercased terms as fallback
+        logger.debug("All query tokens were stopwords, falling back to raw terms")
         query_tokens = [w.lower().strip("?.,!") for w in question.split() if len(w) > 1]
     if not query_tokens:
         return []
