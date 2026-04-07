@@ -9,9 +9,6 @@ from kb.lint.verdicts import load_verdicts
 
 logger = logging.getLogger(__name__)
 
-# Group verdicts into 7-day periods
-PERIOD_DAYS = 7
-
 
 def compute_verdict_trends(path: Path | None = None) -> dict:
     """Analyze verdict history to identify quality trends.

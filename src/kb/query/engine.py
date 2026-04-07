@@ -94,8 +94,8 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
         if max_pr == 0:
             return {}
         return {node: score / max_pr for node, score in pr.items()}
-    except Exception:
-        logger.debug("Failed to compute PageRank for search blending")
+    except Exception as e:
+        logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
 
 
