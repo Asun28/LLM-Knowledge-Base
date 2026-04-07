@@ -18,6 +18,7 @@ from pathlib import Path
 
 REVIEW_MODEL = "claude-haiku-4-5-20251001"
 MAX_DIFF_CHARS = 15000
+VALID_MODES = {"pre", "post"}
 
 
 def _load_env():
@@ -35,7 +36,14 @@ def _get_diff(mode: str) -> str:
         result = subprocess.run(
             ["git", "diff", "HEAD~1", "HEAD"], capture_output=True, text=True
         )
-    return result.stdout[:MAX_DIFF_CHARS]
+    if result.returncode != 0:
+        print(f"git diff failed (exit {result.returncode}): {result.stderr.strip()}", file=sys.stderr)
+        return ""
+    diff = result.stdout
+    if len(diff) > MAX_DIFF_CHARS:
+        print(f"Warning: diff truncated to {MAX_DIFF_CHARS} chars (full diff: {len(diff)} chars)", file=sys.stderr)
+        diff = diff[:MAX_DIFF_CHARS]
+    return diff
 
 
 def _review(diff: str, mode: str) -> str:
@@ -76,6 +84,9 @@ Respond EXACTLY: "PASS" or "FAIL: <one-line reason>"."""
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
+    if mode not in VALID_MODES:
+        print(f"Unknown mode '{mode}'. Use: pre | post", file=sys.stderr)
+        sys.exit(0)  # fail-open to avoid blocking commits
 
     _load_env()
 
