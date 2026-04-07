@@ -124,3 +124,54 @@ class TestFixDeadLinksNoPhantom:
             fixes = fix_dead_links(tmp_wiki)
 
         assert fixes == [], f"Expected no phantom fixes, got: {fixes}"
+
+
+# ── Task 5: inject_wikilinks special-char boundary fix ──────────
+
+
+class TestInjectWikilinksSpecialChars:
+    """inject_wikilinks must handle titles starting/ending with non-word chars."""
+
+    def _make_page(self, wiki_dir, page_id: str, body: str):
+        parts = page_id.split("/")
+        d = wiki_dir
+        for p in parts[:-1]:
+            d = d / p
+        d.mkdir(parents=True, exist_ok=True)
+        page = d / f"{parts[-1]}.md"
+        page.write_text(
+            f"---\ntitle: {parts[-1]}\nsource:\n  - raw/articles/a.md\n"
+            f"created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n{body}",
+            encoding="utf-8",
+        )
+        return page
+
+    def test_inject_cxx_title(self, tmp_wiki):
+        """Titles ending with non-word chars (C++) are injected correctly."""
+        from kb.compile.linker import inject_wikilinks
+
+        self._make_page(tmp_wiki, "concepts/target", "")
+        source_page = self._make_page(
+            tmp_wiki, "concepts/source", "We use C++ for performance."
+        )
+
+        updated = inject_wikilinks("C++", "concepts/target", wiki_dir=tmp_wiki)
+
+        content = source_page.read_text(encoding="utf-8")
+        assert "[[concepts/target|C++]]" in content, f"Wikilink not injected:\n{content}"
+        assert "concepts/source" in updated
+
+    def test_inject_dotnet_title(self, tmp_wiki):
+        """Titles starting with non-word chars (.NET) are injected correctly."""
+        from kb.compile.linker import inject_wikilinks
+
+        self._make_page(tmp_wiki, "concepts/target", "")
+        source_page = self._make_page(
+            tmp_wiki, "concepts/source", "The .NET ecosystem is large."
+        )
+
+        updated = inject_wikilinks(".NET", "concepts/target", wiki_dir=tmp_wiki)
+
+        content = source_page.read_text(encoding="utf-8")
+        assert "[[concepts/target|.NET]]" in content, f"Wikilink not injected:\n{content}"
+        assert "concepts/source" in updated

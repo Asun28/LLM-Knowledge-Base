@@ -103,9 +103,15 @@ def inject_wikilinks(
     pages = scan_wiki_pages(wiki_dir)
     updated = []
 
-    # Build regex for word-boundary match of the title (case-insensitive)
+    # Build regex for word-boundary match of the title (case-insensitive).
+    # \b fails for titles starting/ending with non-word chars (C++, .NET, GPT-4o).
+    # Use lookahead/lookbehind based on whether the first/last char is a word char.
     escaped_title = re.escape(title)
-    pattern = re.compile(r"\b" + escaped_title + r"\b", re.IGNORECASE)
+    starts_with_word = bool(title) and (title[0].isalnum() or title[0] == "_")
+    ends_with_word = bool(title) and (title[-1].isalnum() or title[-1] == "_")
+    left = r"\b" if starts_with_word else r"(?<![a-zA-Z0-9_])"
+    right = r"\b" if ends_with_word else r"(?![a-zA-Z0-9_])"
+    pattern = re.compile(left + escaped_title + right, re.IGNORECASE)
 
     for page_path in pages:
         pid = page_id(page_path, wiki_dir)
