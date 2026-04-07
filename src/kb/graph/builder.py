@@ -1,11 +1,14 @@
 """Build a networkx graph from wiki pages and their wikilinks."""
 
+import logging
 from pathlib import Path
 
 import networkx as nx
 
 from kb.config import WIKI_DIR
 from kb.utils.markdown import extract_wikilinks
+
+logger = logging.getLogger(__name__)
 
 
 def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
@@ -49,7 +52,11 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
     # Add edges from wikilinks (only to existing nodes)
     existing_ids = set(graph.nodes())
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8")
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Failed to read %s: %s", page_path, e)
+            continue
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
         for link in links:

@@ -208,8 +208,10 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Top stubs: {', '.join(stub_pages[:5])}. "
                 "Use kb_review_page to get context, then kb_refine_page to add content."
             )
-    except Exception:
-        pass  # Stub check is a nice-to-have, don't fail evolve
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).debug("Stub check failed in evolve: %s", e)
 
     return {
         "coverage": coverage,

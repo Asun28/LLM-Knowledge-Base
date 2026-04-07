@@ -317,6 +317,12 @@ def ingest_source(
 
     # 2. Create or update entity pages
     entities = extraction.get("entities_mentioned") or []
+    if not isinstance(entities, list):
+        logger.warning(
+            "entities_mentioned is not a list (%s), skipping entities",
+            type(entities).__name__,
+        )
+        entities = []
     seen_entity_slugs: dict[str, str] = {}
     for entity in entities:
         if not entity or not entity.strip():
@@ -349,6 +355,12 @@ def ingest_source(
 
     # 3. Create or update concept pages
     concepts = extraction.get("concepts_mentioned") or []
+    if not isinstance(concepts, list):
+        logger.warning(
+            "concepts_mentioned is not a list (%s), skipping concepts",
+            type(concepts).__name__,
+        )
+        concepts = []
     seen_concept_slugs: dict[str, str] = {}
     for concept in concepts:
         if not concept or not concept.strip():

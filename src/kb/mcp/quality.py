@@ -319,6 +319,8 @@ def kb_create_page(
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
     if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
         return f"Error: Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+    if not title or not title.strip():
+        return "Error: Title cannot be empty."
 
     page_path = WIKI_DIR / f"{page_id}.md"
     if page_path.exists():

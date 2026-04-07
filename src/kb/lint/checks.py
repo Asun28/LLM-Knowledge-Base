@@ -93,6 +93,17 @@ def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
         if modified:
             page_path.write_text(content, encoding="utf-8")
 
+    # Log fixes to audit trail
+    if fixes:
+        from kb.utils.wiki_log import append_wiki_log
+
+        fixed_count = len(fixes)
+        pages_fixed = len(broken_by_page)
+        append_wiki_log(
+            "lint-fix",
+            f"Auto-fixed {fixed_count} broken wikilink(s) across {pages_fixed} page(s)",
+        )
+
     return fixes
 
 
