@@ -260,9 +260,23 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.11). Format: [Kee
 ## Automation
 
 Auto-commit hooks are configured in `.claude/settings.local.json` using `claude -p` with native skills (no external API calls):
-- **Stop hook** — pytest → `git add -A` → `claude -p` invokes `everything-claude-code:code-review` skill → commit + push if review passes. Timeout 300s.
-- **PostToolUse (Bash)** — triggers when a Bash command contains `pytest` with "passed" in output → same skill-based review → commit + push. Timeout 180s.
 
-Both hooks call `claude -p "... invoke Skill for everything-claude-code:code-review ..." --allowedTools "Skill,Bash,Read,Grep"`. Claude uses its native skill to gate commits — no raw API calls, no external script. Swap `everything-claude-code:code-review` for `superpowers:requesting-code-review` to use the actor-critic reviewer instead.
+### Stop hook (2-step sequential)
+1. **Doc updater** (180s) — `claude -p` reviews `git diff`, updates project docs if changes warrant it:
+   - `CHANGELOG.md` — add entries under `[Unreleased]`
+   - `BACKLOG.md` — **delete** resolved items (never strikethrough); collapse empty phase sections to one-liner under "Resolved Phases"; add newly discovered issues
+   - `CLAUDE.md` — update version numbers, test counts, module/tool counts, API docs
+   - `README.md` — update if user-facing features or setup changed
+   - `others/architecture-diagram.html` + re-render PNG if architecture changed
+   - Skips files where changes are trivial
+2. **Test + code review + commit** (300s) — pytest → `git add -A` → `claude -p` invokes `everything-claude-code:code-review` skill → commit + push if review passes.
+
+### PostToolUse (Bash — pytest passed)
+Triggers when a Bash command contains `pytest` with "passed" in output → same 2-step flow (doc update → code review → commit + push). Timeout 300s.
+
+Both review steps call `claude -p "... invoke Skill for everything-claude-code:code-review ..." --allowedTools "Skill,Bash,Read,Grep"`. Claude uses its native skill to gate commits — no raw API calls, no external script. Swap `everything-claude-code:code-review` for `superpowers:requesting-code-review` to use the actor-critic reviewer instead.
+
+### BACKLOG.md lifecycle
+Resolved items are **deleted** from `BACKLOG.md` (the fix is recorded in `CHANGELOG.md`). When all items in a phase section are resolved, the section collapses to a one-liner under "Resolved Phases" (e.g., `- **Phase 3.92** — all items resolved in v0.9.11`). This keeps the backlog focused on open work only.
 
 All tools are auto-approved for this project (permissions in `settings.local.json`).
