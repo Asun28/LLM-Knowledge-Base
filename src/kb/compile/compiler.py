@@ -255,6 +255,10 @@ def compile_wiki(
         "sources_processed": 0,
         "pages_created": [],
         "pages_updated": [],
+        "pages_skipped": [],
+        "wikilinks_injected": [],
+        "affected_pages": [],
+        "duplicates": 0,
         "errors": [],
     }
 
@@ -264,6 +268,11 @@ def compile_wiki(
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
             results["pages_updated"].extend(ingest_result["pages_updated"])
+            results["pages_skipped"].extend(ingest_result.get("pages_skipped", []))
+            results["wikilinks_injected"].extend(ingest_result.get("wikilinks_injected", []))
+            results["affected_pages"].extend(ingest_result.get("affected_pages", []))
+            if ingest_result.get("duplicate"):
+                results["duplicates"] += 1
 
             # Update manifest and save immediately (crash-safe)
             rel_path = _canonical_rel_path(source, raw_dir)
@@ -282,6 +291,8 @@ def compile_wiki(
         f"{results['mode']} compile: {results['sources_processed']} sources, "
         f"{len(results['pages_created'])} pages created, "
         f"{len(results['pages_updated'])} pages updated, "
+        f"{len(results['pages_skipped'])} skipped, "
+        f"{results['duplicates']} duplicate(s), "
         f"{len(results['errors'])} errors",
     )
 

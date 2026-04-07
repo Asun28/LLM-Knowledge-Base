@@ -175,3 +175,48 @@ class TestInjectWikilinksSpecialChars:
         content = source_page.read_text(encoding="utf-8")
         assert "[[concepts/target|.NET]]" in content, f"Wikilink not injected:\n{content}"
         assert "concepts/source" in updated
+
+
+# ── Task 6: compile_wiki propagates ingest fields ─────────────────
+
+
+class TestCompileWikiPropagatesFields:
+    """compile_wiki must include pages_skipped, wikilinks_injected, affected_pages, duplicates."""
+
+    def test_compile_wiki_result_has_all_fields(self, tmp_project):
+        """compile_wiki result dict includes all ingest_source output fields."""
+        from unittest.mock import MagicMock, patch
+
+        from kb.compile.compiler import compile_wiki
+
+        fake_ingest = MagicMock(return_value={
+            "pages_created": ["concepts/foo"],
+            "pages_updated": [],
+            "pages_skipped": ["entities/bar"],
+            "wikilinks_injected": ["summaries/baz"],
+            "affected_pages": ["concepts/qux"],
+            "duplicate": False,
+            "source_path": "raw/articles/test.md",
+            "source_type": "article",
+            "content_hash": "abc123",
+        })
+
+        raw_dir = tmp_project / "raw"
+        (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+        (raw_dir / "articles" / "test.md").write_text("# Test\nContent.", encoding="utf-8")
+
+        with patch("kb.compile.compiler.ingest_source", fake_ingest):
+            result = compile_wiki(
+                incremental=False,
+                raw_dir=raw_dir,
+                manifest_path=tmp_project / "hashes.json",
+            )
+
+        assert "pages_skipped" in result, "pages_skipped missing"
+        assert "wikilinks_injected" in result, "wikilinks_injected missing"
+        assert "affected_pages" in result, "affected_pages missing"
+        assert "duplicates" in result, "duplicates missing"
+        assert result["pages_skipped"] == ["entities/bar"]
+        assert result["wikilinks_injected"] == ["summaries/baz"]
+        assert result["affected_pages"] == ["concepts/qux"]
+        assert result["duplicates"] == 0

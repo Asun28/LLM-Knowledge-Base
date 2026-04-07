@@ -391,6 +391,16 @@ def kb_compile(incremental: bool = True) -> str:
         lines.append("\n## Updated")
         for p in result["pages_updated"]:
             lines.append(f"  ~ {p}")
+    if result.get("pages_skipped"):
+        lines.append(f"\n## Skipped ({len(result['pages_skipped'])})")
+        for p in result["pages_skipped"]:
+            lines.append(f"  ! {p}")
+    if result.get("wikilinks_injected"):
+        lines.append(f"\n## Wikilinks Injected ({len(result['wikilinks_injected'])})")
+        for p in result["wikilinks_injected"]:
+            lines.append(f"  -> {p}")
+    if result.get("duplicates"):
+        lines.append(f"\n**Duplicates skipped:** {result['duplicates']}")
     if result["errors"]:
         lines.append(f"\n## Errors ({len(result['errors'])})")
         for err in result["errors"]:
