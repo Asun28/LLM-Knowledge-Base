@@ -283,3 +283,48 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
                     )
 
     return issues
+
+
+def check_stub_pages(wiki_dir: Path | None = None, min_content_chars: int = 100) -> list[dict]:
+    """Find wiki pages with minimal body content (stubs needing enrichment).
+
+    A stub is a page where the body content (after frontmatter) is less than
+    min_content_chars characters. Summaries are excluded since they're auto-generated.
+
+    Args:
+        wiki_dir: Path to wiki directory.
+        min_content_chars: Minimum chars for non-stub content. Default 100.
+
+    Returns:
+        List of dicts: {page, content_length, message}.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    pages = scan_wiki_pages(wiki_dir)
+    issues = []
+
+    for page_path in pages:
+        pid = page_id(page_path, wiki_dir)
+        # Skip summaries — they're auto-generated entry points
+        if pid.startswith("summaries/"):
+            continue
+        try:
+            post = frontmatter.load(str(page_path))
+            body = post.content.strip()
+            if len(body) < min_content_chars:
+                issues.append(
+                    {
+                        "check": "stub_page",
+                        "severity": "info",
+                        "page": pid,
+                        "content_length": len(body),
+                        "message": (
+                            f"Stub page ({len(body)} chars): {pid} — "
+                            "consider enriching with more content"
+                        ),
+                    }
+                )
+        except Exception as e:
+            logger.warning("Failed to check stub status for %s: %s", page_path, e)
+            continue
+
+    return issues

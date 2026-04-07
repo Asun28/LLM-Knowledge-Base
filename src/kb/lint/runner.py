@@ -10,6 +10,7 @@ from kb.lint.checks import (
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
+    check_stub_pages,
     fix_dead_links,
 )
 from kb.lint.verdicts import get_verdict_summary
@@ -67,6 +68,10 @@ def run_all_checks(
     cycles = check_cycles(wiki_dir)
     all_issues.extend(cycles)
     checks_run.append({"name": "wikilink_cycles", "issues": len(cycles)})
+
+    stubs = check_stub_pages(wiki_dir)
+    all_issues.extend(stubs)
+    checks_run.append({"name": "stub_pages", "issues": len(stubs)})
 
     # Summarize by severity
     severity_counts = {"error": 0, "warning": 0, "info": 0}
