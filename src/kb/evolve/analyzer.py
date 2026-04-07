@@ -21,10 +21,9 @@ def analyze_coverage(wiki_dir: Path | None = None) -> dict:
 
     by_type = {"entities": 0, "concepts": 0, "comparisons": 0, "summaries": 0, "synthesis": 0}
     for page_path in pages:
-        for page_type in by_type:
-            if page_type in str(page_path).replace("\\", "/"):
-                by_type[page_type] += 1
-                break
+        subdir = page_path.parent.name
+        if subdir in by_type:
+            by_type[subdir] += 1
 
     # Find under-covered types (types with zero pages)
     under_covered = [t for t, count in by_type.items() if count == 0]
@@ -127,7 +126,7 @@ def suggest_new_pages(wiki_dir: Path | None = None) -> list[dict]:
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
         for link in links:
-            target = link.removesuffix(".md")
+            target = link  # Already normalized by extract_wikilinks()
             if target not in existing_ids:
                 if target not in suggestions:
                     suggestions[target] = {"target": target, "referenced_by": []}
@@ -196,6 +195,21 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
             f"Wiki has {stats['components']} disconnected components. "
             "Consider adding cross-links to improve connectivity."
         )
+
+    # Suggest enriching stubs
+    try:
+        from kb.lint.checks import check_stub_pages
+
+        stubs = check_stub_pages(wiki_dir)
+        if stubs:
+            stub_pages = [s["page"] for s in stubs]
+            recommendations.append(
+                f"{len(stubs)} stub page(s) need enrichment. "
+                f"Top stubs: {', '.join(stub_pages[:5])}. "
+                "Use kb_review_page to get context, then kb_refine_page to add content."
+            )
+    except Exception:
+        pass  # Stub check is a nice-to-have, don't fail evolve
 
     return {
         "coverage": coverage,

@@ -172,7 +172,7 @@ def test_run_all_checks(tmp_wiki, tmp_path):
     assert "checks_run" in report
     assert "total_issues" in report
     assert "summary" in report
-    assert len(report["checks_run"]) == 6
+    assert len(report["checks_run"]) == 7
 
 
 def test_run_all_checks_empty(tmp_wiki, tmp_path):

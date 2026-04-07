@@ -77,7 +77,7 @@ def extract_from_source(content: str, source_type: str) -> dict:
             cleaned = cleaned[newline_pos + 1 :]
         else:
             # Single-line: strip opening ``` or ```json prefix
-            cleaned = cleaned[3:]
+            cleaned = cleaned[3:].lstrip()
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
     if cleaned.endswith("```"):

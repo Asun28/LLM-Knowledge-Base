@@ -45,6 +45,7 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = scan_wiki_pages(wiki_dir)
+    existing_ids = {page_id(p, wiki_dir) for p in pages}
     backlinks: dict[str, list[str]] = {}
 
     for page_path in pages:
@@ -54,6 +55,8 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
 
         for link in links:
             target = link
+            if target not in existing_ids:
+                continue  # Skip broken links (consistent with build_graph)
             if target not in backlinks:
                 backlinks[target] = []
             if source_id not in backlinks[target]:
