@@ -87,6 +87,12 @@ SEARCH_CONTENT_WEIGHT = 1
 BM25_K1 = 1.5  # Term frequency saturation (1.2-2.0 typical)
 BM25_B = 0.75  # Document length normalization (0.0-1.0)
 
+# ── PageRank search blending ──────────────────────────────────
+# Weight for blending PageRank into BM25 scores.
+# final_score = bm25_score * (1 + PAGERANK_SEARCH_WEIGHT * normalized_pagerank)
+# Set to 0 to disable PageRank blending (pure BM25).
+PAGERANK_SEARCH_WEIGHT = 0.5
+
 # ── Query context limits ───────────────────────────────────
 # Approximate character budget for query context sent to LLM.
 # ~4 chars/token, 100k context window → conservative 80k char limit.

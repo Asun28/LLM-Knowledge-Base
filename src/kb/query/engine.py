@@ -6,6 +6,7 @@ from pathlib import Path
 from kb.config import (
     BM25_B,
     BM25_K1,
+    PAGERANK_SEARCH_WEIGHT,
     QUERY_CONTEXT_MAX_CHARS,
     SEARCH_TITLE_WEIGHT,
 )
@@ -55,15 +56,47 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     index = BM25Index(documents)
     scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
 
+    # Blend PageRank into BM25 scores if weight > 0
+    pagerank_scores: dict[str, float] = {}
+    if PAGERANK_SEARCH_WEIGHT > 0:
+        pagerank_scores = _compute_pagerank_scores(wiki_dir)
+
     # Pair scores with pages, filter zero scores
     scored = []
     for i, score in enumerate(scores):
         if score > 0:
-            pages[i]["score"] = round(score, 4)
+            # Blend: final = bm25 * (1 + weight * normalized_pagerank)
+            pr = pagerank_scores.get(pages[i]["id"], 0.0)
+            blended = score * (1 + PAGERANK_SEARCH_WEIGHT * pr)
+            pages[i]["score"] = round(blended, 4)
             scored.append(pages[i])
 
     scored.sort(key=lambda p: p["score"], reverse=True)
     return scored[:max_results]
+
+
+def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
+    """Compute normalized PageRank scores for all wiki pages.
+
+    Returns a dict mapping page_id to normalized PageRank (0.0 to 1.0).
+    Normalized so the maximum PageRank in the graph maps to 1.0.
+    """
+    try:
+        import networkx as nx
+
+        from kb.graph.builder import build_graph
+
+        graph = build_graph(wiki_dir)
+        if graph.number_of_nodes() == 0:
+            return {}
+        pr = nx.pagerank(graph)
+        max_pr = max(pr.values()) if pr else 1.0
+        if max_pr == 0:
+            return {}
+        return {node: score / max_pr for node, score in pr.items()}
+    except Exception:
+        logger.debug("Failed to compute PageRank for search blending")
+        return {}
 
 
 def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> str:
