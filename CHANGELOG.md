@@ -19,6 +19,14 @@ Rules:
 - Keep bullets concise — what changed and why, not how
 -->
 
+## [Unreleased]
+
+### Fixed
+- `mcp/browse.py`: simplified `except (OSError, PermissionError)` → `except OSError` in `kb_read_page` and `kb_list_sources` (`PermissionError` is a subclass of `OSError`)
+- `scripts/hook_review.py`: added `VALID_MODES` guard (fail-open on unknown mode); `_get_diff` now checks `returncode` and surfaces stderr on `git diff` failure; prints warning when diff is silently truncated at `MAX_DIFF_CHARS`
+
+---
+
 ## [0.9.11] — 2026-04-08 (Phase 3.92)
 
 9-item backlog hardening. All Phase 3.92 known issues resolved. Ruff clean.
@@ -36,7 +44,7 @@ Rules:
 
 ### Fixed
 - `review/refiner.py`: review history now capped at `MAX_REVIEW_HISTORY_ENTRIES` (same pattern as feedback/verdict stores)
-- `mcp/browse.py`: `kb_read_page` and `kb_list_sources` wrap I/O in `try/except (OSError, PermissionError)` — raw exceptions no longer escape to MCP client
+- `mcp/browse.py`: `kb_read_page` and `kb_list_sources` wrap I/O in `try/except OSError` — raw exceptions no longer escape to MCP client
 - `lint/checks.py`: `fix_dead_links` only appends audit trail entry when `re.sub` actually changed content (eliminates phantom entries)
 - `evolve/analyzer.py`: added module-level logger; `find_connection_opportunities` and `suggest_new_pages` guard `read_text()` with `try/except (OSError, UnicodeDecodeError)`
 
