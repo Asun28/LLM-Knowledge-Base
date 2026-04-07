@@ -294,7 +294,7 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
 **Current:** Phase 3.91 (v0.9.10) — 574 tests, 25 MCP tools, 12 modules.
 
 **Phase 3.92 backlog (known issues):**
-- `review/refiner.py` missing 10k entry cap on review history
+- ~~`review/refiner.py` missing 10k entry cap on review history~~ — **RESOLVED** (cap applied at `refiner.py:96-97`)
 - `kb_read_page`, `kb_list_sources` missing outer `try/except` (raw `OSError`/`PermissionError` can escape to MCP client)
 - `fix_dead_links` generates phantom audit trail entries when `re.sub` makes no change
 - `inject_wikilinks` `\b` regex silently fails for titles with leading non-word chars (`C++`, `GPT-4o`, `.NET`)
@@ -303,6 +303,60 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
 - Hardcoded `0.1` trend threshold in `trends.py` should be `VERDICT_TREND_THRESHOLD` config constant
 - `wiki_log.py` calls `stat()` twice on same file; `check_source_coverage` reads each page file twice
 - MCP instructions claim 26 tools, actual registered count is 25
+
+**Phase 3.93 backlog (code review 2026-04-08 — new findings):**
+
+*Security / Path Traversal:*
+- `mcp/quality.py` `kb_refine_page` missing `_validate_page_id()` before file write — only write-capable MCP tool without traversal protection
+- `review/refiner.py` `page_id` not validated against `wiki_dir` at library level before constructing write path
+- `review/context.py` `page_id` not validated before `page_path.read_text()` call in `pair_page_with_sources`
+- `mcp/quality.py` `kb_affected_pages`, `kb_save_lint_verdict`, `kb_lint_consistency` (comma-split ids) missing `_validate_page_id()` per-element
+
+*MCP Error Handling:*
+- `mcp/core.py` `kb_ingest_content` writes raw file to disk before validating extraction JSON — leaves orphaned file on validation failure
+- `mcp/core.py` `kb_save_source` `OSError` from `write_text` escapes unhandled to MCP client
+- `mcp/core.py` `kb_query` API branch (`query_wiki()` call) has no `try/except` — `LLMError`/timeout escapes to MCP client
+- `mcp/core.py` `kb_save_source` silently overwrites existing raw source files (unlike `kb_create_page` which errors)
+
+*Lint Correctness:*
+- `lint/runner.py` filter key mismatch: `"dead_links"` (filter) vs `"dead_link"` (issues) — `--fix` never removes fixed errors from report (always-broken since introduction)
+- `lint/checks.py` `check_source_coverage` first `read_text()` loop has no error handling; one unreadable file aborts the entire lint run
+- `lint/checks.py` `check_source_coverage` suffix-based reference matching (`ref.endswith(f"/{f.name}")`) can false-positive on same-named files across subdirs
+- `lint/semantic.py` two unguarded `read_text()` in `_group_by_term_overlap` (line 166) and `build_consistency_context` (line 242)
+- `lint/verdicts.py` `load_verdicts` silently discards all verdict history on `JSONDecodeError` with no warning logged
+
+*Query Correctness:*
+- `query/engine.py` `query_wiki` never forwards `max_results` to `search_pages` — the [1,100] clamp in `kb_query` is a dead letter in API mode
+- `query/engine.py` skip-and-continue context assembly can silently exclude highest-ranked page (too large) while including lower-ranked pages
+
+*Ingest Correctness:*
+- `ingest/pipeline.py` summary page always overwritten without checking existence — unlike entity/concept pages which correctly use `_update_existing_page`; loses original `created:` date on re-ingest
+- `ingest/pipeline.py` no defense-in-depth path traversal guard: `ingest_source` never verifies `source_path` resolves inside `RAW_DIR` (only MCP layer validates)
+- `ingest/pipeline.py` `_update_sources_mapping` and `_update_index_batch` silently no-op when files missing on fresh install (no creation, no warning)
+
+*Compile Correctness:*
+- `compile/linker.py` `inject_wikilinks` case mismatch — `target_page_id` not lowercased before `in existing_links` check; `extract_wikilinks` always lowercases, so mixed-case page IDs are never matched as already-linked → duplicate wikilinks injected
+- `compile/compiler.py` `find_changed_sources` writes manifest side-effect (saves updated template hashes) even when called read-only from `kb_detect_drift` — suppresses real template changes from next compile scan
+- `compile/extractors.py` `load_template` LRU cache never invalidated mid-session — template changes during a running compile are silently ignored
+
+*Graph / Evolve:*
+- `graph/export.py` Mermaid label sanitization incomplete — newlines (`\n`) and backticks not stripped; LLM-generated title with newline breaks Mermaid output
+
+*LLM Client:*
+- `utils/llm.py` `range(MAX_RETRIES)` yields max 2 retries for `MAX_RETRIES=3` — variable named MAX_RETRIES implies first call + 3 retries; behavior gives first call + 2 retries
+- `utils/llm.py` `last_error` is `None` on exhaustion path if `MAX_RETRIES=0` — `raise LLMError(...) from None` silently swallows exception chain
+
+*Utils / Architecture:*
+- `utils/pages.py` imports `page_id` from `graph/builder.py` — fragile coupling pulls `networkx` into every page-load operation; broken networkx import disables `load_all_pages` system-wide
+- `utils/pages.py` `raw_content` field stores pre-lowercased text — name implies verbatim content; callers expecting original text get silently downcased version
+- `MAX_FEEDBACK_ENTRIES` (`feedback/store.py:9`) and `MAX_VERDICTS` (`lint/verdicts.py:9`) defined as module constants, not in `kb.config` alongside `MAX_REVIEW_HISTORY_ENTRIES`
+
+*CLI:*
+- `cli.py` `mcp` command missing `try/except` — raw Python traceback shown on startup failure (all other CLI commands handle exceptions cleanly)
+
+*Review Layer:*
+- `review/refiner.py` frontmatter regex only matches LF line endings (`---\n`) — CRLF files on Windows silently fail with "Invalid frontmatter format" error
+- `review/context.py` `source_path.read_text()` unguarded — `OSError`/`PermissionError` escapes caller
 
 **Phase 4 next:** Two-phase compile pipeline (batch cross-source merging before writing), pre-publish validation gate, iterative multi-hop retrieve/trace loop (BM25 + graph traversal), answer trace enforcement (reject uncited claims), conversation→KB promotion (positively-rated query answers → wiki pages), DSPy Teacher-Student optimization, RAGAS evaluation.
 
