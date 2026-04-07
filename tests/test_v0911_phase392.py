@@ -1,8 +1,5 @@
 """Tests for Phase 3.92 backlog fixes (v0.9.11)."""
 
-from pathlib import Path
-
-
 # ── Task 2: Review history 10k cap ──────────────────────────────
 
 
@@ -29,7 +26,8 @@ class TestReviewHistoryCap:
         page = wiki_dir / "concepts" / "test.md"
         page.write_text(
             "---\ntitle: Test\nsource:\n  - raw/articles/a.md\n"
-            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nBody.",
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\nBody.",
             encoding="utf-8",
         )
 
@@ -141,7 +139,8 @@ class TestInjectWikilinksSpecialChars:
         page = d / f"{parts[-1]}.md"
         page.write_text(
             f"---\ntitle: {parts[-1]}\nsource:\n  - raw/articles/a.md\n"
-            f"created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n{body}",
+            f"created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            f"confidence: stated\n---\n\n{body}",
             encoding="utf-8",
         )
         return page
@@ -236,6 +235,7 @@ class TestVerdictTrendThreshold:
     def test_trends_module_imports_threshold_from_config(self):
         """compute_verdict_trends uses the config constant (not hardcoded 0.1)."""
         import inspect
+
         from kb.lint import trends as trends_module
 
         source = inspect.getsource(trends_module)
