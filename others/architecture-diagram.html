@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Knowledge Base — Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 48px 40px;
+    min-width: 1400px;
+  }
+
+  /* ── Title ── */
+  .title-block { margin-bottom: 40px; }
+  .title-block h1 {
+    font-size: 42px;
+    font-weight: 800;
+    color: #f0f6fc;
+    letter-spacing: -1px;
+    margin-bottom: 6px;
+  }
+  .title-block .version {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: #7ee787;
+    background: rgba(126, 231, 135, 0.1);
+    padding: 2px 10px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-left: 12px;
+    vertical-align: middle;
+  }
+  .title-block .subtitle {
+    font-size: 17px;
+    color: #8b949e;
+    margin-top: 4px;
+  }
+
+  /* ── Main Grid (4 columns) ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 220px 300px 300px 320px;
+    gap: 28px;
+    margin-bottom: 36px;
+    align-items: start;
+  }
+
+  /* ── Column Headers ── */
+  .col-header {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    padding-bottom: 6px;
+  }
+  .col-header.raw { color: #f97583; border-bottom: 2px solid #f97583; }
+  .col-header.compile { color: #79c0ff; border-bottom: 2px solid #79c0ff; }
+  .col-header.wiki { color: #7ee787; border-bottom: 2px solid #7ee787; }
+  .col-header.runtime { color: #d2a8ff; border-bottom: 2px solid #d2a8ff; }
+
+  /* ── Cards ── */
+  .card {
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .card h3 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .card .desc {
+    font-size: 12px;
+    color: #8b949e;
+    line-height: 1.5;
+  }
+  .card .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  /* Card color schemes */
+  .card.raw-main {
+    background: rgba(249, 117, 131, 0.08);
+    border: 1.5px dashed rgba(249, 117, 131, 0.4);
+  }
+  .card.raw-main h3 { color: #f97583; }
+
+  .card.raw-item {
+    background: rgba(249, 117, 131, 0.05);
+    border: 1px solid rgba(249, 117, 131, 0.15);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .card.raw-item h3 { color: #ffa198; font-size: 13px; }
+  .card.raw-item .desc { font-size: 11px; }
+
+  .card.compile-main {
+    background: rgba(121, 192, 255, 0.08);
+    border: 1.5px solid rgba(121, 192, 255, 0.3);
+  }
+  .card.compile-main h3 { color: #79c0ff; }
+
+  .card.compile-steps {
+    background: rgba(121, 192, 255, 0.05);
+    border: 1px solid rgba(121, 192, 255, 0.2);
+  }
+  .card.compile-steps h3 { color: #79c0ff; }
+
+  .card.wiki-main {
+    background: rgba(126, 231, 135, 0.08);
+    border: 1.5px solid rgba(126, 231, 135, 0.3);
+  }
+  .card.wiki-main h3 { color: #7ee787; }
+
+  .card.wiki-layer {
+    background: rgba(126, 231, 135, 0.05);
+    border: 1px solid rgba(126, 231, 135, 0.2);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+  }
+  .card.wiki-layer h3 { color: #7ee787; font-size: 13px; font-weight: 600; }
+  .card.wiki-layer .desc { font-size: 11px; }
+
+  .card.runtime-main {
+    background: rgba(210, 168, 255, 0.08);
+    border: 1.5px solid rgba(210, 168, 255, 0.3);
+  }
+  .card.runtime-main h3 { color: #d2a8ff; }
+
+  .card.runtime-inner {
+    background: rgba(210, 168, 255, 0.05);
+    border: 1px solid rgba(210, 168, 255, 0.2);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+  }
+  .card.runtime-inner h3 { color: #d2a8ff; font-size: 13px; font-weight: 600; }
+  .card.runtime-inner .desc { font-size: 11px; }
+
+  /* Gate / barrier cards */
+  .card.gate {
+    background: rgba(249, 117, 131, 0.12);
+    border: 2px solid rgba(249, 117, 131, 0.5);
+    text-align: center;
+    padding: 10px;
+  }
+  .card.gate h3 { color: #f97583; font-size: 13px; }
+
+  .card.commit-barrier {
+    background: rgba(249, 117, 131, 0.12);
+    border: 2px solid rgba(249, 117, 131, 0.5);
+    text-align: center;
+    padding: 10px;
+  }
+  .card.commit-barrier h3 { color: #f97583; font-size: 13px; }
+
+  /* ── Arrows between columns ── */
+  .arrow-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0 4px;
+  }
+
+  /* ── Flow arrows (inline SVG or CSS) ── */
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 40px;
+  }
+  .flow-arrow svg { overflow: visible; }
+
+  /* ── Support Layer ── */
+  .support-layer {
+    border: 1.5px dashed rgba(255, 215, 0, 0.3);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-top: 16px;
+    background: rgba(255, 215, 0, 0.02);
+  }
+  .support-layer .layer-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #e3b341;
+    margin-bottom: 18px;
+  }
+  .support-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  .support-card {
+    background: rgba(255, 215, 0, 0.06);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .support-card h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e3b341;
+    margin-bottom: 6px;
+  }
+  .support-card .desc {
+    font-size: 12px;
+    color: #8b949e;
+    line-height: 1.5;
+  }
+
+  /* ── Model Tier Badge ── */
+  .tier-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 8px;
+    margin-top: 6px;
+    margin-right: 4px;
+  }
+  .tier-scan { background: rgba(126, 231, 135, 0.15); color: #7ee787; }
+  .tier-write { background: rgba(121, 192, 255, 0.15); color: #79c0ff; }
+  .tier-orchestrate { background: rgba(210, 168, 255, 0.15); color: #d2a8ff; }
+
+  /* ── Italic tagline ── */
+  .tagline {
+    font-style: italic;
+    font-size: 12px;
+    color: #7ee787;
+    margin-top: 8px;
+    text-align: center;
+  }
+  .tagline.blue { color: #79c0ff; }
+  .tagline.purple { color: #d2a8ff; }
+  .tagline.red { color: #f97583; }
+
+  /* ── Legend ── */
+  .legend-row {
+    display: flex;
+    gap: 36px;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #21262d;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .legend-box {
+    border: 1.5px solid #30363d;
+    border-radius: 8px;
+    padding: 14px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: center;
+  }
+  .legend-box .legend-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f0f6fc;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-right: 8px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #8b949e;
+  }
+  .legend-swatch {
+    width: 28px;
+    height: 4px;
+    border-radius: 2px;
+  }
+  .legend-swatch.solid-green { background: #7ee787; }
+  .legend-swatch.solid-blue { background: #79c0ff; }
+  .legend-swatch.dashed-gold {
+    background: repeating-linear-gradient(90deg, #e3b341 0px, #e3b341 6px, transparent 6px, transparent 10px);
+    height: 3px;
+  }
+  .legend-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+  }
+  .legend-dot.red { background: rgba(249, 117, 131, 0.3); border: 1.5px dashed #f97583; }
+  .legend-dot.green { background: rgba(126, 231, 135, 0.3); border: 1.5px solid #7ee787; }
+
+  .credits {
+    margin-top: 24px;
+    font-size: 13px;
+    color: #484f58;
+    text-align: right;
+  }
+  .credits a { color: #58a6ff; text-decoration: none; }
+  .credits a:hover { text-decoration: underline; }
+
+  /* ── Step Numbers ── */
+  .step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #8b949e;
+    margin-bottom: 3px;
+  }
+
+  /* ── Numbered list ── */
+  .steps-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0 0;
+  }
+  .steps-list li {
+    font-size: 12px;
+    color: #c9d1d9;
+    padding: 3px 0;
+    padding-left: 20px;
+    position: relative;
+  }
+  .steps-list li::before {
+    content: attr(data-n) ".";
+    position: absolute;
+    left: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #79c0ff;
+    font-weight: 600;
+  }
+
+  /* ── Horizontal arrows between columns ── */
+  .grid-with-arrows {
+    display: grid;
+    grid-template-columns: 220px 40px 300px 40px 300px 40px 320px;
+    gap: 0;
+    margin-bottom: 36px;
+    align-items: start;
+  }
+
+  .arrow-spacer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 120px;
+  }
+  .arrow-spacer svg { overflow: visible; }
+
+  /* ── Stat badge ── */
+  .stat-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .stat {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(139, 148, 158, 0.1);
+    color: #8b949e;
+    border: 1px solid rgba(139, 148, 158, 0.15);
+  }
+
+  /* ── Operations cycle ring ── */
+  .cycle-ring {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin: 16px 0 8px;
+    flex-wrap: wrap;
+  }
+  .cycle-step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 14px;
+    border: 1px solid;
+  }
+  .cycle-step.ingest { color: #f97583; border-color: rgba(249,117,131,0.4); background: rgba(249,117,131,0.08); }
+  .cycle-step.compile { color: #79c0ff; border-color: rgba(121,192,255,0.4); background: rgba(121,192,255,0.08); }
+  .cycle-step.query { color: #d2a8ff; border-color: rgba(210,168,255,0.4); background: rgba(210,168,255,0.08); }
+  .cycle-step.lint { color: #e3b341; border-color: rgba(227,179,65,0.4); background: rgba(227,179,65,0.08); }
+  .cycle-step.evolve { color: #7ee787; border-color: rgba(126,231,135,0.4); background: rgba(126,231,135,0.08); }
+  .cycle-arrow {
+    color: #484f58;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════
+     TITLE
+     ════════════════════════════════════════════════════════ -->
+<div class="title-block">
+  <h1>LLM Knowledge Base <span class="version">v0.9.9</span></h1>
+  <div class="subtitle">Human curates sources. LLM compiles everything. A file-only, agent-native knowledge wiki.</div>
+  <div class="cycle-ring" style="justify-content: flex-start; margin-top: 12px;">
+    <span class="cycle-step ingest">Ingest</span>
+    <span class="cycle-arrow">&rarr;</span>
+    <span class="cycle-step compile">Compile</span>
+    <span class="cycle-arrow">&rarr;</span>
+    <span class="cycle-step query">Query</span>
+    <span class="cycle-arrow">&rarr;</span>
+    <span class="cycle-step lint">Lint</span>
+    <span class="cycle-arrow">&rarr;</span>
+    <span class="cycle-step evolve">Evolve</span>
+    <span class="cycle-arrow">&circlearrowleft;</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     MAIN 4-COLUMN GRID WITH ARROWS
+     ════════════════════════════════════════════════════════ -->
+<div class="grid-with-arrows">
+
+  <!-- ──────────────── COL 1: RAW SOURCES ──────────────── -->
+  <div>
+    <div class="col-header raw">1. Raw Sources</div>
+
+    <div class="card raw-main">
+      <h3 class="mono">raw/</h3>
+      <div class="desc">Immutable source corpus. LLM reads but never modifies.</div>
+    </div>
+
+    <div class="card raw-item">
+      <h3>Articles / Papers</h3>
+      <div class="desc">trafilatura, markitdown, docling, Obsidian Web Clipper</div>
+    </div>
+
+    <div class="card raw-item">
+      <h3>Videos / Podcasts</h3>
+      <div class="desc">yt-dlp transcripts, audio extraction</div>
+    </div>
+
+    <div class="card raw-item">
+      <h3>Books / Datasets</h3>
+      <div class="desc">Structured parsing, CSV/JSON ingestion</div>
+    </div>
+
+    <div class="card raw-item">
+      <h3>Repos / Conversations</h3>
+      <div class="desc">Code docs, chat exports, discussions</div>
+    </div>
+
+    <div class="tagline red">Immutable source of truth</div>
+
+    <div class="stat-row" style="margin-top: 12px;">
+      <span class="stat">9 source types</span>
+      <span class="stat">10 templates</span>
+    </div>
+  </div>
+
+  <!-- Arrow 1→2 -->
+  <div class="arrow-spacer">
+    <svg width="40" height="24" viewBox="0 0 40 24">
+      <defs>
+        <marker id="ah1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#79c0ff"/>
+        </marker>
+      </defs>
+      <line x1="0" y1="12" x2="30" y2="12" stroke="#79c0ff" stroke-width="2" marker-end="url(#ah1)"/>
+    </svg>
+  </div>
+
+  <!-- ──────────────── COL 2: COMPILE & STAGE ──────────────── -->
+  <div>
+    <div class="col-header compile">2. Compile &amp; Stage</div>
+
+    <div class="card compile-main">
+      <h3>Ingest Pipeline</h3>
+      <div class="desc">Hash-based incremental detection. Extraction via YAML templates + LLM.</div>
+      <div class="stat-row">
+        <span class="tier-badge tier-write">write: Sonnet</span>
+      </div>
+    </div>
+
+    <div class="card compile-steps">
+      <h3>Incremental Compilation</h3>
+      <ol class="steps-list">
+        <li data-n="1">Detect changes (content hash vs manifest)</li>
+        <li data-n="2">Extract entities, concepts, summaries</li>
+        <li data-n="3">Dedup check (hash-based)</li>
+        <li data-n="4">Create/update wiki pages</li>
+        <li data-n="5">Inject retroactive wikilinks</li>
+        <li data-n="6">Track cascade affected pages</li>
+      </ol>
+    </div>
+
+    <div class="card gate">
+      <h3>Validation Gate</h3>
+      <div class="desc">Frontmatter validation, path traversal protection,<br>entity/concept limits (50 max), slug collision tracking</div>
+    </div>
+
+    <div class="card compile-steps" style="text-align: center; padding: 10px;">
+      <h3 style="font-size: 13px;">Publish to wiki/</h3>
+      <div class="desc">Manifest saved per source (crash-safe)</div>
+    </div>
+
+    <div class="tagline blue">Silent, smart backend</div>
+  </div>
+
+  <!-- Arrow 2→3 -->
+  <div class="arrow-spacer">
+    <svg width="40" height="24" viewBox="0 0 40 24">
+      <defs>
+        <marker id="ah2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#7ee787"/>
+        </marker>
+      </defs>
+      <line x1="0" y1="12" x2="30" y2="12" stroke="#7ee787" stroke-width="2" marker-end="url(#ah2)"/>
+    </svg>
+  </div>
+
+  <!-- ──────────────── COL 3: PUBLISHED WIKI ──────────────── -->
+  <div>
+    <div class="col-header wiki">3. Published Wiki Truth</div>
+
+    <div class="card wiki-main">
+      <h3 class="mono">wiki/</h3>
+      <div class="desc">100% Local File-Based Truth</div>
+      <div class="stat-row">
+        <span class="stat">5 page types</span>
+        <span class="stat">5 index files</span>
+      </div>
+    </div>
+
+    <div class="card wiki-layer">
+      <h3>Semantic Layer</h3>
+      <div class="desc">entities/, concepts/, comparisons/, synthesis/, summaries/</div>
+    </div>
+
+    <div class="card wiki-layer">
+      <h3>Retrieval Substrate</h3>
+      <div class="desc">BM25 ranking + PageRank blending. Title-boosted search. No vector DB.</div>
+    </div>
+
+    <div class="card wiki-layer">
+      <h3>Knowledge Graph</h3>
+      <div class="desc">PageRank, betweenness centrality, Mermaid export, auto-pruning</div>
+    </div>
+
+    <div class="card wiki-layer">
+      <h3>Trace Artifacts</h3>
+      <div class="desc">index.md, _sources.md, _categories.md, log.md, contradictions.md</div>
+    </div>
+
+    <div class="tagline">No Vector DB needed</div>
+  </div>
+
+  <!-- Arrow 3→4 -->
+  <div class="arrow-spacer">
+    <svg width="40" height="24" viewBox="0 0 40 24">
+      <defs>
+        <marker id="ah3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#d2a8ff"/>
+        </marker>
+      </defs>
+      <line x1="0" y1="12" x2="30" y2="12" stroke="#d2a8ff" stroke-width="2" marker-end="url(#ah3)"/>
+    </svg>
+  </div>
+
+  <!-- ──────────────── COL 4: AGENT RUNTIME ──────────────── -->
+  <div>
+    <div class="col-header runtime">4. Agent Runtime &amp; Output</div>
+
+    <div class="card runtime-main">
+      <h3>Claude Code</h3>
+      <div class="desc">The Runtime Engine. Human curates, LLM executes.</div>
+      <div class="stat-row">
+        <span class="tier-badge tier-scan">scan: Haiku</span>
+        <span class="tier-badge tier-write">write: Sonnet</span>
+        <span class="tier-badge tier-orchestrate">orch: Opus</span>
+      </div>
+    </div>
+
+    <div class="card runtime-inner">
+      <h3>MCP Server (Front Controller)</h3>
+      <div class="desc">26 tools across 5 modules. Governs all ingest, query, lint, evolve workflows.</div>
+      <div class="desc mono" style="margin-top: 4px; color: #d2a8ff;">app &middot; core &middot; browse &middot; health &middot; quality</div>
+    </div>
+
+    <div class="card runtime-inner">
+      <h3>Grounded Query</h3>
+      <div class="desc">BM25 + PageRank + trust scores. Multi-page context assembly. Citation-backed answers.</div>
+      <div class="stat-row">
+        <span class="tier-badge tier-orchestrate">orchestrate: Opus</span>
+      </div>
+    </div>
+
+    <div class="card runtime-inner">
+      <h3>Actor-Critic Review</h3>
+      <div class="desc">Self-refine on compile. Wiki-reviewer agent. Max 2 refinement rounds.</div>
+    </div>
+
+    <div class="card commit-barrier">
+      <h3>Citation Barrier (Answer-Source Trace)</h3>
+      <div class="desc">All claims traced to raw/ sources. Unsourced claims flagged.</div>
+    </div>
+
+    <div class="tagline purple">Truth contract enforced</div>
+  </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     SUPPORT LAYER
+     ════════════════════════════════════════════════════════ -->
+<div class="support-layer">
+  <div class="layer-title">Support Layer: Continuous Learning &amp; Governance</div>
+  <div class="support-grid">
+
+    <div class="support-card">
+      <h3>Feedback &amp; Trust</h3>
+      <div class="desc">
+        Query feedback store with weighted Bayesian trust scoring. "Wrong" penalized 2&times; vs "incomplete". Reliability map. Duplicate citation dedup. Flagged pages surfaced in evolve.
+      </div>
+      <div class="stat-row">
+        <span class="stat">10k entry cap</span>
+        <span class="stat">feedback + verdicts</span>
+      </div>
+    </div>
+
+    <div class="support-card">
+      <h3>Quality System</h3>
+      <div class="desc">
+        Mechanical lint (orphans, dead links, staleness, cycles). Semantic lint (fidelity, consistency, completeness). Persistent verdict storage with audit trail. Weekly quality trends.
+      </div>
+      <div class="stat-row">
+        <span class="stat">lint --fix</span>
+        <span class="stat">lint_deep</span>
+        <span class="stat">lint_consistency</span>
+      </div>
+    </div>
+
+    <div class="support-card">
+      <h3>Evolution &amp; Drift</h3>
+      <div class="desc">
+        Gap analysis. Content drift detection (hash-based). Stub detection (&lt;100 chars). Low-trust page surfacing. Evolve recommendations for enrichment.
+      </div>
+      <div class="stat-row">
+        <span class="stat">detect_drift</span>
+        <span class="stat">verdict_trends</span>
+        <span class="stat">affected_pages</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Feedback arrows (dashed, back to columns) -->
+  <div style="display: flex; justify-content: center; gap: 12px; margin-top: 16px;">
+    <svg width="820" height="32" viewBox="0 0 820 32">
+      <defs>
+        <marker id="ahf1" markerWidth="7" markerHeight="5" refX="0" refY="2.5" orient="auto">
+          <polygon points="7 0, 0 2.5, 7 5" fill="#e3b341"/>
+        </marker>
+        <marker id="ahf2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+          <polygon points="0 0, 7 2.5, 0 5" fill="#e3b341"/>
+        </marker>
+      </defs>
+      <!-- Feedback arrow left (to compile) -->
+      <line x1="200" y1="8" x2="200" y2="24" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf1)"/>
+      <text x="208" y="20" fill="#e3b341" font-size="10" font-family="Inter">to compile</text>
+      <!-- Feedback arrow center (to wiki) -->
+      <line x1="420" y1="8" x2="420" y2="24" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf1)"/>
+      <text x="428" y="20" fill="#e3b341" font-size="10" font-family="Inter">to wiki</text>
+      <!-- Feedback arrow right (to runtime) -->
+      <line x1="640" y1="24" x2="640" y2="8" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahf2)"/>
+      <text x="648" y="20" fill="#e3b341" font-size="10" font-family="Inter">from runtime</text>
+    </svg>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     LEGEND + CREDITS
+     ════════════════════════════════════════════════════════ -->
+<div class="legend-row">
+  <div class="legend-box">
+    <span class="legend-title">Legend</span>
+    <div class="legend-item">
+      <span class="legend-swatch solid-blue"></span>
+      Primary Data Flow
+    </div>
+    <div class="legend-item">
+      <span class="legend-swatch solid-green"></span>
+      Published Truth
+    </div>
+    <div class="legend-item">
+      <span class="legend-swatch dashed-gold"></span>
+      Async Feedback / Governance
+    </div>
+    <div class="legend-item">
+      <span class="legend-dot red"></span>
+      Raw / Untrusted Boundary
+    </div>
+    <div class="legend-item">
+      <span class="legend-dot green"></span>
+      Verified Knowledge Truth
+    </div>
+  </div>
+
+  <div style="flex: 1;"></div>
+
+  <div class="credits">
+    Built for structured knowledge, not RAG. Not just another vector wrapper.<br>
+    Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a>
+    &middot; 550 tests &middot; 26 MCP tools &middot; 12 modules
+  </div>
+</div>
+
+</body>
+</html>
