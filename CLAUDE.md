@@ -358,6 +358,41 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
 - `review/refiner.py` frontmatter regex only matches LF line endings (`---\n`) — CRLF files on Windows silently fail with "Invalid frontmatter format" error
 - `review/context.py` `source_path.read_text()` unguarded — `OSError`/`PermissionError` escapes caller
 
+*(Additional findings from 10-part parallel code review, 2026-04-08):*
+
+*CRITICAL — new blockers:*
+- `compile/compiler.py` `load_manifest` propagates raw `json.JSONDecodeError` to all callers — one corrupt `.data/hashes.json` crashes `compile_wiki`, `find_changed_sources`, and `detect_source_drift` with no recovery (fix: return `{}` on decode error)
+- `ingest/pipeline.py:273` LLM-extracted context strings containing `## References` double-inject the section header via `content.replace("## References", f"{ctx}\n\n## References", 1)`
+
+*HIGH — additional reliability/correctness warnings:*
+- `utils/llm.py` `call_llm_json` returns first `tool_use` block without verifying `block.name == tool_name`; wrong-tool response silently returned to caller
+- `query/engine.py:131` `_build_query_context` returns `""` when ALL matched pages individually exceed the 80K limit; `query_wiki` then calls LLM with zero context and produces hallucinated answers (query engine docstring also lies — says "trimmed" but code skips pages entirely)
+- `lint/verdicts.py` `load_verdicts` catches `JSONDecodeError` but does not validate parsed value is a `list`; a `{}` verdict file causes `AttributeError: 'dict' object has no attribute 'append'` in `add_verdict`
+- `inject_wikilinks` `\b` regex failure is bidirectional — fails for TRAILING non-word chars too (not just leading as backlog documents); titles like `C++`, `ASP.NET`, `(RAG)` all produce zero injections silently
+- `lint/semantic.py` `build_fidelity_context` and `build_completeness_context` have no context size limit; large raw sources (books, arXiv PDFs) overflow the LLM context window — query engine solved this with 80K cap, semantic module has no equivalent
+- `review/context.py:63` `source_path.read_text(encoding="utf-8")` called unconditionally on any source in frontmatter; PDF, image, or non-UTF-8 files crash `kb_review_page` and `kb_lint_deep` with `UnicodeDecodeError`
+- `lint/semantic.py` `_group_by_wikilinks` adds all neighbors to `seen` set; pages in link chains (A→B→C) are consumed by A's group then skipped — B and C never form valid consistency groups
+- `utils/markdown.py` `extract_raw_refs` regex `[\w/.-]+` allows `../` path traversal patterns; inconsistent with `extract_citations` which explicitly rejects `..`
+- `evolve/analyzer.py:60-65` `find_connection_opportunities` reads full file content including YAML frontmatter; structural keywords (`source`, `stated`, `confidence`, `created`) pass `len > 4` filter and produce false-positive link suggestions, especially in small wikis
+- `utils/wiki_log.py` file creation uses `exists()` + `write_text()` — not atomic; concurrent MCP calls can race and overwrite a partially-written log with just the header (fix: use `open(path, "x")` with `FileExistsError` guard)
+- `graph/builder.py` `betweenness_centrality` in `graph_stats` is unguarded and O(V·E); can stall the synchronous `kb_evolve` MCP tool for tens of seconds on large wikis (PageRank is guarded, centrality is not)
+- `feedback/store.py` `page_scores` dict grows unbounded; only `entries` list is capped at 10k; every `add_feedback_entry` serialises the full scores dict regardless of wiki size
+- `mcp/quality.py:371` `kb_create_page` writes `source_refs` verbatim to frontmatter without traversal validation; `../../etc/passwd` as a source ref is silently stored
+- `review/refiner.py:83-96` page file written before audit trail persisted; crash between the two leaves page updated but no history entry (fix: persist history first, then write page)
+
+*MEDIUM — additional quality items:*
+- `cli.py` `--type` choices list missing `comparison` and `synthesis` (both valid in `PAGE_TYPES` and have extraction templates); users cannot pass these types via CLI
+- `cli.py` `query`, `compile`, and `mcp` commands have zero test coverage; CLI-level failures go undetected
+- `config.py` env override model IDs not validated at startup; `CLAUDE_WRITE_MODEL=""` passes empty string silently to Anthropic API (error only surfaces at call time)
+- `lint/checks.py:189` `check_staleness` silently skips pages where YAML-parsed `updated` field is a quoted string rather than `datetime.date`; those pages are never flagged for staleness
+- `graph/export.py` entire module (112 lines: `export_mermaid`, `_sanitize_label`, pruning, deduplication) has zero test coverage in `test_graph.py`
+- `lint/checks.py` orphan detection exempts `summaries/` but not `comparisons/` or `synthesis/` pages; these are equally valid entry points and generate noise when flagged as orphans
+- `query/engine.py:75` `search_pages` `max_results` not clamped inside the function; direct Python callers passing `-1` get all-but-last result (MCP layer clamps but internal callers are unprotected)
+- `graph/builder.py` vs `evolve/analyzer.py` — "orphan" defined differently: `analyze_coverage` uses no-backlinks, `graph_stats` uses in_degree=0 AND out_degree>0; isolated nodes appear in one list but not the other, giving contradictory signals to callers combining both outputs
+- `utils/pages.py:14` `WIKI_SUBDIRS` hardcodes subdirectory names instead of deriving from config constants; adding a new page type subdir without updating this tuple causes `load_all_pages` to silently miss it
+- `evolve/analyzer.py:228` `except Exception: pass` in `generate_evolution_report` too broad; real bugs in `get_flagged_pages` are swallowed with no log output (should at least `logger.debug`)
+- `feedback/reliability.py:31` `get_flagged_pages` docstring says "below threshold" but code uses `<=`; pages at exactly `LOW_TRUST_THRESHOLD` are flagged but the docstring misleadingly implies they are not
+
 **Phase 4 next:** Two-phase compile pipeline (batch cross-source merging before writing), pre-publish validation gate, iterative multi-hop retrieve/trace loop (BM25 + graph traversal), answer trace enforcement (reject uncited claims), conversation→KB promotion (positively-rated query answers → wiki pages), DSPy Teacher-Student optimization, RAGAS evaluation.
 
 ## Automation
