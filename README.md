@@ -156,7 +156,7 @@ Reports:
 
 ### Claude Code Integration (MCP Server)
 
-The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **26 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
+The knowledge base ships with a built-in [MCP server](https://modelcontextprotocol.io/) with **25 tools**. **Claude Code is the default LLM** — no API key needed. `kb_query` and `kb_ingest` use Claude Code for all intelligence; add `use_api=true` to call the Anthropic API instead.
 
 ```bash
 # Start the MCP server standalone
@@ -179,7 +179,7 @@ python -m kb.mcp_server
 }
 ```
 
-After restarting Claude Code, you get 26 tools:
+After restarting Claude Code, you get 25 tools:
 
 #### Core Tools (Claude Code is the default LLM)
 
@@ -367,7 +367,7 @@ LLM-Knowledge-Base/
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, tuning constants
     mcp_server.py          # MCP entry point (thin wrapper)
-    mcp/                   # FastMCP server package (26 tools: core, browse, health, quality)
+    mcp/                   # FastMCP server package (25 tools: core, browse, health, quality)
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline (dedup, cascade, tiering) + extractors (template-driven)
     compile/               # Hash-based incremental compiler (crash-safe) + linker (wikilink injection)
