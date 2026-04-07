@@ -1,6 +1,6 @@
 [project]
 name = "llm-knowledge-base"
-version = "0.9.9"
+version = "0.9.10"
 description = "LLM-maintained knowledge wiki — compile raw sources into structured, interlinked markdown."
 requires-python = ">=3.12"
 readme = "CLAUDE.md"
