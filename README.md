@@ -421,4 +421,4 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 
 ## License
 
-Personal project. Not licensed for redistribution.
+[MIT License](LICENSE)
