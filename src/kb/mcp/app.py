@@ -69,6 +69,16 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
 
 def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, result: dict) -> str:
     """Format ingest result as readable text."""
+    # Duplicate content: surface clearly instead of showing "0 pages created"
+    if result.get("duplicate"):
+        return (
+            f"Duplicate content detected: {rel_path}\n"
+            f"Type: {source_type}\n"
+            f"Hash: {source_hash}\n"
+            "This file has identical content to an already-ingested source. "
+            "Skipped to avoid duplicate pages."
+        )
+
     lines = [
         f"Ingested: {rel_path}",
         f"Type: {source_type}",
@@ -84,4 +94,19 @@ def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, res
         lines.append(f"Pages skipped ({len(result['pages_skipped'])}):")
         for p in result["pages_skipped"]:
             lines.append(f"  ! {p}")
+
+    # Affected pages (cascade update detection)
+    affected = result.get("affected_pages", {})
+    if isinstance(affected, dict):
+        backlinks = affected.get("backlinks", [])
+        shared = affected.get("shared_sources", [])
+    else:
+        backlinks, shared = [], []
+    if backlinks or shared:
+        lines.append(f"Affected pages ({len(backlinks) + len(shared)}) — may need review:")
+        for p in backlinks:
+            lines.append(f"  <- {p}  (backlink)")
+        for p in shared:
+            lines.append(f"  ~ {p}  (shared source)")
+
     return "\n".join(lines)

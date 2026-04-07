@@ -18,6 +18,7 @@ from kb.config import (
     WIKI_INDEX,
     WIKI_SOURCES,
 )
+from kb.compile.linker import inject_wikilinks
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
 from kb.utils.pages import normalize_sources
@@ -352,9 +353,15 @@ def ingest_source(
         source_path: Path to the raw source file.
         source_type: Source type (auto-detected from path if omitted).
         extraction: Pre-extracted data dict. If None, calls LLM to extract.
+        defer_small: If True, sources under SMALL_SOURCE_THRESHOLD chars get
+            summary-only processing (no entity/concept pages).
 
     Returns:
-        dict with keys: source_path, source_type, content_hash, pages_created, pages_updated
+        dict with keys:
+            source_path, source_type, content_hash, pages_created, pages_updated,
+            pages_skipped, affected_pages, wikilinks_injected.
+            Also includes ``duplicate: True`` (and omits affected_pages) when the
+            source has identical content to an already-ingested file.
     """
     source_path = Path(source_path).resolve()
     if not source_path.exists():
@@ -391,6 +398,8 @@ def ingest_source(
     pages_created = []
     pages_updated = []
     pages_skipped = []
+    # (page_id, title) for newly created pages — used by inject_wikilinks
+    new_pages_with_titles: list[tuple[str, str]] = []
 
     # 1. Create summary page
     title = extraction.get("title") or extraction.get("name") or source_path.stem
@@ -399,6 +408,7 @@ def ingest_source(
     summary_content = _build_summary_content(extraction, source_type)
     _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
     pages_created.append(f"summaries/{summary_slug}")
+    new_pages_with_titles.append((f"summaries/{summary_slug}", title))
 
     # Content-length-aware tiering: short sources get summary only when
     # defer_small is enabled (entity/concept pages deferred to avoid stub proliferation).
@@ -453,6 +463,7 @@ def ingest_source(
             entity_content = _build_entity_content(entity, source_ref, ctx)
             _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
             pages_created.append(f"entities/{entity_slug}")
+            new_pages_with_titles.append((f"entities/{entity_slug}", entity))
 
     # 3. Create or update concept pages (skip for small sources)
     concepts = [] if is_small_source else (extraction.get("concepts_mentioned") or [])
@@ -500,6 +511,7 @@ def ingest_source(
                 concept_path, concept, "concept", source_ref, "stated", concept_content
             )
             pages_created.append(f"concepts/{concept_slug}")
+            new_pages_with_titles.append((f"concepts/{concept_slug}", concept))
 
     # 4. Update index files
     _update_index("summary", summary_slug, title)
@@ -534,6 +546,15 @@ def ingest_source(
     # 8. Compute affected pages (cascade update detection)
     affected_pages = _find_affected_pages(pages_created + pages_updated, WIKI_DIR)
 
+    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
+    wikilinks_injected: list[str] = []
+    for pid, ptitle in new_pages_with_titles:
+        try:
+            updated = inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
+            wikilinks_injected.extend(updated)
+        except Exception as e:
+            logger.debug("inject_wikilinks failed for %s: %s", pid, e)
+
     result = {
         "source_path": str(source_path),
         "source_type": source_type,
@@ -542,6 +563,7 @@ def ingest_source(
         "pages_updated": pages_updated,
         "pages_skipped": pages_skipped,
         "affected_pages": affected_pages,
+        "wikilinks_injected": wikilinks_injected,
     }
     if is_small_source:
         result["deferred_entities"] = True
