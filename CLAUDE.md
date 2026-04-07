@@ -163,21 +163,6 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 1. `kb_query(question)` — synthesize answer
 2. After user reaction: `kb_query_feedback(question, rating, pages)`
 
-### Phase 2 MCP Tools
-| Tool | Purpose |
-|------|---------|
-| `kb_review_page(page_id)` | Page + sources + checklist for quality review |
-| `kb_refine_page(page_id, content, notes)` | Update page preserving frontmatter |
-| `kb_lint_deep(page_id)` | Source fidelity check context |
-| `kb_lint_consistency(page_ids)` | Cross-page contradiction check |
-| `kb_query_feedback(question, rating, pages, notes)` | Record query success/failure |
-| `kb_reliability_map()` | Page trust scores from feedback |
-| `kb_affected_pages(page_id)` | Pages affected by a change |
-| `kb_save_lint_verdict(page_id, verdict_type, verdict, issues, notes)` | Record lint/review verdict persistently |
-| `kb_create_page(page_id, title, content, page_type, confidence, source_refs)` | Create comparison/synthesis/any wiki page |
-| `kb_graph_viz(max_nodes)` | Export knowledge graph as Mermaid diagram |
-| `kb_verdict_trends()` | Show weekly quality trends from verdict history |
-
 ## Conventions
 
 - All wiki pages must link claims back to specific `raw/` source files. Unsourced claims should be flagged.
