@@ -27,17 +27,16 @@ from kb.utils.wiki_log import append_wiki_log
 logger = logging.getLogger(__name__)
 
 
-def _is_duplicate_content(source_hash: str, source_path: Path) -> bool:
+def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     """Check if a source with this content hash was already ingested.
 
     Compares against the compile manifest to detect duplicate content
-    from different file paths.
+    from different file paths. Skips template entries.
     """
     try:
         from kb.compile.compiler import load_manifest
 
         manifest = load_manifest()
-        source_ref = make_source_ref(source_path)
         for ref, stored_hash in manifest.items():
             if ref.startswith("_template/"):
                 continue
@@ -318,9 +317,11 @@ def ingest_source(
     raw_content = source_path.read_text(encoding="utf-8")
     source_hash = content_hash(source_path)
 
+    # Build source reference early for duplicate check
+    source_ref = make_source_ref(source_path)
+
     # Duplicate detection: check if this content hash was already ingested
-    if _is_duplicate_content(source_hash, source_path):
-        source_ref = make_source_ref(source_path)
+    if _is_duplicate_content(source_hash, source_ref):
         logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
         return {
             "source_path": str(source_path),
@@ -335,9 +336,6 @@ def ingest_source(
     # Extract structured data via LLM (or use pre-extracted)
     if extraction is None:
         extraction = extract_from_source(raw_content, source_type)
-
-    # Build source reference (canonical relative path)
-    source_ref = make_source_ref(source_path)
 
     # Track created/updated pages
     pages_created = []
