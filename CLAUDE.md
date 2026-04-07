@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 3.91 complete (v0.9.10).** 574 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
+**Phase 3.92 complete (v0.9.11).** 583 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -291,18 +291,10 @@ Key usage:
 
 See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
 
-**Current:** Phase 3.91 (v0.9.10) — 574 tests, 25 MCP tools, 12 modules.
+**Current:** Phase 3.92 (v0.9.11) — 583 tests, 25 MCP tools, 12 modules.
 
 **Phase 3.92 backlog (known issues):**
-- ~~`review/refiner.py` missing 10k entry cap on review history~~ — **RESOLVED** (cap applied at `refiner.py:96-97`)
-- `kb_read_page`, `kb_list_sources` missing outer `try/except` (raw `OSError`/`PermissionError` can escape to MCP client)
-- `fix_dead_links` generates phantom audit trail entries when `re.sub` makes no change
-- `inject_wikilinks` `\b` regex silently fails for titles with leading non-word chars (`C++`, `GPT-4o`, `.NET`)
-- `compile_wiki` silently drops `pages_skipped`/`wikilinks_injected`/`affected_pages`/`duplicate` from `ingest_source` result
-- `evolve/analyzer.py` has no module-level logger; `check_staleness` uses broad `except Exception`; `find_connection_opportunities`/`suggest_new_pages` have unguarded `read_text()` calls
-- Hardcoded `0.1` trend threshold in `trends.py` should be `VERDICT_TREND_THRESHOLD` config constant
-- `wiki_log.py` calls `stat()` twice on same file; `check_source_coverage` reads each page file twice
-- MCP instructions claim 26 tools, actual registered count is 25
+**(none — all items resolved in v0.9.11)**
 
 **Phase 3.93 backlog (code review 2026-04-08 — new findings):**
 

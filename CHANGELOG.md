@@ -63,3 +63,18 @@ Infrastructure for content growth and AI leverage — 8 features implemented, 32
 
 ## Phase 3.91 (complete, v0.9.10)
 5-agent parallel code review fix list. 574 tests. Key fixes: `save_manifest` now uses `atomic_json_write`. `inject_wikilinks` frontmatter split uses regex (`_FRONTMATTER_RE`). `resolve_wikilinks`/`build_backlinks` wrap `read_text()` in `try/except (OSError, UnicodeDecodeError)`. `KNOWN_LIST_FIELDS` extended with `key_arguments`, `quotes`, `themes`, `open_questions`. Mermaid `_safe_node_id` tracks seen IDs with suffix deduplication. `run_all_checks` with `fix=True` removes fixed issues from report. `kb_ingest` wrapped in `try/except`. `kb_create_page` uses `_validate_page_id(check_exists=False)`. URL in `kb_ingest_content`/`kb_save_source` wrapped in `yaml_escape()`. `VERDICTS_PATH` and LLM retry constants moved to `config.py`. `detect_source_drift` bare `except` narrowed. `extract_raw_refs` extended to `.csv`/`.png`/`.jpg`/`.jpeg`/`.svg`/`.gif`.
+
+## Phase 3.92 (complete, v0.9.11)
+9-item backlog hardening — all Phase 3.92 known issues resolved. 9 new tests (574→583). Ruff clean.
+
+- `review/refiner.py`: review history now capped at `MAX_REVIEW_HISTORY_ENTRIES` (10k) — same pattern as feedback/verdict stores.
+- `mcp/browse.py`: `kb_read_page` and `kb_list_sources` wrap I/O in `try/except (OSError, PermissionError)` — raw exceptions no longer escape to MCP client.
+- `lint/checks.py`: `fix_dead_links` only appends audit trail entry when `re.sub` actually changed content (eliminates phantom entries for stale broken-link records).
+- `compile/linker.py`: `inject_wikilinks` uses smart lookahead/lookbehind boundary for titles starting/ending with non-word chars (`C++`, `.NET`, `GPT-4o`).
+- `compile/compiler.py`: `compile_wiki` now propagates `pages_skipped`, `wikilinks_injected`, `affected_pages`, `duplicates` from `ingest_source` result; `kb_compile` MCP output shows these fields.
+- `evolve/analyzer.py`: added module-level logger; `find_connection_opportunities` and `suggest_new_pages` guard `read_text()` with `try/except (OSError, UnicodeDecodeError)`.
+- `lint/checks.py`: `check_staleness` narrows `except Exception` to specific types; `check_source_coverage` merged into single-pass loop (reads each file once via `frontmatter.loads()`).
+- `lint/trends.py`: hardcoded `0.1` trend threshold replaced with `VERDICT_TREND_THRESHOLD` config constant.
+- `utils/wiki_log.py`: `stat()` result cached — called once instead of twice.
+- `README.md`, `others/architecture-diagram.html`: corrected "26 tools" → "25 tools".
+- `config.py`: added `MAX_REVIEW_HISTORY_ENTRIES = 10_000` and `VERDICT_TREND_THRESHOLD = 0.1`.
