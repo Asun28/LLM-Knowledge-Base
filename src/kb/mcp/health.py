@@ -66,3 +66,38 @@ def kb_evolve() -> str:
         logger.debug("Failed to load feedback data for evolve: %s", e)
 
     return result
+
+
+@mcp.tool()
+def kb_detect_drift() -> str:
+    """Detect wiki pages that may be stale due to raw source changes.
+
+    Compares current source content hashes against the compile manifest
+    to find changed sources, then identifies which wiki pages reference
+    those sources. Use this before re-compiling to understand impact.
+    """
+    try:
+        from kb.compile.compiler import detect_source_drift
+
+        result = detect_source_drift()
+    except Exception as e:
+        logger.error("Error detecting source drift: %s", e)
+        return f"Error detecting source drift: {e}"
+
+    lines = ["# Source Drift Detection\n", result["summary"], ""]
+
+    if result["changed_sources"]:
+        lines.append(f"## Changed Sources ({len(result['changed_sources'])})\n")
+        for src in result["changed_sources"]:
+            lines.append(f"- {src}")
+        lines.append("")
+
+    if result["affected_pages"]:
+        lines.append(f"## Affected Wiki Pages ({len(result['affected_pages'])})\n")
+        for ap in result["affected_pages"]:
+            sources_str = ", ".join(ap["changed_sources"])
+            lines.append(f"- **{ap['page_id']}** ← {sources_str}")
+        lines.append("")
+        lines.append("Run `kb_review_page(page_id)` on affected pages to check for stale content.")
+
+    return "\n".join(lines)

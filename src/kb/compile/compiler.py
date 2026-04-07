@@ -136,6 +136,85 @@ def find_changed_sources(
     return new_sources, changed_sources
 
 
+def detect_source_drift(
+    raw_dir: Path | None = None,
+    wiki_dir: Path | None = None,
+    manifest_path: Path | None = None,
+) -> dict:
+    """Detect wiki pages that may be stale due to raw source changes.
+
+    Finds sources whose content has changed since last compile, then identifies
+    which wiki pages reference those sources (via frontmatter source: field).
+
+    Args:
+        raw_dir: Path to raw directory.
+        wiki_dir: Path to wiki directory.
+        manifest_path: Path to hash manifest file.
+
+    Returns:
+        dict with keys: changed_sources, affected_pages, summary.
+    """
+    import frontmatter as fm
+
+    from kb.config import WIKI_DIR as DEFAULT_WIKI_DIR
+    from kb.graph.builder import page_id as get_page_id
+    from kb.graph.builder import scan_wiki_pages
+    from kb.utils.pages import normalize_sources
+
+    raw_dir = raw_dir or RAW_DIR
+    wiki_dir = wiki_dir or DEFAULT_WIKI_DIR
+
+    new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path)
+    all_changed = new_sources + changed_sources
+
+    if not all_changed:
+        return {
+            "changed_sources": [],
+            "affected_pages": [],
+            "summary": "No source changes detected. Wiki is up to date.",
+        }
+
+    # Build set of changed source refs (canonical paths)
+    changed_refs = set()
+    for source in all_changed:
+        ref = _canonical_rel_path(source, raw_dir)
+        changed_refs.add(ref)
+
+    # Scan wiki pages to find which reference the changed sources
+    affected_pages = []
+    wiki_pages = scan_wiki_pages(wiki_dir)
+
+    for page_path in wiki_pages:
+        try:
+            post = fm.load(str(page_path))
+            page_sources = normalize_sources(post.metadata.get("source"))
+            matching = [s for s in page_sources if s in changed_refs]
+            if matching:
+                pid = get_page_id(page_path, wiki_dir)
+                affected_pages.append(
+                    {
+                        "page_id": pid,
+                        "changed_sources": matching,
+                    }
+                )
+        except Exception:
+            continue
+
+    summary_parts = [
+        f"{len(new_sources)} new source(s), {len(changed_sources)} changed source(s).",
+    ]
+    if affected_pages:
+        summary_parts.append(f"{len(affected_pages)} wiki page(s) may need re-review.")
+    else:
+        summary_parts.append("No existing wiki pages reference the changed sources.")
+
+    return {
+        "changed_sources": [_canonical_rel_path(s, raw_dir) for s in all_changed],
+        "affected_pages": affected_pages,
+        "summary": " ".join(summary_parts),
+    }
+
+
 def compile_wiki(
     incremental: bool = True,
     raw_dir: Path | None = None,
