@@ -1,10 +1,14 @@
 """Wikilink resolution, cross-referencing, and backlink management."""
 
+import logging
+import re
 from pathlib import Path
 
 from kb.config import WIKI_DIR
 from kb.graph.builder import page_id, scan_wiki_pages
 from kb.utils.markdown import extract_wikilinks
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
@@ -63,3 +67,83 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
                 backlinks[target].append(source_id)
 
     return backlinks
+
+
+def inject_wikilinks(
+    title: str,
+    target_page_id: str,
+    wiki_dir: Path | None = None,
+) -> list[str]:
+    """Scan existing pages and inject wikilinks for mentions of a new page's title.
+
+    Uses word-boundary matching (case-insensitive) to find plain-text mentions
+    of the title in existing page bodies (not frontmatter). Skips pages that
+    already link to the target or are the target page itself.
+
+    Args:
+        title: The title of the newly created page.
+        target_page_id: Page ID of the new page (e.g., 'concepts/rag').
+        wiki_dir: Path to wiki directory.
+
+    Returns:
+        List of page IDs that were updated with new wikilinks.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    pages = scan_wiki_pages(wiki_dir)
+    updated = []
+
+    # Build regex for word-boundary match of the title (case-insensitive)
+    escaped_title = re.escape(title)
+    pattern = re.compile(r"\b" + escaped_title + r"\b", re.IGNORECASE)
+
+    for page_path in pages:
+        pid = page_id(page_path, wiki_dir)
+
+        # Skip self
+        if pid == target_page_id:
+            continue
+
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # Skip if already links to target
+        existing_links = extract_wikilinks(content)
+        if target_page_id in existing_links:
+            continue
+
+        # Split frontmatter from body
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            frontmatter_section = parts[0] + "---" + parts[1] + "---"
+            body = parts[2]
+        else:
+            frontmatter_section = ""
+            body = content
+
+        # Check if title appears in body
+        if not pattern.search(body):
+            continue
+
+        # Replace first occurrence in body with wikilink
+        replacement = f"[[{target_page_id}|{title}]]"
+
+        # Only replace plain text mentions (not already inside wikilinks)
+        def _replace_if_not_in_wikilink(match):
+            start = match.start()
+            # Check if this match is already inside a [[ ]] pair
+            before = body[:start]
+            open_count = before.count("[[") - before.count("]]")
+            if open_count > 0:
+                return match.group(0)  # Inside a wikilink, don't replace
+            return replacement
+
+        new_body = pattern.sub(_replace_if_not_in_wikilink, body, count=1)
+
+        if new_body != body:
+            page_path.write_text(frontmatter_section + new_body, encoding="utf-8")
+            updated.append(pid)
+            logger.info("Injected wikilink to %s in %s", target_page_id, pid)
+
+    return updated

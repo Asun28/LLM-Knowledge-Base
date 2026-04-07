@@ -459,3 +459,100 @@ class TestMermaidGraphExport:
         result = kb_graph_viz()
         assert isinstance(result, str)
         assert "graph" in result.lower() or "no pages" in result.lower()
+
+
+# ── Task 6: Retroactive inbound wikilink injection ───────────
+
+
+class TestRetroactiveWikilinkInjection:
+    """Test injecting wikilinks into existing pages when new pages are created."""
+
+    def test_inject_wikilink_for_exact_match(self, tmp_path):
+        """Existing page mentioning a new page's title gets a wikilink injected."""
+        wiki_dir = tmp_path / "wiki"
+        # Create existing page that mentions "Machine Learning" as plain text
+        _make_wiki_page(
+            wiki_dir, "concepts", "deep-learning",
+            "Deep Learning",
+            "Deep learning is a subset of Machine Learning that uses neural networks.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Machine Learning", "concepts/machine-learning", wiki_dir=wiki_dir
+        )
+        assert len(injected) == 1
+        assert injected[0] == "concepts/deep-learning"
+
+        # Verify the wikilink was inserted
+        content = (wiki_dir / "concepts" / "deep-learning.md").read_text(encoding="utf-8")
+        assert "[[concepts/machine-learning|Machine Learning]]" in content
+
+    def test_no_injection_in_frontmatter(self, tmp_path):
+        """Wikilinks are not injected into YAML frontmatter."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "test-page",
+            "Test Page",
+            "Some content about other things.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Test Page", "concepts/test-page-new", wiki_dir=wiki_dir
+        )
+        # Should not inject into the page's own title in frontmatter
+        content = (wiki_dir / "concepts" / "test-page.md").read_text(encoding="utf-8")
+        # Frontmatter should be unchanged
+        assert 'title: "Test Page"' in content
+
+    def test_no_injection_when_wikilink_exists(self, tmp_path):
+        """Skip injection when page already has a wikilink to the target."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "existing",
+            "Existing",
+            "Already links to [[concepts/target-page]] explicitly.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Target Page", "concepts/target-page", wiki_dir=wiki_dir
+        )
+        assert len(injected) == 0  # Already linked
+
+    def test_skip_self_injection(self, tmp_path):
+        """Don't inject wikilink into the page itself."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "self-ref",
+            "Self Ref",
+            "This page talks about Self Ref concepts.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Self Ref", "concepts/self-ref", wiki_dir=wiki_dir
+        )
+        assert len(injected) == 0
+
+    def test_case_insensitive_match(self, tmp_path):
+        """Matching is case-insensitive for the title."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "nlp-page",
+            "NLP Page",
+            "Natural language processing uses transformer architecture frequently.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Transformer Architecture", "concepts/transformer-architecture",
+            wiki_dir=wiki_dir,
+        )
+        assert len(injected) == 1
