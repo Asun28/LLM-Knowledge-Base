@@ -249,7 +249,7 @@ Key usage:
 
 ## Implementation History
 
-See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.10).
+See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.11). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
 
 **Current:** Phase 3.92 (v0.9.11) — 583 tests, 25 MCP tools, 12 modules.
 
