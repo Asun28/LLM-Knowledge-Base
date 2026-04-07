@@ -1,6 +1,5 @@
 """Tests for the ingest pipeline."""
 
-import json
 from unittest.mock import patch
 
 import pytest

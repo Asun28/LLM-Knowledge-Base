@@ -1,13 +1,11 @@
 """Tests for v0.9.8 fixes — path traversal, structured outputs, dedup, atomic writes."""
 
 import json
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 
 import kb.config
-
 
 # ── 1. kb_ingest path traversal protection ──────────────────────────
 
@@ -56,7 +54,7 @@ class TestKbIngestPathTraversal:
 
         # Without extraction_json, should return extraction prompt
         result = kb_ingest(
-            source_path=f"raw/articles/valid-article.md",
+            source_path="raw/articles/valid-article.md",
             source_type="article",
         )
         assert "Error:" not in result or "not found" not in result.lower()
