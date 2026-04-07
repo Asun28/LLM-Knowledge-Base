@@ -168,9 +168,9 @@ def test_query_context_truncation_logging(caplog):
     assert "x" * 100 not in result  # big-page was skipped
 
     # Should have logged exclusion
-    assert any(
-        "excluded" in r.message.lower() for r in caplog.records
-    ), f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
+    assert any("excluded" in r.message.lower() for r in caplog.records), (
+        f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
+    )
 
 
 def test_query_context_exclusion_logging(caplog):

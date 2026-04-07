@@ -179,10 +179,12 @@ def test_kb_save_lint_verdict_with_issues_json(tmp_path, monkeypatch):
     """JSON issues array is parsed and stored with verdict."""
     _setup_quality_paths(tmp_path, monkeypatch)
 
-    issues = json.dumps([
-        {"severity": "error", "description": "Missing citation for claim X"},
-        {"severity": "info", "description": "Minor formatting issue"},
-    ])
+    issues = json.dumps(
+        [
+            {"severity": "error", "description": "Missing citation for claim X"},
+            {"severity": "info", "description": "Minor formatting issue"},
+        ]
+    )
 
     result = kb_save_lint_verdict(
         page_id="concepts/rag",

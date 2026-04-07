@@ -173,9 +173,9 @@ def test_get_page_verdicts_sorted_desc(tmp_path):
 
     result = get_page_verdicts("concepts/rag", path)
     assert len(result) == 3
-    assert result[0]["notes"] == "third"   # 2026-04-03 (most recent)
+    assert result[0]["notes"] == "third"  # 2026-04-03 (most recent)
     assert result[1]["notes"] == "second"  # 2026-04-02
-    assert result[2]["notes"] == "first"   # 2026-04-01
+    assert result[2]["notes"] == "first"  # 2026-04-01
 
 
 # ── get_verdict_summary ──────────────────────────────────────────

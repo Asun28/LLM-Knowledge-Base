@@ -89,9 +89,7 @@ def test_kb_create_page_rejects_traversal(tmp_path):
     wiki = tmp_path / "wiki"
     wiki.mkdir(parents=True)
     with patch("kb.mcp.quality.WIKI_DIR", wiki):
-        result = kb_create_page(
-            "../evil/page", "Evil", "content", "concept"
-        )
+        result = kb_create_page("../evil/page", "Evil", "content", "concept")
     assert "Error" in result
     assert "Invalid" in result
 

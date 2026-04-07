@@ -127,8 +127,11 @@ def test_kb_read_page_case_insensitive_fallback(tmp_project, monkeypatch, create
     """kb_read_page falls back to case-insensitive match when exact path missing."""
     wiki_dir, _ = _setup_browse_dirs(tmp_project, monkeypatch)
     create_wiki_page(
-        "entities/openai", title="OpenAI", content="About OpenAI.",
-        page_type="entity", wiki_dir=wiki_dir,
+        "entities/openai",
+        title="OpenAI",
+        content="About OpenAI.",
+        page_type="entity",
+        wiki_dir=wiki_dir,
     )
 
     # Request with different case — should still find entities/openai.md
@@ -145,12 +148,18 @@ def test_kb_list_pages_all(tmp_project, monkeypatch, create_wiki_page):
     wiki_dir, _ = _setup_browse_dirs(tmp_project, monkeypatch)
     create_wiki_page("concepts/rag", title="RAG", content="About RAG.", wiki_dir=wiki_dir)
     create_wiki_page(
-        "entities/openai", title="OpenAI", content="About OpenAI.",
-        page_type="entity", wiki_dir=wiki_dir,
+        "entities/openai",
+        title="OpenAI",
+        content="About OpenAI.",
+        page_type="entity",
+        wiki_dir=wiki_dir,
     )
     create_wiki_page(
-        "summaries/test-article", title="Test Article", content="Summary.",
-        page_type="summary", wiki_dir=wiki_dir,
+        "summaries/test-article",
+        title="Test Article",
+        content="Summary.",
+        page_type="summary",
+        wiki_dir=wiki_dir,
     )
 
     result = kb_list_pages()
@@ -166,8 +175,11 @@ def test_kb_list_pages_filtered(tmp_project, monkeypatch, create_wiki_page):
     create_wiki_page("concepts/rag", title="RAG", content="About RAG.", wiki_dir=wiki_dir)
     create_wiki_page("concepts/llm", title="LLM", content="About LLM.", wiki_dir=wiki_dir)
     create_wiki_page(
-        "entities/openai", title="OpenAI", content="About OpenAI.",
-        page_type="entity", wiki_dir=wiki_dir,
+        "entities/openai",
+        title="OpenAI",
+        content="About OpenAI.",
+        page_type="entity",
+        wiki_dir=wiki_dir,
     )
 
     result = kb_list_pages(page_type="concepts")

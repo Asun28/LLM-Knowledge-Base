@@ -95,9 +95,7 @@ def test_trust_at_threshold_is_flagged(tmp_path):
 
     data = {
         "entries": [],
-        "page_scores": {
-            "concepts/test": {"useful": 1, "wrong": 1, "incomplete": 0, "trust": 0.4}
-        },
+        "page_scores": {"concepts/test": {"useful": 1, "wrong": 1, "incomplete": 0, "trust": 0.4}},
     }
     path = tmp_path / "feedback.json"
     save_feedback(data, path)
@@ -112,9 +110,7 @@ def test_trust_above_threshold_not_flagged(tmp_path):
 
     data = {
         "entries": [],
-        "page_scores": {
-            "concepts/good": {"useful": 3, "wrong": 0, "incomplete": 0, "trust": 0.8}
-        },
+        "page_scores": {"concepts/good": {"useful": 3, "wrong": 0, "incomplete": 0, "trust": 0.8}},
     }
     path = tmp_path / "feedback.json"
     save_feedback(data, path)
@@ -129,9 +125,7 @@ def test_trust_below_threshold_flagged(tmp_path):
 
     data = {
         "entries": [],
-        "page_scores": {
-            "concepts/bad": {"useful": 0, "wrong": 2, "incomplete": 0, "trust": 0.2}
-        },
+        "page_scores": {"concepts/bad": {"useful": 0, "wrong": 2, "incomplete": 0, "trust": 0.2}},
     }
     path = tmp_path / "feedback.json"
     save_feedback(data, path)

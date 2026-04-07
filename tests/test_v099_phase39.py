@@ -28,6 +28,7 @@ class TestEnvConfigurableModelTiers:
         import importlib
 
         import kb.config
+
         importlib.reload(kb.config)
         try:
             assert kb.config.MODEL_TIERS["scan"] == "custom-haiku-model"
@@ -42,6 +43,7 @@ class TestEnvConfigurableModelTiers:
         import importlib
 
         import kb.config
+
         importlib.reload(kb.config)
         try:
             assert kb.config.MODEL_TIERS["write"] == "custom-sonnet-model"
@@ -55,6 +57,7 @@ class TestEnvConfigurableModelTiers:
         import importlib
 
         import kb.config
+
         importlib.reload(kb.config)
         try:
             assert kb.config.MODEL_TIERS["orchestrate"] == "custom-opus-model"
@@ -68,6 +71,7 @@ class TestEnvConfigurableModelTiers:
         import importlib
 
         import kb.config
+
         importlib.reload(kb.config)
         try:
             assert kb.config.MODEL_TIERS["scan"] == "custom-scan"
@@ -109,19 +113,29 @@ class TestPageRankBlendedSearch:
         wiki_dir = tmp_path / "wiki"
         # Create pages that link to each other (hub page gets high PageRank)
         _make_wiki_page(
-            wiki_dir, "concepts", "hub-topic",
-            "Hub Topic", "Hub topic is central. See [[concepts/spoke-a]] and [[concepts/spoke-b]]."
+            wiki_dir,
+            "concepts",
+            "hub-topic",
+            "Hub Topic",
+            "Hub topic is central. See [[concepts/spoke-a]] and [[concepts/spoke-b]].",
         )
         _make_wiki_page(
-            wiki_dir, "concepts", "spoke-a",
-            "Spoke A", "Spoke A discusses hub topic. See [[concepts/hub-topic]]."
+            wiki_dir,
+            "concepts",
+            "spoke-a",
+            "Spoke A",
+            "Spoke A discusses hub topic. See [[concepts/hub-topic]].",
         )
         _make_wiki_page(
-            wiki_dir, "concepts", "spoke-b",
-            "Spoke B", "Spoke B discusses hub topic. See [[concepts/hub-topic]]."
+            wiki_dir,
+            "concepts",
+            "spoke-b",
+            "Spoke B",
+            "Spoke B discusses hub topic. See [[concepts/hub-topic]].",
         )
 
         from kb.query.engine import search_pages
+
         results = search_pages("hub topic", wiki_dir=wiki_dir)
         assert len(results) > 0
         # hub-topic should be boosted by PageRank (more inlinks)
@@ -132,12 +146,12 @@ class TestPageRankBlendedSearch:
         """Search works correctly when PageRank weight is zero (pure BM25)."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "alpha",
-            "Alpha Topic", "Alpha topic content for search."
+            wiki_dir, "concepts", "alpha", "Alpha Topic", "Alpha topic content for search."
         )
 
         with patch("kb.query.engine.PAGERANK_SEARCH_WEIGHT", 0.0):
             from kb.query.engine import search_pages
+
             results = search_pages("alpha topic", wiki_dir=wiki_dir)
             assert len(results) > 0
 
@@ -145,11 +159,11 @@ class TestPageRankBlendedSearch:
         """Search works with a single page (no meaningful graph)."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "lonely",
-            "Lonely Page", "A lonely page about searching."
+            wiki_dir, "concepts", "lonely", "Lonely Page", "A lonely page about searching."
         )
 
         from kb.query.engine import search_pages
+
         results = search_pages("lonely page", wiki_dir=wiki_dir)
         assert len(results) == 1
         assert results[0]["score"] > 0
@@ -159,24 +173,34 @@ class TestPageRankBlendedSearch:
         wiki_dir = tmp_path / "wiki"
         # Create a hub that many pages link to
         _make_wiki_page(
-            wiki_dir, "concepts", "popular",
-            "Machine Learning", "Machine learning is a popular topic."
+            wiki_dir,
+            "concepts",
+            "popular",
+            "Machine Learning",
+            "Machine learning is a popular topic.",
         )
         # Create several pages linking to popular
         for i in range(5):
             _make_wiki_page(
-                wiki_dir, "concepts", f"fan-{i}",
-                f"Fan {i}", f"Fan {i} discusses machine learning. See [[concepts/popular]].",
+                wiki_dir,
+                "concepts",
+                f"fan-{i}",
+                f"Fan {i}",
+                f"Fan {i} discusses machine learning. See [[concepts/popular]].",
                 source_ref=f"raw/articles/fan-{i}.md",
             )
         # Create an isolated page with similar content
         _make_wiki_page(
-            wiki_dir, "concepts", "isolated",
-            "Machine Learning Isolated", "Machine learning is a popular topic.",
+            wiki_dir,
+            "concepts",
+            "isolated",
+            "Machine Learning Isolated",
+            "Machine learning is a popular topic.",
             source_ref="raw/articles/isolated.md",
         )
 
         from kb.query.engine import search_pages
+
         results = search_pages("machine learning", wiki_dir=wiki_dir)
 
         # popular should appear above isolated due to PageRank boost
@@ -199,7 +223,8 @@ class TestDuplicateDetection:
             (wiki_dir / sub).mkdir(parents=True)
         (wiki_dir / "index.md").write_text(
             "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
-            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
         )
         (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
         (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
@@ -332,8 +357,13 @@ class TestVerdictTrends:
 
         path = tmp_path / "verdicts.json"
         add_verdict("concepts/rag", "fidelity", "pass", path=path)
-        add_verdict("concepts/rag", "consistency", "fail",
-                     issues=[{"severity": "error", "description": "mismatch"}], path=path)
+        add_verdict(
+            "concepts/rag",
+            "consistency",
+            "fail",
+            issues=[{"severity": "error", "description": "mismatch"}],
+            path=path,
+        )
         add_verdict("entities/openai", "review", "warning", path=path)
 
         result = compute_verdict_trends(path)
@@ -353,14 +383,38 @@ class TestVerdictTrends:
         new_ts = datetime.now().isoformat(timespec="seconds")
 
         verdicts = [
-            {"timestamp": old_ts, "page_id": "c/a", "verdict_type": "fidelity",
-             "verdict": "fail", "issues": [], "notes": ""},
-            {"timestamp": old_ts, "page_id": "c/b", "verdict_type": "fidelity",
-             "verdict": "fail", "issues": [], "notes": ""},
-            {"timestamp": new_ts, "page_id": "c/a", "verdict_type": "fidelity",
-             "verdict": "pass", "issues": [], "notes": ""},
-            {"timestamp": new_ts, "page_id": "c/b", "verdict_type": "fidelity",
-             "verdict": "pass", "issues": [], "notes": ""},
+            {
+                "timestamp": old_ts,
+                "page_id": "c/a",
+                "verdict_type": "fidelity",
+                "verdict": "fail",
+                "issues": [],
+                "notes": "",
+            },
+            {
+                "timestamp": old_ts,
+                "page_id": "c/b",
+                "verdict_type": "fidelity",
+                "verdict": "fail",
+                "issues": [],
+                "notes": "",
+            },
+            {
+                "timestamp": new_ts,
+                "page_id": "c/a",
+                "verdict_type": "fidelity",
+                "verdict": "pass",
+                "issues": [],
+                "notes": "",
+            },
+            {
+                "timestamp": new_ts,
+                "page_id": "c/b",
+                "verdict_type": "fidelity",
+                "verdict": "pass",
+                "issues": [],
+                "notes": "",
+            },
         ]
         path.write_text(json.dumps(verdicts), encoding="utf-8")
 
@@ -401,10 +455,16 @@ class TestMermaidGraphExport:
     def test_basic_graph_produces_valid_mermaid(self, tmp_path):
         """Simple graph produces valid Mermaid with nodes and edges."""
         wiki_dir = tmp_path / "wiki"
-        _make_wiki_page(wiki_dir, "concepts", "rag", "RAG",
-                        "RAG combines [[concepts/retrieval]] with generation.")
-        _make_wiki_page(wiki_dir, "concepts", "retrieval", "Retrieval",
-                        "Retrieval is used by [[concepts/rag]].")
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "rag",
+            "RAG",
+            "RAG combines [[concepts/retrieval]] with generation.",
+        )
+        _make_wiki_page(
+            wiki_dir, "concepts", "retrieval", "Retrieval", "Retrieval is used by [[concepts/rag]]."
+        )
 
         from kb.graph.export import export_mermaid
 
@@ -419,10 +479,13 @@ class TestMermaidGraphExport:
         wiki_dir = tmp_path / "wiki"
         # Create 60 pages
         for i in range(60):
-            links = f"[[concepts/page-{(i+1) % 60}]]"
+            links = f"[[concepts/page-{(i + 1) % 60}]]"
             _make_wiki_page(
-                wiki_dir, "concepts", f"page-{i}",
-                f"Page {i}", f"Content for page {i}. {links}",
+                wiki_dir,
+                "concepts",
+                f"page-{i}",
+                f"Page {i}",
+                f"Content for page {i}. {links}",
                 source_ref=f"raw/articles/p{i}.md",
             )
 
@@ -436,8 +499,7 @@ class TestMermaidGraphExport:
     def test_node_labels_use_page_titles(self, tmp_path):
         """Node labels use page titles from frontmatter."""
         wiki_dir = tmp_path / "wiki"
-        _make_wiki_page(wiki_dir, "entities", "openai", "OpenAI",
-                        "OpenAI makes GPT models.")
+        _make_wiki_page(wiki_dir, "entities", "openai", "OpenAI", "OpenAI makes GPT models.")
 
         from kb.graph.export import export_mermaid
 
@@ -465,7 +527,9 @@ class TestRetroactiveWikilinkInjection:
         wiki_dir = tmp_path / "wiki"
         # Create existing page that mentions "Machine Learning" as plain text
         _make_wiki_page(
-            wiki_dir, "concepts", "deep-learning",
+            wiki_dir,
+            "concepts",
+            "deep-learning",
             "Deep Learning",
             "Deep learning is a subset of Machine Learning that uses neural networks.",
         )
@@ -486,16 +550,16 @@ class TestRetroactiveWikilinkInjection:
         """Wikilinks are not injected into YAML frontmatter."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "test-page",
+            wiki_dir,
+            "concepts",
+            "test-page",
             "Test Page",
             "Some content about other things.",
         )
 
         from kb.compile.linker import inject_wikilinks
 
-        inject_wikilinks(
-            "Test Page", "concepts/test-page-new", wiki_dir=wiki_dir
-        )
+        inject_wikilinks("Test Page", "concepts/test-page-new", wiki_dir=wiki_dir)
         # Should not inject into the page's own title in frontmatter
         content = (wiki_dir / "concepts" / "test-page.md").read_text(encoding="utf-8")
         # Frontmatter should be unchanged
@@ -505,39 +569,41 @@ class TestRetroactiveWikilinkInjection:
         """Skip injection when page already has a wikilink to the target."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "existing",
+            wiki_dir,
+            "concepts",
+            "existing",
             "Existing",
             "Already links to [[concepts/target-page]] explicitly.",
         )
 
         from kb.compile.linker import inject_wikilinks
 
-        injected = inject_wikilinks(
-            "Target Page", "concepts/target-page", wiki_dir=wiki_dir
-        )
+        injected = inject_wikilinks("Target Page", "concepts/target-page", wiki_dir=wiki_dir)
         assert len(injected) == 0  # Already linked
 
     def test_skip_self_injection(self, tmp_path):
         """Don't inject wikilink into the page itself."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "self-ref",
+            wiki_dir,
+            "concepts",
+            "self-ref",
             "Self Ref",
             "This page talks about Self Ref concepts.",
         )
 
         from kb.compile.linker import inject_wikilinks
 
-        injected = inject_wikilinks(
-            "Self Ref", "concepts/self-ref", wiki_dir=wiki_dir
-        )
+        injected = inject_wikilinks("Self Ref", "concepts/self-ref", wiki_dir=wiki_dir)
         assert len(injected) == 0
 
     def test_case_insensitive_match(self, tmp_path):
         """Matching is case-insensitive for the title."""
         wiki_dir = tmp_path / "wiki"
         _make_wiki_page(
-            wiki_dir, "concepts", "nlp-page",
+            wiki_dir,
+            "concepts",
+            "nlp-page",
             "NLP Page",
             "Natural language processing uses transformer architecture frequently.",
         )
@@ -545,7 +611,8 @@ class TestRetroactiveWikilinkInjection:
         from kb.compile.linker import inject_wikilinks
 
         injected = inject_wikilinks(
-            "Transformer Architecture", "concepts/transformer-architecture",
+            "Transformer Architecture",
+            "concepts/transformer-architecture",
             wiki_dir=wiki_dir,
         )
         assert len(injected) == 1
@@ -564,7 +631,8 @@ class TestContentLengthIngestTiering:
             (wiki_dir / sub).mkdir(parents=True)
         (wiki_dir / "index.md").write_text(
             "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
-            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
         )
         (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
         (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
@@ -649,6 +717,7 @@ class TestContentLengthIngestTiering:
     def test_config_threshold_exists(self):
         """SMALL_SOURCE_THRESHOLD config constant exists."""
         from kb.config import SMALL_SOURCE_THRESHOLD
+
         assert isinstance(SMALL_SOURCE_THRESHOLD, int)
         assert SMALL_SOURCE_THRESHOLD > 0
 
@@ -666,7 +735,8 @@ class TestCascadeUpdateOnIngest:
             (wiki_dir / sub).mkdir(parents=True)
         (wiki_dir / "index.md").write_text(
             "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
-            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
         )
         (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
         (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
@@ -693,7 +763,9 @@ class TestCascadeUpdateOnIngest:
 
         # Create existing page that references the same source
         _make_wiki_page(
-            wiki_dir, "concepts", "existing-concept",
+            wiki_dir,
+            "concepts",
+            "existing-concept",
             "Existing Concept",
             "Content about existing concept. See [[summaries/new-article]].",
             source_ref="raw/articles/shared-source.md",
@@ -733,7 +805,9 @@ class TestCascadeUpdateOnIngest:
 
         # Create page that links to a page that will be created by ingest
         _make_wiki_page(
-            wiki_dir, "concepts", "linker",
+            wiki_dir,
+            "concepts",
+            "linker",
             "Linker Page",
             "This page references [[entities/test-entity]].",
         )

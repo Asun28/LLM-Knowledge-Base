@@ -60,7 +60,8 @@ def export_mermaid(
         nodes_to_include = {n for n, _ in degrees[:max_nodes]}
         logger.info(
             "Graph pruned from %d to %d nodes (by degree)",
-            graph.number_of_nodes(), len(nodes_to_include),
+            graph.number_of_nodes(),
+            len(nodes_to_include),
         )
     else:
         nodes_to_include = set(graph.nodes())

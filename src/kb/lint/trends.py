@@ -25,8 +25,12 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
     """
     verdicts = load_verdicts(path)
     if not verdicts:
-        return {"total": 0, "overall": {"pass": 0, "fail": 0, "warning": 0},
-                "periods": [], "trend": "stable"}
+        return {
+            "total": 0,
+            "overall": {"pass": 0, "fail": 0, "warning": 0},
+            "periods": [],
+            "trend": "stable",
+        }
 
     # Overall counts
     overall = {"pass": 0, "fail": 0, "warning": 0}
@@ -62,14 +66,16 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
         bucket = period_buckets[key]
         total = bucket["total"]
         pass_rate = bucket["pass"] / total if total > 0 else 0.0
-        sorted_periods.append({
-            "period": key,
-            "pass": bucket["pass"],
-            "fail": bucket["fail"],
-            "warning": bucket["warning"],
-            "total": total,
-            "pass_rate": round(pass_rate, 2),
-        })
+        sorted_periods.append(
+            {
+                "period": key,
+                "pass": bucket["pass"],
+                "fail": bucket["fail"],
+                "warning": bucket["warning"],
+                "total": total,
+                "pass_rate": round(pass_rate, 2),
+            }
+        )
 
     # Determine trend from last 2 periods
     trend = "stable"

@@ -292,9 +292,7 @@ class TestFixDeadLinksAuditLog:
         wiki_log = tmp_wiki / "log.md"
         wiki_log.write_text("# Wiki Log\n\n", encoding="utf-8")
 
-        with patch("kb.config.WIKI_LOG", wiki_log), patch(
-            "kb.utils.wiki_log.WIKI_LOG", wiki_log
-        ):
+        with patch("kb.config.WIKI_LOG", wiki_log), patch("kb.utils.wiki_log.WIKI_LOG", wiki_log):
             fixes = fix_dead_links(tmp_wiki)
 
         assert len(fixes) > 0
@@ -320,9 +318,7 @@ class TestFixDeadLinksAuditLog:
         wiki_log = tmp_wiki / "log.md"
         wiki_log.write_text("# Wiki Log\n\n", encoding="utf-8")
 
-        with patch("kb.config.WIKI_LOG", wiki_log), patch(
-            "kb.utils.wiki_log.WIKI_LOG", wiki_log
-        ):
+        with patch("kb.config.WIKI_LOG", wiki_log), patch("kb.utils.wiki_log.WIKI_LOG", wiki_log):
             fixes = fix_dead_links(tmp_wiki)
 
         assert len(fixes) == 0

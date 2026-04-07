@@ -54,7 +54,10 @@ def _make_api_call(kwargs: dict, model: str):
             delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
             logger.warning(
                 "Rate limited by %s (attempt %d/%d), retrying in %.1fs",
-                model, attempt + 1, MAX_RETRIES, delay,
+                model,
+                attempt + 1,
+                MAX_RETRIES,
+                delay,
             )
             time.sleep(delay)
 
@@ -64,20 +67,25 @@ def _make_api_call(kwargs: dict, model: str):
                 delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
                 logger.warning(
                     "API error %d from %s (attempt %d/%d), retrying in %.1fs",
-                    e.status_code, model, attempt + 1, MAX_RETRIES, delay,
+                    e.status_code,
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
             else:
-                raise LLMError(
-                    f"API error from {model}: {e.status_code} — {e.message}"
-                ) from e
+                raise LLMError(f"API error from {model}: {e.status_code} — {e.message}") from e
 
         except anthropic.APIConnectionError as e:
             last_error = e
             delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
             logger.warning(
                 "Connection error to %s (attempt %d/%d), retrying in %.1fs",
-                model, attempt + 1, MAX_RETRIES, delay,
+                model,
+                attempt + 1,
+                MAX_RETRIES,
+                delay,
             )
             time.sleep(delay)
 
@@ -86,7 +94,10 @@ def _make_api_call(kwargs: dict, model: str):
             delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
             logger.warning(
                 "Timeout calling %s (attempt %d/%d), retrying in %.1fs",
-                model, attempt + 1, MAX_RETRIES, delay,
+                model,
+                attempt + 1,
+                MAX_RETRIES,
+                delay,
             )
             time.sleep(delay)
 

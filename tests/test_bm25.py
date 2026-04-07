@@ -1,6 +1,5 @@
 """Tests for BM25 search implementation — tokenizer, index, and search integration."""
 
-
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.engine import search_pages
 

@@ -14,27 +14,44 @@ VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
 # Used as fallback when template specs lack explicit type annotations.
 _ANNOTATED_FIELD_RE = re.compile(r"^(\w+)\s*\(([^)]+)\)\s*:\s*(.+)$")
 
-KNOWN_LIST_FIELDS = frozenset({
-    # Common across all templates
-    "entities_mentioned", "concepts_mentioned",
-    # Article
-    "key_claims", "evidence",
-    # Paper
-    "authors", "citations_relevant", "results", "limitations",
-    # Video
-    "key_points", "claims_with_timestamps", "action_items",
-    # Podcast
-    "speakers", "topics_by_timestamp", "speaker_claims",
-    "agreements", "disagreements",
-    # Repo
-    "dependencies", "usage_patterns",
-    # Book
-    "chapters", "key_themes",
-    # Dataset
-    "columns", "use_cases",
-    # Conversation
-    "participants", "topic_segments", "key_exchanges",
-})
+KNOWN_LIST_FIELDS = frozenset(
+    {
+        # Common across all templates
+        "entities_mentioned",
+        "concepts_mentioned",
+        # Article
+        "key_claims",
+        "evidence",
+        # Paper
+        "authors",
+        "citations_relevant",
+        "results",
+        "limitations",
+        # Video
+        "key_points",
+        "claims_with_timestamps",
+        "action_items",
+        # Podcast
+        "speakers",
+        "topics_by_timestamp",
+        "speaker_claims",
+        "agreements",
+        "disagreements",
+        # Repo
+        "dependencies",
+        "usage_patterns",
+        # Book
+        "chapters",
+        "key_themes",
+        # Dataset
+        "columns",
+        "use_cases",
+        # Conversation
+        "participants",
+        "topic_segments",
+        "key_exchanges",
+    }
+)
 
 
 @functools.lru_cache(maxsize=16)

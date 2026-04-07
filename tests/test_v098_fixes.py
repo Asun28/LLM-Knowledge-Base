@@ -99,9 +99,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"title": "Test", "score": 42})
-        mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[tool_block]
-        )
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         result = call_llm_json(
             "Extract data",
@@ -114,9 +112,7 @@ class TestCallLlmJson:
         from kb.utils.llm import LLMError, call_llm_json
 
         text_block = Mock(type="text", text="Hello")
-        mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[text_block]
-        )
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[text_block])
 
         with pytest.raises(LLMError, match="No tool_use block"):
             call_llm_json(
@@ -140,9 +136,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"title": "OK"})
-        mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[tool_block]
-        )
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         schema = {"type": "object", "properties": {"title": {"type": "string"}}}
         call_llm_json("Extract", schema=schema, tool_name="my_tool")
@@ -182,9 +176,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={})
-        mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[tool_block]
-        )
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         call_llm_json("Extract", schema={"type": "object"}, system="Be precise")
         call_kwargs = mock_get_client.return_value.messages.create.call_args.kwargs
@@ -233,9 +225,7 @@ class TestBuildExtractionSchema:
         from kb.ingest.extractors import build_extraction_schema
 
         # Load comparison template directly (not a source type, so skip load_template)
-        tpl = yaml.safe_load(
-            (TEMPLATES_DIR / "comparison.yaml").read_text(encoding="utf-8")
-        )
+        tpl = yaml.safe_load((TEMPLATES_DIR / "comparison.yaml").read_text(encoding="utf-8"))
         schema = build_extraction_schema(tpl)
 
         assert "title" in schema["required"]
@@ -279,9 +269,7 @@ class TestParseFieldSpec:
     def test_annotated_string_field(self):
         from kb.ingest.extractors import _parse_field_spec
 
-        name, desc, is_list = _parse_field_spec(
-            '"title (str): Title of the comparison"'
-        )
+        name, desc, is_list = _parse_field_spec('"title (str): Title of the comparison"')
         assert name == "title"
         assert desc == "Title of the comparison"
         assert is_list is False
@@ -289,9 +277,7 @@ class TestParseFieldSpec:
     def test_annotated_list_field(self):
         from kb.ingest.extractors import _parse_field_spec
 
-        name, desc, is_list = _parse_field_spec(
-            '"subjects (list[str]): Items being compared"'
-        )
+        name, desc, is_list = _parse_field_spec('"subjects (list[str]): Items being compared"')
         assert name == "subjects"
         assert desc == "Items being compared"
         assert is_list is True
@@ -434,9 +420,7 @@ class TestMakeApiCall:
 
         tool_block = Mock(type="tool_use", input={"ok": True})
         mock_get_client.return_value.messages.create.side_effect = [
-            anthropic.APIConnectionError(
-                message="network error", request=Mock()
-            ),
+            anthropic.APIConnectionError(message="network error", request=Mock()),
             Mock(content=[tool_block]),
         ]
 

@@ -135,8 +135,16 @@ def test_load_all_pages_returns_all_fields(create_wiki_page, tmp_path):
     assert len(pages) == 1
     page = pages[0]
     assert set(page.keys()) == {
-        "id", "path", "title", "type", "confidence",
-        "sources", "created", "updated", "content", "raw_content",
+        "id",
+        "path",
+        "title",
+        "type",
+        "confidence",
+        "sources",
+        "created",
+        "updated",
+        "content",
+        "raw_content",
     }
     assert page["id"] == "concepts/rag"
     assert page["raw_content"] == page["content"].lower()

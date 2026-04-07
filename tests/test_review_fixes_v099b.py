@@ -7,11 +7,7 @@ Covers 4 issues from code review:
 4. ingest_source docstring updated with all new params/keys
 """
 
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
-
 
 # ── Issue 1: inject_wikilinks called from ingest ──────────────────────────────
 
@@ -62,7 +58,7 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
             patch("kb.compile.linker.inject_wikilinks", side_effect=mock_inject),
         ):
-            result = ingest_source(source, source_type="article")
+            ingest_source(source, source_type="article")
 
         # inject_wikilinks should be called for each created page
         assert len(inject_calls) > 0, "inject_wikilinks was never called"
@@ -100,7 +96,7 @@ class TestInjectWikilinksCalledOnIngest:
         # Pre-existing page that mentions "Attention Mechanism" in plain text
         existing_page = wiki_dir / "concepts" / "transformer.md"
         existing_page.write_text(
-            "---\ntitle: \"Transformer\"\nsource:\n  - \"raw/articles/transformer.md\"\n"
+            '---\ntitle: "Transformer"\nsource:\n  - "raw/articles/transformer.md"\n'
             "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
             "The Transformer uses Attention Mechanism as its core building block.\n"
         )
@@ -118,7 +114,7 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
             patch("kb.compile.linker.WIKI_DIR", wiki_dir),
         ):
-            result = ingest_source(source, source_type="article")
+            ingest_source(source, source_type="article")
 
         # The existing page should now contain a wikilink to the new summary
         updated_content = existing_page.read_text(encoding="utf-8")
@@ -204,12 +200,13 @@ class TestDuplicateDetectionMCPOutput:
         }
         output = _format_ingest_result("raw/articles/copy.md", "article", "deadbeef", result)
 
-        # The user should not be left confused — either show duplicate message
-        # or at minimum not just "Pages created (0)" with no context
-        lines = output.splitlines()
         # Must contain some indication this was intentionally skipped
         full_output = output.lower()
-        assert "duplicate" in full_output or "already ingested" in full_output or "identical" in full_output
+        assert (
+            "duplicate" in full_output
+            or "already ingested" in full_output
+            or "identical" in full_output
+        )
 
     def test_non_duplicate_result_unchanged(self):
         """Normal (non-duplicate) results still show pages created/updated."""

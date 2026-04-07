@@ -415,7 +415,8 @@ def ingest_source(
     if is_small_source:
         logger.info(
             "Small source (%d chars < %d threshold): deferring entity/concept pages",
-            len(raw_content), SMALL_SOURCE_THRESHOLD,
+            len(raw_content),
+            SMALL_SOURCE_THRESHOLD,
         )
 
     # 2. Create or update entity pages (skip for small sources)

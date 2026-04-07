@@ -75,9 +75,7 @@ class TestAffectedPagesLogLevel:
         # Should still return backlinks even though shared sources failed
         assert "entities/a" in result
         # The failure should be logged at DEBUG, not WARNING
-        shared_source_logs = [
-            r for r in caplog.records if "shared sources" in r.message.lower()
-        ]
+        shared_source_logs = [r for r in caplog.records if "shared sources" in r.message.lower()]
         for record in shared_source_logs:
             assert record.levelno == logging.DEBUG, (
                 f"Expected DEBUG but got {record.levelname}: {record.message}"
@@ -102,9 +100,7 @@ class TestLlmErrorMessages:
         with patch("kb.utils.llm.get_client") as mock_get:
             client = self._mock_client()
             mock_get.return_value = client
-            client.messages.create.side_effect = anthropic.APITimeoutError(
-                request=MagicMock()
-            )
+            client.messages.create.side_effect = anthropic.APITimeoutError(request=MagicMock())
 
             try:
                 call_llm("test prompt", tier="scan")
@@ -142,9 +138,7 @@ class TestLlmErrorMessages:
         with patch("kb.utils.llm.get_client") as mock_get:
             client = self._mock_client()
             mock_get.return_value = client
-            client.messages.create.side_effect = anthropic.APIConnectionError(
-                request=MagicMock()
-            )
+            client.messages.create.side_effect = anthropic.APIConnectionError(request=MagicMock())
 
             try:
                 call_llm("test prompt", tier="scan")

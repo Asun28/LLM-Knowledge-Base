@@ -207,8 +207,13 @@ def test_update_existing_page_updates_date(tmp_path):
 def test_build_query_context_respects_limit():
     """_build_query_context truncates when exceeding max_chars."""
     pages = [
-        {"id": f"p{i}", "type": "concept", "confidence": "stated",
-         "title": f"Page {i}", "content": "x" * 1000}
+        {
+            "id": f"p{i}",
+            "type": "concept",
+            "confidence": "stated",
+            "title": f"Page {i}",
+            "content": "x" * 1000,
+        }
         for i in range(20)
     ]
 
@@ -220,8 +225,13 @@ def test_build_query_context_respects_limit():
 def test_build_query_context_all_fit():
     """_build_query_context includes all pages when under limit."""
     pages = [
-        {"id": "p1", "type": "concept", "confidence": "stated",
-         "title": "Page 1", "content": "Short content"},
+        {
+            "id": "p1",
+            "type": "concept",
+            "confidence": "stated",
+            "title": "Page 1",
+            "content": "Short content",
+        },
     ]
 
     result = _build_query_context(pages, max_chars=80_000)
@@ -628,8 +638,13 @@ def test_review_history_includes_context(tmp_path):
     )
 
     history_path = tmp_path / "history.json"
-    refine_page("concepts/test", "New content here", "test fix",
-                wiki_dir=wiki_dir, history_path=history_path)
+    refine_page(
+        "concepts/test",
+        "New content here",
+        "test fix",
+        wiki_dir=wiki_dir,
+        history_path=history_path,
+    )
 
     history = load_review_history(history_path)
     assert len(history) == 1

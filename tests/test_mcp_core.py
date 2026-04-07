@@ -266,9 +266,7 @@ def test_kb_ingest_content_extraction_not_dict(tmp_path, monkeypatch):
 
 def test_kb_compile_scan_no_changes():
     """kb_compile_scan returns 'up to date' when no changed sources."""
-    with patch(
-        "kb.compile.compiler.find_changed_sources", return_value=([], [])
-    ):
+    with patch("kb.compile.compiler.find_changed_sources", return_value=([], [])):
         result = kb_compile_scan(incremental=True)
 
     assert "up to date" in result.lower()
