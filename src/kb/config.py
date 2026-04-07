@@ -1,5 +1,6 @@
 """Project configuration — paths, model tiers, and settings."""
 
+import os
 from pathlib import Path
 
 # ── Project paths ──────────────────────────────────────────────
@@ -48,10 +49,11 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
 
 # ── Model tiering (from tooling-research.md) ──────────────────
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
+# Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
 MODEL_TIERS = {
-    "scan": "claude-haiku-4-5-20251001",
-    "write": "claude-sonnet-4-6",
-    "orchestrate": "claude-opus-4-6",
+    "scan": os.environ.get("CLAUDE_SCAN_MODEL", "claude-haiku-4-5-20251001"),
+    "write": os.environ.get("CLAUDE_WRITE_MODEL", "claude-sonnet-4-6"),
+    "orchestrate": os.environ.get("CLAUDE_ORCHESTRATE_MODEL", "claude-opus-4-6"),
 }
 
 # ── Page types ────────────────────────────────────────────────
