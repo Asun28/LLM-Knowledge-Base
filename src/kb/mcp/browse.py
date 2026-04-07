@@ -66,7 +66,11 @@ def kb_read_page(page_id: str) -> str:
                         break
     if not page_path.exists():
         return f"Page not found: {page_id}"
-    return page_path.read_text(encoding="utf-8")
+    try:
+        return page_path.read_text(encoding="utf-8")
+    except (OSError, PermissionError) as e:
+        logger.error("Error reading page %s: %s", page_id, e)
+        return f"Error: Could not read page {page_id}: {e}"
 
 
 @mcp.tool()
@@ -101,22 +105,26 @@ def kb_list_sources() -> str:
     if not RAW_DIR.exists():
         return "No raw directory found."
 
-    lines = ["# Raw Sources\n"]
-    total = 0
-    for subdir in sorted(RAW_DIR.iterdir()):
-        if not subdir.is_dir() or subdir.name.startswith("."):
-            continue
-        files = sorted(subdir.glob("*"))
-        files = [f for f in files if f.is_file()]
-        if files:
-            lines.append(f"\n## {subdir.name}/ ({len(files)} files)")
-            for f in files:
-                size_kb = f.stat().st_size / 1024
-                lines.append(f"  - {f.name} ({size_kb:.1f} KB)")
-            total += len(files)
+    try:
+        lines = ["# Raw Sources\n"]
+        total = 0
+        for subdir in sorted(RAW_DIR.iterdir()):
+            if not subdir.is_dir() or subdir.name.startswith("."):
+                continue
+            files = sorted(subdir.glob("*"))
+            files = [f for f in files if f.is_file()]
+            if files:
+                lines.append(f"\n## {subdir.name}/ ({len(files)} files)")
+                for f in files:
+                    size_kb = f.stat().st_size / 1024
+                    lines.append(f"  - {f.name} ({size_kb:.1f} KB)")
+                total += len(files)
 
-    lines.insert(1, f"**Total:** {total} source file(s)")
-    return "\n".join(lines)
+        lines.insert(1, f"**Total:** {total} source file(s)")
+        return "\n".join(lines)
+    except (OSError, PermissionError) as e:
+        logger.error("Error listing sources: %s", e)
+        return f"Error: Could not list sources: {e}"
 
 
 @mcp.tool()
