@@ -44,10 +44,21 @@ def run_all_checks(
     all_issues.extend(dead_links)
     checks_run.append({"name": "dead_links", "issues": len(dead_links)})
 
-    # Auto-fix dead links if requested
+    # Auto-fix dead links if requested; remove fixed issues from report
     fixes_applied: list[dict] = []
     if fix and dead_links:
         fixes_applied = fix_dead_links(wiki_dir)
+        if fixes_applied:
+            # Remove the dead link issues that were successfully fixed
+            fixed_pairs = {(f["page"], f["target"]) for f in fixes_applied}
+            all_issues = [
+                i
+                for i in all_issues
+                if not (
+                    i.get("check") == "dead_links"
+                    and (i.get("source"), i.get("target")) in fixed_pairs
+                )
+            ]
 
     orphans = check_orphan_pages(wiki_dir)
     all_issues.extend(orphans)

@@ -95,18 +95,33 @@ def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, res
         for p in result["pages_skipped"]:
             lines.append(f"  ! {p}")
 
-    # Affected pages (cascade update detection)
-    affected = result.get("affected_pages", {})
+    # Wikilinks injected into existing pages
+    wikilinks_injected = result.get("wikilinks_injected", [])
+    if wikilinks_injected:
+        lines.append(f"Wikilinks injected ({len(wikilinks_injected)}):")
+        for p in wikilinks_injected:
+            lines.append(f"  -> {p}")
+
+    # Affected pages (cascade update detection) — pipeline returns flat list[str]
+    affected = result.get("affected_pages", [])
     if isinstance(affected, dict):
+        # Legacy dict format: extract both lists
         backlinks = affected.get("backlinks", [])
         shared = affected.get("shared_sources", [])
-    else:
+        all_affected = backlinks + shared
+    elif isinstance(affected, list):
+        all_affected = affected
         backlinks, shared = [], []
-    if backlinks or shared:
-        lines.append(f"Affected pages ({len(backlinks) + len(shared)}) — may need review:")
+    else:
+        all_affected, backlinks, shared = [], [], []
+    if all_affected:
+        lines.append(f"Affected pages ({len(all_affected)}) — may need review:")
         for p in backlinks:
             lines.append(f"  <- {p}  (backlink)")
         for p in shared:
             lines.append(f"  ~ {p}  (shared source)")
+        if not isinstance(affected, dict):
+            for p in all_affected:
+                lines.append(f"  ~ {p}")
 
     return "\n".join(lines)

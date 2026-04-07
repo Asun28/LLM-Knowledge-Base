@@ -16,4 +16,4 @@ def extract_wikilinks(text: str) -> list[str]:
 
 def extract_raw_refs(text: str) -> list[str]:
     """Extract all references to raw/ source files from markdown text."""
-    return re.findall(r"raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml)", text)
+    return re.findall(r"raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)", text)

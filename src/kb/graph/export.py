@@ -1,5 +1,6 @@
 """Export wiki graph as Mermaid diagram."""
 
+import heapq
 import logging
 import re
 from pathlib import Path
@@ -22,9 +23,23 @@ def _sanitize_label(text: str) -> str:
     return re.sub(r'["\[\]{}|<>]', "", text).strip()
 
 
-def _safe_node_id(node: str) -> str:
-    """Convert a page ID to a Mermaid-safe node identifier."""
-    return node.replace("/", "_").replace("-", "_")
+def _safe_node_id(node: str, seen: set[str] | None = None) -> str:
+    """Convert a page ID to a Mermaid-safe node identifier.
+
+    When ``seen`` is provided, appends a numeric suffix to avoid collisions
+    (e.g. 'fine-tuning' and 'fine_tuning' would both map to 'fine_tuning'
+    without deduplication).
+    """
+    base = node.replace("/", "_").replace("-", "_")
+    if seen is None:
+        return base
+    candidate = base
+    i = 2
+    while candidate in seen:
+        candidate = f"{base}_{i}"
+        i += 1
+    seen.add(candidate)
+    return candidate
 
 
 def export_mermaid(
@@ -55,9 +70,9 @@ def export_mermaid(
     # Auto-prune if needed
     nodes_to_include: set[str]
     if max_nodes > 0 and graph.number_of_nodes() > max_nodes:
-        # Keep top N by total degree (most connected)
-        degrees = sorted(graph.degree(), key=lambda x: x[1], reverse=True)
-        nodes_to_include = {n for n, _ in degrees[:max_nodes]}
+        # Keep top N by total degree (most connected); nlargest is O(n log k) vs O(n log n) sort
+        top = heapq.nlargest(max_nodes, graph.degree(), key=lambda x: x[1])
+        nodes_to_include = {n for n, _ in top}
         logger.info(
             "Graph pruned from %d to %d nodes (by degree)",
             graph.number_of_nodes(),
@@ -75,17 +90,23 @@ def export_mermaid(
         page_type = node.split("/")[0] if "/" in node else "other"
         type_groups.setdefault(page_type, []).append(node)
 
+    # Pre-build node ID map with collision deduplication
+    seen_ids: set[str] = set()
+    node_id_map: dict[str, str] = {
+        node: _safe_node_id(node, seen_ids) for node in sorted(nodes_to_include)
+    }
+
     # Define nodes with labels
     for page_type, nodes in sorted(type_groups.items()):
         lines.append(f"  subgraph {page_type}")
         for node in nodes:
             title = _sanitize_label(titles.get(node, node.split("/")[-1]))
-            lines.append(f'    {_safe_node_id(node)}["{title}"]')
+            lines.append(f'    {node_id_map[node]}["{title}"]')
         lines.append("  end")
 
     # Define edges (only between included nodes)
     for source, target in graph.edges():
         if source in nodes_to_include and target in nodes_to_include:
-            lines.append(f"  {_safe_node_id(source)} --> {_safe_node_id(target)}")
+            lines.append(f"  {node_id_map[source]} --> {node_id_map[target]}")
 
     return "\n".join(lines)

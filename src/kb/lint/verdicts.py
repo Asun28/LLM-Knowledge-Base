@@ -4,9 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from kb.config import PROJECT_ROOT
+from kb.config import VERDICTS_PATH
 
-VERDICTS_PATH = PROJECT_ROOT / ".data" / "lint_verdicts.json"
 MAX_VERDICTS = 10_000
 VALID_SEVERITIES = ("error", "warning", "info")
 

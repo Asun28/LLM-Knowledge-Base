@@ -330,3 +330,110 @@ class TestIngestSourceDocstring:
 
         doc = ingest_source.__doc__ or ""
         assert "duplicate" in doc
+
+
+# ── Post-review fixes: flat list affected_pages + wikilinks_injected ─────────
+
+
+class TestAffectedPagesFlatList:
+    """_format_ingest_result handles flat list[str] from pipeline (actual return type)."""
+
+    def test_flat_list_affected_pages_shown_in_output(self):
+        """affected_pages as flat list (from _find_affected_pages) is displayed."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/new-topic"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "affected_pages": ["concepts/related", "entities/person-a"],
+        }
+        output = _format_ingest_result("raw/articles/x.md", "article", "h1", result)
+
+        assert "Affected pages" in output
+        assert "concepts/related" in output
+        assert "entities/person-a" in output
+
+    def test_empty_flat_list_not_shown(self):
+        """Empty flat list produces no affected pages section."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/foo"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "affected_pages": [],
+        }
+        output = _format_ingest_result("raw/articles/y.md", "article", "h2", result)
+        assert "Affected pages" not in output
+
+    def test_flat_list_count_shown_correctly(self):
+        """Count in header matches the number of affected pages."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "affected_pages": ["a", "b", "c"],
+        }
+        output = _format_ingest_result("raw/articles/z.md", "article", "h3", result)
+        assert "Affected pages (3)" in output
+
+
+class TestWikilinksInjectedMCPOutput:
+    """_format_ingest_result surfaces wikilinks_injected when non-empty."""
+
+    def test_wikilinks_injected_shown_in_output(self):
+        """When wikilinks_injected is non-empty, it appears in the formatted output."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/foo"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": ["concepts/bar", "entities/baz"],
+        }
+        output = _format_ingest_result("raw/articles/foo.md", "article", "h4", result)
+
+        assert "Wikilinks injected" in output
+        assert "concepts/bar" in output
+        assert "entities/baz" in output
+
+    def test_empty_wikilinks_injected_not_shown(self):
+        """Empty wikilinks_injected list produces no wikilinks section."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/foo"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+        }
+        output = _format_ingest_result("raw/articles/foo.md", "article", "h5", result)
+        assert "Wikilinks injected" not in output
+
+    def test_missing_wikilinks_injected_key_no_error(self):
+        """Results without wikilinks_injected key don't crash."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/foo"],
+            "pages_updated": [],
+            "pages_skipped": [],
+        }
+        output = _format_ingest_result("raw/articles/foo.md", "article", "h6", result)
+        assert "Pages created (1):" in output
+
+    def test_wikilinks_injected_count_shown(self):
+        """Count of injected wikilinks is shown in the header."""
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": ["a", "b"],
+        }
+        output = _format_ingest_result("raw/articles/foo.md", "article", "h7", result)
+        assert "Wikilinks injected (2)" in output

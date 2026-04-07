@@ -48,9 +48,13 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         updated_content: New markdown body (frontmatter preserved automatically).
         revision_notes: What changed and why.
     """
-    from kb.review.refiner import refine_page
+    try:
+        from kb.review.refiner import refine_page
 
-    result = refine_page(page_id, updated_content, revision_notes)
+        result = refine_page(page_id, updated_content, revision_notes)
+    except Exception as e:
+        logger.exception("Unexpected error refining %s", page_id)
+        return f"Error refining {page_id}: {e}"
     if "error" in result:
         return f"Error: {result['error']}"
 
@@ -155,14 +159,18 @@ def kb_reliability_map() -> str:
     Pages cited in successful queries score higher.
     Pages cited in wrong answers score lower and are flagged for re-lint.
     """
-    from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
+    try:
+        from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 
-    scores = compute_trust_scores()
-    if not scores:
-        return "No feedback recorded yet. Use kb_query_feedback after queries."
+        scores = compute_trust_scores()
+        if not scores:
+            return "No feedback recorded yet. Use kb_query_feedback after queries."
 
-    sorted_pages = sorted(scores.items(), key=lambda x: x[1].get("trust", 0.5), reverse=True)
-    flagged = set(get_flagged_pages())
+        sorted_pages = sorted(scores.items(), key=lambda x: x[1].get("trust", 0.5), reverse=True)
+        flagged = set(get_flagged_pages())
+    except Exception as e:
+        logger.exception("Error computing reliability map")
+        return f"Error computing reliability map: {e}"
 
     lines = ["# Page Reliability Map\n"]
     for pid, s in sorted_pages:
@@ -315,11 +323,12 @@ def kb_create_page(
         confidence: Confidence level: 'stated', 'inferred', or 'speculative'.
         source_refs: Comma-separated source references (e.g., 'raw/articles/a.md,raw/papers/b.md').
     """
-    # Validate page_id format
+    # Validate page_id — reuse shared validator (handles traversal + resolve check)
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
-    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
-        return f"Error: Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+    err = _validate_page_id(page_id, check_exists=False)
+    if err:
+        return f"Error: {err}"
     if not title or not title.strip():
         return "Error: Title cannot be empty."
 

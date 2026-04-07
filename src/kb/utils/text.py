@@ -1,6 +1,9 @@
 """Text utilities — slugify, YAML escaping."""
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def slugify(text: str) -> str:
@@ -20,11 +23,13 @@ def yaml_escape(value: str) -> str:
 
     Handles backslashes, double quotes, newlines, tabs, carriage returns, and null bytes.
     """
+    if "\0" in value:
+        logger.warning("Null byte removed from YAML value (possible data corruption)")
+        value = value.replace("\0", "")
     return (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')
         .replace("\n", "\\n")
         .replace("\r", "\\r")
         .replace("\t", "\\t")
-        .replace("\0", "")
     )

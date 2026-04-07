@@ -378,3 +378,22 @@ def test_call_llm_mixed_transient_errors(mock_get_client, mock_sleep):
     assert result == "Finally worked"
     assert mock_client.messages.create.call_count == 3
     assert mock_sleep.call_count == 2
+
+
+# ── _backoff_delay helper ────────────────────────────────────────
+
+
+def test_backoff_delay_values():
+    """_backoff_delay returns correct exponential values for valid attempts."""
+    from kb.utils.llm import RETRY_BASE_DELAY, _backoff_delay
+
+    assert _backoff_delay(0) == RETRY_BASE_DELAY * 1
+    assert _backoff_delay(1) == RETRY_BASE_DELAY * 2
+    assert _backoff_delay(2) == RETRY_BASE_DELAY * 4
+
+
+def test_backoff_delay_cap():
+    """_backoff_delay never exceeds RETRY_MAX_DELAY regardless of attempt number."""
+    from kb.utils.llm import RETRY_MAX_DELAY, _backoff_delay
+
+    assert _backoff_delay(100) == RETRY_MAX_DELAY

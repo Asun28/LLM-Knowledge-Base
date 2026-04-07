@@ -11,6 +11,7 @@ import yaml
 from kb.config import (
     MAX_CONCEPTS_PER_INGEST,
     MAX_ENTITIES_PER_INGEST,
+    PROJECT_ROOT,
     RAW_DIR,
     SMALL_SOURCE_THRESHOLD,
     SOURCE_TYPE_DIRS,
@@ -20,7 +21,7 @@ from kb.config import (
 )
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash
-from kb.utils.pages import normalize_sources
+from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
 from kb.utils.text import slugify, yaml_escape
 from kb.utils.wiki_log import append_wiki_log
@@ -51,8 +52,6 @@ def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> l
         logger.debug("Failed to compute backlinks for cascade: %s", e)
 
     try:
-        from kb.utils.pages import load_all_pages
-
         all_pages = load_all_pages(wiki_dir)
         new_sources: set[str] = set()
         for page in all_pages:
@@ -76,9 +75,8 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     from different file paths. Skips template entries. Only flags as
     duplicate if the other source file still exists on disk.
     """
-    from kb.config import PROJECT_ROOT
-
     try:
+        # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
         from kb.compile.compiler import load_manifest
 
         manifest = load_manifest()
@@ -182,24 +180,12 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
     return "\n".join(lines)
 
 
-def _build_entity_content(entity_name: str, source_ref: str, context: str) -> str:
-    """Build entity page content."""
+def _build_item_content(name: str, source_ref: str, context: str, verb: str) -> str:
+    """Build entity or concept page content."""
     lines = [
-        f"# {entity_name}\n",
+        f"# {name}\n",
         "## References\n",
-        f"- Mentioned in {source_ref}",
-    ]
-    if context:
-        lines.insert(1, f"{context}\n")
-    return "\n".join(lines)
-
-
-def _build_concept_content(concept_name: str, source_ref: str, context: str) -> str:
-    """Build concept page content."""
-    lines = [
-        f"# {concept_name}\n",
-        "## References\n",
-        f"- Discussed in {source_ref}",
+        f"- {verb} in {source_ref}",
     ]
     if context:
         lines.insert(1, f"{context}\n")
@@ -235,7 +221,11 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
 
 
 def _update_existing_page(
-    page_path: Path, source_ref: str, name: str = "", extraction: dict | None = None
+    page_path: Path,
+    source_ref: str,
+    name: str = "",
+    extraction: dict | None = None,
+    verb: str = "Mentioned",
 ) -> None:
     """Add a new source reference to an existing wiki page.
 
@@ -264,7 +254,7 @@ def _update_existing_page(
         content = content.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
 
     # 2. Append to References section
-    ref_line = f"- Mentioned in {source_ref}"
+    ref_line = f"- {verb} in {source_ref}"
     if "## References" in content:
         content = content.replace("## References\n", f"## References\n{ref_line}\n", 1)
     else:
@@ -299,44 +289,108 @@ def _update_sources_mapping(source_ref: str, wiki_pages: list[str]) -> None:
         WIKI_SOURCES.write_text(content, encoding="utf-8")
 
 
-def _update_index(page_type: str, slug: str, title: str) -> None:
-    """Update wiki/index.md with a new page entry under the appropriate section."""
-    if not WIKI_INDEX.exists():
+_SECTION_HEADERS = {
+    "entity": "## Entities",
+    "concept": "## Concepts",
+    "comparison": "## Comparisons",
+    "summary": "## Summaries",
+    "synthesis": "## Synthesis",
+}
+_SUBDIR_MAP = {
+    "entity": "entities",
+    "concept": "concepts",
+    "comparison": "comparisons",
+    "summary": "summaries",
+    "synthesis": "synthesis",
+}
+
+
+def _update_index_batch(entries: list[tuple[str, str, str]]) -> None:
+    """Update wiki/index.md with multiple new page entries in a single read/write."""
+    if not WIKI_INDEX.exists() or not entries:
         return
     content = WIKI_INDEX.read_text(encoding="utf-8")
-    section_headers = {
-        "entity": "## Entities",
-        "concept": "## Concepts",
-        "comparison": "## Comparisons",
-        "summary": "## Summaries",
-        "synthesis": "## Synthesis",
-    }
-    section = section_headers.get(page_type)
-    if not section or section not in content:
-        return
+    changed = False
+    for page_type, slug, title in entries:
+        section = _SECTION_HEADERS.get(page_type)
+        if not section or section not in content:
+            continue
+        subdir = _SUBDIR_MAP.get(page_type)
+        if not subdir or f"{subdir}/{slug}" in content:
+            continue
+        entry = f"- [[{subdir}/{slug}|{title}]]"
+        placeholder = f"{section}\n\n*No pages yet.*"
+        if placeholder in content:
+            content = content.replace(placeholder, f"{section}\n\n{entry}")
+        else:
+            content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
+        changed = True
+    if changed:
+        WIKI_INDEX.write_text(content, encoding="utf-8")
 
-    # Use the actual subdirectory name for wikilink
-    subdir_map = {
-        "entity": "entities",
-        "concept": "concepts",
-        "comparison": "comparisons",
-        "summary": "summaries",
-        "synthesis": "synthesis",
-    }
-    subdir = subdir_map[page_type]
-    entry = f"- [[{subdir}/{slug}|{title}]]"
 
-    if f"{subdir}/{slug}" in content:
-        return  # Already in index
+def _process_item_batch(
+    items_raw: object,
+    field_name: str,
+    max_count: int,
+    page_type: str,
+    source_ref: str,
+    extraction: dict,
+) -> tuple[list[str], list[str], list[str], list[tuple[str, str]], list[str]]:
+    """Validate, deduplicate, and create/update wiki pages for a list of names.
 
-    # Replace "*No pages yet.*" or append after section header
-    placeholder = f"{section}\n\n*No pages yet.*"
-    if placeholder in content:
-        content = content.replace(placeholder, f"{section}\n\n{entry}")
+    Returns (created, updated, skipped, new_with_titles, valid_items).
+    valid_items is the deduplicated list of names that passed all guards
+    (empty-name, empty-slug, collision), for both created and updated pages.
+    Used by the caller to build index entries.
+    """
+    verb = "Mentioned" if page_type == "entity" else "Discussed"
+    subdir = _SUBDIR_MAP[page_type]
+    items: list = []
+    if not isinstance(items_raw, list):
+        logger.warning("%s is not a list (%s), skipping", field_name, type(items_raw).__name__)
     else:
-        content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
+        items = items_raw
+    if len(items) > max_count:
+        logger.warning("%s has %d items, truncating to %d", field_name, len(items), max_count)
+        items = items[:max_count]
 
-    WIKI_INDEX.write_text(content, encoding="utf-8")
+    created: list[str] = []
+    updated: list[str] = []
+    skipped: list[str] = []
+    new_with_titles: list[tuple[str, str]] = []
+    valid_items: list[str] = []
+    seen_slugs: dict[str, str] = {}
+
+    for item in items:
+        if not item or not item.strip():
+            continue
+        item_slug = slugify(item)
+        if not item_slug:
+            logger.warning("Skipping %s with empty slug: %r", page_type, item)
+            continue
+        if item_slug in seen_slugs:
+            prev = seen_slugs[item_slug]
+            if prev != item:
+                logger.warning("Slug collision: %r and %r both slug to %r", prev, item, item_slug)
+                skipped.append(f"{subdir}/{item_slug} (collision: {item!r})")
+            continue
+        seen_slugs[item_slug] = item
+        valid_items.append(item)
+        item_path = WIKI_DIR / subdir / f"{item_slug}.md"
+        if item_path.exists():
+            _update_existing_page(
+                item_path, source_ref, name=item, extraction=extraction, verb=verb
+            )
+            updated.append(f"{subdir}/{item_slug}")
+        else:
+            ctx = _extract_entity_context(item, extraction)
+            content = _build_item_content(item, source_ref, ctx, verb)
+            _write_wiki_page(item_path, item, page_type, source_ref, "stated", content)
+            created.append(f"{subdir}/{item_slug}")
+            new_with_titles.append((f"{subdir}/{item_slug}", item))
+
+    return created, updated, skipped, new_with_titles, valid_items
 
 
 def ingest_source(
@@ -420,107 +474,38 @@ def ingest_source(
         )
 
     # 2. Create or update entity pages (skip for small sources)
-    entities = [] if is_small_source else (extraction.get("entities_mentioned") or [])
-    if not isinstance(entities, list):
-        logger.warning(
-            "entities_mentioned is not a list (%s), skipping entities",
-            type(entities).__name__,
-        )
-        entities = []
-    if len(entities) > MAX_ENTITIES_PER_INGEST:
-        logger.warning(
-            "entities_mentioned has %d items, truncating to %d",
-            len(entities),
-            MAX_ENTITIES_PER_INGEST,
-        )
-        entities = entities[:MAX_ENTITIES_PER_INGEST]
-    seen_entity_slugs: dict[str, str] = {}
-    for entity in entities:
-        if not entity or not entity.strip():
-            continue
-        entity_slug = slugify(entity)
-        if not entity_slug:
-            logger.warning("Skipping entity with empty slug: %r", entity)
-            continue
-        if entity_slug in seen_entity_slugs:
-            prev = seen_entity_slugs[entity_slug]
-            if prev != entity:
-                logger.warning(
-                    "Slug collision: %r and %r both slug to %r",
-                    prev,
-                    entity,
-                    entity_slug,
-                )
-                pages_skipped.append(f"entities/{entity_slug} (collision: {entity!r})")
-            continue
-        seen_entity_slugs[entity_slug] = entity
-        entity_path = WIKI_DIR / "entities" / f"{entity_slug}.md"
-        if entity_path.exists():
-            _update_existing_page(entity_path, source_ref, name=entity, extraction=extraction)
-            pages_updated.append(f"entities/{entity_slug}")
-        else:
-            ctx = _extract_entity_context(entity, extraction)
-            entity_content = _build_entity_content(entity, source_ref, ctx)
-            _write_wiki_page(entity_path, entity, "entity", source_ref, "stated", entity_content)
-            pages_created.append(f"entities/{entity_slug}")
-            new_pages_with_titles.append((f"entities/{entity_slug}", entity))
+    e_created, e_updated, e_skipped, e_new, e_valid = _process_item_batch(
+        [] if is_small_source else (extraction.get("entities_mentioned") or []),
+        "entities_mentioned",
+        MAX_ENTITIES_PER_INGEST,
+        "entity",
+        source_ref,
+        extraction,
+    )
+    pages_created.extend(e_created)
+    pages_updated.extend(e_updated)
+    pages_skipped.extend(e_skipped)
+    new_pages_with_titles.extend(e_new)
 
     # 3. Create or update concept pages (skip for small sources)
-    concepts = [] if is_small_source else (extraction.get("concepts_mentioned") or [])
-    if not isinstance(concepts, list):
-        logger.warning(
-            "concepts_mentioned is not a list (%s), skipping concepts",
-            type(concepts).__name__,
-        )
-        concepts = []
-    if len(concepts) > MAX_CONCEPTS_PER_INGEST:
-        logger.warning(
-            "concepts_mentioned has %d items, truncating to %d",
-            len(concepts),
-            MAX_CONCEPTS_PER_INGEST,
-        )
-        concepts = concepts[:MAX_CONCEPTS_PER_INGEST]
-    seen_concept_slugs: dict[str, str] = {}
-    for concept in concepts:
-        if not concept or not concept.strip():
-            continue
-        concept_slug = slugify(concept)
-        if not concept_slug:
-            logger.warning("Skipping concept with empty slug: %r", concept)
-            continue
-        if concept_slug in seen_concept_slugs:
-            prev = seen_concept_slugs[concept_slug]
-            if prev != concept:
-                logger.warning(
-                    "Slug collision: %r and %r both slug to %r",
-                    prev,
-                    concept,
-                    concept_slug,
-                )
-                pages_skipped.append(f"concepts/{concept_slug} (collision: {concept!r})")
-            continue
-        seen_concept_slugs[concept_slug] = concept
-        concept_path = WIKI_DIR / "concepts" / f"{concept_slug}.md"
-        if concept_path.exists():
-            _update_existing_page(concept_path, source_ref, name=concept, extraction=extraction)
-            pages_updated.append(f"concepts/{concept_slug}")
-        else:
-            ctx = _extract_entity_context(concept, extraction)
-            concept_content = _build_concept_content(concept, source_ref, ctx)
-            _write_wiki_page(
-                concept_path, concept, "concept", source_ref, "stated", concept_content
-            )
-            pages_created.append(f"concepts/{concept_slug}")
-            new_pages_with_titles.append((f"concepts/{concept_slug}", concept))
+    c_created, c_updated, c_skipped, c_new, c_valid = _process_item_batch(
+        [] if is_small_source else (extraction.get("concepts_mentioned") or []),
+        "concepts_mentioned",
+        MAX_CONCEPTS_PER_INGEST,
+        "concept",
+        source_ref,
+        extraction,
+    )
+    pages_created.extend(c_created)
+    pages_updated.extend(c_updated)
+    pages_skipped.extend(c_skipped)
+    new_pages_with_titles.extend(c_new)
 
-    # 4. Update index files
-    _update_index("summary", summary_slug, title)
-    for entity in entities:
-        if entity and entity.strip():
-            _update_index("entity", slugify(entity), entity)
-    for concept in concepts:
-        if concept and concept.strip():
-            _update_index("concept", slugify(concept), concept)
+    # 4. Update index files (single read/write)
+    index_entries: list[tuple[str, str, str]] = [("summary", summary_slug, title)]
+    index_entries.extend(("entity", slugify(e), e) for e in e_valid)
+    index_entries.extend(("concept", slugify(c), c) for c in c_valid)
+    _update_index_batch(index_entries)
 
     # 5. Update _sources.md mapping
     all_pages = pages_created + pages_updated
@@ -528,6 +513,7 @@ def ingest_source(
 
     # 6. Record hash in manifest for duplicate detection
     try:
+        # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
         from kb.compile.compiler import load_manifest, save_manifest
 
         manifest = load_manifest()
@@ -548,17 +534,14 @@ def ingest_source(
 
     # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
     wikilinks_injected: list[str] = []
-    try:
-        from kb.compile.linker import inject_wikilinks as _inject_wikilinks
+    for pid, ptitle in new_pages_with_titles:
+        try:
+            from kb.compile.linker import inject_wikilinks
 
-        for pid, ptitle in new_pages_with_titles:
-            try:
-                updated = _inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
-                wikilinks_injected.extend(updated)
-            except Exception as e:
-                logger.debug("inject_wikilinks failed for %s: %s", pid, e)
-    except ImportError as e:
-        logger.debug("inject_wikilinks import failed: %s", e)
+            updated = inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
+            wikilinks_injected.extend(updated)
+        except Exception as e:
+            logger.debug("inject_wikilinks failed for %s: %s", pid, e)
 
     result = {
         "source_path": str(source_path),

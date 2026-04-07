@@ -275,6 +275,7 @@ class TestDuplicateDetection:
         monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
         monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.PROJECT_ROOT", tmp_path)
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
         monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
@@ -425,6 +426,37 @@ class TestVerdictTrends:
         # Should have at least 2 periods (old and new)
         assert len(result["periods"]) >= 1
         assert result["trend"] in ("improving", "stable", "declining")
+
+    def test_bad_timestamp_still_counted_in_overall(self, tmp_path):
+        """Verdicts with invalid timestamps count in overall but not period buckets."""
+        path = tmp_path / "verdicts.json"
+        verdicts = [
+            {
+                "timestamp": "NOT_A_DATE",
+                "page_id": "x",
+                "verdict_type": "fidelity",
+                "verdict": "pass",
+                "issues": [],
+                "notes": "",
+            },
+            {
+                "timestamp": "",
+                "page_id": "y",
+                "verdict_type": "fidelity",
+                "verdict": "fail",
+                "issues": [],
+                "notes": "",
+            },
+        ]
+        path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        from kb.lint.trends import compute_verdict_trends
+
+        result = compute_verdict_trends(path)
+        assert result["total"] == 2
+        assert result["overall"]["pass"] == 1
+        assert result["overall"]["fail"] == 1
+        assert result["periods"] == []  # no valid timestamps → no period buckets
 
     def test_mcp_tool_returns_string(self):
         """kb_verdict_trends MCP tool returns a formatted string."""

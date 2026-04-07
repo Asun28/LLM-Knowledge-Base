@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, SOURCE_TYPE_DIRS
 from kb.mcp.app import _format_ingest_result, _rel, mcp
-from kb.utils.text import slugify
+from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +122,19 @@ def kb_ingest(
 
     # ── API mode ──
     if use_api:
-        from kb.ingest.pipeline import ingest_source
+        try:
+            from kb.ingest.pipeline import ingest_source
 
-        result = ingest_source(path, source_type or None)
-        return _format_ingest_result(
-            _rel(Path(result["source_path"])),
-            result["source_type"],
-            result["content_hash"],
-            result,
-        )
+            result = ingest_source(path, source_type or None)
+            return _format_ingest_result(
+                _rel(Path(result["source_path"])),
+                result["source_type"],
+                result["content_hash"],
+                result,
+            )
+        except Exception as e:
+            logger.exception("Error ingesting %s (API mode)", source_path)
+            return f"Error ingesting source: {e}"
 
     # ── Detect source type ──
     if not source_type:
@@ -157,12 +161,16 @@ def kb_ingest(
                 "Required keys: title, entities_mentioned, concepts_mentioned."
             )
 
-        from kb.ingest.pipeline import ingest_source
+        try:
+            from kb.ingest.pipeline import ingest_source
 
-        result = ingest_source(path, source_type, extraction=extraction)
-        return _format_ingest_result(
-            _rel(path), result["source_type"], result["content_hash"], result
-        )
+            result = ingest_source(path, source_type, extraction=extraction)
+            return _format_ingest_result(
+                _rel(path), result["source_type"], result["content_hash"], result
+            )
+        except Exception as e:
+            logger.exception("Error ingesting %s", source_path)
+            return f"Error ingesting source: {e}"
 
     # ── Claude Code mode: without extraction → return prompt ──
     from kb.ingest.extractors import build_extraction_prompt, load_template
@@ -172,7 +180,10 @@ def kb_ingest(
     except FileNotFoundError as e:
         return f"Error: {e}"
 
-    content = path.read_text(encoding="utf-8")
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Error reading source file: {e}"
     prompt = build_extraction_prompt(content, template)
 
     return (
@@ -221,7 +232,7 @@ def kb_ingest_content(
 
     save_content = content
     if url:
-        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
+        header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         save_content = header + content
 
     file_path.write_text(save_content, encoding="utf-8")
@@ -277,7 +288,7 @@ def kb_save_source(
     file_path = type_dir / f"{slug}.md"
 
     if url:
-        header = f"---\nurl: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
+        header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         content = header + content
 
     file_path.write_text(content, encoding="utf-8")

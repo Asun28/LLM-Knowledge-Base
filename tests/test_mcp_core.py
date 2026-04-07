@@ -57,7 +57,7 @@ def test_kb_save_source_with_url(tmp_path, monkeypatch):
     file_path = dirs["article"] / "url-article.md"
     assert file_path.exists()
     text = file_path.read_text(encoding="utf-8")
-    assert "url: https://example.com/article" in text
+    assert 'url: "https://example.com/article"' in text
     assert "fetched:" in text
     assert "Article body text." in text
     # The header adds chars, so the char count should include them
@@ -224,7 +224,7 @@ def test_kb_ingest_content_with_url(tmp_path, monkeypatch):
 
     saved_path = dirs["article"] / "url-article.md"
     text = saved_path.read_text(encoding="utf-8")
-    assert "url: https://example.com/source" in text
+    assert 'url: "https://example.com/source"' in text
     assert "fetched:" in text
     assert "Article from URL." in text
     assert "Saved source:" in result

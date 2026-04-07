@@ -1,13 +1,18 @@
 """Compile orchestrator — build/update wiki pages from raw sources."""
 
 import json
+import logging
 from pathlib import Path
+
+import yaml
 
 from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, TEMPLATES_DIR
 from kb.ingest.extractors import VALID_SOURCE_TYPES
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.wiki_log import append_wiki_log
+
+logger = logging.getLogger(__name__)
 
 # Hash manifest location (git-ignored)
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
@@ -48,10 +53,11 @@ def load_manifest(manifest_path: Path | None = None) -> dict[str, str]:
 
 
 def save_manifest(manifest: dict[str, str], manifest_path: Path | None = None) -> None:
-    """Save the content hash manifest."""
+    """Save the content hash manifest (atomic write via temp file)."""
+    from kb.utils.io import atomic_json_write
+
     manifest_path = manifest_path or HASH_MANIFEST
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    atomic_json_write(manifest, manifest_path)
 
 
 def scan_raw_sources(raw_dir: Path | None = None) -> list[Path]:
@@ -197,7 +203,8 @@ def detect_source_drift(
                         "changed_sources": matching,
                     }
                 )
-        except Exception:
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError):
+            logger.warning("Skipping unreadable page %s during drift detection", page_path)
             continue
 
     summary_parts = [

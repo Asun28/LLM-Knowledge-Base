@@ -62,13 +62,17 @@ CONFIDENCE_LEVELS = ("stated", "inferred", "speculative")
 
 # ── Phase 2: Quality system paths ────────────────────────────
 FEEDBACK_PATH = PROJECT_ROOT / ".data" / "query_feedback.json"
-REVIEW_MANIFEST_PATH = PROJECT_ROOT / ".data" / "review_manifest.json"
 REVIEW_HISTORY_PATH = PROJECT_ROOT / ".data" / "review_history.json"
+VERDICTS_PATH = PROJECT_ROOT / ".data" / "lint_verdicts.json"
+
+# ── LLM retry / timeout settings ─────────────────────────────
+LLM_MAX_RETRIES = 3
+LLM_RETRY_BASE_DELAY = 1.0  # seconds
+LLM_RETRY_MAX_DELAY = 30.0  # seconds
+LLM_REQUEST_TIMEOUT = 120.0  # seconds
 
 # ── Phase 2: Quality thresholds ──────────────────────────────
 LOW_TRUST_THRESHOLD = 0.4
-SELF_REFINE_MAX_ROUNDS = 2
-LINT_MAX_ROUNDS = 3
 MAX_CONSISTENCY_GROUP_SIZE = 5
 
 # ── Lint tuning ──────────────────────────────────────────────
@@ -81,7 +85,6 @@ MIN_SHARED_TERMS = 3
 
 # ── Query search weights ────────────────────────────────────
 SEARCH_TITLE_WEIGHT = 3
-SEARCH_CONTENT_WEIGHT = 1
 
 # ── BM25 search parameters ─────────────────────────────────
 BM25_K1 = 1.5  # Term frequency saturation (1.2-2.0 typical)

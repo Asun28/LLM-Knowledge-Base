@@ -10,6 +10,9 @@ from kb.utils.markdown import extract_wikilinks
 
 logger = logging.getLogger(__name__)
 
+# Regex for splitting frontmatter from body — correct for --- inside YAML values
+_FRONTMATTER_RE = re.compile(r"\A(---\n.*?\n---\n?)(.*)", re.DOTALL)
+
 
 def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
     """Resolve all wikilinks across the wiki and report broken links.
@@ -26,7 +29,11 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
     broken = []
 
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8")
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Failed to read %s for wikilink resolution: %s", page_path, e)
+            continue
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
 
@@ -53,7 +60,11 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
     backlinks: dict[str, list[str]] = {}
 
     for page_path in pages:
-        content = page_path.read_text(encoding="utf-8")
+        try:
+            content = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Failed to read %s for backlink index: %s", page_path, e)
+            continue
         links = extract_wikilinks(content)
         source_id = page_id(page_path, wiki_dir)
 
@@ -113,11 +124,11 @@ def inject_wikilinks(
         if target_page_id in existing_links:
             continue
 
-        # Split frontmatter from body
-        parts = content.split("---", 2)
-        if len(parts) >= 3:
-            frontmatter_section = parts[0] + "---" + parts[1] + "---"
-            body = parts[2]
+        # Split frontmatter from body — use regex to avoid splitting on --- inside YAML values
+        fm_match = _FRONTMATTER_RE.match(content)
+        if fm_match:
+            frontmatter_section = fm_match.group(1)
+            body = fm_match.group(2)
         else:
             frontmatter_section = ""
             body = content

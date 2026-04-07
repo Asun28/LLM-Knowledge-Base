@@ -6,15 +6,21 @@ import time
 
 import anthropic
 
-from kb.config import MODEL_TIERS
+from kb.config import (
+    LLM_MAX_RETRIES,
+    LLM_REQUEST_TIMEOUT,
+    LLM_RETRY_BASE_DELAY,
+    LLM_RETRY_MAX_DELAY,
+    MODEL_TIERS,
+)
 
 logger = logging.getLogger(__name__)
 
-# Retry settings
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0  # seconds
-RETRY_MAX_DELAY = 30.0  # seconds
-REQUEST_TIMEOUT = 120.0  # seconds
+# Re-export for backwards compatibility (tests import these from this module)
+MAX_RETRIES = LLM_MAX_RETRIES
+RETRY_BASE_DELAY = LLM_RETRY_BASE_DELAY
+RETRY_MAX_DELAY = LLM_RETRY_MAX_DELAY
+REQUEST_TIMEOUT = LLM_REQUEST_TIMEOUT
 
 _client: anthropic.Anthropic | None = None
 _client_lock = threading.Lock()
@@ -37,6 +43,11 @@ def _resolve_model(tier: str) -> str:
     return MODEL_TIERS[tier]
 
 
+def _backoff_delay(attempt: int) -> float:
+    """Compute capped exponential backoff delay for a given attempt number."""
+    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+
+
 def _make_api_call(kwargs: dict, model: str):
     """Execute an API call with retry logic on transient errors.
 
@@ -51,7 +62,7 @@ def _make_api_call(kwargs: dict, model: str):
 
         except anthropic.RateLimitError as e:
             last_error = e
-            delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+            delay = _backoff_delay(attempt)
             logger.warning(
                 "Rate limited by %s (attempt %d/%d), retrying in %.1fs",
                 model,
@@ -64,7 +75,7 @@ def _make_api_call(kwargs: dict, model: str):
         except anthropic.APIStatusError as e:
             if e.status_code in (500, 502, 503, 529):
                 last_error = e
-                delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+                delay = _backoff_delay(attempt)
                 logger.warning(
                     "API error %d from %s (attempt %d/%d), retrying in %.1fs",
                     e.status_code,
@@ -79,7 +90,7 @@ def _make_api_call(kwargs: dict, model: str):
 
         except anthropic.APIConnectionError as e:
             last_error = e
-            delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+            delay = _backoff_delay(attempt)
             logger.warning(
                 "Connection error to %s (attempt %d/%d), retrying in %.1fs",
                 model,
@@ -91,7 +102,7 @@ def _make_api_call(kwargs: dict, model: str):
 
         except anthropic.APITimeoutError as e:
             last_error = e
-            delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+            delay = _backoff_delay(attempt)
             logger.warning(
                 "Timeout calling %s (attempt %d/%d), retrying in %.1fs",
                 model,

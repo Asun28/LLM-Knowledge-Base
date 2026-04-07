@@ -32,19 +32,17 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
             "trend": "stable",
         }
 
-    # Overall counts
+    # Overall counts and period grouping in a single pass
     overall = {"pass": 0, "fail": 0, "warning": 0}
-    for v in verdicts:
-        vrd = v.get("verdict", "")
-        if vrd in overall:
-            overall[vrd] += 1
-
-    # Group by period
     period_buckets: dict[str, dict] = defaultdict(
         lambda: {"pass": 0, "fail": 0, "warning": 0, "total": 0}
     )
 
     for v in verdicts:
+        vrd = v.get("verdict", "")
+        if vrd in overall:
+            overall[vrd] += 1
+
         ts_str = v.get("timestamp", "")
         try:
             ts = datetime.fromisoformat(ts_str)
@@ -55,7 +53,6 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
         period_start = ts - timedelta(days=ts.weekday())
         period_key = period_start.strftime("%Y-%m-%d")
 
-        vrd = v.get("verdict", "")
         if vrd in period_buckets[period_key]:
             period_buckets[period_key][vrd] += 1
         period_buckets[period_key]["total"] += 1

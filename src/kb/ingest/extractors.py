@@ -43,6 +43,9 @@ KNOWN_LIST_FIELDS = frozenset(
         # Book
         "chapters",
         "key_themes",
+        "key_arguments",
+        "quotes",
+        "themes",
         # Dataset
         "columns",
         "use_cases",
@@ -50,6 +53,7 @@ KNOWN_LIST_FIELDS = frozenset(
         "participants",
         "topic_segments",
         "key_exchanges",
+        "open_questions",
     }
 )
 

@@ -8,7 +8,6 @@ from kb.config import (
     MAX_PAGES_FOR_TERM,
     MIN_PAGES_FOR_TERM,
     MIN_SHARED_TERMS,
-    SEARCH_CONTENT_WEIGHT,
     SEARCH_TITLE_WEIGHT,
     STALENESS_MAX_DAYS,
 )
@@ -225,7 +224,6 @@ def test_config_constants_exist():
     assert MAX_PAGES_FOR_TERM == 5
     assert MIN_SHARED_TERMS == 3
     assert SEARCH_TITLE_WEIGHT == 3
-    assert SEARCH_CONTENT_WEIGHT == 1
 
 
 # ── M6: Empty slugify skipped ───────────────────────────────────
