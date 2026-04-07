@@ -209,6 +209,7 @@ All modules use `logging.getLogger(__name__)` for warnings on skipped pages or f
 - When updating wiki pages, prefer proposing diffs over full rewrites for auditability.
 - Keep `wiki/index.md` under 500 lines — use category groupings, one line per page.
 - Always install Python packages into the project `.venv`, never globally.
+- **Architecture diagram**: Source is `others/architecture-diagram.html`, rendered to `others/architecture-diagram.png` and embedded in `README.md`. Whenever the HTML diagram is modified, re-render the PNG (Playwright, 3x DPI) and ensure the README image stays current.
 
 ## Wiki Page Frontmatter Template
 
