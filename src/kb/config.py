@@ -112,3 +112,13 @@ MAX_CONCEPTS_PER_INGEST = 50
 # Sources under this character count get simplified processing:
 # summary page only, entity/concept pages deferred.
 SMALL_SOURCE_THRESHOLD = 1000
+
+# ── Data retention limits ──────────────────────────────────────
+# Maximum entries retained in JSON stores before old entries are pruned.
+# Same pattern as MAX_FEEDBACK_ENTRIES and MAX_VERDICTS.
+MAX_REVIEW_HISTORY_ENTRIES = 10_000
+
+# ── Verdict trend analysis ────────────────────────────────────
+# Threshold for classifying weekly trend direction as significant.
+# Used by kb.lint.trends to determine "improving", "stable", or "declining".
+VERDICT_TREND_THRESHOLD = 0.1
