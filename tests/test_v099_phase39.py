@@ -189,3 +189,123 @@ class TestPageRankBlendedSearch:
         popular_idx = ids.index("concepts/popular")
         isolated_idx = ids.index("concepts/isolated")
         assert popular_idx < isolated_idx, "Well-linked page should rank higher"
+
+
+# ── Task 3: Duplicate detection in ingest ─────────────────────
+
+
+class TestDuplicateDetection:
+    """Test hash-based duplicate detection in ingest pipeline."""
+
+    def _setup_project(self, tmp_path):
+        """Create minimal project structure for ingest tests."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+
+        return wiki_dir, raw_dir, data_dir
+
+    def test_first_ingest_succeeds(self, tmp_path, monkeypatch):
+        """First ingest of a source creates pages normally."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+
+        source = raw_dir / "articles" / "test-article.md"
+        source.write_text("# Test Article\n\nSome content here.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Test Article",
+            "entities_mentioned": ["TestEntity"],
+            "concepts_mentioned": ["TestConcept"],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+        assert len(result["pages_created"]) > 0
+        assert result.get("duplicate") is not True
+
+    def test_duplicate_detected_by_hash(self, tmp_path, monkeypatch):
+        """Ingesting same content from different path is detected as duplicate."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        content = "# Duplicate Article\n\nThis is duplicate content."
+        source1 = raw_dir / "articles" / "original.md"
+        source1.write_text(content, encoding="utf-8")
+
+        source2 = raw_dir / "articles" / "copy.md"
+        source2.write_text(content, encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Duplicate Article",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        # First ingest
+        result1 = ingest_source(source1, "article", extraction=extraction)
+        assert len(result1["pages_created"]) > 0
+
+        # Second ingest with same content - should be detected as duplicate
+        result2 = ingest_source(source2, "article", extraction=extraction)
+        assert result2.get("duplicate") is True
+
+    def test_different_content_not_duplicate(self, tmp_path, monkeypatch):
+        """Different content from different paths is not flagged as duplicate."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        source1 = raw_dir / "articles" / "article-a.md"
+        source1.write_text("# Article A\n\nUnique content A.", encoding="utf-8")
+
+        source2 = raw_dir / "articles" / "article-b.md"
+        source2.write_text("# Article B\n\nUnique content B.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        ext1 = {"title": "Article A", "entities_mentioned": [], "concepts_mentioned": []}
+        ext2 = {"title": "Article B", "entities_mentioned": [], "concepts_mentioned": []}
+
+        result1 = ingest_source(source1, "article", extraction=ext1)
+        result2 = ingest_source(source2, "article", extraction=ext2)
+        assert result1.get("duplicate") is not True
+        assert result2.get("duplicate") is not True
