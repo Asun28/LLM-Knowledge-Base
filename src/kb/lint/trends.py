@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from kb.lint.verdicts import VERDICTS_PATH, load_verdicts
+from kb.lint.verdicts import load_verdicts
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 
 import frontmatter
-import networkx as nx
 
 from kb.config import WIKI_DIR
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages

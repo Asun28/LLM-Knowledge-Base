@@ -1,13 +1,8 @@
 """Tests for Phase 3.9 features (v0.9.9)."""
 
 import json
-import os
-import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from kb.config import PAGERANK_SEARCH_WEIGHT
 
@@ -113,15 +108,15 @@ class TestPageRankBlendedSearch:
         """search_pages returns results with blended scores when graph exists."""
         wiki_dir = tmp_path / "wiki"
         # Create pages that link to each other (hub page gets high PageRank)
-        hub = _make_wiki_page(
+        _make_wiki_page(
             wiki_dir, "concepts", "hub-topic",
             "Hub Topic", "Hub topic is central. See [[concepts/spoke-a]] and [[concepts/spoke-b]]."
         )
-        spoke_a = _make_wiki_page(
+        _make_wiki_page(
             wiki_dir, "concepts", "spoke-a",
             "Spoke A", "Spoke A discusses hub topic. See [[concepts/hub-topic]]."
         )
-        spoke_b = _make_wiki_page(
+        _make_wiki_page(
             wiki_dir, "concepts", "spoke-b",
             "Spoke B", "Spoke B discusses hub topic. See [[concepts/hub-topic]]."
         )
@@ -322,7 +317,6 @@ class TestVerdictTrends:
 
     def test_empty_verdicts_returns_empty(self, tmp_path):
         """No verdicts produces empty trends."""
-        from kb.lint.verdicts import load_verdicts
 
         path = tmp_path / "verdicts.json"
         from kb.lint.trends import compute_verdict_trends
@@ -352,7 +346,6 @@ class TestVerdictTrends:
 
     def test_trend_shows_improvement(self, tmp_path):
         """Trends show improvement when recent verdicts are better than old."""
-        import json
 
         path = tmp_path / "verdicts.json"
         # Manually write old + new verdicts with different timestamps
@@ -437,7 +430,7 @@ class TestMermaidGraphExport:
 
         result = export_mermaid(wiki_dir=wiki_dir, max_nodes=30)
         # Should be pruned — count node definitions
-        node_lines = [l for l in result.split("\n") if '["' in l or '("' in l]
+        node_lines = [line for line in result.split("\n") if '["' in line or '("' in line]
         assert len(node_lines) <= 30
 
     def test_node_labels_use_page_titles(self, tmp_path):
@@ -500,7 +493,7 @@ class TestRetroactiveWikilinkInjection:
 
         from kb.compile.linker import inject_wikilinks
 
-        injected = inject_wikilinks(
+        inject_wikilinks(
             "Test Page", "concepts/test-page-new", wiki_dir=wiki_dir
         )
         # Should not inject into the page's own title in frontmatter
