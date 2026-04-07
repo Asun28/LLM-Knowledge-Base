@@ -378,7 +378,7 @@ LLM-Knowledge-Base/
     feedback/              # Bayesian trust scoring + reliability analysis
     review/                # Page-source pairing + frontmatter-preserving refiner
     utils/                 # Shared: hashing, markdown, LLM (retry/timeout), text, wiki_log, pages, io
-  tests/                   # 550 tests across 37 test files (~34s)
+  tests/                   # 564 tests across 38 test files (~35s)
 ```
 
 ## Development
@@ -416,7 +416,7 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 3.4 (complete, v0.9.3):** `kb_compile` + `kb lint --fix`. 431 tests
 - **Phase 3.5–3.8 (complete, v0.9.4–v0.9.7):** Stub detection, drift detection, tier audits, observability. 490 tests
 - **Phase 3.9a (complete, v0.9.8):** Structured outputs (`call_llm_json`), shared retry, atomic writes, extraction schema builder. 518 tests
-- **Phase 3.9 (complete, v0.9.9):** Content growth infrastructure — env-configurable model tiers, PageRank-blended search, hash-based duplicate detection, verdict trend dashboard (`kb_verdict_trends`), Mermaid graph export (`kb_graph_viz`), retroactive wikilink injection, content-length ingest tiering, cascade update detection. 3 new MCP tools (26 total), 32 new tests (550 total)
+- **Phase 3.9 (complete, v0.9.9):** Content growth infrastructure — env-configurable model tiers, PageRank-blended search, hash-based duplicate detection, verdict trend dashboard (`kb_verdict_trends`), Mermaid graph export (`kb_graph_viz`), retroactive wikilink injection (auto-triggered on ingest), content-length ingest tiering, cascade update detection (surfaced in `kb_ingest` MCP output). 3 new MCP tools (26 total), 46 new tests (564 total)
 - **Phase 4 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave, Pydantic extraction validation, arxiv MCP integration, semantic dependency tracking, URL-based smart routing. Research in `research/agent-architecture-research.md`
 
 ## Special Thanks
