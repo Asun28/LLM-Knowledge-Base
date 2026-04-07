@@ -249,6 +249,7 @@ class TestDuplicateDetection:
         wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
         monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
         monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
         monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
         monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
         monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
@@ -272,11 +273,11 @@ class TestDuplicateDetection:
             "entities_mentioned": [],
             "concepts_mentioned": [],
         }
-        # First ingest
+        # First ingest — records hash in manifest
         result1 = ingest_source(source1, "article", extraction=extraction)
         assert len(result1["pages_created"]) > 0
 
-        # Second ingest with same content - should be detected as duplicate
+        # Second ingest with same content — should detect duplicate
         result2 = ingest_source(source2, "article", extraction=extraction)
         assert result2.get("duplicate") is True
 
