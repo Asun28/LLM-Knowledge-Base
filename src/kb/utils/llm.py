@@ -30,6 +30,13 @@ def get_client() -> anthropic.Anthropic:
     return _client
 
 
+def _resolve_model(tier: str) -> str:
+    """Validate tier and return the model ID."""
+    if tier not in MODEL_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
+    return MODEL_TIERS[tier]
+
+
 def _make_api_call(kwargs: dict, model: str):
     """Execute an API call with retry logic on transient errors.
 
@@ -52,7 +59,7 @@ def _make_api_call(kwargs: dict, model: str):
             time.sleep(delay)
 
         except anthropic.APIStatusError as e:
-            if e.status_code in (429, 500, 502, 503, 529):
+            if e.status_code in (500, 502, 503, 529):
                 last_error = e
                 delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
                 logger.warning(
@@ -115,9 +122,7 @@ def call_llm(
     overload, network) with exponential backoff. Wraps API errors in
     a descriptive LLMError.
     """
-    if tier not in MODEL_TIERS:
-        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
-    model = MODEL_TIERS[tier]
+    model = _resolve_model(tier)
 
     messages = [{"role": "user", "content": prompt}]
     kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
@@ -161,9 +166,7 @@ def call_llm_json(
         LLMError: On API failures after retries or missing tool_use block.
         ValueError: On invalid tier.
     """
-    if tier not in MODEL_TIERS:
-        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
-    model = MODEL_TIERS[tier]
+    model = _resolve_model(tier)
 
     tool_def = {
         "name": tool_name,

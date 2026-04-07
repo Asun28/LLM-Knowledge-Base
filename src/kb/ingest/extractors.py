@@ -1,5 +1,6 @@
 """Source-type-specific extraction logic (article, paper, video, etc.)."""
 
+import functools
 import re
 
 import yaml
@@ -11,6 +12,8 @@ VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
 
 # Fields that are always lists across all extraction templates.
 # Used as fallback when template specs lack explicit type annotations.
+_ANNOTATED_FIELD_RE = re.compile(r"^(\w+)\s*\(([^)]+)\)\s*:\s*(.+)$")
+
 KNOWN_LIST_FIELDS = frozenset({
     # Common across all templates
     "entities_mentioned", "concepts_mentioned",
@@ -34,6 +37,7 @@ KNOWN_LIST_FIELDS = frozenset({
 })
 
 
+@functools.lru_cache(maxsize=16)
 def load_template(source_type: str) -> dict:
     """Load extraction template YAML for a given source type.
 
@@ -66,7 +70,7 @@ def _parse_field_spec(spec: str) -> tuple[str, str, bool]:
         spec = spec[: spec.index(" #")].strip()
 
     # Check for annotated format: "name (type): description"
-    annotated = re.match(r"^(\w+)\s*\(([^)]+)\)\s*:\s*(.+)$", spec)
+    annotated = _ANNOTATED_FIELD_RE.match(spec)
     if annotated:
         name = annotated.group(1)
         type_hint = annotated.group(2).strip()
@@ -138,7 +142,7 @@ return arrays of strings.
 For scalar fields, return strings.
 If a field cannot be determined from the source, use null.
 
-IMPORTANT: Return ONLY valid JSON, no markdown code fences, no explanation.
+Use the provided tool to return the extracted data.
 
 ---
 SOURCE DOCUMENT:
@@ -169,6 +173,5 @@ def extract_from_source(content: str, source_type: str) -> dict:
         tier="write",
         system=system_msg,
         schema=schema,
-        tool_name="extract",
         tool_description=f"Extract structured data from a {source_type} document.",
     )

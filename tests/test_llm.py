@@ -200,13 +200,14 @@ def test_call_llm_uses_correct_model(mock_get_client, tier, expected_model):
 
 
 # ── APIStatusError retryable codes (500, 502, 503, 529) ─────────
+# Note: 429 is handled by the RateLimitError handler, tested separately above.
 
 
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 529])
+@pytest.mark.parametrize("status_code", [500, 502, 503, 529])
 @patch("time.sleep")
 @patch("kb.utils.llm.get_client")
 def test_call_llm_retryable_status_codes(mock_get_client, mock_sleep, status_code):
-    """call_llm retries on retryable APIStatusError codes (429, 500, 502, 503, 529)."""
+    """call_llm retries on retryable APIStatusError codes (500, 502, 503, 529)."""
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = [
         _make_api_status_error(status_code),

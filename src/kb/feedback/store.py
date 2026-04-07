@@ -34,18 +34,10 @@ def load_feedback(path: Path | None = None) -> dict:
 
 def save_feedback(data: dict, path: Path | None = None) -> None:
     """Save feedback data to JSON file (atomic write via temp file)."""
-    path = path or FEEDBACK_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    import tempfile
+    from kb.utils.io import atomic_json_write
 
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with open(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        Path(tmp_path).replace(path)
-    except BaseException:
-        Path(tmp_path).unlink(missing_ok=True)
-        raise
+    path = path or FEEDBACK_PATH
+    atomic_json_write(data, path)
 
 
 def add_feedback_entry(

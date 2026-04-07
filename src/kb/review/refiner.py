@@ -22,18 +22,10 @@ def load_review_history(path: Path | None = None) -> list[dict]:
 
 def save_review_history(history: list[dict], path: Path | None = None) -> None:
     """Save revision history to JSON file (atomic write via temp file)."""
-    import tempfile
+    from kb.utils.io import atomic_json_write
 
     path = path or REVIEW_HISTORY_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with open(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2)
-        Path(tmp_path).replace(path)
-    except BaseException:
-        Path(tmp_path).unlink(missing_ok=True)
-        raise
+    atomic_json_write(history, path)
 
 
 def refine_page(
