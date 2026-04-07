@@ -23,10 +23,19 @@ def load_verdicts(path: Path | None = None) -> list[dict]:
 
 
 def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
-    """Save verdicts to JSON file."""
+    """Save verdicts to JSON file (atomic write via temp file)."""
     path = path or VERDICTS_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(verdicts, indent=2), encoding="utf-8")
+    import tempfile
+
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(verdicts, f, indent=2)
+        Path(tmp_path).replace(path)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
 
 
 def add_verdict(

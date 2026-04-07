@@ -15,11 +15,15 @@ def extract_citations(text: str) -> list[dict]:
     # Match [source: path] or [ref: path] patterns
     pattern = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]")
     for match in pattern.finditer(text):
+        path = match.group(2)
+        # Reject path traversal attempts
+        if ".." in path or path.startswith("/"):
+            continue
         cite_type = "wiki" if match.group(1) == "source" else "raw"
         citations.append(
             {
                 "type": cite_type,
-                "path": match.group(2),
+                "path": path,
                 "context": text[max(0, match.start() - 50) : match.end() + 50].strip(),
             }
         )

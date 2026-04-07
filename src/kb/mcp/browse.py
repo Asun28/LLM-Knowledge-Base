@@ -17,6 +17,9 @@ def kb_search(query: str, max_results: int = 10) -> str:
         query: Search terms (space-separated keywords).
         max_results: Maximum results to return (default 10).
     """
+    if not query or not query.strip():
+        return "Error: Query cannot be empty."
+
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
     from kb.query.engine import search_pages

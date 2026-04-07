@@ -92,3 +92,7 @@ QUERY_CONTEXT_MAX_CHARS = 80_000
 
 # ── Search result limits ──────────────────────────────────────
 MAX_SEARCH_RESULTS = 100
+
+# ── Ingest limits ────────────────────────────────────────────
+MAX_ENTITIES_PER_INGEST = 50
+MAX_CONCEPTS_PER_INGEST = 50

@@ -75,6 +75,7 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         return "No relevant wiki pages found."
     sections = []
     total = 0
+    skipped = 0
     for page in pages:
         section = (
             f"--- Page: {page['id']} (type: {page['type']}, "
@@ -82,17 +83,18 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
         if total + len(section) > max_chars:
-            remaining = max_chars - total
-            if remaining > 100:
-                sections.append(section[:remaining] + "\n[...truncated]")
-                logger.debug(
-                    "Query context truncated at %d chars (page: %s)", max_chars, page["id"]
-                )
-            else:
-                logger.debug("Page excluded from query context due to limit: %s", page["id"])
-            break
+            skipped += 1
+            logger.debug("Page excluded from query context due to limit: %s", page["id"])
+            continue  # Try remaining pages (smaller ones may fit)
         sections.append(section)
         total += len(section)
+    if skipped:
+        logger.info(
+            "Query context: included %d pages, skipped %d (limit: %d chars)",
+            len(sections),
+            skipped,
+            max_chars,
+        )
     return "\n".join(sections)
 
 

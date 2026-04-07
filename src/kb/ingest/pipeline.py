@@ -9,6 +9,8 @@ import frontmatter
 import yaml
 
 from kb.config import (
+    MAX_CONCEPTS_PER_INGEST,
+    MAX_ENTITIES_PER_INGEST,
     RAW_DIR,
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
@@ -323,6 +325,13 @@ def ingest_source(
             type(entities).__name__,
         )
         entities = []
+    if len(entities) > MAX_ENTITIES_PER_INGEST:
+        logger.warning(
+            "entities_mentioned has %d items, truncating to %d",
+            len(entities),
+            MAX_ENTITIES_PER_INGEST,
+        )
+        entities = entities[:MAX_ENTITIES_PER_INGEST]
     seen_entity_slugs: dict[str, str] = {}
     for entity in entities:
         if not entity or not entity.strip():
@@ -361,6 +370,13 @@ def ingest_source(
             type(concepts).__name__,
         )
         concepts = []
+    if len(concepts) > MAX_CONCEPTS_PER_INGEST:
+        logger.warning(
+            "concepts_mentioned has %d items, truncating to %d",
+            len(concepts),
+            MAX_CONCEPTS_PER_INGEST,
+        )
+        concepts = concepts[:MAX_CONCEPTS_PER_INGEST]
     seen_concept_slugs: dict[str, str] = {}
     for concept in concepts:
         if not concept or not concept.strip():

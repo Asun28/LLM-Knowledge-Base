@@ -61,6 +61,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         backlinks = build_backlinks()
         affected = backlinks.get(page_id, [])
     except Exception:
+        logger.debug("Failed to compute backlinks for %s after refine", page_id, exc_info=True)
         affected = []
 
     lines = [

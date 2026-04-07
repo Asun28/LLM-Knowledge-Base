@@ -164,13 +164,13 @@ def test_query_context_truncation_logging(caplog):
     with caplog.at_level(logging.DEBUG, logger="kb.query.engine"):
         result = _build_query_context(pages, max_chars=3000)
 
-    # First page should be partially included (truncated)
-    assert "[...truncated]" in result
+    # Pages that don't fit are skipped entirely (no mid-page truncation)
+    assert "x" * 100 not in result  # big-page was skipped
 
-    # Should have logged truncation
+    # Should have logged exclusion
     assert any(
-        "truncated" in r.message.lower() or "excluded" in r.message.lower() for r in caplog.records
-    ), f"Expected truncation log message, got: {[r.message for r in caplog.records]}"
+        "excluded" in r.message.lower() for r in caplog.records
+    ), f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
 
 
 def test_query_context_exclusion_logging(caplog):

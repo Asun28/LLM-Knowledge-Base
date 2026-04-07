@@ -213,6 +213,21 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
 
         logging.getLogger(__name__).debug("Stub check failed in evolve: %s", e)
 
+    # Surface low-trust pages from feedback (closes the feedback loop)
+    flagged_pages: list[str] = []
+    try:
+        from kb.feedback.reliability import get_flagged_pages
+
+        flagged_pages = get_flagged_pages()
+        if flagged_pages:
+            recommendations.append(
+                f"{len(flagged_pages)} page(s) flagged as low-trust from query feedback. "
+                f"Pages: {', '.join(flagged_pages[:5])}. "
+                "Run kb_lint_deep on these to verify source fidelity."
+            )
+    except Exception:
+        pass  # Feedback data may not exist yet
+
     return {
         "coverage": coverage,
         "connection_opportunities": connections,
@@ -222,6 +237,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
             "edges": stats["edges"],
             "components": stats["components"],
         },
+        "flagged_pages": flagged_pages,
         "recommendations": recommendations,
     }
 
