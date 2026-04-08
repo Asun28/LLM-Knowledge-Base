@@ -420,9 +420,12 @@ confidence: {confidence}
         return f"Error: Failed to write page: {e}"
 
     # Log
-    from kb.utils.wiki_log import append_wiki_log
+    try:
+        from kb.utils.wiki_log import append_wiki_log
 
-    append_wiki_log("create", f"Created {page_id} ({page_type}, {confidence})")
+        append_wiki_log("create", f"Created {page_id} ({page_type}, {confidence})")
+    except OSError as e:
+        logger.warning("Failed to append wiki log after creating %s: %s", page_id, e)
 
     return (
         f"Created: {page_id}\n"
