@@ -77,9 +77,7 @@ def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
                 content = pattern.sub(r"\1", content)
             else:
                 # No display text — replace [[target]] with target basename
-                pattern_plain = re.compile(
-                    r"\[\[" + re.escape(target) + r"\]\]", re.IGNORECASE
-                )
+                pattern_plain = re.compile(r"\[\[" + re.escape(target) + r"\]\]", re.IGNORECASE)
                 display = target.split("/")[-1] if "/" in target else target
                 content = pattern_plain.sub(display, content)
 
@@ -126,8 +124,8 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
 
     # Orphans: have outgoing links but no incoming links
     for orphan in stats["orphans"]:
-        # Summaries are natural entry points, don't flag them
-        if orphan.startswith("summaries/"):
+        # Summaries, comparisons, and synthesis are natural entry points, don't flag them
+        if orphan.startswith(("summaries/", "comparisons/", "synthesis/")):
             continue
         issues.append(
             {
@@ -140,6 +138,9 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
 
     # Isolated: no links at all (neither in nor out)
     for isolated in stats["isolated"]:
+        # Summaries, comparisons, and synthesis are natural entry points, don't flag them
+        if isolated.startswith(("summaries/", "comparisons/", "synthesis/")):
+            continue
         issues.append(
             {
                 "check": "isolated_page",
@@ -192,6 +193,12 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
         try:
             post = frontmatter.load(str(page_path))
             updated = post.metadata.get("updated")
+            if isinstance(updated, str):
+                try:
+                    updated = date.fromisoformat(updated)
+                except ValueError:
+                    logger.warning("Could not parse updated date %r in %s", updated, page_path)
+                    continue
             if updated and isinstance(updated, date) and updated < cutoff:
                 pid = page_id(page_path, wiki_dir)
                 issues.append(
@@ -285,10 +292,9 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
         for f in actual_dir.iterdir():
             if f.is_file() and f.name != ".gitkeep":
                 rel_path = f"raw/{type_dir.name}/{f.name}"
-                # Check if this source is referenced (exact path or ends with filename)
-                referenced = any(
-                    ref == rel_path or ref.endswith(f"/{f.name}") for ref in all_raw_refs
-                )
+                # Check if this source is referenced (exact path only — no suffix match to avoid
+                # false-positives when two subdirs contain same-named files)
+                referenced = rel_path in all_raw_refs
                 if not referenced:
                     issues.append(
                         {

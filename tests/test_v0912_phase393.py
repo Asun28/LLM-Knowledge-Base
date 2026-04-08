@@ -210,6 +210,104 @@ class TestIngestPipeline:
         )
 
 
+class TestLintFixes:
+    """lint/checks.py and lint/verdicts.py correctness fixes."""
+
+    def test_check_staleness_handles_string_updated_date(self, tmp_wiki, create_wiki_page):
+        """check_staleness must detect stale pages with string-typed updated: field."""
+        from datetime import date, timedelta
+
+        from kb.lint.checks import check_staleness
+
+        old_date = (date.today() - timedelta(days=200)).isoformat()
+        page_path = tmp_wiki / "concepts" / "old-concept.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            f"---\ntitle: Old Concept\nsource:\n  - raw/articles/x.md\n"
+            f'created: "{old_date}"\nupdated: "{old_date}"\n'
+            f"type: concept\nconfidence: stated\n---\n\nBody.\n",
+            encoding="utf-8",
+        )
+
+        issues = check_staleness(wiki_dir=tmp_wiki, max_days=90)
+        stale_pages = [i["page"] for i in issues]
+        assert "concepts/old-concept" in stale_pages, (
+            f"Stale page with string updated: was silently skipped. Found: {stale_pages}"
+        )
+
+    def test_check_orphan_exempts_comparisons_and_synthesis(self, tmp_wiki, create_wiki_page):
+        """check_orphan_pages must not flag comparisons/ and synthesis/ pages as orphans."""
+        from kb.lint.checks import check_orphan_pages
+
+        create_wiki_page(page_id="comparisons/a-vs-b", title="A vs B", wiki_dir=tmp_wiki)
+        create_wiki_page(page_id="synthesis/overview", title="Overview", wiki_dir=tmp_wiki)
+
+        issues = check_orphan_pages(wiki_dir=tmp_wiki)
+        flagged = [i["page"] for i in issues]
+        assert "comparisons/a-vs-b" not in flagged, (
+            "comparisons/ should be exempt from orphan check"
+        )
+        assert "synthesis/overview" not in flagged, (
+            "synthesis/ should be exempt from orphan check"
+        )
+
+    def test_check_source_coverage_no_false_positive_same_filename(
+        self, tmp_wiki, create_wiki_page, tmp_path
+    ):
+        """check_source_coverage must not false-positive on same-named files in different dirs."""
+        from unittest.mock import patch
+
+        from kb.lint.checks import check_source_coverage
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        (raw_dir / "papers").mkdir(parents=True)
+        (raw_dir / "articles" / "example.md").write_text("article content", encoding="utf-8")
+        (raw_dir / "papers" / "example.md").write_text("paper content", encoding="utf-8")
+
+        # Wiki page references only the article
+        create_wiki_page(
+            page_id="summaries/example",
+            title="Example",
+            content="Source: raw/articles/example.md",
+            wiki_dir=tmp_wiki,
+        )
+
+        # Patch SOURCE_TYPE_DIRS to only include articles and papers
+        fake_dirs = {
+            "article": raw_dir / "articles",
+            "paper": raw_dir / "papers",
+        }
+        with patch("kb.lint.checks.SOURCE_TYPE_DIRS", fake_dirs):
+            issues = check_source_coverage(wiki_dir=tmp_wiki, raw_dir=raw_dir)
+
+        uncovered = [i["source"] for i in issues]
+        assert "raw/papers/example.md" in uncovered, (
+            "Paper with same name should be flagged as uncovered"
+        )
+        assert "raw/articles/example.md" not in uncovered, (
+            "Article should NOT be flagged — false positive from old endswith check"
+        )
+
+    def test_load_verdicts_logs_warning_on_json_error(self, tmp_path, caplog):
+        """load_verdicts must log a warning when verdicts file is corrupt JSON."""
+        import logging
+
+        from kb.lint.verdicts import load_verdicts
+
+        bad_path = tmp_path / "verdicts.json"
+        bad_path.write_text("{ NOT VALID JSON }", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="kb.lint.verdicts"):
+            result = load_verdicts(bad_path)
+
+        assert result == [], "Should return empty list on JSON error"
+        assert any("corrupt" in r.message.lower() or "json" in r.message.lower()
+                   for r in caplog.records), (
+            f"Expected warning about corrupt JSON. Got: {[r.message for r in caplog.records]}"
+        )
+
+
 class TestCompileFixes:
     """compile/linker.py and compile/compiler.py correctness fixes."""
 

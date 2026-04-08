@@ -1,10 +1,13 @@
 """Persistent lint and review verdict storage."""
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
 from kb.config import VERDICTS_PATH
+
+logger = logging.getLogger(__name__)
 
 MAX_VERDICTS = 10_000
 VALID_SEVERITIES = ("error", "warning", "info")
@@ -16,7 +19,8 @@ def load_verdicts(path: Path | None = None) -> list[dict]:
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
             return []
         if not isinstance(data, list):
             return []
