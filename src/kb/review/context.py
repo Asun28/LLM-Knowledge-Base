@@ -29,6 +29,16 @@ def pair_page_with_sources(
     raw_dir = raw_dir or RAW_DIR
 
     page_path = wiki_dir / f"{page_id}.md"
+
+    # Guard against path traversal — page must resolve within wiki_dir
+    try:
+        page_path.resolve().relative_to(wiki_dir.resolve())
+    except ValueError:
+        return {
+            "error": f"Invalid page_id: {page_id}. Path escapes wiki directory.",
+            "page_id": page_id,
+        }
+
     if not page_path.exists():
         return {"error": f"Page not found: {page_id}", "page_id": page_id}
 
@@ -57,10 +67,22 @@ def pair_page_with_sources(
             )
             continue
         if source_path.exists():
+            try:
+                content = source_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                logger.warning("Cannot read source %s: %s", source_ref, exc)
+                source_contents.append(
+                    {
+                        "path": source_ref,
+                        "content": None,
+                        "error": f"Cannot read source file: {exc}",
+                    }
+                )
+                continue
             source_contents.append(
                 {
                     "path": source_ref,
-                    "content": source_path.read_text(encoding="utf-8"),
+                    "content": content,
                 }
             )
         else:

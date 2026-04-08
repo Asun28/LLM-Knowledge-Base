@@ -57,7 +57,7 @@ class TestKbIngestPathTraversal:
             source_path="raw/articles/valid-article.md",
             source_type="article",
         )
-        assert "Error:" not in result or "not found" not in result.lower()
+        assert "project directory" not in result.lower()
 
     def test_rejects_backslash_traversal(self, tmp_path, monkeypatch):
         """Path with backslash traversal is rejected."""
@@ -99,6 +99,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"title": "Test", "score": 42})
+        tool_block.name = "extract"
         mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         result = call_llm_json(
@@ -136,6 +137,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"title": "OK"})
+        tool_block.name = "my_tool"
         mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         schema = {"type": "object", "properties": {"title": {"type": "string"}}}
@@ -155,6 +157,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"title": "OK"})
+        tool_block.name = "extract"
         mock_get_client.return_value.messages.create.side_effect = [
             anthropic.RateLimitError(
                 message="rate limited",
@@ -176,6 +179,7 @@ class TestCallLlmJson:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={})
+        tool_block.name = "extract"
         mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
 
         call_llm_json("Extract", schema={"type": "object"}, system="Be precise")
@@ -419,6 +423,7 @@ class TestMakeApiCall:
         from kb.utils.llm import call_llm_json
 
         tool_block = Mock(type="tool_use", input={"ok": True})
+        tool_block.name = "extract"
         mock_get_client.return_value.messages.create.side_effect = [
             anthropic.APIConnectionError(message="network error", request=Mock()),
             Mock(content=[tool_block]),

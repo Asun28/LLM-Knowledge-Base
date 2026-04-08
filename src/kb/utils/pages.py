@@ -7,11 +7,15 @@ import frontmatter
 import yaml
 
 from kb.config import WIKI_DIR
-from kb.graph.builder import page_id
 
 logger = logging.getLogger(__name__)
 
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
+
+
+def _page_id(page_path: Path, wiki_dir: Path) -> str:
+    """Convert a wiki page path to a page ID (e.g., 'concepts/rag')."""
+    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md")
 
 
 def normalize_sources(sources: str | list | None) -> list[str]:
@@ -38,7 +42,7 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
         for page_path in sorted(subdir_path.glob("*.md")):
             try:
                 post = frontmatter.load(str(page_path))
-                pid = page_id(page_path, wiki_dir)
+                pid = _page_id(page_path, wiki_dir)
                 sources = normalize_sources(post.metadata.get("source"))
                 pages.append(
                     {

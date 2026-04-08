@@ -93,7 +93,11 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         pagerank = []
 
     # Top 10 pages by betweenness centrality (bridge nodes)
-    bc = nx.betweenness_centrality(graph)
+    # Use sampling approximation for large graphs to avoid O(V·E) stall
+    if graph.number_of_nodes() > 500:
+        bc = nx.betweenness_centrality(graph, k=500)
+    else:
+        bc = nx.betweenness_centrality(graph)
     bridge_nodes = sorted(
         ((n, c) for n, c in bc.items() if c > 0),
         key=lambda x: x[1],

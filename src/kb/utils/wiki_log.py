@@ -26,7 +26,11 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
     entry = f"- {date.today().isoformat()} | {operation} | {message}\n"
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
+        try:
+            with log_path.open("x", encoding="utf-8") as f:
+                f.write("# Wiki Log\n\n")
+        except FileExistsError:
+            pass  # Another concurrent call created it first
     with log_path.open("a", encoding="utf-8") as f:
         f.write(entry)
 

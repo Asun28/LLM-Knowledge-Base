@@ -6,12 +6,44 @@ from pathlib import Path
 
 import frontmatter
 
-from kb.config import MAX_CONSISTENCY_GROUP_SIZE, MIN_SHARED_TERMS, WIKI_DIR
+from kb.config import (
+    MAX_CONSISTENCY_GROUP_SIZE,
+    MIN_SHARED_TERMS,
+    QUERY_CONTEXT_MAX_CHARS,
+    WIKI_DIR,
+)
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages
 from kb.review.context import pair_page_with_sources
 from kb.utils.pages import normalize_sources
 
 logger = logging.getLogger(__name__)
+
+
+def _truncate_source(content: str, budget: int) -> str:
+    """Truncate source content to fit within a character budget."""
+    if len(content) <= budget:
+        return content
+    return content[:budget] + f"\n\n[... truncated from {len(content):,} to {budget:,} chars]\n"
+
+
+def _render_sources(sources: list[dict], lines: list[str]) -> None:
+    """Append source sections to lines with budget-aware truncation.
+
+    Mutates `lines` in place. Tracks cumulative size so later sources
+    get progressively less budget — prevents LLM context overflow.
+    """
+    used = sum(len(line) for line in lines)
+    for i, source in enumerate(sources, 1):
+        header = f"## Source {i}: {source['path']}\n"
+        if source.get("content"):
+            remaining = max(0, QUERY_CONTEXT_MAX_CHARS - used - len(header) - 20)
+            body = _truncate_source(source["content"], remaining)
+        else:
+            body = f"*Not available: {source.get('error', 'unknown')}*"
+        lines.append(header)
+        lines.append(body)
+        lines.append("\n---\n")
+        used += len(header) + len(body) + 6
 
 
 def build_fidelity_context(
@@ -37,13 +69,7 @@ def build_fidelity_context(
         "\n---\n",
     ]
 
-    for i, source in enumerate(paired["source_contents"], 1):
-        lines.append(f"## Source {i}: {source['path']}\n")
-        if source.get("content"):
-            lines.append(source["content"])
-        else:
-            lines.append(f"*Not available: {source.get('error', 'unknown')}*")
-        lines.append("\n---\n")
+    _render_sources(paired["source_contents"], lines)
 
     lines.append(
         "For each factual claim in the wiki page, identify whether it is:\n"
@@ -89,9 +115,17 @@ def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
         if existing_neighbors:
             group = sorted(existing_neighbors | {node})
             groups.append(group)
-            seen.update(group)
+        seen.add(node)
 
-    return [g for g in groups if len(g) >= 2]
+    # Deduplicate groups — the same neighbor set can be emitted by multiple nodes
+    seen_keys: set[frozenset] = set()
+    unique: list[list[str]] = []
+    for g in groups:
+        key = frozenset(g)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            unique.append(g)
+    return [g for g in unique if len(g) >= 2]
 
 
 def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
@@ -163,7 +197,11 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
     page_terms: dict[str, set[str]] = {}
 
     for page_path in pages:
-        raw = page_path.read_text(encoding="utf-8")
+        try:
+            raw = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Skipping unreadable page %s in term overlap: %s", page_path, e)
+            continue
         pid = page_id(page_path, wiki_dir)
         # Strip YAML frontmatter before tokenizing
         fm_match = re.match(r"\A\s*---\n.*?\n---\n?(.*)", raw, re.DOTALL)
@@ -239,7 +277,11 @@ def build_consistency_context(
         for pid in group:
             page_path = wiki_dir / f"{pid}.md"
             if page_path.exists():
-                content = page_path.read_text(encoding="utf-8")
+                try:
+                    content = page_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as e:
+                    lines.append(f"### {pid}\n*Unreadable: {e}*\n---\n")
+                    continue
                 lines.append(f"### {pid}\n")
                 lines.append(content)
                 lines.append("\n---\n")
@@ -270,13 +312,7 @@ def build_completeness_context(
         "\n---\n",
     ]
 
-    for i, source in enumerate(paired["source_contents"], 1):
-        lines.append(f"## Source {i}: {source['path']}\n")
-        if source.get("content"):
-            lines.append(source["content"])
-        else:
-            lines.append(f"*Not available: {source.get('error', 'unknown')}*")
-        lines.append("\n---\n")
+    _render_sources(paired["source_contents"], lines)
 
     lines.append(
         "List any key claims, facts, or arguments from the source(s) that are "

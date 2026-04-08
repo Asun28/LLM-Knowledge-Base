@@ -15,9 +15,12 @@ def load_verdicts(path: Path | None = None) -> list[dict]:
     path = path or VERDICTS_PATH
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return []
+        if not isinstance(data, list):
+            return []
+        return data
     return []
 
 

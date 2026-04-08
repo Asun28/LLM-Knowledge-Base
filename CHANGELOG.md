@@ -23,10 +23,39 @@ Rules:
 
 ### Fixed
 - `mcp/browse.py`: simplified `except (OSError, PermissionError)` → `except OSError` in `kb_read_page` and `kb_list_sources` (`PermissionError` is a subclass of `OSError`)
-- `scripts/hook_review.py`: added `VALID_MODES` guard (fail-open on unknown mode); `_get_diff` now checks `returncode` and surfaces stderr on `git diff` failure; prints warning when diff is silently truncated at `MAX_DIFF_CHARS`
+- `compile/compiler.py` `load_manifest`: returns `{}` on `json.JSONDecodeError` or `UnicodeDecodeError` instead of propagating — corrupt `.data/hashes.json` no longer crashes compile, detect-drift, or find-changed-sources
+- `ingest/pipeline.py` `_update_existing_page`: entity context insertion uses `re.search(r"^## References", …, re.MULTILINE)` and positional splice instead of `str.replace` — prevents double-injection when LLM-extracted context itself contains `## References`
+- `lint/runner.py` `run_all_checks`: filter key corrected `"dead_links"` → `"dead_link"` to match actual issue dict key — `--fix` now properly removes resolved dead-link issues from the report
+- `lint/verdicts.py` `load_verdicts`: added `isinstance(data, list)` guard after JSON parse — a `{}` verdict file no longer causes `AttributeError` in `add_verdict`
+- `lint/semantic.py` `build_fidelity_context` / `build_completeness_context`: source content now truncated at `QUERY_CONTEXT_MAX_CHARS` (80K) — large books and arXiv PDFs no longer overflow the LLM context window
+- `lint/semantic.py` `_group_by_wikilinks`: changed `seen.update(group)` → `seen.add(node)` + added frozenset dedup pass — pages in link chains (A→B→C) were consumed by A's group and skipped; B and C now form their own consistency groups; dedup pass prevents the same group being emitted by multiple nodes in the same component
+- `lint/semantic.py`: split long import line and renamed `l` loop variable to `line` — ruff E501/E741 clean
+- `lint/semantic.py` `_group_by_term_overlap` / `build_consistency_context`: wrapped `read_text()` calls in `try/except (OSError, UnicodeDecodeError)` — unreadable pages no longer abort the full consistency check
+- `mcp/core.py` `kb_query`: API branch wraps `query_wiki()` in `try/except` — `LLMError`/timeout no longer escapes raw to MCP client
+- `mcp/core.py` `kb_ingest_content`: extraction JSON validated before writing the raw file — validation failure no longer leaves an orphaned file on disk
+- `mcp/core.py` `kb_save_source`: added `overwrite` parameter (default `false`) with file-existence guard; `write_text` wrapped in `try/except OSError` — silently overwriting existing sources and unhandled OS errors both fixed
+- `mcp/quality.py` `kb_refine_page` / `kb_affected_pages` / `kb_save_lint_verdict` / `kb_lint_consistency`: added `_validate_page_id()` guards — these write-capable tools were the only MCP tools missing traversal protection
+- `mcp/quality.py` `kb_create_page`: `source_refs` validated against path traversal before being written to frontmatter — `../../etc/passwd` as a source ref is now rejected
+- `review/context.py` `pair_page_with_sources`: added `page_path.resolve().relative_to(wiki_dir.resolve())` guard and `try/except (OSError, UnicodeDecodeError)` around source reads — path traversal and unreadable binary sources both handled
+- `review/refiner.py` `refine_page`: added path traversal guard; normalized CRLF→LF before frontmatter parsing (Windows fix); swapped write order so audit history is persisted before page file — a crash between the two now leaves the refinement detectable and retryable
+- `utils/llm.py` `call_llm_json`: validates `block.name == tool_name` before returning — wrong-tool responses from the API no longer silently corrupt callers
+- `tests/test_v098_fixes.py` `TestCallLlmJson` / `TestMakeApiCall`: added `tool_block.name = "extract"` (or `"my_tool"`) to 5 mock `tool_use` blocks — tests were failing because `call_llm_json` now validates `block.name` but mocks lacked the attribute
+- `tests/test_v098_fixes.py` `TestKbIngestPathTraversal::test_allows_valid_raw_path`: fixed weak `or`-based assertion to `assert "project directory" not in result.lower()` — previous logic could silently pass on non-traversal errors
+- `utils/markdown.py` `extract_raw_refs`: filters out matches containing `..` — consistent path-traversal protection matching `extract_citations()`
+- `utils/wiki_log.py` `append_wiki_log`: replaced `exists()` + `write_text()` with `open("x")` + `FileExistsError` guard — concurrent MCP calls can no longer race on initial log creation
+- `evolve/analyzer.py` `find_connection_opportunities`: strips YAML frontmatter before tokenizing — structural keys (`title`, `type`, `source`) were producing false-positive link suggestions
+- `feedback/store.py` `add_feedback_entry`: `page_scores` dict now capped at `MAX_FEEDBACK_ENTRIES` (10k) — previously only `entries` list was capped; high-churn wikis could grow `page_scores` without bound
+
+### Changed
+- `graph/builder.py` `graph_stats`: `betweenness_centrality` uses `k=min(500, n_nodes)` sampling approximation for graphs > 500 nodes — prevents O(V·E) stall in `kb_evolve` on large wikis
+- `utils/pages.py`: inlined `_page_id` helper to break circular import dependency on `kb.graph.builder` (which pulls `networkx` into every page-load operation)
 
 ### Removed
+- `scripts/hook_review.py`: deleted — standalone Anthropic-API commit-gate script removed; the `claude -p` skill gate in hooks covers this use case
 - `docs/superpowers/specs/2026-04-06-phase2-multi-loop-quality-design.md`: deleted obsolete Phase 2 design spec (fully implemented as of v0.6.0)
+- `docs/superpowers/plans/2026-04-06-phase2-multi-loop-quality.md`: deleted obsolete Phase 2 implementation plan (fully shipped)
+- `docs/superpowers/plans/2026-04-07-v092-audit-fixes.md`: deleted obsolete v0.9.2 audit-fixes plan (all tasks completed, status was COMPLETE)
+- `docs/superpowers/plans/2026-04-07-v093-remaining-fixes.md`: deleted obsolete v0.9.3 remaining-fixes plan (all tasks completed, status was COMPLETE)
 
 ---
 

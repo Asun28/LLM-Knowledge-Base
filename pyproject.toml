@@ -32,6 +32,7 @@ select = ["E", "F", "I", "W", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-p no:faker -p no:langsmith_plugin"
 
 [build-system]
 requires = ["setuptools>=75.0"]

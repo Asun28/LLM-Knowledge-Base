@@ -34,7 +34,11 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         from kb.query.citations import format_citations
         from kb.query.engine import query_wiki
 
-        result = query_wiki(question)
+        try:
+            result = query_wiki(question)
+        except Exception as e:
+            logger.exception("Error in kb_query API mode for: %s", question)
+            return f"Error: Query failed — {e}"
         parts = [result["answer"]]
         if result["citations"]:
             parts.append("\n" + format_citations(result["citations"]))
@@ -230,13 +234,7 @@ def kb_ingest_content(
     type_dir.mkdir(parents=True, exist_ok=True)
     file_path = type_dir / f"{slug}.md"
 
-    save_content = content
-    if url:
-        header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
-        save_content = header + content
-
-    file_path.write_text(save_content, encoding="utf-8")
-
+    # Validate extraction JSON BEFORE writing file to avoid orphaned files
     try:
         extraction = json.loads(extraction_json)
     except json.JSONDecodeError as e:
@@ -249,6 +247,13 @@ def kb_ingest_content(
             "Error: extraction_json must contain 'title' (or 'name'). "
             "Required keys: title, entities_mentioned, concepts_mentioned."
         )
+
+    save_content = content
+    if url:
+        header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
+        save_content = header + content
+
+    file_path.write_text(save_content, encoding="utf-8")
 
     from kb.ingest.pipeline import ingest_source
 
@@ -266,6 +271,7 @@ def kb_save_source(
     filename: str,
     source_type: str = "article",
     url: str = "",
+    overwrite: bool = False,
 ) -> str:
     """Save content to raw/ as a source file without ingesting.
 
@@ -276,6 +282,7 @@ def kb_save_source(
         filename: Filename without extension (e.g., 'karpathy-llm-knowledge-bases').
         source_type: Determines which raw/ subdirectory. Default 'article'.
         url: Optional source URL to include as metadata.
+        overwrite: If true, overwrite existing file. Default false (returns error).
     """
     slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
@@ -287,11 +294,20 @@ def kb_save_source(
     type_dir.mkdir(parents=True, exist_ok=True)
     file_path = type_dir / f"{slug}.md"
 
+    if file_path.exists() and not overwrite:
+        return (
+            f"Error: Source file already exists: {_rel(file_path)}. "
+            "Use overwrite=true to replace it."
+        )
+
     if url:
         header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         content = header + content
 
-    file_path.write_text(content, encoding="utf-8")
+    try:
+        file_path.write_text(content, encoding="utf-8")
+    except OSError as e:
+        return f"Error: Failed to write source file: {e}"
     return (
         f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
         f'To ingest: kb_ingest("{_rel(file_path)}", "{source_type}")'

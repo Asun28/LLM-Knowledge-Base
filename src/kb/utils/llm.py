@@ -209,6 +209,11 @@ def call_llm_json(
     response = _make_api_call(kwargs, model)
     for block in response.content:
         if block.type == "tool_use":
+            if block.name != tool_name:
+                raise LLMError(
+                    f"Wrong tool in response from {model}: "
+                    f"expected '{tool_name}', got '{block.name}'"
+                )
             return block.input
     raise LLMError(f"No tool_use block in response from {model}")
 

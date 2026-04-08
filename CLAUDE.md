@@ -136,7 +136,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - **Page loading loops**: Catch specific exceptions (not broad `Exception`) and skip with warning — never abort a full scan for one bad file.
 - **JSON stores**: All use `atomic_json_write()` (temp file + rename). Capped at 10,000 entries each (feedback, verdicts).
 - **Ingest limits**: `MAX_ENTITIES_PER_INGEST=50`, `MAX_CONCEPTS_PER_INGEST=50` — prevents runaway page creation from hallucinated lists.
-- **Path traversal**: Validated at MCP boundary (`_validate_page_id`, ingest path check) and in citation/feedback extraction. `extract_citations()` rejects `..` and leading `/`.
+- **Path traversal**: Validated at MCP boundary (`_validate_page_id`, ingest path check), at library level (`refine_page`, `pair_page_with_sources`), and in reference extraction. `extract_citations()` and `extract_raw_refs()` reject `..` and leading `/`.
 
 ## Phase 2 Workflows
 
@@ -237,7 +237,7 @@ Key usage:
   - `kb_query(question)` — returns wiki context with trust scores; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
   - `kb_ingest(path, extraction_json=...)` — creates wiki pages from Claude Code's extraction. Omit `extraction_json` to get the extraction prompt. Add `use_api=true` for API extraction. Output includes `affected_pages` (cascade review list) and `wikilinks_injected` (pages updated with retroactive links). Shows "Duplicate content detected" with hash if source was already ingested.
   - `kb_ingest_content(content, filename, type, extraction_json)` — one-shot: saves content to `raw/` and creates wiki pages in one call.
-  - `kb_save_source(content, filename)` — save content to `raw/` for later ingestion.
+  - `kb_save_source(content, filename, overwrite=false)` — save content to `raw/` for later ingestion. Returns error if file already exists unless `overwrite=true`.
   - `kb_compile_scan()` — find changed sources, then `kb_ingest` each.
   - `kb_compile(incremental=true)` — run full compilation (requires ANTHROPIC_API_KEY for LLM extraction).
   - Browse: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`.
@@ -259,24 +259,17 @@ See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.11). Format: [Kee
 
 ## Automation
 
-Auto-commit hooks are configured in `.claude/settings.local.json` using `claude -p` with native skills (no external API calls):
-
-### Stop hook (2-step sequential)
-1. **Doc updater** (180s) — `claude -p` reviews `git diff`, updates project docs if changes warrant it:
-   - `CHANGELOG.md` — add entries under `[Unreleased]`
-   - `BACKLOG.md` — **delete** resolved items (never strikethrough); collapse empty phase sections to one-liner under "Resolved Phases"; add newly discovered issues
-   - `CLAUDE.md` — update version numbers, test counts, module/tool counts, API docs
-   - `README.md` — update if user-facing features or setup changed
-   - `others/architecture-diagram.html` + re-render PNG if architecture changed
-   - Skips files where changes are trivial
-2. **Test + code review + commit** (300s) — pytest → `git add -A` → `claude -p` invokes `everything-claude-code:code-review` skill → commit + push if review passes.
-
-### PostToolUse (Bash — pytest passed)
-Triggers when a Bash command contains `pytest` with "passed" in output → same 2-step flow (doc update → code review → commit + push). Timeout 300s.
-
-Both review steps call `claude -p "... invoke Skill for everything-claude-code:code-review ..." --allowedTools "Skill,Bash,Read,Grep"`. Claude uses its native skill to gate commits — no raw API calls, no external script. Swap `everything-claude-code:code-review` for `superpowers:requesting-code-review` to use the actor-critic reviewer instead.
+No auto-commit hooks. Doc updates and commits are done manually when ready to push.
 
 ### BACKLOG.md lifecycle
 Resolved items are **deleted** from `BACKLOG.md` (the fix is recorded in `CHANGELOG.md`). When all items in a phase section are resolved, the section collapses to a one-liner under "Resolved Phases" (e.g., `- **Phase 3.92** — all items resolved in v0.9.11`). This keeps the backlog focused on open work only.
+
+### Doc update checklist (before push)
+When asked to update docs, review `git diff` and update as needed:
+- `CHANGELOG.md` — add entries under `[Unreleased]`
+- `BACKLOG.md` — **delete** resolved items (never strikethrough); collapse empty phase sections
+- `CLAUDE.md` — update version numbers, test counts, module/tool counts, API docs
+- `README.md` — update if user-facing features or setup changed
+- `others/architecture-diagram.html` + re-render PNG if architecture changed
 
 All tools are auto-approved for this project (permissions in `settings.local.json`).

@@ -55,7 +55,7 @@ def run_all_checks(
                 i
                 for i in all_issues
                 if not (
-                    i.get("check") == "dead_links"
+                    i.get("check") == "dead_link"
                     and (i.get("source"), i.get("target")) in fixed_pairs
                 )
             ]

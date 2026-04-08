@@ -50,10 +50,18 @@ def refine_page(
     wiki_dir = wiki_dir or WIKI_DIR
     page_path = wiki_dir / f"{page_id}.md"
 
+    # Guard against path traversal — page must resolve within wiki_dir
+    try:
+        page_path.resolve().relative_to(wiki_dir.resolve())
+    except ValueError:
+        return {"error": f"Invalid page_id: {page_id}. Path escapes wiki directory."}
+
     if not page_path.exists():
         return {"error": f"Page not found: {page_id}"}
 
     text = page_path.read_text(encoding="utf-8")
+    # Normalize CRLF → LF for consistent frontmatter parsing on Windows
+    text = text.replace("\r\n", "\n")
 
     # Split frontmatter from content using regex for robust --- matching
     # Matches: start-of-file, optional whitespace, ---, newline, content, ---, rest
@@ -80,9 +88,11 @@ def refine_page(
 
     # Reconstruct page
     new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
-    page_path.write_text(new_text, encoding="utf-8")
 
-    # Append to review history with context
+    # Persist audit trail BEFORE writing the page file.
+    # If we crash after writing the page but before saving history,
+    # the refinement is lost from the audit trail. Reverse order:
+    # a failed page write after history save is detectable and retryable.
     history = load_review_history(history_path)
     history.append(
         {
@@ -96,6 +106,8 @@ def refine_page(
     if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
         history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
     save_review_history(history, history_path)
+
+    page_path.write_text(new_text, encoding="utf-8")
 
     # Append to wiki/log.md (auto-creates if missing)
     log_path = wiki_dir / "log.md"

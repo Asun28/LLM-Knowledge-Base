@@ -48,6 +48,10 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         updated_content: New markdown body (frontmatter preserved automatically).
         revision_notes: What changed and why.
     """
+    err = _validate_page_id(page_id)
+    if err:
+        return f"Error: {err}"
+
     try:
         from kb.review.refiner import refine_page
 
@@ -120,6 +124,11 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         from kb.lint.semantic import build_consistency_context
 
         ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
+        if ids:
+            for pid in ids:
+                err = _validate_page_id(pid, check_exists=False)
+                if err:
+                    return f"Error: {err}"
         return build_consistency_context(ids)
     except Exception as e:
         logger.exception("Error running consistency check")
@@ -199,6 +208,10 @@ def kb_affected_pages(page_id: str) -> str:
     Args:
         page_id: Page that was changed (e.g., 'concepts/rag').
     """
+    err = _validate_page_id(page_id, check_exists=False)
+    if err:
+        return f"Error: {err}"
+
     try:
         from kb.compile.linker import build_backlinks
 
@@ -272,6 +285,10 @@ def kb_save_lint_verdict(
         issues: Optional JSON array of issue objects with severity/description.
         notes: Free-text notes about the evaluation.
     """
+    err = _validate_page_id(page_id, check_exists=False)
+    if err:
+        return f"Error: {err}"
+
     import json
 
     from kb.lint.verdicts import add_verdict
@@ -362,6 +379,14 @@ def kb_create_page(
 
     # Build source list
     sources = [s.strip() for s in source_refs.split(",") if s.strip()] if source_refs else []
+
+    # Validate source refs — reject path traversal
+    for src in sources:
+        if ".." in src or src.startswith("/") or src.startswith("\\"):
+            return (
+                f"Error: Invalid source_ref '{src}'. "
+                "Must not contain '..' or start with '/' or '\\'."
+            )
 
     # Write page with frontmatter
     today = date.today().isoformat()

@@ -1,6 +1,7 @@
 """Gap analysis, connection discovery, and source suggestions."""
 
 import logging
+import re
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
@@ -63,10 +64,12 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
     term_index: dict[str, list[str]] = {}
     for page_path in pages:
         try:
-            content = page_path.read_text(encoding="utf-8").lower()
+            raw = page_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             logger.warning("Skipping unreadable page %s in connection analysis", page_path)
             continue
+        # Strip YAML frontmatter to avoid false-positive matches on structural keywords
+        content = re.sub(r"\A\s*---\n.*?\n---\n?", "", raw, count=1, flags=re.DOTALL).lower()
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
         words = set(w.strip(".,!?()[]{}\"'") for w in content.split() if len(w) > 4)

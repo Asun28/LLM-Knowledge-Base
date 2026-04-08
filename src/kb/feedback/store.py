@@ -111,5 +111,15 @@ def add_feedback_entry(
             (scores["useful"] + 1) / (scores["useful"] + weighted_negative + 2), 4
         )
 
+    # Cap page_scores dict to prevent unbounded growth
+    if len(data["page_scores"]) > MAX_FEEDBACK_ENTRIES:
+        # Keep only pages with highest activity (most total ratings)
+        sorted_pages = sorted(
+            data["page_scores"].items(),
+            key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],
+            reverse=True,
+        )
+        data["page_scores"] = dict(sorted_pages[:MAX_FEEDBACK_ENTRIES])
+
     save_feedback(data, path)
     return entry

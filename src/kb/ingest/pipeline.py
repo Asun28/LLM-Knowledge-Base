@@ -268,9 +268,13 @@ def _update_existing_page(
     if name and extraction:
         ctx = _extract_entity_context(name, extraction)
         if ctx and ctx not in content:
-            # Add context before References section, or at end
-            if "## References" in content:
-                content = content.replace("## References", f"{ctx}\n\n## References", 1)
+            # Add context before References section, or at end.
+            # Use regex anchored to line start to avoid matching "## References"
+            # inside body text or LLM-extracted context strings.
+            ref_match = re.search(r"^## References", content, re.MULTILINE)
+            if ref_match:
+                insert_pos = ref_match.start()
+                content = content[:insert_pos] + f"{ctx}\n\n" + content[insert_pos:]
             else:
                 content += f"\n{ctx}\n"
 

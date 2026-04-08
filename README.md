@@ -188,7 +188,7 @@ After restarting Claude Code, you get 25 tools:
 | `kb_query` | Query the wiki. Returns context for Claude Code to answer. Add `use_api=true` for API synthesis. |
 | `kb_ingest` | Ingest a source file. Pass `extraction_json` with your extraction; omit it to get the prompt first. Add `use_api=true` for API extraction. |
 | `kb_ingest_content` | **One-shot**: provide raw content + extraction JSON; saves to `raw/` and creates all wiki pages. |
-| `kb_save_source` | Save content to `raw/` without ingesting (ingest later with `kb_ingest`). |
+| `kb_save_source` | Save content to `raw/` without ingesting (ingest later with `kb_ingest`). Errors if file already exists unless `overwrite=true`. |
 | `kb_compile_scan` | List new/changed sources that need `kb_ingest`. |
 
 #### Browse & Health Tools (always local)
