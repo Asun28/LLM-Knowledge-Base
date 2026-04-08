@@ -122,17 +122,17 @@ def test_call_llm_rate_limit_retry(mock_get_client, mock_sleep):
 @patch("time.sleep")
 @patch("kb.utils.llm.get_client")
 def test_call_llm_max_retries_exceeded(mock_get_client, mock_sleep):
-    """call_llm raises LLMError after exhausting all 3 retry attempts."""
+    """call_llm raises LLMError after exhausting all 3 retries (4 total calls)."""
     mock_client = MagicMock()
     rate_limit_err = _make_rate_limit_error()
-    mock_client.messages.create.side_effect = [rate_limit_err] * 3
+    mock_client.messages.create.side_effect = [rate_limit_err] * 4
     mock_get_client.return_value = mock_client
 
     with pytest.raises(LLMError, match="after 3 retries"):
         call_llm("Say hello")
 
-    assert mock_client.messages.create.call_count == 3
-    assert mock_sleep.call_count == 3
+    assert mock_client.messages.create.call_count == 4  # 1 initial + 3 retries
+    assert mock_sleep.call_count == 4
 
 
 # ── Non-retryable APIStatusError ─────────────────────────────────
@@ -268,17 +268,17 @@ def test_call_llm_timeout_error_retry(mock_get_client, mock_sleep):
 @patch("time.sleep")
 @patch("kb.utils.llm.get_client")
 def test_call_llm_exponential_backoff(mock_get_client, mock_sleep):
-    """call_llm uses exponential backoff: 1s, 2s, 4s on successive retries."""
+    """call_llm uses exponential backoff: 1s, 2s, 4s, 8s on successive retries."""
     mock_client = MagicMock()
-    mock_client.messages.create.side_effect = [_make_rate_limit_error()] * 3
+    mock_client.messages.create.side_effect = [_make_rate_limit_error()] * 4
     mock_get_client.return_value = mock_client
 
     with pytest.raises(LLMError):
         call_llm("Say hello")
 
-    # Verify the exponential backoff delays: 1*2^0=1, 1*2^1=2, 1*2^2=4
+    # Verify the exponential backoff delays: 1*2^0=1, 1*2^1=2, 1*2^2=4, 1*2^3=8
     delays = [call.args[0] for call in mock_sleep.call_args_list]
-    assert delays == [1.0, 2.0, 4.0]
+    assert delays == [1.0, 2.0, 4.0, 8.0]
 
 
 # ── System prompt forwarded ──────────────────────────────────────
@@ -319,7 +319,7 @@ def test_call_llm_error_chaining_retryable(mock_get_client, mock_sleep):
     """LLMError raised after max retries chains the original exception."""
     mock_client = MagicMock()
     original_err = _make_rate_limit_error()
-    mock_client.messages.create.side_effect = [original_err] * 3
+    mock_client.messages.create.side_effect = [original_err] * 4
     mock_get_client.return_value = mock_client
 
     with pytest.raises(LLMError) as exc_info:

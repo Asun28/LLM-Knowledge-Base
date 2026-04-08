@@ -56,7 +56,7 @@ def _make_api_call(kwargs: dict, model: str):
     """
     client = get_client()
     last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(MAX_RETRIES + 1):
         try:
             return client.messages.create(**kwargs)
 
@@ -111,6 +111,11 @@ def _make_api_call(kwargs: dict, model: str):
                 delay,
             )
             time.sleep(delay)
+
+    # Belt-and-suspenders: if the loop never ran (shouldn't happen after fix #1), avoid
+    # AttributeError from isinstance checks on None.
+    if last_error is None:
+        raise LLMError(f"No call was attempted for {model}")
 
     # Provide a specific error message based on the last error type
     if isinstance(last_error, anthropic.APITimeoutError):
