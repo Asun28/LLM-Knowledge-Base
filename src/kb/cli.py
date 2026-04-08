@@ -28,6 +28,8 @@ def cli():
             "book",
             "dataset",
             "conversation",
+            "comparison",
+            "synthesis",
         ]
     ),
     help="Source type (auto-detected if omitted)",
@@ -142,7 +144,11 @@ def mcp():
     """Start the MCP server for Claude Code integration."""
     from kb.mcp_server import main as mcp_main
 
-    mcp_main()
+    try:
+        mcp_main()
+    except Exception as e:
+        click.echo(f"Error: MCP server failed to start — {e}", err=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
