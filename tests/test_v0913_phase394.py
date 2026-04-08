@@ -580,12 +580,15 @@ class TestCompileHashCapturedBeforeIngest:
 
         manifest = load_manifest(manifest_path)
         # Hash in manifest should be pre-ingest (original file hash)
+        found = False
         for key, val in manifest.items():
             if "hash-test" in key:
                 assert val == expected_hash, (
                     f"Manifest hash should be pre-ingest. Expected {expected_hash}, got {val}"
                 )
+                found = True
                 break
+        assert found, f"No manifest entry found for hash-test source. Keys: {list(manifest.keys())}"
 
 
 class TestScanRawSourcesWarnsUnknownSubdir:
