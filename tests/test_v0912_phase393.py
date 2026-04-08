@@ -481,3 +481,69 @@ class TestMCPFixes:
         monkeypatch.setattr(eng_mod, "search_pages", bad_search)
         result = kb_search("test query")
         assert result.startswith("Error:"), f"Expected Error: string, got: {result[:80]!r}"
+
+
+class TestCoverageGaps:
+    """Test coverage for previously uncovered branches."""
+
+    def test_kb_compile_scan_full_scan_returns_string(self):
+        """kb_compile_scan with incremental=False must return a string result."""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        fake_sources = [Path("/fake/raw/articles/test.md")]
+
+        with patch("kb.compile.compiler.scan_raw_sources", return_value=fake_sources):
+            from kb.mcp.core import kb_compile_scan
+
+            result = kb_compile_scan(incremental=False)
+
+        assert isinstance(result, str), f"Expected str, got {type(result)}"
+        assert len(result) > 0, "Result should not be empty"
+
+    def test_cli_compile_command_runs(self):
+        """cli compile command should execute without error."""
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        mock_result = {
+            "mode": "incremental",
+            "sources_processed": 0,
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": [],
+            "duplicates": 0,
+            "errors": [],
+        }
+        with patch("kb.compile.compiler.compile_wiki", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 0, f"CLI compile failed: {result.output!r}"
+        assert "Done" in result.output
+
+    def test_cli_query_command_runs(self):
+        """cli query command should execute without error."""
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        mock_result = {
+            "question": "test",
+            "answer": "Test answer.",
+            "citations": [],
+            "source_pages": [],
+        }
+        with patch("kb.query.engine.query_wiki", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["query", "test question"])
+
+        assert result.exit_code == 0, f"CLI query failed: {result.output!r}"
+        assert "Test answer" in result.output
