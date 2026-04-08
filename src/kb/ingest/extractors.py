@@ -146,6 +146,17 @@ def build_extraction_schema(template: dict) -> dict:
     }
 
 
+@functools.lru_cache(maxsize=16)
+def _build_schema_cached(source_type: str) -> dict:
+    """LRU-cached schema builder: load template then build schema.
+
+    Use this instead of calling build_extraction_schema(template) directly
+    to avoid rebuilding the schema on every extraction call.
+    """
+    template = load_template(source_type)
+    return build_extraction_schema(template)
+
+
 def build_extraction_prompt(content: str, template: dict) -> str:
     """Build the LLM prompt for extracting structured data from a raw source."""
     fields = template["extract"]

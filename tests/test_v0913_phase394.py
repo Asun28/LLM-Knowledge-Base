@@ -499,3 +499,52 @@ class TestNormalizeSourcesTypeCheck:
         # At minimum, no AttributeError or TypeError
         result = normalize_sources(["raw/articles/a.md", 42])
         assert all(isinstance(s, str) for s in result)
+
+
+# ── Task 7: Ingest Pipeline MEDIUM ──────────────────────────────────────────
+
+
+class TestExtractionSchemaCaching:
+    """ingest/extractors.py: _build_schema_cached uses LRU cache."""
+
+    def test_schema_cached_across_calls(self):
+        """Calling _build_schema_cached twice for the same type returns the same object."""
+        from kb.ingest.extractors import _build_schema_cached
+
+        schema1 = _build_schema_cached("article")
+        schema2 = _build_schema_cached("article")
+        assert schema1 is schema2, "Expected same object from cache"
+
+
+class TestUpdateSourcesMappingBacktick:
+    """ingest/pipeline.py _update_sources_mapping: backtick-wrapped check avoids prefix match."""
+
+    def test_shorter_ref_does_not_match_longer_ref(self, tmp_wiki):
+        """'raw/articles/a.md' must not falsely match when 'raw/articles/abc.md' is present."""
+        from kb.ingest.pipeline import _update_sources_mapping
+
+        sources_path = tmp_wiki / "_sources.md"
+        sources_path.write_text(
+            "# Sources\n\n- `raw/articles/abc.md` → concepts/something\n",
+            encoding="utf-8",
+        )
+        _update_sources_mapping("raw/articles/a.md", ["concepts/new-page"], tmp_wiki)
+        content = sources_path.read_text(encoding="utf-8")
+        assert "`raw/articles/a.md`" in content, (
+            "Shorter ref should have been added despite longer ref present"
+        )
+
+
+class TestBuildSummaryContentTypeGuard:
+    """ingest/pipeline.py _build_summary_content: None in authors list is handled."""
+
+    def test_none_in_authors_list_does_not_crash(self):
+        """_build_summary_content must not raise TypeError for [None, 'Alice']."""
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test Article",
+            "authors": [None, "Alice Smith"],
+        }
+        result = _build_summary_content(extraction, "article")
+        assert "Alice Smith" in result

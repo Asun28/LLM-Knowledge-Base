@@ -111,7 +111,7 @@ def _write_wiki_page(
     today = date.today().isoformat()
     safe_title = yaml_escape(title)
     safe_source = yaml_escape(source_ref)
-    frontmatter = f'''---
+    fm_text = f'''---
 title: "{safe_title}"
 source:
   - "{safe_source}"
@@ -123,7 +123,7 @@ confidence: {confidence}
 
 '''
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(frontmatter + content, encoding="utf-8")
+    path.write_text(fm_text + content, encoding="utf-8")
 
 
 def _build_summary_content(extraction: dict, source_type: str) -> str:
@@ -136,7 +136,9 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
     author = extraction.get("author") or extraction.get("speaker")
     authors = extraction.get("authors")
     if authors and isinstance(authors, list):
-        lines.append(f"**Authors:** {', '.join(authors)}\n")
+        safe_authors = [str(a) for a in authors if isinstance(a, str)]
+        if safe_authors:
+            lines.append(f"**Authors:** {', '.join(safe_authors)}\n")
     elif author:
         lines.append(f"**Author:** {author}\n")
 
@@ -148,10 +150,11 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
             break
 
     # Key claims / key points / key arguments
+    key_claims = extraction.get("key_claims")
+    key_points = extraction.get("key_points")
+    key_args = extraction.get("key_arguments")
     claims = (
-        extraction.get("key_claims")
-        or extraction.get("key_points")
-        or extraction.get("key_arguments")
+        key_claims if key_claims is not None else key_points if key_points is not None else key_args
     )
     if claims and isinstance(claims, list):
         lines.append("\n## Key Claims\n")
@@ -207,7 +210,9 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
             relevant.append(val)
             break
 
-    for claim in extraction.get("key_claims") or extraction.get("key_points") or []:
+    key_claims = extraction.get("key_claims")
+    key_points = extraction.get("key_points")
+    for claim in key_claims if key_claims is not None else key_points or []:
         if isinstance(claim, str) and name_lower in claim.lower():
             relevant.append(claim)
 
@@ -290,18 +295,21 @@ def _update_existing_page(
     page_path.write_text(content, encoding="utf-8")
 
 
-def _update_sources_mapping(source_ref: str, wiki_pages: list[str]) -> None:
+def _update_sources_mapping(
+    source_ref: str, wiki_pages: list[str], wiki_dir: Path | None = None
+) -> None:
     """Update wiki/_sources.md with the source -> wiki page mapping."""
+    sources_file = (wiki_dir / "_sources.md") if wiki_dir is not None else WIKI_SOURCES
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
     entry = f"- `{source_ref}` → {pages_str}\n"
-    if not WIKI_SOURCES.exists():
+    if not sources_file.exists():
         logger.warning("_sources.md not found — skipping source mapping for %s", source_ref)
         return
-    content = WIKI_SOURCES.read_text(encoding="utf-8")
-    if source_ref in content:
-        return
+    content = sources_file.read_text(encoding="utf-8")
+    if f"`{source_ref}`" in content:
+        return  # Already listed
     content += entry
-    WIKI_SOURCES.write_text(content, encoding="utf-8")
+    sources_file.write_text(content, encoding="utf-8")
 
 
 _SECTION_HEADERS = {
