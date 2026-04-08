@@ -75,7 +75,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         most_linked (highest in-degree nodes).
     """
     in_degrees = dict(graph.in_degree())
-    orphans = [n for n, d in in_degrees.items() if d == 0 and graph.out_degree(n) > 0]
+    no_inbound = [n for n, d in in_degrees.items() if d == 0 and graph.out_degree(n) > 0]
     isolated = [n for n in graph.nodes() if graph.degree(n) == 0]
 
     # Top 10 most-linked pages
@@ -94,21 +94,25 @@ def graph_stats(graph: nx.DiGraph) -> dict:
 
     # Top 10 pages by betweenness centrality (bridge nodes)
     # Use sampling approximation for large graphs to avoid O(V·E) stall
-    if graph.number_of_nodes() > 500:
-        bc = nx.betweenness_centrality(graph, k=500)
-    else:
-        bc = nx.betweenness_centrality(graph)
-    bridge_nodes = sorted(
-        ((n, c) for n, c in bc.items() if c > 0),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:10]
+    try:
+        if graph.number_of_nodes() > 500:
+            bc = nx.betweenness_centrality(graph, k=500)
+        else:
+            bc = nx.betweenness_centrality(graph)
+        bridge_nodes = sorted(
+            ((n, c) for n, c in bc.items() if c > 0),
+            key=lambda x: x[1],
+            reverse=True,
+        )[:10]
+    except Exception as e:
+        logger.warning("betweenness_centrality failed: %s", e)
+        bridge_nodes = []
 
     return {
         "nodes": graph.number_of_nodes(),
         "edges": graph.number_of_edges(),
         "components": n_components,
-        "orphans": orphans,
+        "no_inbound": no_inbound,
         "isolated": isolated,
         "most_linked": most_linked,
         "pagerank": pagerank,

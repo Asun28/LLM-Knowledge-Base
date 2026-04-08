@@ -619,3 +619,55 @@ class TestScanRawSourcesWarnsUnknownSubdir:
         assert any("unknown_type" in r.message for r in caplog.records), (
             "Expected WARNING mentioning unknown subdir 'unknown_type'"
         )
+
+
+# ── Task 9: Graph & Evolve ────────────────────────────────────────────────────
+
+
+class TestGraphStatsBetweennessException:
+    """graph/builder.py graph_stats: betweenness_centrality failure is caught."""
+
+    def test_betweenness_exception_does_not_propagate(self, monkeypatch):
+        """A failure in betweenness_centrality must be caught and return empty bridge_nodes."""
+        import networkx as nx
+
+        from kb.graph.builder import graph_stats
+
+        def failing_bc(graph, **kw):
+            raise RuntimeError("betweenness boom")
+
+        monkeypatch.setattr(nx, "betweenness_centrality", failing_bc)
+
+        g = nx.DiGraph()
+        g.add_edge("a", "b")
+        stats = graph_stats(g)
+        assert stats["bridge_nodes"] == [], (
+            f"Expected empty bridge_nodes, got {stats['bridge_nodes']}"
+        )
+
+
+class TestGraphStatsOrphansKeyRenamed:
+    """graph/builder.py graph_stats: 'orphans' key renamed to 'no_inbound'."""
+
+    def test_no_inbound_key_present(self):
+        """graph_stats must return 'no_inbound' key (not 'orphans')."""
+        import networkx as nx
+
+        from kb.graph.builder import graph_stats
+
+        g = nx.DiGraph()
+        g.add_edge("a", "b")
+        g.add_node("c")  # isolated
+        stats = graph_stats(g)
+        assert "no_inbound" in stats, f"'no_inbound' key missing from stats: {list(stats.keys())}"
+
+
+class TestMermaidSanitizeLabel:
+    """graph/export.py _sanitize_label: parentheses stripped."""
+
+    def test_parentheses_stripped_from_label(self):
+        """_sanitize_label must remove '(' and ')' from page titles."""
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("GPT-4 (OpenAI)")
+        assert "(" not in result and ")" not in result, f"Parens not stripped: {result!r}"

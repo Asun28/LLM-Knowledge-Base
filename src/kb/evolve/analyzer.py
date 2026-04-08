@@ -78,9 +78,8 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
                 term_index[word] = []
             term_index[word].append(pid)
 
-    # Find page pairs sharing terms but not linked
-    opportunities = []
-    seen_pairs: set[tuple[str, str]] = set()
+    # Accumulate shared terms per pair incrementally (avoids O(V×T) re-scan)
+    pair_shared_terms: dict[tuple, list[str]] = {}
 
     for term, page_ids in term_index.items():
         if len(page_ids) < MIN_PAGES_FOR_TERM or len(page_ids) > MAX_PAGES_FOR_TERM:
@@ -88,28 +87,25 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
         for i, page_a in enumerate(page_ids):
             for page_b in page_ids[i + 1 :]:
                 pair = tuple(sorted([page_a, page_b]))
-                if pair in seen_pairs:
-                    continue
-                seen_pairs.add(pair)
+                if pair not in pair_shared_terms:
+                    pair_shared_terms[pair] = []
+                pair_shared_terms[pair].append(term)
 
-                # Check if they're already linked
-                if not graph.has_edge(page_a, page_b) and not graph.has_edge(page_b, page_a):
-                    # Count shared terms
-                    shared = [
-                        t
-                        for t, pids in term_index.items()
-                        if page_a in pids and page_b in pids and len(pids) <= MAX_PAGES_FOR_TERM
-                    ]
-                    if len(shared) >= MIN_SHARED_TERMS:
-                        opportunities.append(
-                            {
-                                "page_a": page_a,
-                                "page_b": page_b,
-                                "shared_terms": shared[:10],  # Top 10 shared terms
-                                "suggestion": f"Consider linking {page_a} ↔ {page_b} "
-                                f"({len(shared)} shared terms)",
-                            }
-                        )
+    opportunities = []
+    for pair, shared in pair_shared_terms.items():
+        page_a, page_b = pair
+        if len(shared) < MIN_SHARED_TERMS:
+            continue
+        if graph.has_edge(page_a, page_b) or graph.has_edge(page_b, page_a):
+            continue
+        opportunities.append(
+            {
+                "page_a": page_a,
+                "page_b": page_b,
+                "shared_terms": shared[:10],
+                "suggestion": f"Consider linking {page_a} ↔ {page_b} ({len(shared)} shared terms)",
+            }
+        )
 
     # Sort by number of shared terms (most shared first)
     opportunities.sort(key=lambda x: len(x["shared_terms"]), reverse=True)
@@ -223,9 +219,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 "Use kb_review_page to get context, then kb_refine_page to add content."
             )
     except Exception as e:
-        import logging
-
-        logging.getLogger(__name__).debug("Stub check failed in evolve: %s", e)
+        logger.warning("Stub check failed in evolve: %s", e)
 
     # Surface low-trust pages from feedback (closes the feedback loop)
     flagged_pages: list[str] = []
@@ -240,7 +234,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 "Run kb_lint_deep on these to verify source fidelity."
             )
     except Exception as e:
-        logger.debug("Feedback data unavailable for evolve report: %s", e)
+        logger.warning("Feedback data unavailable for evolve report: %s", e)
 
     return {
         "coverage": coverage,

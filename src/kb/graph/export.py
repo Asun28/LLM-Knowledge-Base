@@ -21,7 +21,7 @@ def _sanitize_label(text: str) -> str:
     Removes quotes, special characters, newlines, and backticks that break Mermaid syntax.
     """
     text = text.replace("\n", " ").replace("\r", " ")
-    return re.sub(r'["\[\]{}|<>`]', "", text).strip()
+    return re.sub(r'["\[\]{}|<>`\(\)]', "", text).strip()
 
 
 def _safe_node_id(node: str, seen: set[str] | None = None) -> str:
@@ -99,7 +99,7 @@ def export_mermaid(
 
     # Define nodes with labels
     for page_type, nodes in sorted(type_groups.items()):
-        lines.append(f"  subgraph {page_type}")
+        lines.append(f'  subgraph "{page_type}"')
         for node in nodes:
             title = _sanitize_label(titles.get(node, node.split("/")[-1]))
             lines.append(f'    {node_id_map[node]}["{title}"]')

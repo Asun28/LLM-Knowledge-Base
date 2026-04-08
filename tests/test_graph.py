@@ -117,4 +117,4 @@ def test_graph_stats_orphan_detection(tmp_wiki):
     _create_wiki_page(tmp_wiki / "concepts" / "rag.md", "RAG", "RAG content, no links.")
     graph = build_graph(tmp_wiki)
     stats = graph_stats(graph)
-    assert "summaries/orphan" in stats["orphans"]
+    assert "summaries/orphan" in stats["no_inbound"]

@@ -124,7 +124,7 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     issues = []
 
     # Orphans: have outgoing links but no incoming links
-    for orphan in stats["orphans"]:
+    for orphan in stats["no_inbound"]:
         # Summaries, comparisons, and synthesis are natural entry points, don't flag them
         if orphan.startswith(("summaries/", "comparisons/", "synthesis/")):
             continue
