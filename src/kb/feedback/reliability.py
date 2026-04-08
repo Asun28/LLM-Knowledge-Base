@@ -17,7 +17,7 @@ def compute_trust_scores(path: Path | None = None) -> dict[str, dict]:
 
 
 def get_flagged_pages(path: Path | None = None, threshold: float | None = None) -> list[str]:
-    """Get page IDs with trust score below threshold.
+    """Get page IDs with trust score at or below threshold.
 
     Args:
         path: Path to feedback JSON.
