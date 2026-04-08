@@ -2,6 +2,7 @@
 
 import logging
 
+from kb.graph.export import export_mermaid
 from kb.mcp.app import mcp
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,8 @@ def kb_graph_viz(max_nodes: int = 30) -> str:
     Args:
         max_nodes: Maximum nodes to include (default 30). Set 0 for all.
     """
+    max_nodes = max(0, min(max_nodes, 500))
     try:
-        from kb.graph.export import export_mermaid
-
         return export_mermaid(max_nodes=max_nodes)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)

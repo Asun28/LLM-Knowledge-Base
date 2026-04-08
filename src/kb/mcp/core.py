@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, SOURCE_TYPE_DIRS
+from kb.ingest.pipeline import ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, mcp
 from kb.utils.text import slugify, yaml_escape
 
@@ -127,8 +128,6 @@ def kb_ingest(
     # ── API mode ──
     if use_api:
         try:
-            from kb.ingest.pipeline import ingest_source
-
             result = ingest_source(path, source_type or None)
             return _format_ingest_result(
                 _rel(Path(result["source_path"])),
@@ -166,8 +165,6 @@ def kb_ingest(
             )
 
         try:
-            from kb.ingest.pipeline import ingest_source
-
             result = ingest_source(path, source_type, extraction=extraction)
             return _format_ingest_result(
                 _rel(path), result["source_type"], result["content_hash"], result
@@ -253,13 +250,23 @@ def kb_ingest_content(
         header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         save_content = header + content
 
-    file_path.write_text(save_content, encoding="utf-8")
+    try:
+        file_path.write_text(save_content, encoding="utf-8")
+    except OSError as e:
+        return f"Error: Failed to write source file: {e}"
 
-    from kb.ingest.pipeline import ingest_source
+    try:
+        result = ingest_source(file_path, source_type, extraction=extraction)
+    except Exception as e:
+        # Clean up orphaned file before returning error
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        logger.exception("Error ingesting %s after write", filename)
+        return f"Error: Ingest failed — {e}"
 
-    result = ingest_source(file_path, source_type, extraction=extraction)
     source_ref = _rel(file_path)
-
     return f"Saved source: {source_ref} ({len(save_content)} chars)\n" + _format_ingest_result(
         source_ref, result["source_type"], result["content_hash"], result
     )

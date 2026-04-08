@@ -152,6 +152,9 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         add_feedback_entry(question, rating, pages, notes)
     except ValueError as e:
         return f"Error: {e}"
+    except Exception as e:
+        logger.exception("Error storing feedback for question: %s", question)
+        return f"Error: Failed to store feedback — {e}"
 
     action = {
         "useful": "Trust scores boosted for cited pages.",
@@ -410,8 +413,11 @@ confidence: {confidence}
 
 """
 
-    page_path.parent.mkdir(parents=True, exist_ok=True)
-    page_path.write_text(frontmatter + content, encoding="utf-8")
+    try:
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(frontmatter + content, encoding="utf-8")
+    except OSError as e:
+        return f"Error: Failed to write page: {e}"
 
     # Log
     from kb.utils.wiki_log import append_wiki_log

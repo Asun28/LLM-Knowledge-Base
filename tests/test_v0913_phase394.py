@@ -360,3 +360,74 @@ class TestInjectWikilinksLowercaseTarget:
         assert "[[concepts/rag|" in updated_content or "[[concepts/rag]]" in updated_content, (
             f"Expected lowercase wikilink in content, got: {updated_content!r}"
         )
+
+
+# ── Task 5: MCP Error Handling HIGH ─────────────────────────────────────────
+
+
+class TestKbIngestContentOSError:
+    """mcp/core.py kb_ingest_content: OSError returns error string, no orphan file."""
+
+    def test_write_oserror_returns_error_string(self, monkeypatch, tmp_project):
+        """OSError during file write must return 'Error: ...' string."""
+        from pathlib import Path
+
+        from kb.mcp import core as mcp_core
+
+        original_write = Path.write_text
+
+        def failing_write(self, *a, **kw):
+            if "test-content" in str(self):
+                raise OSError("disk full")
+            return original_write(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "write_text", failing_write)
+
+        result = mcp_core.kb_ingest_content(
+            content="Some article content",
+            filename="test-content",
+            source_type="article",
+            extraction_json='{"title":"Test","entities_mentioned":[],"concepts_mentioned":[]}',
+        )
+        assert result.startswith("Error:"), f"Expected error string, got: {result[:80]}"
+
+    def test_orphan_file_cleaned_up_on_ingest_failure(self, monkeypatch, tmp_project):
+        """If ingest_source raises after write, the written file must be deleted."""
+        from kb.mcp import core as mcp_core
+
+        def failing_ingest(*a, **kw):
+            raise RuntimeError("ingest boom")
+
+        monkeypatch.setattr("kb.mcp.core.ingest_source", failing_ingest, raising=False)
+
+        result = mcp_core.kb_ingest_content(
+            content="Orphan file content",
+            filename="orphan-test-file",
+            source_type="article",
+            extraction_json='{"title":"Orphan","entities_mentioned":[],"concepts_mentioned":[]}',
+        )
+        assert result.startswith("Error:")
+        # The raw file must NOT remain
+        from kb.config import SOURCE_TYPE_DIRS
+
+        orphan = SOURCE_TYPE_DIRS["article"] / "orphan-test-file.md"
+        assert not orphan.exists(), "Orphaned raw file not cleaned up"
+
+
+class TestKbGraphVizMaxNodes:
+    """mcp/health.py kb_graph_viz: max_nodes clamped at 500."""
+
+    def test_max_nodes_clamped(self, monkeypatch):
+        """kb_graph_viz with max_nodes=99999 must call export_mermaid with max_nodes<=500."""
+        from kb.mcp import health as mcp_health
+
+        calls = []
+
+        def mock_export(max_nodes):
+            calls.append(max_nodes)
+            return "graph LR"
+
+        monkeypatch.setattr("kb.mcp.health.export_mermaid", mock_export, raising=False)
+
+        mcp_health.kb_graph_viz(max_nodes=99999)
+        assert calls and calls[0] <= 500, f"max_nodes not clamped: got {calls}"
