@@ -174,7 +174,7 @@ class BM25Index:
         """
         scores = [0.0] * self.n_docs
 
-        for term in query_tokens:
+        for term in dict.fromkeys(query_tokens):
             if term not in self.idf:
                 continue
             idf = self.idf[term]

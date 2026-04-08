@@ -6,6 +6,7 @@ from pathlib import Path
 from kb.config import (
     BM25_B,
     BM25_K1,
+    MAX_SEARCH_RESULTS,
     PAGERANK_SEARCH_WEIGHT,
     QUERY_CONTEXT_MAX_CHARS,
     SEARCH_TITLE_WEIGHT,
@@ -32,17 +33,13 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     Returns:
         List of matching page dicts sorted by relevance score (descending).
     """
-    max_results = max(1, max_results)
+    max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
     pages = load_all_pages(wiki_dir)
     if not pages:
         return []
 
-    # Tokenize query
+    # Tokenize query; return empty if all tokens are stopwords (correct behavior)
     query_tokens = tokenize(question)
-    if not query_tokens:
-        # All words were stopwords — use raw lowercased terms as fallback
-        logger.debug("All query tokens were stopwords, falling back to raw terms")
-        query_tokens = [w.lower().strip("?.,!") for w in question.split() if len(w) > 1]
     if not query_tokens:
         return []
 
@@ -111,15 +108,23 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     sections = []
     total = 0
     skipped = 0
-    for page in pages:
+    for i, page in enumerate(pages):
         section = (
             f"--- Page: {page['id']} (type: {page['type']}, "
             f"confidence: {page['confidence']}) ---\n"
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
         if total + len(section) > max_chars:
+            if i == 0:
+                logger.warning(
+                    "Top-ranked page %s (%d chars) exceeds context limit (%d); skipping it",
+                    page["id"],
+                    len(section),
+                    max_chars,
+                )
+            else:
+                logger.debug("Page excluded from query context due to limit: %s", page["id"])
             skipped += 1
-            logger.debug("Page excluded from query context due to limit: %s", page["id"])
             continue  # Try remaining pages (smaller ones may fit)
         sections.append(section)
         total += len(section)

@@ -8,13 +8,13 @@ import anthropic
 
 
 # ===========================================================================
-# Fix 15 — Query logs debug when falling back to raw terms
+# Fix 15 — Query returns [] for stopword-only queries (no fallback)
 # ===========================================================================
 class TestQueryStopwordFallbackLogging:
-    """search_pages should log when all query tokens are stopwords."""
+    """search_pages should return [] for stopword-only queries (no raw fallback)."""
 
-    def test_logs_debug_on_stopword_fallback(self, caplog):
-        """When all tokens are stopwords, a debug message is emitted."""
+    def test_returns_empty_on_stopword_only_query(self, caplog):
+        """When all tokens are stopwords, search_pages returns [] with no fallback."""
         from kb.query.engine import search_pages
 
         fake_page = {
@@ -35,9 +35,9 @@ class TestQueryStopwordFallbackLogging:
             caplog.at_level(logging.DEBUG, logger="kb.query.engine"),
         ):
             # "the" and "is" and "a" are all stopwords
-            search_pages("the is a")
+            result = search_pages("the is a")
 
-        assert any("stopwords" in r.message for r in caplog.records)
+        assert result == [], f"Expected [] for stopword-only query, got {result}"
 
     def test_no_log_on_normal_query(self, caplog):
         """Normal queries with non-stopword terms don't trigger fallback log."""
