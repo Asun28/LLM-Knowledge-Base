@@ -208,3 +208,48 @@ class TestIngestPipeline:
         assert any("index" in r.message.lower() for r in caplog.records), (
             f"Expected warning about missing index.md. Got: {[r.message for r in caplog.records]}"
         )
+
+
+class TestCompileFixes:
+    """compile/linker.py and compile/compiler.py correctness fixes."""
+
+    def test_inject_wikilinks_skips_page_already_linked_case_insensitive(
+        self, tmp_wiki, create_wiki_page
+    ):
+        """inject_wikilinks must not inject duplicate when target already exists (lowercase)."""
+        from kb.compile.linker import inject_wikilinks
+
+        # Page body already has a lowercase wikilink to concepts/gpt4
+        create_wiki_page(
+            page_id="entities/openai",
+            title="OpenAI",
+            content="We use [[concepts/gpt4|GPT-4]] in our work. GPT-4 is great.",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(page_id="concepts/gpt4", title="GPT-4", wiki_dir=tmp_wiki)
+
+        # Caller passes mixed-case target_page_id (which is the bug trigger)
+        updated = inject_wikilinks("GPT-4", "concepts/GPT4", wiki_dir=tmp_wiki)
+        assert "entities/openai" not in updated, (
+            "Should not inject duplicate wikilink — page already links to lowercased target"
+        )
+
+    def test_find_changed_sources_read_only_does_not_update_manifest(self, tmp_path):
+        """find_changed_sources with save_hashes=False must not modify the manifest."""
+        from kb.compile.compiler import find_changed_sources, load_manifest, save_manifest
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        manifest_path = tmp_path / "hashes.json"
+        save_manifest({}, manifest_path)
+
+        find_changed_sources(
+            raw_dir=raw_dir,
+            manifest_path=manifest_path,
+            save_hashes=False,
+        )
+
+        manifest_after = load_manifest(manifest_path)
+        assert manifest_after == {}, (
+            f"Manifest was modified despite save_hashes=False: {manifest_after}"
+        )

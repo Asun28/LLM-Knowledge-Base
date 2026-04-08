@@ -125,9 +125,9 @@ def inject_wikilinks(
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Skip if already links to target
+        # Skip if already links to target (case-insensitive — extract_wikilinks returns lowercased)
         existing_links = extract_wikilinks(content)
-        if target_page_id in existing_links:
+        if target_page_id.lower() in existing_links:
             continue
 
         # Split frontmatter from body — use regex to avoid splitting on --- inside YAML values

@@ -89,12 +89,16 @@ def scan_raw_sources(raw_dir: Path | None = None) -> list[Path]:
 def find_changed_sources(
     raw_dir: Path | None = None,
     manifest_path: Path | None = None,
+    save_hashes: bool = True,
 ) -> tuple[list[Path], list[Path]]:
     """Find new and changed source files by comparing content hashes.
 
     Args:
         raw_dir: Path to raw directory.
         manifest_path: Path to hash manifest file.
+        save_hashes: If True (default), update the manifest with current template hashes.
+            Pass False for read-only callers (e.g. detect_source_drift) to avoid wiping
+            out the template hash diff before the next compile scan sees it.
 
     Returns:
         Tuple of (new_sources, changed_sources).
@@ -139,9 +143,10 @@ def find_changed_sources(
                     changed_sources.append(f)
                     changed_source_set.add(f.resolve())
 
-    # Update manifest with current template hashes
-    manifest.update(current_tpl_hashes)
-    save_manifest(manifest, manifest_path)
+    if save_hashes:
+        # Update manifest with current template hashes
+        manifest.update(current_tpl_hashes)
+        save_manifest(manifest, manifest_path)
 
     return new_sources, changed_sources
 
@@ -174,7 +179,7 @@ def detect_source_drift(
     raw_dir = raw_dir or RAW_DIR
     wiki_dir = wiki_dir or DEFAULT_WIKI_DIR
 
-    new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path)
+    new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path, save_hashes=False)
     all_changed = new_sources + changed_sources
 
     if not all_changed:
