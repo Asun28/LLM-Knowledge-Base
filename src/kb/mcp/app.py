@@ -104,24 +104,9 @@ def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, res
 
     # Affected pages (cascade update detection) — pipeline returns flat list[str]
     affected = result.get("affected_pages", [])
-    if isinstance(affected, dict):
-        # Legacy dict format: extract both lists
-        backlinks = affected.get("backlinks", [])
-        shared = affected.get("shared_sources", [])
-        all_affected = backlinks + shared
-    elif isinstance(affected, list):
-        all_affected = affected
-        backlinks, shared = [], []
-    else:
-        all_affected, backlinks, shared = [], [], []
-    if all_affected:
-        lines.append(f"Affected pages ({len(all_affected)}) — may need review:")
-        for p in backlinks:
-            lines.append(f"  <- {p}  (backlink)")
-        for p in shared:
-            lines.append(f"  ~ {p}  (shared source)")
-        if not isinstance(affected, dict):
-            for p in all_affected:
-                lines.append(f"  ~ {p}")
+    if affected:
+        lines.append(f"Affected pages ({len(affected)}) — may need review:")
+        for p in affected:
+            lines.append(f"  ~ {p}")
 
     return "\n".join(lines)

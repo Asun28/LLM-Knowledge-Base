@@ -231,17 +231,18 @@ class TestAffectedPagesMCPOutput:
     """_format_ingest_result surfaces affected_pages when non-empty."""
 
     def test_affected_pages_shown_in_output(self):
-        """When affected_pages is non-empty, it appears in the formatted output."""
+        """When affected_pages is non-empty (flat list), it appears in the formatted output."""
         from kb.mcp.app import _format_ingest_result
 
         result = {
             "pages_created": ["summaries/new-topic"],
             "pages_updated": [],
             "pages_skipped": [],
-            "affected_pages": {
-                "backlinks": ["concepts/related-topic", "entities/some-entity"],
-                "shared_sources": ["summaries/old-summary"],
-            },
+            "affected_pages": [
+                "concepts/related-topic",
+                "entities/some-entity",
+                "summaries/old-summary",
+            ],
         }
         output = _format_ingest_result("raw/articles/new.md", "article", "hash456", result)
 
@@ -251,14 +252,14 @@ class TestAffectedPagesMCPOutput:
         assert "summaries/old-summary" in output
 
     def test_empty_affected_pages_not_shown(self):
-        """When affected_pages is empty, no affected section appears."""
+        """When affected_pages is empty list, no affected section appears."""
         from kb.mcp.app import _format_ingest_result
 
         result = {
             "pages_created": ["summaries/new-topic"],
             "pages_updated": [],
             "pages_skipped": [],
-            "affected_pages": {"backlinks": [], "shared_sources": []},
+            "affected_pages": [],
         }
         output = _format_ingest_result("raw/articles/new.md", "article", "hash789", result)
 
@@ -279,17 +280,14 @@ class TestAffectedPagesMCPOutput:
         assert "Pages created (1):" in output
 
     def test_affected_pages_backlinks_and_shared_shown_separately(self):
-        """Backlinks and shared_sources appear with labels in output."""
+        """Flat affected_pages list shows all pages in output."""
         from kb.mcp.app import _format_ingest_result
 
         result = {
             "pages_created": ["summaries/alpha"],
             "pages_updated": [],
             "pages_skipped": [],
-            "affected_pages": {
-                "backlinks": ["concepts/beta"],
-                "shared_sources": ["summaries/gamma"],
-            },
+            "affected_pages": ["concepts/beta", "summaries/gamma"],
         }
         output = _format_ingest_result("raw/articles/alpha.md", "article", "hash000", result)
 

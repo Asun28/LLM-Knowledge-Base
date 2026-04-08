@@ -22,21 +22,24 @@ def kb_search(query: str, max_results: int = 10) -> str:
 
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
-    from kb.query.engine import search_pages
+    try:
+        from kb.query.engine import search_pages
 
-    results = search_pages(query, max_results=max_results)
-    if not results:
-        return "No matching pages found."
-
-    lines = [f"Found {len(results)} matching page(s):\n"]
-    for r in results:
-        snippet = r["content"][:200].replace("\n", " ").strip()
-        lines.append(
-            f"- **{r['id']}** (type: {r['type']}, score: {r['score']})\n"
-            f"  Title: {r['title']}\n"
-            f"  Snippet: {snippet}..."
-        )
-    return "\n".join(lines)
+        results = search_pages(query, max_results=max_results)
+        if not results:
+            return "No matching pages found."
+        lines = [f"Found {len(results)} matching page(s):\n"]
+        for r in results:
+            snippet = r["content"][:200].replace("\n", " ").strip()
+            lines.append(
+                f"- **{r['id']}** (type: {r['type']}, score: {r['score']})\n"
+                f"  Title: {r['title']}\n"
+                f"  Snippet: {snippet}..."
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.exception("Error in kb_search for query: %s", query)
+        return f"Error: Search failed — {e}"
 
 
 @mcp.tool()
@@ -81,22 +84,24 @@ def kb_list_pages(page_type: str = "") -> str:
         page_type: Filter: 'entities', 'concepts', 'comparisons', 'summaries',
                    'synthesis'. Empty returns all.
     """
-    pages = load_all_pages()
-    if page_type:
-        pages = [p for p in pages if p["id"].startswith(page_type)]
-
-    if not pages:
-        return "No pages found."
-
-    lines = [f"Total: {len(pages)} page(s)\n"]
-    current_type = ""
-    for p in pages:
-        ptype = p["id"].split("/")[0]
-        if ptype != current_type:
-            current_type = ptype
-            lines.append(f"\n## {current_type}")
-        lines.append(f"- {p['id']} — {p['title']} ({p['type']}, {p['confidence']})")
-    return "\n".join(lines)
+    try:
+        pages = load_all_pages()
+        if page_type:
+            pages = [p for p in pages if p["id"].startswith(page_type)]
+        if not pages:
+            return "No pages found."
+        lines = [f"Total: {len(pages)} page(s)\n"]
+        current_type = ""
+        for p in pages:
+            ptype = p["id"].split("/")[0]
+            if ptype != current_type:
+                current_type = ptype
+                lines.append(f"\n## {current_type}")
+            lines.append(f"- {p['id']} — {p['title']} ({p['type']}, {p['confidence']})")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.exception("Error in kb_list_pages")
+        return f"Error: Could not list pages — {e}"
 
 
 @mcp.tool()
