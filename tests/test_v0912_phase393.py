@@ -191,3 +191,20 @@ class TestIngestPipeline:
             f"Expected warning about missing _sources.md."
             f" Got: {[r.message for r in caplog.records]}"
         )
+
+    def test_update_index_batch_warns_when_file_missing(self, tmp_path, caplog):
+        """_update_index_batch logs a warning when index.md doesn't exist."""
+        import logging
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import _update_index_batch
+
+        missing_index = tmp_path / "index.md"
+
+        with patch("kb.ingest.pipeline.WIKI_INDEX", missing_index):
+            with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+                _update_index_batch([("summary", "test-article", "Test Article")])
+
+        assert any("index" in r.message.lower() for r in caplog.records), (
+            f"Expected warning about missing index.md. Got: {[r.message for r in caplog.records]}"
+        )

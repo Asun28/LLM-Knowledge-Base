@@ -474,7 +474,7 @@ def ingest_source(
     summary_path = WIKI_DIR / "summaries" / f"{summary_slug}.md"
     summary_content = _build_summary_content(extraction, source_type)
     if summary_path.exists():
-        _update_existing_page(summary_path, source_ref)
+        _update_existing_page(summary_path, source_ref, verb="Summarized")
         pages_updated.append(f"summaries/{summary_slug}")
         # Do NOT add to new_pages_with_titles — wikilinks for this page already exist
     else:
