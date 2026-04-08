@@ -29,7 +29,10 @@ def test_call_llm_success(mock_get_client):
     """call_llm returns text on successful response."""
     mock_client = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="Hello world")]
+    block = MagicMock()
+    block.type = "text"
+    block.text = "Hello world"
+    mock_response.content = [block]
     mock_client.messages.create.return_value = mock_response
     mock_get_client.return_value = mock_client
 
@@ -46,7 +49,7 @@ def test_call_llm_empty_response_raises(mock_get_client):
     mock_client.messages.create.return_value = mock_response
     mock_get_client.return_value = mock_client
 
-    with pytest.raises(LLMError, match="Empty response"):
+    with pytest.raises(LLMError, match="No text content block"):
         call_llm("test prompt")
 
 
@@ -56,7 +59,10 @@ def test_call_llm_retries_on_rate_limit(mock_get_client, mock_sleep):
     """call_llm retries on RateLimitError then succeeds."""
     mock_client = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="success")]
+    block = MagicMock()
+    block.type = "text"
+    block.text = "success"
+    mock_response.content = [block]
 
     rate_error = anthropic.RateLimitError(
         message="rate limited",
@@ -112,7 +118,10 @@ def test_call_llm_retries_on_connection_error(mock_get_client, mock_sleep):
     """call_llm retries on APIConnectionError."""
     mock_client = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="ok")]
+    block_ok1 = MagicMock()
+    block_ok1.type = "text"
+    block_ok1.text = "ok"
+    mock_response.content = [block_ok1]
 
     conn_error = anthropic.APIConnectionError(request=MagicMock())
     mock_client.messages.create.side_effect = [conn_error, mock_response]
@@ -129,7 +138,10 @@ def test_call_llm_retries_on_timeout(mock_get_client, mock_sleep):
     """call_llm retries on APITimeoutError."""
     mock_client = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="ok")]
+    block_ok2 = MagicMock()
+    block_ok2.type = "text"
+    block_ok2.text = "ok"
+    mock_response.content = [block_ok2]
 
     timeout_error = anthropic.APITimeoutError(request=MagicMock())
     mock_client.messages.create.side_effect = [timeout_error, mock_response]
@@ -330,6 +342,7 @@ def test_ingest_creates_entity_with_context(tmp_path):
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
     ):
         ingest_source(source, "article", extraction=extraction)
 
@@ -418,6 +431,7 @@ def test_slug_collision_logs_warning(tmp_path, caplog):
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
         caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"),
     ):
         result = ingest_source(source, "article", extraction=extraction)
@@ -452,6 +466,7 @@ def test_empty_slug_logs_warning(tmp_path, caplog):
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
         caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"),
     ):
         ingest_source(source, "article", extraction=extraction)

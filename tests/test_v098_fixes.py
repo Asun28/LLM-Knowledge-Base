@@ -410,8 +410,9 @@ class TestMakeApiCall:
         """call_llm returns text using shared _make_api_call."""
         from kb.utils.llm import call_llm
 
+        text_block = Mock(type="text", text="Hello")
         mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[Mock(text="Hello")]
+            content=[text_block]
         )
         result = call_llm("Say hello", tier="write")
         assert result == "Hello"

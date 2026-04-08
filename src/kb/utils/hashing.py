@@ -5,6 +5,6 @@ from pathlib import Path
 
 
 def content_hash(path: Path | str) -> str:
-    """Compute SHA-256 hash of a file's contents (32-char hex digest)."""
+    """Compute first 32 hex chars (128-bit prefix of SHA-256) of a file's contents."""
     path = Path(path) if isinstance(path, str) else path
     return hashlib.sha256(path.read_bytes()).hexdigest()[:32]

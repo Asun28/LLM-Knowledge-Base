@@ -249,6 +249,7 @@ class TestDuplicateDetection:
         monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
 
         source = raw_dir / "articles" / "test-article.md"
         source.write_text("# Test Article\n\nSome content here.", encoding="utf-8")
@@ -317,6 +318,7 @@ class TestDuplicateDetection:
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
         monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
         monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
 
         source1 = raw_dir / "articles" / "article-a.md"
         source1.write_text("# Article A\n\nUnique content A.", encoding="utf-8")

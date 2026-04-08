@@ -114,18 +114,20 @@ def test_make_source_ref(tmp_path):
 
 
 def test_make_source_ref_fallback(tmp_path):
-    """make_source_ref falls back for files completely outside the project tree."""
+    """make_source_ref raises ValueError for files completely outside the project tree."""
     import tempfile
+
+    import pytest
 
     raw_dir = tmp_path / "project" / "raw"
     raw_dir.mkdir(parents=True)
 
-    # Create file in an unrelated temp dir (outside raw_dir.parent)
+    # Create file in an unrelated temp dir (outside raw_dir)
     with tempfile.TemporaryDirectory() as other_dir:
         source = Path(other_dir) / "doc.md"
         source.write_text("content")
-        ref = make_source_ref(source, raw_dir)
-        assert ref == "raw/doc.md"
+        with pytest.raises(ValueError, match="outside"):
+            make_source_ref(source, raw_dir)
 
 
 # ── H3: Fence stripping edge cases ─────────────────────────────

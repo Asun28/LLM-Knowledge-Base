@@ -67,7 +67,7 @@ def _make_api_call(kwargs: dict, model: str):
                 "Rate limited by %s (attempt %d/%d), retrying in %.1fs",
                 model,
                 attempt + 1,
-                MAX_RETRIES,
+                MAX_RETRIES + 1,
                 delay,
             )
             time.sleep(delay)
@@ -81,7 +81,7 @@ def _make_api_call(kwargs: dict, model: str):
                     e.status_code,
                     model,
                     attempt + 1,
-                    MAX_RETRIES,
+                    MAX_RETRIES + 1,
                     delay,
                 )
                 time.sleep(delay)
@@ -95,7 +95,7 @@ def _make_api_call(kwargs: dict, model: str):
                 "Connection error to %s (attempt %d/%d), retrying in %.1fs",
                 model,
                 attempt + 1,
-                MAX_RETRIES,
+                MAX_RETRIES + 1,
                 delay,
             )
             time.sleep(delay)
@@ -107,7 +107,7 @@ def _make_api_call(kwargs: dict, model: str):
                 "Timeout calling %s (attempt %d/%d), retrying in %.1fs",
                 model,
                 attempt + 1,
-                MAX_RETRIES,
+                MAX_RETRIES + 1,
                 delay,
             )
             time.sleep(delay)
@@ -158,9 +158,14 @@ def call_llm(
         kwargs["system"] = system
 
     response = _make_api_call(kwargs, model)
-    if not response.content:
-        raise LLMError(f"Empty response from {model} — check API key and quota")
-    return response.content[0].text
+    # Find the first text content block (API may return thinking blocks first)
+    text_block = next(
+        (block for block in response.content if getattr(block, "type", None) == "text"),
+        None,
+    )
+    if text_block is None:
+        raise LLMError(f"No text content block in response from {model}")
+    return text_block.text
 
 
 def call_llm_json(

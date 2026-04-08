@@ -35,7 +35,9 @@ def test_make_source_ref_nested(tmp_path):
 
 
 def test_make_source_ref_outside_raw_dir(tmp_path):
-    """Path outside raw dir falls back to 'raw/<filename>'."""
+    """Path outside raw dir raises ValueError."""
+    import pytest
+
     raw_dir = tmp_path / "project" / "raw"
     raw_dir.mkdir(parents=True)
 
@@ -45,9 +47,8 @@ def test_make_source_ref_outside_raw_dir(tmp_path):
     source = other_dir / "stray-file.md"
     source.write_text("content", encoding="utf-8")
 
-    result = make_source_ref(source, raw_dir=raw_dir)
-
-    assert result == "raw/stray-file.md"
+    with pytest.raises(ValueError, match="outside"):
+        make_source_ref(source, raw_dir=raw_dir)
 
 
 # ── Forward slashes (Windows safety) ────────────────────────────

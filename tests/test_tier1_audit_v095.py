@@ -40,6 +40,7 @@ class TestExtractionTypeValidation:
         with (
             patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
             patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+            patch("kb.utils.paths.RAW_DIR", tmp_project / "raw"),
         ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
@@ -64,6 +65,7 @@ class TestExtractionTypeValidation:
         with (
             patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
             patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+            patch("kb.utils.paths.RAW_DIR", tmp_project / "raw"),
         ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
@@ -88,6 +90,7 @@ class TestExtractionTypeValidation:
         with (
             patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
             patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+            patch("kb.utils.paths.RAW_DIR", tmp_project / "raw"),
         ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
@@ -113,6 +116,7 @@ class TestExtractionTypeValidation:
         with (
             patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
             patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+            patch("kb.utils.paths.RAW_DIR", tmp_project / "raw"),
         ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 

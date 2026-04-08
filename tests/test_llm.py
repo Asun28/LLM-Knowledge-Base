@@ -13,8 +13,9 @@ from kb.utils.llm import LLMError, call_llm
 
 
 def _make_response(text: str) -> MagicMock:
-    """Build a mock Anthropic Message with content[0].text."""
+    """Build a mock Anthropic Message with a text content block."""
     block = MagicMock()
+    block.type = "text"
     block.text = text
     response = MagicMock()
     response.content = [block]
@@ -73,12 +74,12 @@ def test_call_llm_success(mock_get_client):
 
 @patch("kb.utils.llm.get_client")
 def test_call_llm_empty_response(mock_get_client):
-    """call_llm raises LLMError when API returns an empty content list."""
+    """call_llm raises LLMError when API returns no text content block."""
     mock_client = MagicMock()
     mock_client.messages.create.return_value = _make_empty_response()
     mock_get_client.return_value = mock_client
 
-    with pytest.raises(LLMError, match="Empty response"):
+    with pytest.raises(LLMError, match="No text content block"):
         call_llm("Say hello")
 
 

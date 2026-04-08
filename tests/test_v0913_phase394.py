@@ -1,5 +1,6 @@
 """Tests for Phase 3.94 backlog fixes (v0.9.13)."""
 
+import pytest
 
 # ── Task 1: BM25 & Query Engine ─────────────────────────────────────────────
 
@@ -274,6 +275,7 @@ class TestIngestSourceEmptySlug:
         }
         with (
             patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
@@ -431,3 +433,69 @@ class TestKbGraphVizMaxNodes:
 
         mcp_health.kb_graph_viz(max_nodes=99999)
         assert calls and calls[0] <= 500, f"max_nodes not clamped: got {calls}"
+
+
+# ── Task 6: Utils ────────────────────────────────────────────────────────────
+
+
+class TestMakeSourceRefRaisesForOutsidePath:
+    """utils/paths.py make_source_ref: raises ValueError for paths outside raw/."""
+
+    def test_raises_for_path_outside_raw(self, tmp_path):
+        """make_source_ref must raise ValueError if source is outside raw/."""
+        from kb.utils.paths import make_source_ref
+
+        outside = tmp_path / "not-raw" / "something.md"
+        outside.parent.mkdir()
+        outside.touch()
+
+        with pytest.raises(ValueError, match="outside"):
+            make_source_ref(outside, raw_dir=tmp_path / "raw")
+
+    def test_valid_path_returns_ref(self, tmp_path):
+        """make_source_ref returns canonical ref for paths inside raw/."""
+        from kb.utils.paths import make_source_ref
+
+        raw_dir = tmp_path / "raw"
+        articles = raw_dir / "articles"
+        articles.mkdir(parents=True)
+        src = articles / "test.md"
+        src.touch()
+
+        ref = make_source_ref(src, raw_dir=raw_dir)
+        assert ref == "raw/articles/test.md"
+
+
+class TestWikiLogPipeSanitization:
+    """utils/wiki_log.py append_wiki_log: pipe characters are sanitized."""
+
+    def test_pipe_in_message_does_not_corrupt_log(self, tmp_path):
+        """A pipe character in message must be replaced before writing."""
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        append_wiki_log("ingest", "Processed raw/articles/a.md | extra column", log_path)
+        content = log_path.read_text(encoding="utf-8")
+        lines = [ln for ln in content.splitlines() if ln.startswith("-")]
+        assert len(lines) == 1, "Pipe in message must not create extra columns"
+        # The log line should have exactly 2 pipe separators (date | op | message)
+        assert lines[0].count("|") == 2, f"Expected 2 pipes in log line, got: {lines[0]!r}"
+
+
+class TestNormalizeSourcesTypeCheck:
+    """utils/pages.py normalize_sources: non-string list elements filtered."""
+
+    def test_none_in_list_filtered_out(self):
+        """None elements in source list must be filtered."""
+        from kb.utils.pages import normalize_sources
+
+        result = normalize_sources([None, "raw/articles/a.md", None, "raw/articles/b.md"])
+        assert result == ["raw/articles/a.md", "raw/articles/b.md"]
+
+    def test_non_string_converted(self):
+        """Non-string elements must be converted to str or dropped."""
+        from kb.utils.pages import normalize_sources
+
+        # At minimum, no AttributeError or TypeError
+        result = normalize_sources(["raw/articles/a.md", 42])
+        assert all(isinstance(s, str) for s in result)

@@ -52,6 +52,7 @@ class TestInjectWikilinksCalledOnIngest:
 
         with (
             patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
@@ -108,6 +109,7 @@ class TestInjectWikilinksCalledOnIngest:
 
         with (
             patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
@@ -154,6 +156,7 @@ class TestInjectWikilinksCalledOnIngest:
 
         with (
             patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),

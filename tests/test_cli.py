@@ -56,6 +56,7 @@ def test_cli_ingest(mock_extract, tmp_path):
 
     with (
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),

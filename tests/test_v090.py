@@ -174,6 +174,7 @@ def test_ingest_tracks_skipped_slug_collisions(tmp_path):
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
     ):
         result = ingest_source(source, "article", extraction=extraction)
 
@@ -214,6 +215,7 @@ def test_ingest_no_skipped_without_collisions(tmp_path):
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
     ):
         result = ingest_source(source, "article", extraction=extraction)
 

@@ -24,7 +24,7 @@ def normalize_sources(sources: str | list | None) -> list[str]:
         return []
     if isinstance(sources, str):
         return [sources]
-    return list(sources)
+    return [str(s) for s in sources if s is not None]
 
 
 def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:

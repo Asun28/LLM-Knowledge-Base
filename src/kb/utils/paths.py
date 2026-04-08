@@ -9,7 +9,6 @@ def make_source_ref(source_path: Path, raw_dir: Path | None = None) -> str:
     """Compute a canonical source reference string for a raw source file.
 
     Produces paths like 'raw/articles/example.md' regardless of OS.
-    Falls back to 'raw/<filename>' if source is outside the raw directory.
 
     Args:
         source_path: Absolute or relative path to the source file.
@@ -17,10 +16,17 @@ def make_source_ref(source_path: Path, raw_dir: Path | None = None) -> str:
 
     Returns:
         Forward-slash relative path starting with 'raw/'.
+
+    Raises:
+        ValueError: If source_path is outside the raw directory.
     """
     raw_dir = raw_dir or RAW_DIR
     source_path = Path(source_path).resolve()
+    resolved_raw = raw_dir.resolve()
     try:
-        return str(source_path.relative_to(raw_dir.resolve().parent)).replace("\\", "/")
+        rel = source_path.relative_to(resolved_raw)
+        return f"{resolved_raw.name}/{rel}".replace("\\", "/")
     except ValueError:
-        return f"raw/{source_path.name}"
+        raise ValueError(
+            f"Source path is outside raw directory: {source_path} (raw dir: {raw_dir})"
+        )
