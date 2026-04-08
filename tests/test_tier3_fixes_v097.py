@@ -23,7 +23,7 @@ class TestQueryStopwordFallbackLogging:
             "confidence": "stated",
             "title": "Test Page",
             "content": "Some content here",
-            "raw_content": "Some content here",
+            "content_lower": "Some content here",
             "sources": [],
             "path": "wiki/concepts/test.md",
             "created": "2026-01-01",

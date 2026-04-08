@@ -144,10 +144,10 @@ def test_load_all_pages_returns_all_fields(create_wiki_page, tmp_path):
         "created",
         "updated",
         "content",
-        "raw_content",
+        "content_lower",
     }
     assert page["id"] == "concepts/rag"
-    assert page["raw_content"] == page["content"].lower()
+    assert page["content_lower"] == page["content"].lower()
     assert isinstance(page["sources"], list)
 
 

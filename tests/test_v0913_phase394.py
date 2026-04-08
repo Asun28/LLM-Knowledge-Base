@@ -45,7 +45,7 @@ class TestQueryEngineMaxResults:
                 "created": "2026-01-01",
                 "updated": "2026-01-01",
                 "content": "neural network deep learning",
-                "raw_content": "neural network deep learning",
+                "content_lower": "neural network deep learning",
             }
             for i in range(MAX_SEARCH_RESULTS + 10)
         ]
@@ -788,3 +788,26 @@ class TestListSourcesStatFailure:
         result = kb_list_sources()
         # Must return a string, not raise
         assert isinstance(result, str)
+
+
+# ── Task 12: raw_content rename ──────────────────────────────────────────────
+
+
+class TestContentLowerFieldName:
+    """utils/pages.py load_all_pages: field is named 'content_lower', not 'raw_content'."""
+
+    def test_content_lower_key_present(self, tmp_wiki, create_wiki_page):
+        """load_all_pages must return 'content_lower' key (not 'raw_content')."""
+        from kb.utils.pages import load_all_pages
+
+        create_wiki_page(
+            page_id="concepts/rename-test",
+            title="Rename Test",
+            content="Hello World",
+            wiki_dir=tmp_wiki,
+        )
+        pages = load_all_pages(tmp_wiki)
+        assert len(pages) == 1
+        assert "content_lower" in pages[0], "'content_lower' key missing"
+        assert "raw_content" not in pages[0], "'raw_content' key must not be present"
+        assert pages[0]["content_lower"] == "hello world"

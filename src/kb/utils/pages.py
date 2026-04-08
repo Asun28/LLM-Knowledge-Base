@@ -31,7 +31,7 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
     """Load all wiki pages with metadata and content.
 
     Returns a list of dicts with keys: id, path, title, type, confidence,
-    sources, created, updated, content, raw_content.
+    sources, created, updated, content, content_lower.
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = []
@@ -55,7 +55,7 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "created": str(post.metadata.get("created", "")),
                         "updated": str(post.metadata.get("updated", "")),
                         "content": post.content,
-                        "raw_content": post.content.lower(),
+                        "content_lower": post.content.lower(),
                     }
                 )
             except (

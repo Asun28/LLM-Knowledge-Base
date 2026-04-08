@@ -47,7 +47,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     documents = []
     for page in pages:
         title_tokens = tokenize(page["title"]) * SEARCH_TITLE_WEIGHT
-        content_tokens = tokenize(page["raw_content"])
+        content_tokens = tokenize(page["content_lower"])
         documents.append(title_tokens + content_tokens)
 
     # Score with BM25
