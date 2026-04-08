@@ -287,3 +287,76 @@ class TestIngestSourceEmptySlug:
         assert result["pages_created"] or result["pages_updated"]
         hidden_md = wiki_dir / "summaries" / ".md"
         assert not hidden_md.exists(), "Hidden .md file must not be created"
+
+
+# ── Task 4: Compile Linker ───────────────────────────────────────────────────
+
+
+class TestInjectWikilinksNestedGuardWarning:
+    """compile/linker.py inject_wikilinks: warns when guard blocks injection."""
+
+    def test_unmatched_bracket_does_not_silently_skip_all(self, tmp_wiki, caplog, create_wiki_page):
+        """An unmatched [[ earlier in body must not silently suppress all injections."""
+        import logging
+
+        from kb.compile.linker import inject_wikilinks
+
+        # Create a target page
+        create_wiki_page(
+            page_id="concepts/rag",
+            title="RAG",
+            content="Retrieval-augmented generation.",
+            wiki_dir=tmp_wiki,
+        )
+        # Create a source page with an unmatched [[ before the mention of RAG
+        source_dir = tmp_wiki / "concepts"
+        src_path = source_dir / "other-concept.md"
+        src_path.write_text(
+            '---\ntitle: "Other"\nsource:\n  - "raw/articles/s.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            "Broken bracket [[unclosed somewhere. RAG is a technique.\n",
+            encoding="utf-8",
+        )
+        # The guard fires because RAG appears after an unmatched [[
+        # The fix must emit a WARNING log — not silently swallow the skip
+        with caplog.at_level(logging.WARNING, logger="kb.compile.linker"):
+            result = inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+        assert isinstance(result, list)
+        assert any(
+            "unmatched" in r.message.lower() or "skipping" in r.message.lower()
+            for r in caplog.records
+            if r.levelno >= logging.WARNING
+        ), "Expected a WARNING log about unmatched [[ / skipped replacement, got: " + str(
+            [r.message for r in caplog.records]
+        )
+
+
+class TestInjectWikilinksLowercaseTarget:
+    """compile/linker.py inject_wikilinks: injected wikilink uses consistent casing."""
+
+    def test_injected_wikilink_uses_lowercase_page_id(self, tmp_wiki, create_wiki_page):
+        """Injected [[target_page_id|Title]] must use lowercased target_page_id."""
+        from kb.compile.linker import inject_wikilinks
+
+        create_wiki_page(
+            page_id="concepts/rag",
+            title="RAG",
+            content="Retrieval-augmented generation.",
+            wiki_dir=tmp_wiki,
+        )
+        source_dir = tmp_wiki / "entities"
+        source_dir.mkdir(exist_ok=True)
+        src_path = source_dir / "gpt4.md"
+        src_path.write_text(
+            '---\ntitle: "GPT-4"\nsource:\n  - "raw/articles/s.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: entity\nconfidence: stated\n---\n\n"
+            "RAG is used with GPT-4 for retrieval.\n",
+            encoding="utf-8",
+        )
+        # Pass mixed-case target_page_id
+        inject_wikilinks("RAG", "Concepts/RAG", wiki_dir=tmp_wiki)
+        updated_content = src_path.read_text(encoding="utf-8")
+        # Injected link must use literal lowercase (not just when .lower() is applied to content)
+        assert "[[concepts/rag|" in updated_content or "[[concepts/rag]]" in updated_content, (
+            f"Expected lowercase wikilink in content, got: {updated_content!r}"
+        )

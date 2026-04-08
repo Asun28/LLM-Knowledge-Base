@@ -22,7 +22,7 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = scan_wiki_pages(wiki_dir)
-    existing_ids = {page_id(p, wiki_dir) for p in pages}
+    existing_ids = {page_id(p, wiki_dir).lower() for p in pages}
 
     total = 0
     resolved = 0
@@ -56,7 +56,7 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = scan_wiki_pages(wiki_dir)
-    existing_ids = {page_id(p, wiki_dir) for p in pages}
+    existing_ids = {page_id(p, wiki_dir).lower() for p in pages}
     backlinks: dict[str, list[str]] = {}
 
     for page_path in pages:
@@ -100,6 +100,7 @@ def inject_wikilinks(
         List of page IDs that were updated with new wikilinks.
     """
     wiki_dir = wiki_dir or WIKI_DIR
+    target_page_id = target_page_id.lower()
     pages = scan_wiki_pages(wiki_dir)
     updated = []
 
@@ -117,7 +118,7 @@ def inject_wikilinks(
         pid = page_id(page_path, wiki_dir)
 
         # Skip self
-        if pid == target_page_id.lower():
+        if pid == target_page_id:
             continue
 
         try:
@@ -127,7 +128,7 @@ def inject_wikilinks(
 
         # Skip if already links to target (case-insensitive — extract_wikilinks returns lowercased)
         existing_links = extract_wikilinks(content)
-        if target_page_id.lower() in existing_links:
+        if target_page_id in existing_links:
             continue
 
         # Split frontmatter from body — use regex to avoid splitting on --- inside YAML values
@@ -153,6 +154,12 @@ def inject_wikilinks(
             before = body[:start]
             open_count = before.count("[[") - before.count("]]")
             if open_count > 0:
+                logger.warning(
+                    "inject_wikilinks: skipping replacement in %s "
+                    "— unmatched [[ before position %d",
+                    pid,
+                    start,
+                )
                 return match.group(0)  # Inside a wikilink, don't replace
             return replacement
 
