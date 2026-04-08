@@ -565,12 +565,18 @@ class TestCompileHashCapturedBeforeIngest:
         raw_path.write_text("# Hash Test\n\nContent here.\n", encoding="utf-8")
         expected_hash = content_hash(raw_path)
 
-        original_ingest = __import__("kb.ingest.pipeline", fromlist=["ingest_source"]).ingest_source
-
         def patched_ingest(path, *a, **kw):
-            # Modify file AFTER hash would be computed (if captured before ingest)
+            # Simulate ingest modifying the file after compile_wiki captured the pre-hash.
+            # We return a stub success dict so compile_wiki proceeds to write the manifest
+            # without making real LLM calls or failing the RAW_DIR path validation.
             path.write_text(path.read_text(encoding="utf-8") + "\nextra\n", encoding="utf-8")
-            return original_ingest(path, *a, **kw)
+            return {
+                "pages_created": [],
+                "pages_updated": [],
+                "pages_skipped": [],
+                "wikilinks_injected": [],
+                "affected_pages": [],
+            }
 
         monkeypatch.setattr("kb.compile.compiler.ingest_source", patched_ingest)
 
@@ -579,7 +585,8 @@ class TestCompileHashCapturedBeforeIngest:
         compile_wiki(incremental=False, raw_dir=tmp_project / "raw", manifest_path=manifest_path)
 
         manifest = load_manifest(manifest_path)
-        # Hash in manifest should be pre-ingest (original file hash)
+        # Hash in manifest should be pre-ingest (original file hash, before patched_ingest
+        # appended "\nextra\n" to the file).
         found = False
         for key, val in manifest.items():
             if "hash-test" in key:
