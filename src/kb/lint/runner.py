@@ -1,8 +1,10 @@
 """Lint orchestrator — run all checks, produce report."""
 
+import logging
 from pathlib import Path
 
 from kb.config import RAW_DIR, WIKI_DIR
+from kb.graph.builder import build_graph
 from kb.lint.checks import (
     check_cycles,
     check_dead_links,
@@ -14,6 +16,8 @@ from kb.lint.checks import (
     fix_dead_links,
 )
 from kb.lint.verdicts import get_verdict_summary
+
+logger = logging.getLogger(__name__)
 
 
 def run_all_checks(
@@ -34,6 +38,9 @@ def run_all_checks(
     """
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
+
+    # Build the wikilink graph once — shared by orphan and cycle checks
+    shared_graph = build_graph(wiki_dir)
 
     all_issues = []
 
@@ -60,7 +67,7 @@ def run_all_checks(
                 )
             ]
 
-    orphans = check_orphan_pages(wiki_dir)
+    orphans = check_orphan_pages(wiki_dir, graph=shared_graph)
     all_issues.extend(orphans)
     checks_run.append({"name": "orphan_pages", "issues": len(orphans)})
 
@@ -76,7 +83,7 @@ def run_all_checks(
     all_issues.extend(coverage)
     checks_run.append({"name": "source_coverage", "issues": len(coverage)})
 
-    cycles = check_cycles(wiki_dir)
+    cycles = check_cycles(wiki_dir, graph=shared_graph)
     all_issues.extend(cycles)
     checks_run.append({"name": "wikilink_cycles", "issues": len(cycles)})
 
@@ -94,7 +101,8 @@ def run_all_checks(
     try:
         verdict_summary = get_verdict_summary()
         verdict_history = verdict_summary
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load verdict summary: %s", e)
         verdict_history = None
 
     summary = severity_counts

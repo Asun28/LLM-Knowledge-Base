@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import frontmatter
@@ -111,14 +111,15 @@ def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
     return fixes
 
 
-def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
+def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) -> list[dict]:
     """Find pages with no incoming links (except summaries, which are entry points).
 
     Returns:
         List of dicts: {page, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    graph = build_graph(wiki_dir)
+    if graph is None:
+        graph = build_graph(wiki_dir)
     stats = graph_stats(graph)
     issues = []
 
@@ -153,14 +154,15 @@ def check_orphan_pages(wiki_dir: Path | None = None) -> list[dict]:
     return issues
 
 
-def check_cycles(wiki_dir: Path | None = None) -> list[dict]:
+def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) -> list[dict]:
     """Find circular wikilink chains (A → B → C → A).
 
     Returns:
         List of dicts: {cycle, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    graph = build_graph(wiki_dir)
+    if graph is None:
+        graph = build_graph(wiki_dir)
     issues = []
 
     for cycle in nx.simple_cycles(graph):
@@ -200,10 +202,10 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
                     try:
                         updated = date.fromisoformat(updated)
                     except ValueError:
-                        logger.warning(
-                            "Could not parse updated date %r in %s", updated, page_path
-                        )
+                        logger.warning("Could not parse updated date %r in %s", updated, page_path)
                         continue
+            if isinstance(updated, datetime):
+                updated = updated.date()
             if updated and isinstance(updated, date) and updated < cutoff:
                 pid = page_id(page_path, wiki_dir)
                 issues.append(

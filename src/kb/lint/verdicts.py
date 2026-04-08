@@ -67,6 +67,15 @@ def add_verdict(
             "Must be 'fidelity', 'consistency', 'completeness', or 'review'"
         )
 
+    # Validate page_id against path traversal
+    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+        raise ValueError(f"Invalid page_id: {page_id!r}. Must not contain '..' or start with '/'.")
+
+    # Cap notes length (consistent with feedback store MAX_NOTES_LEN = 2000)
+    MAX_NOTES_LEN = 2000
+    if len(notes) > MAX_NOTES_LEN:
+        raise ValueError(f"Notes too long ({len(notes)} chars). Maximum: {MAX_NOTES_LEN}")
+
     if issues:
         for issue in issues:
             if not isinstance(issue, dict):
