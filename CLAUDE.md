@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 3.93 complete (v0.9.12).** 613 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
+**Phase 3.94 complete (v0.9.13).** 651 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -91,8 +91,8 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `ingest_source(path, source_type=None, extraction=None, *, defer_small=False)` — In `kb.ingest.pipeline`. Returns dict with `pages_created`, `pages_updated`, `pages_skipped`, `affected_pages`, `wikilinks_injected`, and `duplicate: True` on hash match. Pass `extraction` dict to skip LLM call (Claude Code mode).
 - `load_all_pages(wiki_dir=None)` — In `kb.utils.pages`. Returns list of dicts. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
-- `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached.
-- `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content starting with `---` to prevent corruption.
+- `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached. Use `_build_schema_cached(source_type)` for cached schema lookups (avoids rebuilding on every extraction call).
+- `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 
 ### Wiki Index Files
 
@@ -127,7 +127,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-583 tests across 38 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v099_phase39.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+651 tests across 39 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v0913_phase394.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 
@@ -249,11 +249,11 @@ Key usage:
 
 ## Implementation History
 
-See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.11). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
+See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.12). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
 
-**Current:** Phase 3.93 (v0.9.12) — 613 tests, 25 MCP tools, 12 modules.
+**Current:** Phase 3.94 (v0.9.13) — 651 tests, 25 MCP tools, 12 modules.
 
-**Known issues:** See `BACKLOG.md` for the Phase 3.94 backlog. Format guide is in the HTML comment at the top of that file. Severity levels: CRITICAL (blocks release), HIGH (silent wrong results / security), MEDIUM (quality gaps / missing coverage), LOW (style/naming). Items grouped by severity then by module area. Resolved items are deleted (fix recorded in CHANGELOG.md); resolved phases collapse to a one-liner under "Resolved Phases".
+**Known issues:** See `BACKLOG.md` for the Phase 3.95 backlog. Format guide is in the HTML comment at the top of that file. Severity levels: CRITICAL (blocks release), HIGH (silent wrong results / security), MEDIUM (quality gaps / missing coverage), LOW (style/naming). Items grouped by severity then by module area. Resolved items are deleted (fix recorded in CHANGELOG.md); resolved phases collapse to a one-liner under "Resolved Phases".
 
 **Phase 4 next:** Two-phase compile pipeline (batch cross-source merging before writing), pre-publish validation gate, iterative multi-hop retrieve/trace loop (BM25 + graph traversal), answer trace enforcement (reject uncited claims), conversation→KB promotion (positively-rated query answers → wiki pages), DSPy Teacher-Student optimization, RAGAS evaluation, layered context assembly (replace naive 80K truncation with tiered loading: summaries first → full pages on demand — inspired by MemPalace's 4-layer context stack), temporal claim tracking (validity windows on individual claims within pages for staleness/contradiction resolution), raw-source fallback retrieval (search `raw/` directly alongside `wiki/` during queries for verbatim context when summaries lose nuance), BM25 + LLM reranking (optional Haiku rerank pass for improved relevance at ~$0.001/query), auto-contradiction detection on ingest (flag when new source conflicts with existing wiki claims — not just at lint time), semantic deduplication pre-ingest (embedding similarity check to catch same-topic-different-wording duplicates beyond content hash), exchange-pair chunking for conversation sources (preserve Q+A dialogue structure instead of flat text), pattern-based source pre-classification (regex heuristics to classify content type before LLM extraction — reduce API cost).
 
