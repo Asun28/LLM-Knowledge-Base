@@ -5,7 +5,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, SOURCE_TYPE_DIRS
+from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, QUERY_CONTEXT_MAX_CHARS, SOURCE_TYPE_DIRS
 from kb.ingest.pipeline import ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, mcp
 from kb.utils.text import slugify, yaml_escape
@@ -185,8 +185,6 @@ def kb_ingest(
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return f"Error reading source file: {e}"
-
-    from kb.config import QUERY_CONTEXT_MAX_CHARS
 
     if len(content) > QUERY_CONTEXT_MAX_CHARS:
         logger.warning(
