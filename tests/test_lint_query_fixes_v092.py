@@ -141,7 +141,7 @@ def test_consistency_auto_groups_not_truncated(tmp_wiki):
 
 
 def test_query_context_truncation_logging(caplog):
-    """Truncation of query context should produce a debug log message."""
+    """When all pages exceed limit, the top page is truncated as a fallback (not empty string)."""
     from kb.query.engine import _build_query_context
 
     pages = [
@@ -164,10 +164,14 @@ def test_query_context_truncation_logging(caplog):
     with caplog.at_level(logging.DEBUG, logger="kb.query.engine"):
         result = _build_query_context(pages, max_chars=3000)
 
-    # Pages that don't fit are skipped entirely (no mid-page truncation)
-    assert "x" * 100 not in result  # big-page was skipped
+    # When all pages exceed limit the fallback truncates the top page — result is non-empty
+    assert result != "", "Must not return empty string when all pages exceed limit"
+    # The result is capped at max_chars
+    assert len(result) <= 3000, f"Result should be ≤3000 chars, got {len(result)}"
+    # The second page (excluded-page) must not appear at all
+    assert "y" * 100 not in result, "Second page should not appear in fallback result"
 
-    # Should have logged exclusion
+    # Should have logged exclusion of pages
     assert any("excluded" in r.message.lower() for r in caplog.records), (
         f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
     )

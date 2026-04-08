@@ -32,6 +32,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     Returns:
         List of matching page dicts sorted by relevance score (descending).
     """
+    max_results = max(1, max_results)
     pages = load_all_pages(wiki_dir)
     if not pages:
         return []
@@ -129,21 +130,37 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
             skipped,
             max_chars,
         )
+    # Fallback: if all pages exceeded the limit, truncate the top page rather than
+    # returning an empty string (which would cause the LLM to hallucinate answers).
+    if not sections and pages:
+        top = pages[0]
+        section = (
+            f"--- Page: {top['id']} (type: {top['type']}, "
+            f"confidence: {top['confidence']}) ---\n"
+            f"Title: {top['title']}\n\n{top['content']}\n"
+        )
+        logger.warning(
+            "All pages exceeded context limit (%d chars); truncating top page %s",
+            max_chars,
+            top["id"],
+        )
+        sections.append(section[:max_chars])
     return "\n".join(sections)
 
 
-def query_wiki(question: str, wiki_dir: Path | None = None) -> dict:
+def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> dict:
     """Query the knowledge base and synthesize an answer.
 
     Args:
         question: The user's question.
         wiki_dir: Path to wiki directory (uses config default if None).
+        max_results: Maximum number of pages to retrieve for context.
 
     Returns:
         dict with keys: question, answer, citations, source_pages.
     """
     # 1. Search for relevant pages
-    matching_pages = search_pages(question, wiki_dir)
+    matching_pages = search_pages(question, wiki_dir, max_results=max_results)
 
     if not matching_pages:
         return {
