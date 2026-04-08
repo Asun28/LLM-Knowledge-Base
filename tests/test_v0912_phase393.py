@@ -34,8 +34,8 @@ class TestLLMRetrySemantics:
 
         assert len(calls) == 3, f"Expected 3 total calls (1+2 retries), got {len(calls)}"
 
-    def test_max_retries_zero_raises_llmerror_not_attribute_error(self, monkeypatch):
-        """MAX_RETRIES=0 must raise LLMError, not AttributeError on last_error."""
+    def test_max_retries_zero_makes_one_call_and_raises_llmerror(self, monkeypatch):
+        """MAX_RETRIES=0 should make exactly 1 call (range(1)) then raise LLMError."""
         from kb.utils import llm as llm_mod
 
         monkeypatch.setattr(llm_mod, "MAX_RETRIES", 0)

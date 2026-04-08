@@ -112,8 +112,9 @@ def _make_api_call(kwargs: dict, model: str):
             )
             time.sleep(delay)
 
-    # Belt-and-suspenders: if the loop never ran (shouldn't happen after fix #1), avoid
-    # AttributeError from isinstance checks on None.
+    # Unreachable with valid config (MAX_RETRIES >= 0): range(MAX_RETRIES + 1)
+    # ensures the loop always runs at least once and sets last_error.
+    # Guards against programmatic misuse (e.g. MAX_RETRIES = -1).
     if last_error is None:
         raise LLMError(f"No call was attempted for {model}")
 
