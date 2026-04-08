@@ -18,9 +18,10 @@ DEFAULT_MAX_NODES = 30
 def _sanitize_label(text: str) -> str:
     """Sanitize text for use as a Mermaid node label.
 
-    Removes quotes and special characters that break Mermaid syntax.
+    Removes quotes, special characters, newlines, and backticks that break Mermaid syntax.
     """
-    return re.sub(r'["\[\]{}|<>]', "", text).strip()
+    text = text.replace("\n", " ").replace("\r", " ")
+    return re.sub(r'["\[\]{}|<>`]', "", text).strip()
 
 
 def _safe_node_id(node: str, seen: set[str] | None = None) -> str:

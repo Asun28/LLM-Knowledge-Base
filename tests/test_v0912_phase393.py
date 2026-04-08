@@ -247,9 +247,7 @@ class TestLintFixes:
         assert "comparisons/a-vs-b" not in flagged, (
             "comparisons/ should be exempt from orphan check"
         )
-        assert "synthesis/overview" not in flagged, (
-            "synthesis/ should be exempt from orphan check"
-        )
+        assert "synthesis/overview" not in flagged, "synthesis/ should be exempt from orphan check"
 
     def test_check_source_coverage_no_false_positive_same_filename(
         self, tmp_wiki, create_wiki_page, tmp_path
@@ -302,10 +300,9 @@ class TestLintFixes:
             result = load_verdicts(bad_path)
 
         assert result == [], "Should return empty list on JSON error"
-        assert any("corrupt" in r.message.lower() or "json" in r.message.lower()
-                   for r in caplog.records), (
-            f"Expected warning about corrupt JSON. Got: {[r.message for r in caplog.records]}"
-        )
+        assert any(
+            "corrupt" in r.message.lower() or "json" in r.message.lower() for r in caplog.records
+        ), f"Expected warning about corrupt JSON. Got: {[r.message for r in caplog.records]}"
 
 
 class TestCompileFixes:
@@ -363,3 +360,124 @@ class TestCompileFixes:
         assert manifest_after == {}, (
             f"Manifest was modified despite save_hashes=False: {manifest_after}"
         )
+
+
+class TestGraphExportFixes:
+    """graph/export.py fixes."""
+
+    def test_sanitize_label_strips_newlines(self):
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("Line 1\nLine 2")
+        assert "\n" not in result, f"Newline not stripped: {result!r}"
+
+    def test_sanitize_label_strips_backticks(self):
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("`code term`")
+        assert "`" not in result, f"Backtick not stripped: {result!r}"
+
+    def test_export_mermaid_empty_wiki(self, tmp_wiki):
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=tmp_wiki)
+        assert result.startswith("graph LR")
+
+    def test_export_mermaid_with_pages(self, tmp_wiki, create_wiki_page):
+        from kb.graph.export import export_mermaid
+
+        create_wiki_page(page_id="concepts/rag", title="RAG", wiki_dir=tmp_wiki)
+        result = export_mermaid(wiki_dir=tmp_wiki)
+        assert "graph LR" in result
+        assert "concepts" in result
+
+
+class TestConfigFixes:
+    """config.py constants and model validation."""
+
+    def test_max_verdicts_importable_from_config(self):
+        from kb.config import MAX_VERDICTS
+
+        assert isinstance(MAX_VERDICTS, int) and MAX_VERDICTS > 0
+
+    def test_max_feedback_entries_importable_from_config(self):
+        from kb.config import MAX_FEEDBACK_ENTRIES
+
+        assert isinstance(MAX_FEEDBACK_ENTRIES, int) and MAX_FEEDBACK_ENTRIES > 0
+
+    def test_empty_model_env_override_falls_back_to_default(self, monkeypatch):
+        """Empty CLAUDE_SCAN_MODEL must not pass empty string to API."""
+        import importlib
+
+        monkeypatch.setenv("CLAUDE_SCAN_MODEL", "")
+        import kb.config as cfg
+
+        importlib.reload(cfg)
+        assert cfg.MODEL_TIERS["scan"] != "", "Empty env override must fall back to default"
+        importlib.reload(cfg)  # restore for other tests
+
+
+class TestCLIFixes:
+    """cli.py fixes."""
+
+    def test_ingest_type_accepts_comparison(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["ingest", "--type", "comparison", "/nonexistent.md"])
+        assert "Invalid value for '--type'" not in (result.output or "")
+
+    def test_ingest_type_accepts_synthesis(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["ingest", "--type", "synthesis", "/nonexistent.md"])
+        assert "Invalid value for '--type'" not in (result.output or "")
+
+    def test_mcp_command_handles_startup_error_gracefully(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        def bad_main():
+            raise RuntimeError("Simulated MCP startup failure")
+
+        monkeypatch.setattr("kb.mcp_server.main", bad_main)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["mcp"])
+        assert result.exit_code != 0
+        assert "Traceback" not in (result.output or "")
+        assert "Error" in (result.output or "")
+
+
+class TestMCPFixes:
+    """mcp/browse.py and mcp/app.py fixes."""
+
+    def test_format_ingest_result_handles_flat_affected_pages(self):
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/test"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": ["concepts/rag"],
+        }
+        output = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+        assert "concepts/rag" in output
+        assert "backlink" not in output  # dead legacy branch removed
+
+    def test_kb_search_returns_error_string_on_exception(self, monkeypatch):
+        import kb.query.engine as eng_mod
+        from kb.mcp.browse import kb_search
+
+        def bad_search(*args, **kwargs):
+            raise RuntimeError("Simulated failure")
+
+        monkeypatch.setattr(eng_mod, "search_pages", bad_search)
+        result = kb_search("test query")
+        assert result.startswith("Error:"), f"Expected Error: string, got: {result[:80]!r}"

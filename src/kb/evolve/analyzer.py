@@ -239,8 +239,8 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Pages: {', '.join(flagged_pages[:5])}. "
                 "Run kb_lint_deep on these to verify source fidelity."
             )
-    except Exception:
-        pass  # Feedback data may not exist yet
+    except Exception as e:
+        logger.debug("Feedback data unavailable for evolve report: %s", e)
 
     return {
         "coverage": coverage,
