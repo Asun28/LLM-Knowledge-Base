@@ -197,7 +197,7 @@ def extract_from_source(content: str, source_type: str) -> dict:
     """
     template = load_template(source_type)
     prompt = build_extraction_prompt(content, template)
-    schema = build_extraction_schema(template)
+    schema = _build_schema_cached(source_type)
     system_msg = "You are a precise information extractor."
 
     return call_llm_json(
