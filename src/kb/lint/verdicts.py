@@ -5,11 +5,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from kb.config import VERDICTS_PATH
+from kb.config import MAX_VERDICTS, VERDICTS_PATH
 
 logger = logging.getLogger(__name__)
 
-MAX_VERDICTS = 10_000
 VALID_SEVERITIES = ("error", "warning", "info")
 
 

@@ -24,7 +24,7 @@ def get_flagged_pages(path: Path | None = None, threshold: float | None = None) 
         threshold: Trust threshold (default: LOW_TRUST_THRESHOLD from config).
 
     Returns:
-        Sorted list of page IDs below the threshold.
+        Sorted list of page IDs at or below the threshold.
     """
     threshold = threshold if threshold is not None else LOW_TRUST_THRESHOLD
     scores = compute_trust_scores(path)

@@ -51,9 +51,9 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
 # Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
 MODEL_TIERS = {
-    "scan": os.environ.get("CLAUDE_SCAN_MODEL", "claude-haiku-4-5-20251001"),
-    "write": os.environ.get("CLAUDE_WRITE_MODEL", "claude-sonnet-4-6"),
-    "orchestrate": os.environ.get("CLAUDE_ORCHESTRATE_MODEL", "claude-opus-4-6"),
+    "scan": os.environ.get("CLAUDE_SCAN_MODEL", "").strip() or "claude-haiku-4-5-20251001",
+    "write": os.environ.get("CLAUDE_WRITE_MODEL", "").strip() or "claude-sonnet-4-6",
+    "orchestrate": os.environ.get("CLAUDE_ORCHESTRATE_MODEL", "").strip() or "claude-opus-4-6",
 }
 
 # ── Page types ────────────────────────────────────────────────
@@ -115,7 +115,8 @@ SMALL_SOURCE_THRESHOLD = 1000
 
 # ── Data retention limits ──────────────────────────────────────
 # Maximum entries retained in JSON stores before old entries are pruned.
-# Same pattern as MAX_FEEDBACK_ENTRIES and MAX_VERDICTS.
+MAX_FEEDBACK_ENTRIES = 10_000
+MAX_VERDICTS = 10_000
 MAX_REVIEW_HISTORY_ENTRIES = 10_000
 
 # ── Verdict trend analysis ────────────────────────────────────

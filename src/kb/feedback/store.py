@@ -4,9 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from kb.config import FEEDBACK_PATH
+from kb.config import FEEDBACK_PATH, MAX_FEEDBACK_ENTRIES
 
-MAX_FEEDBACK_ENTRIES = 10_000
 MAX_QUESTION_LEN = 2000
 MAX_NOTES_LEN = 2000
 MAX_PAGE_ID_LEN = 200
