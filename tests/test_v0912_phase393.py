@@ -97,3 +97,97 @@ class TestQueryEngine:
         assert searched_with == [5], (
             f"Expected search called with max_results=5, got {searched_with}"
         )
+
+
+class TestIngestPipeline:
+    """ingest/pipeline.py correctness fixes."""
+
+    def test_summary_page_preserves_created_date_on_reingest(self, tmp_path):
+        """Re-ingesting same source must not overwrite created: date on summary page."""
+        from datetime import date, timedelta
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        # Create a raw source structure
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        raw_path = raw_dir / "articles" / "test-article.md"
+        raw_path.write_text("# Test\nContent about stuff.", encoding="utf-8")
+
+        wiki_dir = tmp_path / "wiki"
+        for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / subdir).mkdir(parents=True)
+
+        old_date = (date.today() - timedelta(days=10)).isoformat()
+        summary_path = wiki_dir / "summaries" / "test.md"
+        summary_path.write_text(
+            f"---\ntitle: Test\nsource:\n  - raw/articles/test-article.md\n"
+            f"created: {old_date}\nupdated: {old_date}\n"
+            f"type: summary\nconfidence: stated\n---\n\n# Test\n",
+            encoding="utf-8",
+        )
+
+        extraction = {"title": "Test", "entities_mentioned": [], "concepts_mentioned": []}
+
+        with (
+            patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+            patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+            patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+            patch("kb.ingest.pipeline.append_wiki_log"),
+            patch("kb.ingest.pipeline._is_duplicate_content", return_value=False),
+            patch("kb.compile.compiler.load_manifest", return_value={}),
+            patch("kb.compile.compiler.save_manifest"),
+        ):
+            result = ingest_source(raw_path, source_type="article", extraction=extraction)
+
+        import frontmatter
+
+        post = frontmatter.load(str(summary_path))
+        created_val = str(post.metadata.get("created", ""))
+        assert old_date in created_val, (
+            f"Re-ingest overwrote created: date. Got: {created_val!r},"
+            f" expected to contain: {old_date!r}"
+        )
+        assert "summaries/test" in result.get("pages_updated", []), (
+            "Re-ingested summary should be in pages_updated, not pages_created"
+        )
+
+    def test_ingest_source_rejects_path_outside_raw_dir(self, tmp_path):
+        """ingest_source must reject paths outside the raw/ directory."""
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        outside_path = tmp_path / "outside.md"
+        outside_path.write_text("# Outside\nContent.", encoding="utf-8")
+
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+
+        with patch("kb.ingest.pipeline.RAW_DIR", raw_dir):
+            with pytest.raises(ValueError, match="raw/"):
+                ingest_source(
+                    outside_path,
+                    source_type="article",
+                    extraction={"title": "X", "entities_mentioned": [], "concepts_mentioned": []},
+                )
+
+    def test_update_sources_mapping_warns_when_file_missing(self, tmp_path, caplog):
+        """_update_sources_mapping logs a warning when _sources.md doesn't exist."""
+        import logging
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import _update_sources_mapping
+
+        missing_sources = tmp_path / "_sources.md"
+
+        with patch("kb.ingest.pipeline.WIKI_SOURCES", missing_sources):
+            with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+                _update_sources_mapping("raw/articles/test.md", ["summaries/test"])
+
+        assert any("sources" in r.message.lower() for r in caplog.records), (
+            f"Expected warning about missing _sources.md."
+            f" Got: {[r.message for r in caplog.records]}"
+        )

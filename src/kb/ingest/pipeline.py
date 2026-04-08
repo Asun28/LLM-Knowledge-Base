@@ -285,12 +285,14 @@ def _update_sources_mapping(source_ref: str, wiki_pages: list[str]) -> None:
     """Update wiki/_sources.md with the source -> wiki page mapping."""
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
     entry = f"- `{source_ref}` → {pages_str}\n"
-    if WIKI_SOURCES.exists():
-        content = WIKI_SOURCES.read_text(encoding="utf-8")
-        if source_ref in content:
-            return  # Already mapped
-        content += entry
-        WIKI_SOURCES.write_text(content, encoding="utf-8")
+    if not WIKI_SOURCES.exists():
+        logger.warning("_sources.md not found — skipping source mapping for %s", source_ref)
+        return
+    content = WIKI_SOURCES.read_text(encoding="utf-8")
+    if source_ref in content:
+        return
+    content += entry
+    WIKI_SOURCES.write_text(content, encoding="utf-8")
 
 
 _SECTION_HEADERS = {
@@ -311,7 +313,10 @@ _SUBDIR_MAP = {
 
 def _update_index_batch(entries: list[tuple[str, str, str]]) -> None:
     """Update wiki/index.md with multiple new page entries in a single read/write."""
-    if not WIKI_INDEX.exists() or not entries:
+    if not entries:
+        return
+    if not WIKI_INDEX.exists():
+        logger.warning("index.md not found — skipping index update for %d entries", len(entries))
         return
     content = WIKI_INDEX.read_text(encoding="utf-8")
     changed = False
@@ -424,6 +429,11 @@ def ingest_source(
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
+    try:
+        source_path.relative_to(RAW_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Source path must be within raw/ directory: {source_path}")
+
     if source_type is None:
         source_type = detect_source_type(source_path)
 
@@ -458,14 +468,19 @@ def ingest_source(
     # (page_id, title) for newly created pages — used by inject_wikilinks
     new_pages_with_titles: list[tuple[str, str]] = []
 
-    # 1. Create summary page
+    # 1. Create summary page (preserve created: date on re-ingest)
     title = extraction.get("title") or extraction.get("name") or source_path.stem
     summary_slug = slugify(title)
     summary_path = WIKI_DIR / "summaries" / f"{summary_slug}.md"
     summary_content = _build_summary_content(extraction, source_type)
-    _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
-    pages_created.append(f"summaries/{summary_slug}")
-    new_pages_with_titles.append((f"summaries/{summary_slug}", title))
+    if summary_path.exists():
+        _update_existing_page(summary_path, source_ref)
+        pages_updated.append(f"summaries/{summary_slug}")
+        # Do NOT add to new_pages_with_titles — wikilinks for this page already exist
+    else:
+        _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
+        pages_created.append(f"summaries/{summary_slug}")
+        new_pages_with_titles.append((f"summaries/{summary_slug}", title))
 
     # Content-length-aware tiering: short sources get summary only when
     # defer_small is enabled (entity/concept pages deferred to avoid stub proliferation).

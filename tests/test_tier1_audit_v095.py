@@ -37,7 +37,10 @@ class TestExtractionTypeValidation:
             "concepts_mentioned": ["valid-concept"],
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         assert "entities_mentioned is not a list" in caplog.text
@@ -58,7 +61,10 @@ class TestExtractionTypeValidation:
             "concepts_mentioned": {"wrong": "type"},  # <-- wrong type
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         assert "concepts_mentioned is not a list" in caplog.text
@@ -79,7 +85,10 @@ class TestExtractionTypeValidation:
             "concepts_mentioned": ["RAG"],
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         entity_pages = [p for p in result["pages_created"] if p.startswith("entities/")]
@@ -101,7 +110,10 @@ class TestExtractionTypeValidation:
             "concepts_mentioned": [],
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         assert "entities_mentioned is not a list" in caplog.text

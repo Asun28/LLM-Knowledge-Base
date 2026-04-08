@@ -225,7 +225,10 @@ class TestIngestEntityLimit:
             "concepts_mentioned": [],
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         # Should have been truncated to 50
@@ -248,7 +251,10 @@ class TestIngestEntityLimit:
             "concepts_mentioned": concepts,
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         concept_pages = [p for p in result["pages_created"] if p.startswith("concepts/")]
@@ -269,7 +275,10 @@ class TestIngestEntityLimit:
             "concepts_mentioned": ["C1", "C2"],
         }
 
-        with patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"):
+        with (
+            patch("kb.ingest.pipeline.WIKI_DIR", tmp_project / "wiki"),
+            patch("kb.ingest.pipeline.RAW_DIR", tmp_project / "raw"),
+        ):
             result = ingest_source(raw, source_type="article", extraction=extraction)
 
         entity_pages = [p for p in result["pages_created"] if p.startswith("entities/")]
