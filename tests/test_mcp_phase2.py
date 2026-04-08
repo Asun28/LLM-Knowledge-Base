@@ -6,6 +6,7 @@ import kb.compile.linker
 import kb.config
 import kb.feedback.store
 import kb.lint.semantic
+import kb.mcp.app
 import kb.review.context
 import kb.review.refiner
 import kb.utils.wiki_log
@@ -60,6 +61,7 @@ def _setup_project(tmp_project, monkeypatch):
     monkeypatch.setattr(kb.feedback.store, "FEEDBACK_PATH", data_dir / "query_feedback.json")
     monkeypatch.setattr(kb.compile.linker, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.utils.wiki_log, "WIKI_LOG", wiki_dir / "log.md")
+    monkeypatch.setattr(kb.mcp.app, "WIKI_DIR", wiki_dir)
 
     return wiki_dir, raw_dir
 

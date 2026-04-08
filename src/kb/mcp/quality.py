@@ -126,7 +126,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
         if ids:
             for pid in ids:
-                err = _validate_page_id(pid, check_exists=False)
+                err = _validate_page_id(pid, check_exists=True)
                 if err:
                     return f"Error: {err}"
         return build_consistency_context(ids)

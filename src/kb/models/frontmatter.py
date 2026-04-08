@@ -1,17 +1,10 @@
 """Frontmatter schema validation using python-frontmatter."""
 
-from pathlib import Path
-
 import frontmatter
 
 from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES
 
 REQUIRED_FIELDS = ("title", "source", "created", "updated", "type", "confidence")
-
-
-def load_page(path: Path) -> frontmatter.Post:
-    """Load a wiki page and parse its YAML frontmatter."""
-    return frontmatter.load(str(path))
 
 
 def validate_frontmatter(post: frontmatter.Post) -> list[str]:

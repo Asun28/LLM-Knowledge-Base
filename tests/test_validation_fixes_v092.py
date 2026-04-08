@@ -126,12 +126,12 @@ def test_refine_page_content_starts_with_frontmatter(tmp_path):
     )
     result = refine_page(
         "concepts/test",
-        "---\nThis breaks things",
+        "---\ntitle: Injected\n---\nContent\n",
         wiki_dir=wiki_dir,
         history_path=tmp_path / "history.json",
     )
     assert "error" in result
-    assert "---" in result["error"]
+    assert "frontmatter" in result["error"].lower() or "---" in result["error"]
 
 
 def test_refine_page_valid_content(tmp_path):

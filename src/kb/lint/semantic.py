@@ -110,10 +110,9 @@ def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
         if node in seen:
             continue
         neighbors = set(graph.successors(node)) | set(graph.predecessors(node))
-        # Only keep neighbors that exist as graph nodes
-        existing_neighbors = {n for n in neighbors if graph.has_node(n)}
-        if existing_neighbors:
-            group = sorted(existing_neighbors | {node})
+        # All neighbors are existing nodes by construction (build_graph only adds edges to existing)
+        if neighbors:
+            group = sorted(neighbors | {node})
             groups.append(group)
         seen.add(node)
 

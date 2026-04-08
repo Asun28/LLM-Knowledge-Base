@@ -81,10 +81,10 @@ def refine_page(
         # Add updated field if missing
         frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
 
-    # Ensure updated content doesn't start with frontmatter delimiters
+    # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
     stripped_content = updated_content.lstrip()
-    if stripped_content.startswith("---"):
-        return {"error": "Updated content must not start with '---' (frontmatter delimiter)"}
+    if re.match(r"---\n.+\n---", stripped_content, re.DOTALL):
+        return {"error": "Updated content must not start with a YAML frontmatter block"}
 
     # Reconstruct page
     new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"

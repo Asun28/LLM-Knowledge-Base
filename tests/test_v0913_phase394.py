@@ -671,3 +671,72 @@ class TestMermaidSanitizeLabel:
 
         result = _sanitize_label("GPT-4 (OpenAI)")
         assert "(" not in result and ")" not in result, f"Parens not stripped: {result!r}"
+
+
+# ── Task 10: Feedback, Review & Quality ───────────────────────────────────────
+
+
+class TestLoadFeedbackShapeValidation:
+    """feedback/store.py load_feedback: returns default when shape is wrong."""
+
+    def test_wrong_shape_json_returns_default(self, tmp_path):
+        """JSON with missing 'entries' or 'page_scores' must return default structure."""
+        from kb.feedback.store import load_feedback
+
+        bad_file = tmp_path / "feedback.json"
+        bad_file.write_text('{"wrong_key": []}', encoding="utf-8")
+
+        result = load_feedback(bad_file)
+        assert "entries" in result
+        assert "page_scores" in result
+
+    def test_valid_structure_returned_as_is(self, tmp_path):
+        """A valid feedback file is returned unchanged."""
+        import json
+
+        from kb.feedback.store import load_feedback
+
+        good_file = tmp_path / "feedback.json"
+        good_data = {"entries": [], "page_scores": {"concepts/rag": {"trust": 0.7}}}
+        good_file.write_text(json.dumps(good_data), encoding="utf-8")
+
+        result = load_feedback(good_file)
+        assert result["page_scores"] == good_data["page_scores"]
+
+
+class TestRefinePageHorizontalRule:
+    """review/refiner.py refine_page: content starting with '---' (hr) is allowed."""
+
+    def test_horizontal_rule_content_not_rejected(self, tmp_wiki, create_wiki_page):
+        """Content starting with '---\\n' (horizontal rule) must not return error."""
+        from kb.review.refiner import refine_page
+
+        create_wiki_page(
+            page_id="concepts/hr-test",
+            title="HR Test",
+            content="Some content.",
+            wiki_dir=tmp_wiki,
+        )
+        result = refine_page(
+            "concepts/hr-test",
+            updated_content="---\n\nBelow the rule.\n",
+            wiki_dir=tmp_wiki,
+        )
+        assert "error" not in result, f"Horizontal rule incorrectly rejected: {result}"
+
+    def test_frontmatter_block_content_still_rejected(self, tmp_wiki, create_wiki_page):
+        """Content that is a full frontmatter block (---\\nkey: val\\n---) must be rejected."""
+        from kb.review.refiner import refine_page
+
+        create_wiki_page(
+            page_id="concepts/fm-test",
+            title="FM Test",
+            content="Some content.",
+            wiki_dir=tmp_wiki,
+        )
+        result = refine_page(
+            "concepts/fm-test",
+            updated_content="---\ntitle: Injected\n---\nContent\n",
+            wiki_dir=tmp_wiki,
+        )
+        assert "error" in result, "Frontmatter block content must be rejected"

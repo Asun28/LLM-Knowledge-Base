@@ -20,14 +20,17 @@ def _default_feedback() -> dict:
 def load_feedback(path: Path | None = None) -> dict:
     """Load feedback data from JSON file.
 
-    Returns default structure if file is missing or corrupted.
+    Returns default structure if file is missing, corrupted, or wrong shape.
     """
     path = path or FEEDBACK_PATH
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return _default_feedback()
+        if not isinstance(data, dict) or "entries" not in data or "page_scores" not in data:
+            return _default_feedback()
+        return data
     return _default_feedback()
 
 
