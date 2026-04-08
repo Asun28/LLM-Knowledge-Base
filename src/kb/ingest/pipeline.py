@@ -244,14 +244,23 @@ def _update_existing_page(
 
     # 1. Update frontmatter source: list
     safe_ref = yaml_escape(source_ref)
-    # Insert new source entry after the last existing source line
+    # Split on the closing '---' to scope the regex to the frontmatter section only
+    fm_match = re.match(r"\A(---\n.*?\n---\n?)(.*)", content, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body_text = fm_match.group(2)
+    else:
+        fm_text = content
+        body_text = ""
+
     source_line_pattern = re.compile(r'^  - ".*"$', re.MULTILINE)
-    matches = list(source_line_pattern.finditer(content))
+    matches = list(source_line_pattern.finditer(fm_text))
     if matches:
         last_match = matches[-1]
-        content = content[: last_match.end()] + f'\n  - "{safe_ref}"' + content[last_match.end() :]
-    elif "source:" in content:
-        content = content.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
+        fm_text = fm_text[: last_match.end()] + f'\n  - "{safe_ref}"' + fm_text[last_match.end() :]
+    elif "source:" in fm_text:
+        fm_text = fm_text.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
+    content = fm_text + body_text
 
     # 2. Append to References section
     ref_line = f"- {verb} in {source_ref}"
@@ -345,6 +354,7 @@ def _process_item_batch(
     page_type: str,
     source_ref: str,
     extraction: dict,
+    wiki_dir: Path | None = None,
 ) -> tuple[list[str], list[str], list[str], list[tuple[str, str]], list[str]]:
     """Validate, deduplicate, and create/update wiki pages for a list of names.
 
@@ -371,7 +381,12 @@ def _process_item_batch(
     valid_items: list[str] = []
     seen_slugs: dict[str, str] = {}
 
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
+
     for item in items:
+        if not isinstance(item, str):
+            logger.warning("Skipping non-string %s in %s: %r", page_type, field_name, item)
+            continue
         if not item or not item.strip():
             continue
         item_slug = slugify(item)
@@ -386,7 +401,7 @@ def _process_item_batch(
             continue
         seen_slugs[item_slug] = item
         valid_items.append(item)
-        item_path = WIKI_DIR / subdir / f"{item_slug}.md"
+        item_path = effective_wiki_dir / subdir / f"{item_slug}.md"
         if item_path.exists():
             _update_existing_page(
                 item_path, source_ref, name=item, extraction=extraction, verb=verb
@@ -471,6 +486,13 @@ def ingest_source(
     # 1. Create summary page (preserve created: date on re-ingest)
     title = extraction.get("title") or extraction.get("name") or source_path.stem
     summary_slug = slugify(title)
+    if not summary_slug:
+        summary_slug = slugify(source_path.stem) or source_path.stem
+        logger.warning(
+            "Title %r produced empty slug; falling back to source stem %r",
+            title,
+            summary_slug,
+        )
     summary_path = WIKI_DIR / "summaries" / f"{summary_slug}.md"
     summary_content = _build_summary_content(extraction, source_type)
     if summary_path.exists():

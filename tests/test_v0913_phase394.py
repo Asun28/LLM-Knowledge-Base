@@ -191,3 +191,99 @@ class TestVerdictNotesCap:
                 notes="x" * 2001,
                 path=tmp_path / "v.json",
             )
+
+
+# ── Task 3: Ingest Pipeline HIGH ─────────────────────────────────────────────
+
+
+class TestUpdateExistingPageFrontmatterOnly:
+    """ingest/pipeline.py _update_existing_page: regex scoped to frontmatter only."""
+
+    def test_body_matching_line_does_not_corrupt_frontmatter(self, tmp_wiki):
+        """Source entry must be inserted in frontmatter, not mid-body."""
+
+        from kb.ingest.pipeline import _update_existing_page
+
+        page_dir = tmp_wiki / "concepts"
+        page_dir.mkdir(exist_ok=True)
+        page_path = page_dir / "test-page.md"
+        # Body contains a line that matches the source-entry pattern
+        page_path.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/first.md"\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            '  - "raw/articles/body-line.md"\n\nSome body content.\n',
+            encoding="utf-8",
+        )
+        _update_existing_page(page_path, "raw/articles/second.md")
+        content = page_path.read_text(encoding="utf-8")
+        # New source must appear inside the frontmatter block (before the closing ---)
+        fm_end = content.index("---\n\n")
+        assert "raw/articles/second.md" in content[: fm_end + 5], (
+            "New source entry not found in frontmatter"
+        )
+        # The body must NOT have an extra YAML source-list entry (  - "...") for second.md
+        # (A reference in ## References is expected and acceptable)
+        body = content[fm_end + 5 :]
+        source_list_entry = '  - "raw/articles/second.md"'
+        assert source_list_entry not in body, (
+            f"YAML source entry was incorrectly inserted into the body: {body!r}"
+        )
+
+
+class TestProcessItemBatchTypeGuard:
+    """ingest/pipeline.py _process_item_batch: non-string items are skipped."""
+
+    def test_none_in_list_does_not_crash(self, tmp_wiki):
+        """A None element in items_raw must be skipped, not raise AttributeError."""
+        from kb.ingest.pipeline import _process_item_batch
+
+        # None element in the middle
+        created, updated, skipped, _, _ = _process_item_batch(
+            [None, "ValidEntity", 42, "AnotherEntity"],
+            "entities_mentioned",
+            50,
+            "entity",
+            "raw/articles/test.md",
+            {"title": "Test"},
+            wiki_dir=tmp_wiki,
+        )
+        # Only valid strings should produce pages
+        entity_ids = created + updated
+        assert any("validentity" in p for p in entity_ids), "ValidEntity not created"
+        assert any("anotherentity" in p for p in entity_ids), "AnotherEntity not created"
+
+
+class TestIngestSourceEmptySlug:
+    """ingest/pipeline.py ingest_source: empty slug triggers fallback, not hidden file."""
+
+    def test_punctuation_only_title_uses_stem_fallback(self, tmp_project):
+        """A title like '???' must not create 'wiki/summaries/.md'."""
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        raw_dir = tmp_project / "raw"
+        wiki_dir = tmp_project / "wiki"
+        raw_path = raw_dir / "articles" / "punc-title.md"
+        raw_path.write_text("# ???\n\nSome content about punctuation.\n", encoding="utf-8")
+
+        extraction = {
+            "title": "???",  # slugifies to empty string
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        with (
+            patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+            patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+            patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+            patch("kb.ingest.pipeline.append_wiki_log"),
+            patch("kb.ingest.pipeline._is_duplicate_content", return_value=False),
+            patch("kb.compile.compiler.load_manifest", return_value={}),
+            patch("kb.compile.compiler.save_manifest"),
+        ):
+            result = ingest_source(raw_path, "article", extraction=extraction)
+        # Summary must be created with a non-empty slug (fallback to stem)
+        assert result["pages_created"] or result["pages_updated"]
+        hidden_md = wiki_dir / "summaries" / ".md"
+        assert not hidden_md.exists(), "Hidden .md file must not be created"
