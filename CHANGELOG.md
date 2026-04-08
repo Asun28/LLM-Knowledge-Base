@@ -45,6 +45,20 @@ Rules:
 - `utils/wiki_log.py` `append_wiki_log`: replaced `exists()` + `write_text()` with `open("x")` + `FileExistsError` guard — concurrent MCP calls can no longer race on initial log creation
 - `evolve/analyzer.py` `find_connection_opportunities`: strips YAML frontmatter before tokenizing — structural keys (`title`, `type`, `source`) were producing false-positive link suggestions
 - `feedback/store.py` `add_feedback_entry`: `page_scores` dict now capped at `MAX_FEEDBACK_ENTRIES` (10k) — previously only `entries` list was capped; high-churn wikis could grow `page_scores` without bound
+- `utils/llm.py`: retry loop used `range(MAX_RETRIES)` (total attempts) instead of `range(MAX_RETRIES + 1)` (retries); `last_error` was `None` when `MAX_RETRIES=0`, causing `AttributeError` on exhaustion
+- `query/engine.py`: `query_wiki` never forwarded `max_results` to `search_pages`; `_build_query_context` returned empty string when all pages exceeded 80K char limit; `search_pages` `max_results` not clamped inside the function
+- `ingest/pipeline.py`: summary page always overwritten on re-ingest, losing original `created:` date; `ingest_source` had no library-level path traversal guard; `_update_sources_mapping` and `_update_index_batch` silently no-op on fresh install
+- `compile/linker.py`: `inject_wikilinks` compared raw `target_page_id` (and self-skip pid) against lowercased existing links — mixed-case page IDs caused duplicate wikilinks
+- `compile/compiler.py`: `find_changed_sources` wrote template hashes to manifest as side-effect even when called read-only from `kb_detect_drift`; added `save_hashes=False` parameter
+- `lint/checks.py`: `check_staleness` silently skipped pages where YAML-parsed `updated` was a quoted string; orphan/isolated detection did not exempt `comparisons/` and `synthesis/`; `check_source_coverage` suffix match false-positived on same-named files in different subdirs
+- `lint/verdicts.py`: `load_verdicts` silently discarded all verdict history on `JSONDecodeError` with no warning
+- `graph/export.py`: `_sanitize_label` did not strip newlines or backticks from Mermaid node labels
+- `evolve/analyzer.py`: bare `except Exception: pass` on feedback lookup swallowed real bugs
+- `config.py`: env override model IDs accepted empty strings; `MAX_FEEDBACK_ENTRIES` and `MAX_VERDICTS` moved from module constants to `kb.config`
+- `feedback/reliability.py`: docstring said "below threshold" but code used `<=` (at or below)
+- `cli.py`: `mcp` command had no `try/except`; `--type` choices missing `comparison` and `synthesis`
+- `mcp/browse.py`: `kb_search` and `kb_list_pages` missing outer `try/except`
+- `mcp/app.py`: `_format_ingest_result` dead legacy dict-branch for `affected_pages` removed
 
 ### Changed
 - `graph/builder.py` `graph_stats`: `betweenness_centrality` uses `k=min(500, n_nodes)` sampling approximation for graphs > 500 nodes — prevents O(V·E) stall in `kb_evolve` on large wikis
