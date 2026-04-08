@@ -150,9 +150,7 @@ class TestInjectWikilinksSpecialChars:
         from kb.compile.linker import inject_wikilinks
 
         self._make_page(tmp_wiki, "concepts/target", "")
-        source_page = self._make_page(
-            tmp_wiki, "concepts/source", "We use C++ for performance."
-        )
+        source_page = self._make_page(tmp_wiki, "concepts/source", "We use C++ for performance.")
 
         updated = inject_wikilinks("C++", "concepts/target", wiki_dir=tmp_wiki)
 
@@ -165,9 +163,7 @@ class TestInjectWikilinksSpecialChars:
         from kb.compile.linker import inject_wikilinks
 
         self._make_page(tmp_wiki, "concepts/target", "")
-        source_page = self._make_page(
-            tmp_wiki, "concepts/source", "The .NET ecosystem is large."
-        )
+        source_page = self._make_page(tmp_wiki, "concepts/source", "The .NET ecosystem is large.")
 
         updated = inject_wikilinks(".NET", "concepts/target", wiki_dir=tmp_wiki)
 
@@ -188,17 +184,19 @@ class TestCompileWikiPropagatesFields:
 
         from kb.compile.compiler import compile_wiki
 
-        fake_ingest = MagicMock(return_value={
-            "pages_created": ["concepts/foo"],
-            "pages_updated": [],
-            "pages_skipped": ["entities/bar"],
-            "wikilinks_injected": ["summaries/baz"],
-            "affected_pages": ["concepts/qux"],
-            "duplicate": False,
-            "source_path": "raw/articles/test.md",
-            "source_type": "article",
-            "content_hash": "abc123",
-        })
+        fake_ingest = MagicMock(
+            return_value={
+                "pages_created": ["concepts/foo"],
+                "pages_updated": [],
+                "pages_skipped": ["entities/bar"],
+                "wikilinks_injected": ["summaries/baz"],
+                "affected_pages": ["concepts/qux"],
+                "duplicate": False,
+                "source_path": "raw/articles/test.md",
+                "source_type": "article",
+                "content_hash": "abc123",
+            }
+        )
 
         raw_dir = tmp_project / "raw"
         (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
@@ -230,6 +228,7 @@ class TestVerdictTrendThreshold:
     def test_threshold_constant_exists_and_is_correct(self):
         """VERDICT_TREND_THRESHOLD is 0.1 and importable from config."""
         from kb.config import VERDICT_TREND_THRESHOLD
+
         assert VERDICT_TREND_THRESHOLD == 0.1
 
     def test_trends_module_imports_threshold_from_config(self):
