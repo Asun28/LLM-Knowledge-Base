@@ -33,7 +33,7 @@ def kb_lint() -> str:
             for p in flagged:
                 result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
     except Exception as e:
-        logger.debug("Failed to load feedback data for lint: %s", e)
+        logger.warning("Failed to load feedback data for lint: %s", e)
 
     return result
 
@@ -64,7 +64,7 @@ def kb_evolve() -> str:
                 notes = f" — {g['notes']}" if g["notes"] else ""
                 result += f'- "{g["question"]}"{notes}\n'
     except Exception as e:
-        logger.debug("Failed to load feedback data for evolve: %s", e)
+        logger.warning("Failed to load feedback data for evolve: %s", e)
 
     return result
 

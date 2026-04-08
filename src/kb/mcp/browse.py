@@ -121,8 +121,12 @@ def kb_list_sources() -> str:
             if files:
                 lines.append(f"\n## {subdir.name}/ ({len(files)} files)")
                 for f in files:
-                    size_kb = f.stat().st_size / 1024
-                    lines.append(f"  - {f.name} ({size_kb:.1f} KB)")
+                    try:
+                        size_kb = f.stat().st_size / 1024
+                        lines.append(f"  - {f.name} ({size_kb:.1f} KB)")
+                    except OSError as e:
+                        logger.warning("Could not stat %s: %s", f.name, e)
+                        lines.append(f"  - {f.name} (size unknown)")
                 total += len(files)
 
         lines.insert(1, f"**Total:** {total} source file(s)")

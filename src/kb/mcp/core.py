@@ -185,6 +185,16 @@ def kb_ingest(
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return f"Error reading source file: {e}"
+
+    from kb.config import QUERY_CONTEXT_MAX_CHARS
+
+    if len(content) > QUERY_CONTEXT_MAX_CHARS:
+        logger.warning(
+            "Source file %s is %d chars (> %d limit); extraction prompt may be truncated",
+            _rel(path),
+            len(content),
+            QUERY_CONTEXT_MAX_CHARS,
+        )
     prompt = build_extraction_prompt(content, template)
 
     return (
@@ -326,6 +336,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
     """Scan for new/changed raw sources that need ingestion.
 
     Returns source files to process. For each, call kb_ingest with extraction_json.
+    Note: each call also writes current template hashes to the hash manifest.
 
     Args:
         incremental: If True (default), only new/changed sources. If False, all.

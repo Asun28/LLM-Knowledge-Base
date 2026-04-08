@@ -740,3 +740,51 @@ class TestRefinePageHorizontalRule:
             wiki_dir=tmp_wiki,
         )
         assert "error" in result, "Frontmatter block content must be rejected"
+
+
+# ── Task 11: MCP MEDIUM/LOW ──────────────────────────────────────────────────
+
+
+class TestFormatIngestResultGetSafety:
+    """mcp/app.py _format_ingest_result: uses .get() for result dict keys."""
+
+    def test_partial_result_does_not_raise(self):
+        """_format_ingest_result must not raise KeyError on a partial result dict."""
+        from kb.mcp.app import _format_ingest_result
+
+        partial = {}  # Missing pages_created, pages_updated
+        result = _format_ingest_result("raw/articles/test.md", "article", "abc123", partial)
+        assert isinstance(result, str)
+
+
+class TestListSourcesStatFailure:
+    """mcp/browse.py kb_list_sources: per-file stat failure is skipped."""
+
+    def test_broken_symlink_does_not_abort_listing(self, tmp_path, monkeypatch):
+        """A stat() failure on one file must not abort the entire listing."""
+        from pathlib import Path
+
+        from kb import config as kb_config
+
+        # Point RAW_DIR to tmp
+        raw_dir = tmp_path / "raw"
+        articles = raw_dir / "articles"
+        articles.mkdir(parents=True)
+        (articles / "good.md").write_text("content", encoding="utf-8")
+
+        monkeypatch.setattr(kb_config, "RAW_DIR", raw_dir)
+
+        original_stat = Path.stat
+
+        def failing_stat(self, **kw):
+            if self.name == "good.md":
+                raise OSError("stat failed")
+            return original_stat(self, **kw)
+
+        monkeypatch.setattr(Path, "stat", failing_stat)
+
+        from kb.mcp.browse import kb_list_sources
+
+        result = kb_list_sources()
+        # Must return a string, not raise
+        assert isinstance(result, str)

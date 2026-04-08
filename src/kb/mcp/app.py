@@ -79,16 +79,18 @@ def _format_ingest_result(rel_path: str, source_type: str, source_hash: str, res
             "Skipped to avoid duplicate pages."
         )
 
+    pages_created = result.get("pages_created", [])
+    pages_updated = result.get("pages_updated", [])
     lines = [
         f"Ingested: {rel_path}",
         f"Type: {source_type}",
         f"Hash: {source_hash}",
-        f"Pages created ({len(result['pages_created'])}):",
+        f"Pages created ({len(pages_created)}):",
     ]
-    for p in result["pages_created"]:
+    for p in pages_created:
         lines.append(f"  + {p}")
-    lines.append(f"Pages updated ({len(result['pages_updated'])}):")
-    for p in result["pages_updated"]:
+    lines.append(f"Pages updated ({len(pages_updated)}):")
+    for p in pages_updated:
         lines.append(f"  ~ {p}")
     if result.get("pages_skipped"):
         lines.append(f"Pages skipped ({len(result['pages_skipped'])}):")
