@@ -194,11 +194,16 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
             post = frontmatter.load(str(page_path))
             updated = post.metadata.get("updated")
             if isinstance(updated, str):
-                try:
-                    updated = date.fromisoformat(updated)
-                except ValueError:
-                    logger.warning("Could not parse updated date %r in %s", updated, page_path)
-                    continue
+                if not updated:
+                    updated = None
+                else:
+                    try:
+                        updated = date.fromisoformat(updated)
+                    except ValueError:
+                        logger.warning(
+                            "Could not parse updated date %r in %s", updated, page_path
+                        )
+                        continue
             if updated and isinstance(updated, date) and updated < cutoff:
                 pid = page_id(page_path, wiki_dir)
                 issues.append(
