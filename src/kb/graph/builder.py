@@ -71,8 +71,9 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     """Compute basic graph statistics.
 
     Returns:
-        dict with keys: nodes, edges, components, orphans (0 in-degree),
-        most_linked (highest in-degree nodes).
+        dict with keys: nodes, edges, components, no_inbound (0 in-degree),
+        isolated (0 degree), most_linked (highest in-degree nodes),
+        pagerank (top 10 by PageRank), bridge_nodes (top 10 by betweenness centrality).
     """
     in_degrees = dict(graph.in_degree())
     no_inbound = [n for n, d in in_degrees.items() if d == 0 and graph.out_degree(n) > 0]
