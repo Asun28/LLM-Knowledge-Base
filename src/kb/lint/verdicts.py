@@ -10,6 +10,7 @@ from kb.config import MAX_VERDICTS, VERDICTS_PATH
 logger = logging.getLogger(__name__)
 
 VALID_SEVERITIES = ("error", "warning", "info")
+MAX_NOTES_LEN = 2000
 
 
 def load_verdicts(path: Path | None = None) -> list[dict]:
@@ -71,8 +72,7 @@ def add_verdict(
     if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
         raise ValueError(f"Invalid page_id: {page_id!r}. Must not contain '..' or start with '/'.")
 
-    # Cap notes length (consistent with feedback store MAX_NOTES_LEN = 2000)
-    MAX_NOTES_LEN = 2000
+    # Cap notes length (consistent with feedback store MAX_NOTES_LEN)
     if len(notes) > MAX_NOTES_LEN:
         raise ValueError(f"Notes too long ({len(notes)} chars). Maximum: {MAX_NOTES_LEN}")
 
