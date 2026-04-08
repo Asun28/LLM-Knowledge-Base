@@ -330,6 +330,8 @@ def kb_compile_scan(incremental: bool = True) -> str:
 
     try:
         if incremental:
+            # save_hashes=True (default): marks templates as seen so repeated calls
+            # to kb_compile_scan de-duplicate work between invocations.
             new_sources, changed_sources = find_changed_sources()
             if not new_sources and not changed_sources:
                 return "No new or changed sources found. Wiki is up to date."

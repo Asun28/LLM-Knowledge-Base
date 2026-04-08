@@ -117,7 +117,7 @@ def inject_wikilinks(
         pid = page_id(page_path, wiki_dir)
 
         # Skip self
-        if pid == target_page_id:
+        if pid == target_page_id.lower():
             continue
 
         try:

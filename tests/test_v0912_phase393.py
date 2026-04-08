@@ -234,6 +234,18 @@ class TestCompileFixes:
             "Should not inject duplicate wikilink — page already links to lowercased target"
         )
 
+        # Positive case: a page WITHOUT the link should get it injected
+        create_wiki_page(
+            page_id="concepts/transformers",
+            title="Transformers",
+            content="GPT-4 is a transformer model.",
+            wiki_dir=tmp_wiki,
+        )
+        updated2 = inject_wikilinks("GPT-4", "concepts/GPT4", wiki_dir=tmp_wiki)
+        assert "concepts/transformers" in updated2, (
+            "Page without existing link should get wikilink injected"
+        )
+
     def test_find_changed_sources_read_only_does_not_update_manifest(self, tmp_path):
         """find_changed_sources with save_hashes=False must not modify the manifest."""
         from kb.compile.compiler import find_changed_sources, load_manifest, save_manifest
