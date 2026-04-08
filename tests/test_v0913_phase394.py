@@ -548,3 +548,64 @@ class TestBuildSummaryContentTypeGuard:
         }
         result = _build_summary_content(extraction, "article")
         assert "Alice Smith" in result
+
+
+# ── Task 8: Compile MEDIUM/LOW ───────────────────────────────────────────────
+
+
+class TestCompileHashCapturedBeforeIngest:
+    """compile/compiler.py compile_wiki: hash captured before ingest_source call."""
+
+    def test_pre_captured_hash_written_to_manifest(self, tmp_project, monkeypatch):
+        """The manifest must store the hash computed BEFORE ingest_source runs."""
+        from kb.compile.compiler import compile_wiki, load_manifest
+        from kb.utils.hashing import content_hash
+
+        raw_path = tmp_project / "raw" / "articles" / "hash-test.md"
+        raw_path.write_text("# Hash Test\n\nContent here.\n", encoding="utf-8")
+        expected_hash = content_hash(raw_path)
+
+        original_ingest = __import__("kb.ingest.pipeline", fromlist=["ingest_source"]).ingest_source
+
+        def patched_ingest(path, *a, **kw):
+            # Modify file AFTER hash would be computed (if captured before ingest)
+            path.write_text(path.read_text(encoding="utf-8") + "\nextra\n", encoding="utf-8")
+            return original_ingest(path, *a, **kw)
+
+        monkeypatch.setattr("kb.compile.compiler.ingest_source", patched_ingest)
+
+        manifest_path = tmp_project / ".data" / "hashes-test.json"
+        manifest_path.parent.mkdir(exist_ok=True)
+        compile_wiki(incremental=False, raw_dir=tmp_project / "raw", manifest_path=manifest_path)
+
+        manifest = load_manifest(manifest_path)
+        # Hash in manifest should be pre-ingest (original file hash)
+        for key, val in manifest.items():
+            if "hash-test" in key:
+                assert val == expected_hash, (
+                    f"Manifest hash should be pre-ingest. Expected {expected_hash}, got {val}"
+                )
+                break
+
+
+class TestScanRawSourcesWarnsUnknownSubdir:
+    """compile/compiler.py scan_raw_sources: warns for unknown subdirectories."""
+
+    def test_unknown_subdir_emits_warning(self, tmp_path, caplog):
+        """scan_raw_sources must emit WARNING for unknown subdirectories."""
+        import logging
+
+        from kb.compile.compiler import scan_raw_sources
+
+        # Create a known dir and an unknown dir
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        (raw_dir / "unknown_type").mkdir()
+        (raw_dir / "unknown_type" / "file.md").write_text("content", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="kb.compile.compiler"):
+            scan_raw_sources(raw_dir=raw_dir)
+
+        assert any("unknown_type" in r.message for r in caplog.records), (
+            "Expected WARNING mentioning unknown subdir 'unknown_type'"
+        )

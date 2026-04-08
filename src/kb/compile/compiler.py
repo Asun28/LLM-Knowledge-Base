@@ -37,7 +37,11 @@ def _canonical_rel_path(source: Path, raw_dir: Path) -> str:
     try:
         return str(source.resolve().relative_to(raw_dir.resolve().parent)).replace("\\", "/")
     except ValueError:
-        return str(source).replace("\\", "/")
+        abs_path = str(source).replace("\\", "/")
+        logger.warning(
+            "Source %s is outside raw_dir parent; using absolute path as manifest key", abs_path
+        )
+        return abs_path
 
 
 def load_manifest(manifest_path: Path | None = None) -> dict[str, str]:
@@ -68,6 +72,7 @@ def scan_raw_sources(raw_dir: Path | None = None) -> list[Path]:
     """Find all source files in raw/ subdirectories.
 
     Skips .gitkeep files and the assets/ directory.
+    Warns about unknown subdirectories that are not indexed by any source type.
     """
     raw_dir = raw_dir or RAW_DIR
     sources = []
@@ -83,6 +88,21 @@ def scan_raw_sources(raw_dir: Path | None = None) -> list[Path]:
                 and f.name != ".gitkeep"
             ):
                 sources.append(f)
+
+    # Warn about unknown subdirectories not covered by any source type
+    known_dirs = {type_dir.name for type_dir in SOURCE_TYPE_DIRS.values()} | {"assets"}
+    if raw_dir.exists():
+        for subdir in raw_dir.iterdir():
+            if (
+                subdir.is_dir()
+                and subdir.name not in known_dirs
+                and not subdir.name.startswith(".")
+            ):
+                logger.warning(
+                    "Unknown subdirectory in raw/: %s — not indexed by any source type",
+                    subdir.name,
+                )
+
     return sources
 
 
@@ -273,6 +293,10 @@ def compile_wiki(
 
     for source in sources_to_process:
         try:
+            # Capture hash BEFORE ingest_source (file may be modified by ingest tools)
+            rel_path = _canonical_rel_path(source, raw_dir)
+            pre_hash = content_hash(source)
+
             ingest_result = ingest_source(source)
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
@@ -283,16 +307,17 @@ def compile_wiki(
             if ingest_result.get("duplicate"):
                 results["duplicates"] += 1
 
-            # Update manifest and save immediately (crash-safe)
-            rel_path = _canonical_rel_path(source, raw_dir)
-            manifest[rel_path] = content_hash(source)
+            # Store pre-ingest hash and save immediately (crash-safe)
+            manifest[rel_path] = pre_hash
             save_manifest(manifest, manifest_path)
         except Exception as e:
             results["errors"].append({"source": str(source), "error": str(e)})
 
-    # Save template hashes
-    manifest.update(_template_hashes())
-    save_manifest(manifest, manifest_path)
+    # Save template hashes (reload manifest first to preserve per-source hashes
+    # written during the loop, then merge template hashes)
+    current_manifest = load_manifest(manifest_path)
+    current_manifest.update(_template_hashes())
+    save_manifest(current_manifest, manifest_path)
 
     # Append to log
     append_wiki_log(
