@@ -78,8 +78,11 @@ class TestQueryEngine:
         }
         # limit is 50 chars — smaller than the page section header alone
         result = _build_query_context([big_page], max_chars=50)
-        assert result != "", "Must not return empty string when top page exceeds limit"
-        assert "big" in result.lower(), "Truncated fallback should contain page content"
+        context = result["context"]
+        assert context != "", "Must not return empty string when top page exceeds limit"
+        assert "big" in context.lower() or "No relevant" in context, (
+            "Fallback should contain page content or indicate no pages"
+        )
 
     def test_query_wiki_accepts_and_forwards_max_results(self, monkeypatch):
         """query_wiki must accept max_results and forward it to search_pages."""

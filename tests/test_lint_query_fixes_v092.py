@@ -164,12 +164,13 @@ def test_query_context_truncation_logging(caplog):
     with caplog.at_level(logging.DEBUG, logger="kb.query.engine"):
         result = _build_query_context(pages, max_chars=3000)
 
+    context = result["context"]
     # When all pages exceed limit the fallback truncates the top page — result is non-empty
-    assert result != "", "Must not return empty string when all pages exceed limit"
+    assert context != "", "Must not return empty string when all pages exceed limit"
     # The result is capped at max_chars
-    assert len(result) <= 3000, f"Result should be ≤3000 chars, got {len(result)}"
+    assert len(context) <= 3000, f"Result should be ≤3000 chars, got {len(context)}"
     # The second page (excluded-page) must not appear at all
-    assert "y" * 100 not in result, "Second page should not appear in fallback result"
+    assert "y" * 100 not in context, "Second page should not appear in fallback result"
 
     # Should have logged exclusion of pages
     assert any("excluded" in r.message.lower() for r in caplog.records), (

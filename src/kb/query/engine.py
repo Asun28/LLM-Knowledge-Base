@@ -66,8 +66,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
             # Blend: final = bm25 * (1 + weight * normalized_pagerank)
             pr = pagerank_scores.get(pages[i]["id"], 0.0)
             blended = score * (1 + PAGERANK_SEARCH_WEIGHT * pr)
-            pages[i]["score"] = round(blended, 4)
-            scored.append(pages[i])
+            scored.append({**pages[i], "score": round(blended, 4)})
 
     scored.sort(key=lambda p: p["score"], reverse=True)
     return scored[:max_results]
@@ -97,15 +96,18 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
         return {}
 
 
-def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> str:
+def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> dict:
     """Build context string from matching wiki pages for the LLM.
 
-    Truncates to max_chars to avoid exceeding the model's context window.
-    Pages are included in relevance order; partially-fitting pages are trimmed.
+    Returns:
+        dict with keys:
+            context: The formatted context string.
+            context_pages: List of page IDs actually included in context.
     """
     if not pages:
-        return "No relevant wiki pages found."
+        return {"context": "No relevant wiki pages found.", "context_pages": []}
     sections = []
+    context_pages = []
     total = 0
     skipped = 0
     for i, page in enumerate(pages):
@@ -125,8 +127,9 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
             else:
                 logger.debug("Page excluded from query context due to limit: %s", page["id"])
             skipped += 1
-            continue  # Try remaining pages (smaller ones may fit)
+            continue
         sections.append(section)
+        context_pages.append(page["id"])
         total += len(section)
     if skipped:
         logger.info(
@@ -139,18 +142,25 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     # returning an empty string (which would cause the LLM to hallucinate answers).
     if not sections and pages:
         top = pages[0]
-        section = (
+        header = (
             f"--- Page: {top['id']} (type: {top['type']}, "
             f"confidence: {top['confidence']}) ---\n"
-            f"Title: {top['title']}\n\n{top['content']}\n"
+            f"Title: {top['title']}\n\n"
         )
+        if max_chars <= len(header):
+            return {
+                "context": "No relevant wiki pages found.",
+                "context_pages": [],
+            }
+        section = header + top["content"]
         logger.warning(
             "All pages exceeded context limit (%d chars); truncating top page %s",
             max_chars,
             top["id"],
         )
         sections.append(section[:max_chars])
-    return "\n".join(sections)
+        context_pages.append(top["id"])
+    return {"context": "\n".join(sections), "context_pages": context_pages}
 
 
 def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> dict:
@@ -176,7 +186,8 @@ def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 1
         }
 
     # 2. Build context from matching pages
-    context = _build_query_context(matching_pages)
+    ctx = _build_query_context(matching_pages)
+    context = ctx["context"]
 
     # 3. Synthesize answer with LLM
     prompt = f"""You are answering a question using a knowledge wiki as your source.
@@ -212,4 +223,5 @@ INSTRUCTIONS:
         "answer": answer,
         "citations": citations,
         "source_pages": [p["id"] for p in matching_pages],
+        "context_pages": ctx["context_pages"],
     }

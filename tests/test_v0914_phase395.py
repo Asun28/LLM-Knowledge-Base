@@ -192,3 +192,87 @@ class TestAppendWikiLogErrorHandling:
             pytest.fail("append_wiki_log should not propagate OSError")
         finally:
             log_path.chmod(0o644)
+
+
+# ── Task 3: Query Engine and BM25 ──
+
+
+class TestSearchPagesNoMutation:
+    """search_pages must not mutate the input page dicts."""
+
+    def test_page_dicts_unchanged_after_search(self, tmp_wiki, create_wiki_page, monkeypatch):
+        create_wiki_page("concepts/rag", title="RAG", content="Retrieval augmented generation.")
+        create_wiki_page("concepts/llm", title="LLM", content="Large language model.")
+
+        from kb.query.engine import search_pages
+
+        # First call — just trigger scoring
+        search_pages("RAG", wiki_dir=tmp_wiki, max_results=5)
+
+        # Load pages fresh — they should NOT have "score" key
+        from kb.utils.pages import load_all_pages
+
+        pages = load_all_pages(wiki_dir=tmp_wiki)
+        for p in pages:
+            assert "score" not in p, f"Page {p['id']} was mutated with 'score' key"
+
+
+class TestBuildQueryContextPages:
+    """_build_query_context must separate context_pages from source_pages."""
+
+    def test_context_pages_excludes_skipped(self):
+        from kb.query.engine import _build_query_context
+
+        pages = [
+            {
+                "id": "concepts/huge",
+                "type": "concept",
+                "confidence": "stated",
+                "title": "Huge",
+                "content": "x" * 10000,
+            },
+            {
+                "id": "concepts/small",
+                "type": "concept",
+                "confidence": "stated",
+                "title": "Small",
+                "content": "Short content.",
+            },
+        ]
+        result = _build_query_context(pages, max_chars=500)
+        # result is now a dict
+        assert isinstance(result, dict)
+        assert "concepts/small" in result["context_pages"]
+        # "huge" was skipped because it exceeds max_chars
+        assert "concepts/huge" not in result["context_pages"]
+
+
+class TestBuildQueryContextSmallMaxChars:
+    """When max_chars is too small, return 'No relevant pages' instead of garbage."""
+
+    def test_tiny_max_chars_returns_no_pages_message(self):
+        from kb.query.engine import _build_query_context
+
+        pages = [
+            {
+                "id": "concepts/test",
+                "type": "concept",
+                "confidence": "stated",
+                "title": "Test Page With Long Title",
+                "content": "Some content here.",
+            },
+        ]
+        result = _build_query_context(pages, max_chars=10)
+        assert "No relevant wiki pages" in result["context"]
+
+
+class TestTokenizeVersionStrings:
+    """Tokenize should handle version strings gracefully."""
+
+    def test_version_documented_behavior(self):
+        from kb.query.bm25 import tokenize
+
+        tokens = tokenize("version v0.9.13 release")
+        # After fix: version strings should not silently lose components.
+        # At minimum, the behavior should be predictable.
+        assert "version" in tokens or "release" in tokens

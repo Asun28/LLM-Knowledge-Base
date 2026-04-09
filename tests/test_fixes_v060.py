@@ -230,8 +230,9 @@ def test_build_query_context_respects_limit():
     ]
 
     result = _build_query_context(pages, max_chars=3000)
-    assert len(result) <= 3100  # small allowance for truncation marker
-    assert "[...truncated]" in result or len(result) < 3000
+    context = result["context"]
+    assert len(context) <= 3100  # small allowance for truncation marker
+    assert "[...truncated]" in context or len(context) < 3000
 
 
 def test_build_query_context_all_fit():
@@ -247,14 +248,15 @@ def test_build_query_context_all_fit():
     ]
 
     result = _build_query_context(pages, max_chars=80_000)
-    assert "Page 1" in result
-    assert "[...truncated]" not in result
+    context = result["context"]
+    assert "Page 1" in context
+    assert "[...truncated]" not in context
 
 
 def test_build_query_context_empty():
     """_build_query_context returns fallback for empty list."""
     result = _build_query_context([])
-    assert "No relevant" in result
+    assert "No relevant" in result["context"]
 
 
 def test_query_context_max_chars_config():
