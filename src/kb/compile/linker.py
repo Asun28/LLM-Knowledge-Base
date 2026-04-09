@@ -11,7 +11,7 @@ from kb.utils.markdown import extract_wikilinks
 logger = logging.getLogger(__name__)
 
 # Regex for splitting frontmatter from body — correct for --- inside YAML values
-_FRONTMATTER_RE = re.compile(r"\A(---\n.*?\n---\n?)(.*)", re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 
 # Regex for fenced code blocks (``` ... ```) and inline code (`...`)
 _CODE_MASK_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)

@@ -31,7 +31,7 @@ def _feedback_lock(path: Path, timeout: float = 5.0):
             if time.monotonic() > deadline:
                 # Stale lock — force break
                 lock_path.unlink(missing_ok=True)
-                continue
+                break
             time.sleep(0.05)
     try:
         yield

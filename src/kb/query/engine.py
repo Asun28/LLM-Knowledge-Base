@@ -64,7 +64,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
     for i, score in enumerate(scores):
         if score > 0:
             # Blend: final = bm25 * (1 + weight * normalized_pagerank)
-            pr = pagerank_scores.get(pages[i]["id"], 0.0)
+            pr = pagerank_scores.get(pages[i]["id"].lower(), 0.0)
             blended = score * (1 + PAGERANK_SEARCH_WEIGHT * pr)
             scored.append({**pages[i], "score": round(blended, 4)})
 

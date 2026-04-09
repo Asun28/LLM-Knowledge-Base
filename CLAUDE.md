@@ -92,6 +92,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `load_all_pages(wiki_dir=None)` — In `kb.utils.pages`. Returns list of dicts. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
 - `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached. Use `_build_schema_cached(source_type)` for cached schema lookups (avoids rebuilding on every extraction call).
+- `query_wiki(question, wiki_dir=None, max_results=10)` — In `kb.query.engine`. Returns dict with `answer` (str), `sources` (list[str] citations), `context_pages` (list[str] page IDs included in context window), and `source_pages` (list[str] page IDs cited in answer). `context_pages` is empty list on no-match.
 - `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 
 ### Wiki Index Files
