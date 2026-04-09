@@ -71,7 +71,7 @@ def test_make_source_ref_forward_slashes(tmp_path):
 
 
 def test_make_source_ref_with_explicit_raw_dir(tmp_path):
-    """Passing raw_dir explicitly overrides the config default."""
+    """Passing raw_dir explicitly always produces a 'raw/...' prefix."""
     custom_raw = tmp_path / "custom_raw"
     (custom_raw / "videos").mkdir(parents=True)
     source = custom_raw / "videos" / "talk.md"
@@ -79,7 +79,7 @@ def test_make_source_ref_with_explicit_raw_dir(tmp_path):
 
     result = make_source_ref(source, raw_dir=custom_raw)
 
-    assert result == "custom_raw/videos/talk.md"
+    assert result == "raw/videos/talk.md"
 
 
 def test_make_source_ref_default_raw_dir(tmp_path):
