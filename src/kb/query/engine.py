@@ -172,7 +172,7 @@ def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 1
         max_results: Maximum number of pages to retrieve for context.
 
     Returns:
-        dict with keys: question, answer, citations, source_pages.
+        dict with keys: question, answer, citations, source_pages, context_pages.
     """
     # 1. Search for relevant pages
     matching_pages = search_pages(question, wiki_dir, max_results=max_results)
@@ -183,6 +183,7 @@ def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 1
             "answer": "No relevant pages found in the knowledge base for this question.",
             "citations": [],
             "source_pages": [],
+            "context_pages": [],
         }
 
     # 2. Build context from matching pages
