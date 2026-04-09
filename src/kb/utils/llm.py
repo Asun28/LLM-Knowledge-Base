@@ -70,7 +70,8 @@ def _make_api_call(kwargs: dict, model: str):
                 MAX_RETRIES + 1,
                 delay,
             )
-            time.sleep(delay)
+            if attempt < MAX_RETRIES:
+                time.sleep(delay)
 
         except anthropic.APIStatusError as e:
             if e.status_code in (500, 502, 503, 529):
@@ -84,7 +85,8 @@ def _make_api_call(kwargs: dict, model: str):
                     MAX_RETRIES + 1,
                     delay,
                 )
-                time.sleep(delay)
+                if attempt < MAX_RETRIES:
+                    time.sleep(delay)
             else:
                 raise LLMError(f"API error from {model}: {e.status_code} — {e.message}") from e
 
@@ -98,7 +100,8 @@ def _make_api_call(kwargs: dict, model: str):
                 MAX_RETRIES + 1,
                 delay,
             )
-            time.sleep(delay)
+            if attempt < MAX_RETRIES:
+                time.sleep(delay)
 
         except anthropic.APITimeoutError as e:
             last_error = e
@@ -110,7 +113,8 @@ def _make_api_call(kwargs: dict, model: str):
                 MAX_RETRIES + 1,
                 delay,
             )
-            time.sleep(delay)
+            if attempt < MAX_RETRIES:
+                time.sleep(delay)
 
     # Unreachable with valid config (MAX_RETRIES >= 0): range(MAX_RETRIES + 1)
     # ensures the loop always runs at least once and sets last_error.

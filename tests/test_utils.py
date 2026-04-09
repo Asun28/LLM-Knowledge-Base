@@ -27,7 +27,7 @@ from kb.utils.wiki_log import append_wiki_log
         ("multiple   spaces", "multiple-spaces"),
         ("trailing-dash-", "trailing-dash"),
         ("-leading-dash", "leading-dash"),
-        ("日本語テスト", "日本語テスト"),
+        ("日本語テスト", ""),  # non-ASCII chars stripped by re.ASCII flag
         ("mixed 123 numbers", "mixed-123-numbers"),
     ],
 )

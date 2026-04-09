@@ -33,12 +33,16 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
                 f.write("# Wiki Log\n\n")
         except FileExistsError:
             pass  # Another concurrent call created it first
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(entry)
-
-    log_stat = log_path.stat()
-    if log_stat.st_size > LOG_SIZE_WARNING_BYTES:
-        logger.warning(
-            "wiki/log.md is %.0f KB — consider archiving old entries",
-            log_stat.st_size / 1024,
-        )
+    try:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(entry)
+        log_stat = log_path.stat()
+        if log_stat.st_size > LOG_SIZE_WARNING_BYTES:
+            logger.warning(
+                "Wiki log %s is large (%d bytes > %d threshold). Consider archiving.",
+                log_path,
+                log_stat.st_size,
+                LOG_SIZE_WARNING_BYTES,
+            )
+    except OSError as e:
+        logger.warning("Failed to append to wiki log %s: %s", log_path, e)

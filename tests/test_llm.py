@@ -133,7 +133,7 @@ def test_call_llm_max_retries_exceeded(mock_get_client, mock_sleep):
         call_llm("Say hello")
 
     assert mock_client.messages.create.call_count == 4  # 1 initial + 3 retries
-    assert mock_sleep.call_count == 4
+    assert mock_sleep.call_count == 3  # sleeps only between attempts, not after the final one
 
 
 # ── Non-retryable APIStatusError ─────────────────────────────────
@@ -277,9 +277,9 @@ def test_call_llm_exponential_backoff(mock_get_client, mock_sleep):
     with pytest.raises(LLMError):
         call_llm("Say hello")
 
-    # Verify the exponential backoff delays: 1*2^0=1, 1*2^1=2, 1*2^2=4, 1*2^3=8
+    # Verify the exponential backoff delays: 1*2^0=1, 1*2^1=2, 1*2^2=4 (no sleep after final)
     delays = [call.args[0] for call in mock_sleep.call_args_list]
-    assert delays == [1.0, 2.0, 4.0, 8.0]
+    assert delays == [1.0, 2.0, 4.0]
 
 
 # ── System prompt forwarded ──────────────────────────────────────

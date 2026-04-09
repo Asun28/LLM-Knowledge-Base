@@ -13,7 +13,7 @@ def slugify(text: str) -> str:
     and lowercases. Returns empty string for all-punctuation input.
     """
     text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text, flags=re.ASCII)
     text = re.sub(r"[\s_]+", "-", text)
     return re.sub(r"-+", "-", text).strip("-")
 

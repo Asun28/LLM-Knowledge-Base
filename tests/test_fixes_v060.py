@@ -92,7 +92,7 @@ def test_call_llm_raises_after_max_retries(mock_get_client, mock_sleep):
 
     with pytest.raises(LLMError, match="after 3 retries"):
         call_llm("test prompt")
-    assert mock_sleep.call_count == 4  # 1 initial + 3 retries, each followed by sleep
+    assert mock_sleep.call_count == 3  # sleeps only between attempts, not after the final one
 
 
 @patch("kb.utils.llm.get_client")
