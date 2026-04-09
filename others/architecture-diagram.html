@@ -42,6 +42,7 @@
     color: #8b949e;
     margin-top: 4px;
   }
+  .title-block .subtitle strong { color: #c9d1d9; }
 
   /* ── Column Headers ── */
   .col-header {
@@ -93,8 +94,9 @@
 
   .card.gate { background: rgba(249, 117, 131, 0.12); border: 2px solid rgba(249, 117, 131, 0.5); text-align: center; padding: 10px; }
   .card.gate h3 { color: #f97583; font-size: 13px; }
-  .card.commit-barrier { background: rgba(249, 117, 131, 0.12); border: 2px solid rgba(249, 117, 131, 0.5); text-align: center; padding: 10px; }
-  .card.commit-barrier h3 { color: #f97583; font-size: 13px; }
+
+  .card.obsidian-card { background: rgba(179, 136, 255, 0.08); border: 1.5px solid rgba(179, 136, 255, 0.3); }
+  .card.obsidian-card h3 { color: #d2a8ff; }
 
   /* ── Main Grid ── */
   .grid-with-arrows {
@@ -227,7 +229,6 @@
   .v-arrow .v-line.dashed {
     background: repeating-linear-gradient(180deg, #e3b341 0px, #e3b341 5px, transparent 5px, transparent 9px);
   }
-  /* Upward arrowhead */
   .v-arrow .v-line.up::before {
     content: '';
     position: absolute;
@@ -239,7 +240,6 @@
     border-right: 5px solid transparent;
     border-bottom: 7px solid #e3b341;
   }
-  /* Downward arrowhead */
   .v-arrow .v-line.down::after {
     content: '';
     position: absolute;
@@ -273,7 +273,7 @@
   .tier-write { background: rgba(121, 192, 255, 0.15); color: #79c0ff; }
   .tier-orchestrate { background: rgba(210, 168, 255, 0.15); color: #d2a8ff; }
 
-  /* ── Italic tagline ── */
+  /* ── Taglines ── */
   .tagline { font-style: italic; font-size: 12px; color: #7ee787; margin-top: 8px; text-align: center; }
   .tagline.blue { color: #79c0ff; }
   .tagline.purple { color: #d2a8ff; }
@@ -335,6 +335,15 @@
     color: #79c0ff;
     font-weight: 600;
   }
+  .steps-list li .auto-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #7ee787;
+    background: rgba(126, 231, 135, 0.1);
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-left: 4px;
+  }
 
   /* ── Stat badge ── */
   .stat-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
@@ -364,6 +373,20 @@
   .cycle-step.lint { color: #e3b341; border-color: rgba(227,179,65,0.4); background: rgba(227,179,65,0.08); }
   .cycle-step.evolve { color: #7ee787; border-color: rgba(126,231,135,0.4); background: rgba(126,231,135,0.08); }
   .cycle-arrow { color: #484f58; font-size: 14px; display: flex; align-items: center; }
+
+  /* ── Auto badge ── */
+  .auto-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: #7ee787;
+    background: rgba(126, 231, 135, 0.1);
+    border: 1px solid rgba(126, 231, 135, 0.25);
+    padding: 2px 8px;
+    border-radius: 8px;
+    margin-left: 8px;
+  }
 </style>
 </head>
 <body>
@@ -372,8 +395,8 @@
      TITLE
      ════════════════════════════════════════════════════════ -->
 <div class="title-block">
-  <h1>LLM Knowledge Base <span class="version">v0.9.9</span></h1>
-  <div class="subtitle">Human curates sources. LLM compiles everything. A file-only, agent-native knowledge wiki.</div>
+  <h1>LLM Knowledge Base <span class="version">v0.9.14</span></h1>
+  <div class="subtitle"><strong>Fully automated.</strong> Human curates sources. Everything else runs without intervention &mdash; extraction, linking, quality checks, self-maintenance.</div>
   <div class="cycle-ring" style="justify-content: flex-start; margin-top: 12px;">
     <span class="cycle-step ingest">Ingest</span>
     <span class="cycle-arrow">&rarr;</span>
@@ -395,26 +418,26 @@
 
   <!-- ──────────────── COL 1: RAW SOURCES ──────────────── -->
   <div>
-    <div class="col-header raw">1. Raw Sources</div>
+    <div class="col-header raw">1. Raw Sources (Human)</div>
 
     <div class="card raw-main">
       <h3 class="mono">raw/</h3>
-      <div class="desc">Immutable source corpus. LLM reads but never modifies.</div>
+      <div class="desc">Immutable source corpus. The only thing humans touch. LLM reads but never modifies.</div>
     </div>
 
     <div class="card raw-item">
       <h3>Articles / Papers</h3>
-      <div class="desc">trafilatura, markitdown, docling, Obsidian Web Clipper</div>
+      <div class="desc">trafilatura, markitdown, docling, crwl, Obsidian Web Clipper</div>
     </div>
 
     <div class="card raw-item">
       <h3>Videos / Podcasts</h3>
-      <div class="desc">yt-dlp transcripts, audio extraction</div>
+      <div class="desc">yt-dlp transcripts, audio transcription</div>
     </div>
 
     <div class="card raw-item">
       <h3>Books / Datasets</h3>
-      <div class="desc">Structured parsing, CSV/JSON ingestion</div>
+      <div class="desc">Structured parsing, schema documentation</div>
     </div>
 
     <div class="card raw-item">
@@ -422,15 +445,15 @@
       <div class="desc">Code docs, chat exports, discussions</div>
     </div>
 
-    <div class="tagline red">Immutable source of truth</div>
+    <div class="tagline red">Only human-touched layer</div>
 
     <div class="stat-row" style="margin-top: 12px;">
-      <span class="stat">9 source types</span>
+      <span class="stat">8 source types</span>
       <span class="stat">10 templates</span>
     </div>
   </div>
 
-  <!-- ──── Arrow 1→2: Raw → Compile ──── -->
+  <!-- ──── Arrow 1 to 2: Raw to Compile ──── -->
   <div class="arrow-spacer">
     <div class="h-arrow forward blue">
       <div class="arrow-label" style="color: #79c0ff;">ingest</div>
@@ -445,25 +468,25 @@
 
   <!-- ──────────────── COL 2: COMPILE & STAGE ──────────────── -->
   <div>
-    <div class="col-header compile">2. Compile &amp; Stage</div>
+    <div class="col-header compile">2. Compile &amp; Stage <span class="auto-badge">auto</span></div>
 
     <div class="card compile-main">
       <h3>Ingest Pipeline</h3>
-      <div class="desc">Hash-based incremental detection. Extraction via YAML templates + LLM.</div>
+      <div class="desc">SHA-256 hash detection. Template-driven extraction via LLM. Duplicate dedup.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-write">write: Sonnet</span>
+        <span class="tier-badge tier-write">write: Sonnet 4.6</span>
       </div>
     </div>
 
     <div class="card compile-steps">
-      <h3>Incremental Compilation</h3>
+      <h3>Automated Compilation</h3>
       <ol class="steps-list">
-        <li data-n="1">Detect changes (content hash vs manifest)</li>
-        <li data-n="2">Extract entities, concepts, summaries</li>
-        <li data-n="3">Dedup check (hash-based)</li>
-        <li data-n="4">Create/update wiki pages</li>
-        <li data-n="5">Inject retroactive wikilinks</li>
-        <li data-n="6">Track cascade affected pages</li>
+        <li data-n="1">Detect changes (content hash vs manifest) <span class="auto-tag">auto</span></li>
+        <li data-n="2">Extract entities, concepts, summaries <span class="auto-tag">auto</span></li>
+        <li data-n="3">Dedup check (SHA-256 hash) <span class="auto-tag">auto</span></li>
+        <li data-n="4">Create/update wiki pages <span class="auto-tag">auto</span></li>
+        <li data-n="5">Inject retroactive wikilinks <span class="auto-tag">auto</span></li>
+        <li data-n="6">Track cascade affected pages <span class="auto-tag">auto</span></li>
       </ol>
     </div>
 
@@ -477,10 +500,10 @@
       <div class="desc">Manifest saved per source (crash-safe)</div>
     </div>
 
-    <div class="tagline blue">Silent, smart backend</div>
+    <div class="tagline blue">Zero human intervention</div>
   </div>
 
-  <!-- ──── Arrow 2→3: Compile → Wiki ──── -->
+  <!-- ──── Arrow 2 to 3: Compile to Wiki ──── -->
   <div class="arrow-spacer">
     <div class="h-arrow forward green">
       <div class="arrow-label" style="color: #7ee787;">publish</div>
@@ -495,41 +518,42 @@
 
   <!-- ──────────────── COL 3: PUBLISHED WIKI ──────────────── -->
   <div>
-    <div class="col-header wiki">3. Published Wiki Truth</div>
+    <div class="col-header wiki">3. Published Wiki <span class="auto-badge">auto</span></div>
 
     <div class="card wiki-main">
       <h3 class="mono">wiki/</h3>
-      <div class="desc">100% Local File-Based Truth</div>
+      <div class="desc">100% markdown. No database. Open in Obsidian for visual graph.</div>
       <div class="stat-row">
         <span class="stat">5 page types</span>
         <span class="stat">5 index files</span>
+        <span class="stat">Obsidian-compatible</span>
       </div>
     </div>
 
     <div class="card wiki-layer">
       <h3>Semantic Layer</h3>
-      <div class="desc">entities/, concepts/, comparisons/, synthesis/, summaries/</div>
+      <div class="desc">entities/ &middot; concepts/ &middot; comparisons/ &middot; synthesis/ &middot; summaries/</div>
     </div>
 
     <div class="card wiki-layer">
-      <h3>Retrieval Substrate</h3>
-      <div class="desc">BM25 ranking + PageRank blending. Title-boosted search. No vector DB.</div>
+      <h3>Retrieval (No Vectors)</h3>
+      <div class="desc">BM25 ranking + PageRank blending. Title-boosted search. 80K context assembly.</div>
     </div>
 
     <div class="card wiki-layer">
       <h3>Knowledge Graph</h3>
-      <div class="desc">PageRank, betweenness centrality, Mermaid export, auto-pruning</div>
+      <div class="desc">NetworkX graph from wikilinks. PageRank, betweenness centrality, Mermaid export.</div>
     </div>
 
     <div class="card wiki-layer">
       <h3>Trace Artifacts</h3>
-      <div class="desc">index.md, _sources.md, _categories.md, log.md, contradictions.md</div>
+      <div class="desc">index.md &middot; _sources.md &middot; _categories.md &middot; log.md &middot; contradictions.md</div>
     </div>
 
-    <div class="tagline">No Vector DB needed</div>
+    <div class="tagline">No vectors. No embeddings. Just markdown.</div>
   </div>
 
-  <!-- ──── Arrow 3→4: Wiki → Runtime ──── -->
+  <!-- ──── Arrow 3 to 4: Wiki to Runtime ──── -->
   <div class="arrow-spacer">
     <div class="h-arrow forward purple">
       <div class="arrow-label" style="color: #d2a8ff;">search</div>
@@ -552,71 +576,64 @@
     <div class="col-header runtime">4. Agent Runtime &amp; Output</div>
 
     <div class="card runtime-main">
-      <h3>Claude Code</h3>
-      <div class="desc">The Runtime Engine. Human curates, LLM executes.</div>
+      <h3>Claude Code + MCP Server</h3>
+      <div class="desc">25 tools. Natural language interface. No API key needed with Claude Code Max.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-scan">scan: Haiku</span>
-        <span class="tier-badge tier-write">write: Sonnet</span>
-        <span class="tier-badge tier-orchestrate">orch: Opus</span>
+        <span class="tier-badge tier-scan">scan: Haiku 4.5</span>
+        <span class="tier-badge tier-write">write: Sonnet 4.6</span>
+        <span class="tier-badge tier-orchestrate">orch: Opus 4.6</span>
       </div>
     </div>
 
     <div class="card runtime-inner">
-      <h3>MCP Server (Front Controller)</h3>
-      <div class="desc">25 tools across 5 modules. Governs all ingest, query, lint, evolve workflows.</div>
+      <h3>MCP Server (25 Tools)</h3>
+      <div class="desc">Core (ingest, query, compile) &middot; Browse (search, read, list) &middot; Health (lint, evolve, drift) &middot; Quality (review, refine, feedback)</div>
       <div class="desc mono" style="margin-top: 4px; color: #d2a8ff;">app &middot; core &middot; browse &middot; health &middot; quality</div>
     </div>
 
     <div class="card runtime-inner">
       <h3>Grounded Query</h3>
-      <div class="desc">BM25 + PageRank + trust scores. Multi-page context assembly. Citation-backed answers.</div>
+      <div class="desc">BM25 + PageRank + trust scores. Multi-page context assembly. Inline citation-backed answers.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-orchestrate">orchestrate: Opus</span>
+        <span class="tier-badge tier-orchestrate">orchestrate: Opus 4.6</span>
       </div>
     </div>
 
     <div class="card runtime-inner">
       <h3>Actor-Critic Review</h3>
-      <div class="desc">Self-refine on compile. Wiki-reviewer agent. Max 2 refinement rounds.</div>
+      <div class="desc">Self-refine on compile. Wiki-reviewer agent. 6-item checklist. Max 2 refinement rounds.</div>
     </div>
 
-    <div class="card commit-barrier">
-      <h3>Citation Barrier (Answer-Source Trace)</h3>
-      <div class="desc">All claims traced to raw/ sources. Unsourced claims flagged.</div>
+    <div class="card obsidian-card">
+      <h3>Obsidian Integration</h3>
+      <div class="desc">Open wiki/ as vault. Visual knowledge graph. Dataview queries. Wikilink navigation.</div>
     </div>
 
-    <div class="tagline purple">Truth contract enforced</div>
+    <div class="tagline purple">Talk naturally, get cited answers</div>
   </div>
 
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     VERTICAL ARROWS: Main Grid → Support Layer
+     VERTICAL ARROWS: Main Grid to Support Layer
      ════════════════════════════════════════════════════════ -->
 <div class="vertical-arrows-row">
-  <!-- col1: raw — empty -->
   <div class="v-arrow-cell"></div>
-  <!-- spacer -->
   <div class="v-arrow-cell"></div>
-  <!-- col2: compile — lint feeds back -->
   <div class="v-arrow-cell">
     <div class="v-arrow">
       <div class="v-line dashed up"></div>
       <span class="v-label">lint fixes</span>
     </div>
   </div>
-  <!-- spacer -->
   <div class="v-arrow-cell"></div>
-  <!-- col3: wiki — verdicts feed in -->
   <div class="v-arrow-cell">
     <div class="v-arrow">
       <div class="v-line dashed up"></div>
       <span class="v-label">verdicts</span>
     </div>
   </div>
-  <!-- spacer -->
   <div class="v-arrow-cell"></div>
-  <!-- col4: runtime — feedback comes down -->
   <div class="v-arrow-cell">
     <div class="v-arrow">
       <div class="v-line dashed down"></div>
@@ -629,24 +646,24 @@
      SUPPORT LAYER
      ════════════════════════════════════════════════════════ -->
 <div class="support-layer">
-  <div class="layer-title">Support Layer: Continuous Learning &amp; Governance</div>
+  <div class="layer-title">Support Layer: Self-Maintaining Quality System <span class="auto-badge" style="font-size: 9px;">fully automated</span></div>
   <div class="support-grid">
 
     <div class="support-card">
       <h3>Feedback &amp; Trust</h3>
       <div class="desc">
-        Query feedback store with weighted Bayesian trust scoring. "Wrong" penalized 2&times; vs "incomplete". Reliability map. Duplicate citation dedup. Flagged pages surfaced in evolve.
+        Query feedback with weighted Bayesian trust scoring. "Wrong" penalized 2&times; vs "incomplete". Reliability map. Low-trust pages auto-flagged in lint.
       </div>
       <div class="stat-row">
         <span class="stat">10k entry cap</span>
-        <span class="stat">feedback + verdicts</span>
+        <span class="stat">atomic writes</span>
       </div>
     </div>
 
     <div class="support-card">
       <h3>Quality System</h3>
       <div class="desc">
-        Mechanical lint (orphans, dead links, staleness, cycles). Semantic lint (fidelity, consistency, completeness). Persistent verdict storage with audit trail. Weekly quality trends.
+        8 mechanical lint checks (orphans, dead links, staleness, stubs, cycles, frontmatter, coverage, trust). Semantic lint (fidelity, consistency). Persistent verdicts with audit trail. Weekly trends.
       </div>
       <div class="stat-row">
         <span class="stat">lint --fix</span>
@@ -658,7 +675,7 @@
     <div class="support-card">
       <h3>Evolution &amp; Drift</h3>
       <div class="desc">
-        Gap analysis. Content drift detection (hash-based). Stub detection (&lt;100 chars). Low-trust page surfacing. Evolve recommendations for enrichment.
+        Gap analysis. Content drift detection (hash-based). Stub detection (&lt;100 chars). Connection opportunities. Evolve recommendations for enrichment.
       </div>
       <div class="stat-row">
         <span class="stat">detect_drift</span>
@@ -698,16 +715,16 @@
     </div>
     <div class="legend-item">
       <span class="legend-dot green"></span>
-      Verified Knowledge Truth
+      Verified Knowledge
     </div>
   </div>
 
   <div style="flex: 1;"></div>
 
   <div class="credits">
-    Built for structured knowledge, not RAG. Not just another vector wrapper.<br>
+    Fully automated. Compile, don't retrieve. Not just another vector wrapper.<br>
     Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a>
-    &middot; 550 tests &middot; 26 MCP tools &middot; 12 modules
+    &middot; 692 tests &middot; 25 MCP tools &middot; 12 modules
   </div>
 </div>
 
