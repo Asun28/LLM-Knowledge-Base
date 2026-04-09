@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Knowledge Base - Quickstart with Obsidian</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --bg-2: #12121a;
+    --bg-3: #1a1a26;
+    --surface: #1e1e2e;
+    --surface-hover: #252538;
+    --border: #2a2a3d;
+    --border-bright: #3d3d5c;
+    --text: #e8e8f0;
+    --text-muted: #8888a8;
+    --text-dim: #5c5c78;
+    --blue: #6c8aff;
+    --blue-glow: rgba(108, 138, 255, 0.15);
+    --purple: #b388ff;
+    --purple-glow: rgba(179, 136, 255, 0.12);
+    --green: #69f0ae;
+    --green-glow: rgba(105, 240, 174, 0.12);
+    --orange: #ffb74d;
+    --orange-glow: rgba(255, 183, 77, 0.12);
+    --pink: #f48fb1;
+    --cyan: #80deea;
+    --gradient-1: linear-gradient(135deg, #6c8aff 0%, #b388ff 100%);
+    --gradient-2: linear-gradient(135deg, #69f0ae 0%, #80deea 100%);
+    --gradient-3: linear-gradient(135deg, #f48fb1 0%, #ffb74d 100%);
+    --radius: 12px;
+    --radius-lg: 20px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.3);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+
+  /* ── Hero ───────────────────────────────────── */
+  .hero {
+    text-align: center;
+    padding: 5rem 1.5rem 4rem;
+    background: radial-gradient(ellipse at 50% 0%, rgba(108,138,255,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 50%, rgba(179,136,255,0.05) 0%, transparent 50%);
+  }
+  .hero-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--blue);
+    background: var(--blue-glow);
+    padding: 0.4em 1em;
+    border-radius: 20px;
+    border: 1px solid rgba(108,138,255,0.2);
+    margin-bottom: 1.5rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 1rem;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-sub {
+    font-size: 1.15rem;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto 2.5rem;
+  }
+
+  /* ── Flow Diagram ───────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .flow-node {
+    padding: 0.65rem 1.2rem;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  .flow-node.src { background: var(--surface); border: 1px solid var(--border); }
+  .flow-node.compile { background: rgba(105,240,174,0.1); border: 1px solid rgba(105,240,174,0.25); color: var(--green); }
+  .flow-node.wiki { background: rgba(108,138,255,0.1); border: 1px solid rgba(108,138,255,0.25); color: var(--blue); }
+  .flow-node.obsidian { background: rgba(179,136,255,0.1); border: 1px solid rgba(179,136,255,0.25); color: var(--purple); }
+  .flow-arrow { color: var(--text-dim); font-size: 1.4rem; }
+
+  /* ── Sections ───────────────────────────────── */
+  section { padding: 3.5rem 0; }
+  section + section { border-top: 1px solid var(--border); }
+
+  .section-label {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+  }
+  .section-label .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 6px;
+    font-size: 0.7rem; margin-right: 0.4rem;
+  }
+  .section-label .num.blue { background: var(--blue-glow); color: var(--blue); }
+  .section-label .num.green { background: var(--green-glow); color: var(--green); }
+  .section-label .num.purple { background: var(--purple-glow); color: var(--purple); }
+  .section-label .num.orange { background: var(--orange-glow); color: var(--orange); }
+
+  h2 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 1.25rem;
+    line-height: 1.3;
+  }
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+  }
+  p { margin-bottom: 1rem; color: var(--text-muted); }
+  p strong { color: var(--text); }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 1.5rem; margin-bottom: 1rem; color: var(--text-muted); }
+  li { margin-bottom: 0.4rem; }
+  li strong { color: var(--text); }
+
+  /* ── Code ────────────────────────────────────── */
+  code {
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.85em;
+    background: var(--bg-3);
+    padding: 0.15em 0.45em;
+    border-radius: 5px;
+    color: var(--cyan);
+  }
+  pre {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+    font-size: 0.85em;
+    line-height: 1.65;
+  }
+  pre code { background: none; padding: 0; color: var(--text); }
+
+  /* ── Cards ───────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .card:hover {
+    border-color: var(--border-bright);
+    box-shadow: var(--shadow);
+  }
+  .card-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    margin-bottom: 0.75rem;
+  }
+  .card-icon.blue { background: var(--blue-glow); }
+  .card-icon.green { background: var(--green-glow); }
+  .card-icon.purple { background: var(--purple-glow); }
+  .card-icon.orange { background: var(--orange-glow); }
+  .card-icon.pink { background: rgba(244,143,177,0.12); }
+  .card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--text); }
+  .card p:last-child { margin-bottom: 0; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ── Feature card (large) ────────────────────── */
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    margin-bottom: 1.25rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .feature-card.blue-top::before { background: var(--gradient-1); }
+  .feature-card.green-top::before { background: var(--gradient-2); }
+  .feature-card.pink-top::before { background: var(--gradient-3); }
+  .feature-card .tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.3em 0.7em;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+  }
+  .feature-card .tag.green { background: var(--green-glow); color: var(--green); }
+  .feature-card .tag.blue { background: var(--blue-glow); color: var(--blue); }
+  .feature-card .tag.purple { background: var(--purple-glow); color: var(--purple); }
+  .feature-card h3 { margin-top: 0; font-size: 1.15rem; }
+
+  /* ── Steps ───────────────────────────────────── */
+  .steps { counter-reset: step; }
+  .step {
+    display: flex;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+    align-items: flex-start;
+  }
+  .step-dot {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.85rem;
+    counter-increment: step;
+    margin-top: 0.1rem;
+  }
+  .step-dot.blue { background: var(--blue-glow); color: var(--blue); border: 1px solid rgba(108,138,255,0.3); }
+  .step-dot.green { background: var(--green-glow); color: var(--green); border: 1px solid rgba(105,240,174,0.3); }
+  .step-dot.purple { background: var(--purple-glow); color: var(--purple); border: 1px solid rgba(179,136,255,0.3); }
+  .step-content h4 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .step-content p { font-size: 0.92rem; }
+
+  /* ── Tables ──────────────────────────────────── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+  th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 0.7rem 1rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface-hover); }
+  td strong { color: var(--text); }
+  td code { font-size: 0.82em; }
+
+  /* ── Callouts ────────────────────────────────── */
+  .callout {
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    font-size: 0.92rem;
+  }
+  .callout-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.15rem; }
+  .callout p { margin-bottom: 0; }
+  .callout.tip { background: var(--blue-glow); border: 1px solid rgba(108,138,255,0.2); }
+  .callout.warn { background: var(--orange-glow); border: 1px solid rgba(255,183,77,0.2); }
+  .callout.success { background: var(--green-glow); border: 1px solid rgba(105,240,174,0.2); }
+
+  /* ── Ops Cycle ───────────────────────────────── */
+  .cycle {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin: 2rem 0;
+    flex-wrap: wrap;
+  }
+  .cycle-item {
+    text-align: center;
+    padding: 1rem 0.5rem;
+    flex: 1;
+    min-width: 120px;
+    position: relative;
+  }
+  .cycle-item::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 50%;
+    transform: translateY(-50%);
+    width: 0; height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: 8px solid var(--border-bright);
+  }
+  .cycle-item:last-child::after { display: none; }
+  .cycle-icon {
+    width: 48px; height: 48px;
+    border-radius: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.3rem;
+    margin-bottom: 0.5rem;
+  }
+  .cycle-name { font-weight: 700; font-size: 0.85rem; margin-bottom: 0.25rem; }
+  .cycle-desc { font-size: 0.72rem; color: var(--text-dim); line-height: 1.4; }
+
+  /* ── Footer ──────────────────────────────────── */
+  .footer {
+    text-align: center;
+    padding: 3rem 0;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  .footer a { color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════ HERO -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-badge">Quickstart Guide</div>
+    <h1>Fully Automated Knowledge Wiki<br>with Claude + Obsidian</h1>
+    <p class="hero-sub">Drop a source in. Everything else is automatic — Claude extracts entities, builds interlinked pages, injects wikilinks, tracks trust scores, and self-maintains. Browse it all in Obsidian.</p>
+    <div class="flow">
+      <span class="flow-node src">raw/ sources</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-node compile">Claude compiles</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-node wiki">wiki/ pages</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-node obsidian">Obsidian graph</span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+<!-- ════════════════════════════════════════════ WHY -->
+<section>
+  <div class="section-label"><span class="num blue">&#x2605;</span> Why This Exists</div>
+  <h2>Compile, don't retrieve</h2>
+  <p>Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a> — then <strong>fully automated</strong>. Karpathy described a pattern where you manually ask an LLM to compile pages. This system automates the entire pipeline.</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-icon orange">&#x1f504;</div>
+      <h4>RAG retrieves chunks</h4>
+      <p>Vector embeddings you can't read. Top-K results with no relationship awareness. No way to know what's missing.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon green">&#x1f4d6;</div>
+      <h4>This compiles knowledge</h4>
+      <p>Markdown pages you can browse. Entities linked by wikilinks forming a graph. Lint catches contradictions. Evolve finds gaps.</p>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Karpathy's pattern (manual)</th><th>This project (fully automated)</th></tr></thead>
+      <tbody>
+        <tr><td>Manually ask LLM to write pages</td><td><strong>One command</strong> &rarr; extraction, page creation, linking, indexing</td></tr>
+        <tr><td>No change detection</td><td><strong>Incremental compile</strong> &mdash; SHA-256 hashes, only reprocesses what's new</td></tr>
+        <tr><td>No cross-linking</td><td><strong>Retroactive wikilink injection</strong> into existing pages</td></tr>
+        <tr><td>No quality checks</td><td><strong>Self-healing</strong> &mdash; lint, trust scoring, contradiction detection</td></tr>
+        <tr><td>No gap awareness</td><td><strong>Evolve</strong> &mdash; automatically identifies missing coverage</td></tr>
+        <tr><td>Text-only</td><td><strong>Obsidian</strong> &mdash; visual knowledge graph for free</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ SETUP -->
+<section>
+  <div class="section-label"><span class="num blue">1</span> Getting Started</div>
+  <h2>Setup in 5 minutes</h2>
+
+  <div class="grid-2">
+    <div>
+      <h3>Prerequisites</h3>
+      <ul>
+        <li><strong>Python 3.12+</strong></li>
+        <li><strong><a href="https://obsidian.md/">Obsidian</a></strong> (free)</li>
+        <li><strong>Claude Code</strong> or an Anthropic API key</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Install</h3>
+      <pre><code>git clone https://github.com/Asun28/LLM-Knowledge-Base.git
+cd LLM-Knowledge-Base
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+kb --version</code></pre>
+    </div>
+  </div>
+
+  <div class="callout tip">
+    <span class="callout-icon">&#x1f4a1;</span>
+    <p><strong>Claude Code Max users:</strong> No API key needed. MCP tools use Claude Code as the LLM by default. Otherwise, copy <code>.env.example</code> to <code>.env</code> and add your <code>ANTHROPIC_API_KEY</code>.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ OBSIDIAN -->
+<section>
+  <div class="section-label"><span class="num purple">2</span> Visual UI</div>
+  <h2>Open wiki/ in Obsidian</h2>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-dot purple">1</div>
+      <div class="step-content">
+        <h4>Open Obsidian</h4>
+        <p>Download from <a href="https://obsidian.md/">obsidian.md</a> if you haven't already.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-dot purple">2</div>
+      <div class="step-content">
+        <h4>Open folder as vault</h4>
+        <p>Select the <code>wiki/</code> directory inside the project. Not the project root.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-dot purple">3</div>
+      <div class="step-content">
+        <h4>Press Ctrl+G to see the graph</h4>
+        <p>Every wiki page and its wikilinks are visualized instantly. Clusters show related concepts, orphan nodes show disconnected pages.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-icon">&#x26a0;&#xfe0f;</span>
+    <p><strong>Important:</strong> Open <code>wiki/</code> as the vault, not the project root. This keeps raw sources and code out of Obsidian's view.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ FIRST INGEST -->
+<section>
+  <div class="section-label"><span class="num green">3</span> Try It</div>
+  <h2>Your first ingest</h2>
+  <p>One trigger. Everything else is automatic — extraction, page creation, cross-linking, indexing, and quality tracking.</p>
+
+  <div class="feature-card green-top">
+    <span class="tag green">Recommended</span>
+    <h3>Claude Code (natural language)</h3>
+    <p>Just tell Claude what to do:</p>
+    <pre><code>"Ingest raw/articles/rag.md into my wiki"</code></pre>
+    <p>Claude <strong>automatically</strong>: extracts entities &amp; concepts, creates wiki pages with frontmatter, injects wikilinks into existing pages, updates all indexes, and flags affected pages for cascade review. Switch to Obsidian to see the graph grow.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="feature-card blue-top">
+      <span class="tag blue">CLI</span>
+      <h3>Command line</h3>
+      <pre><code># Grab an article
+trafilatura -u URL > raw/articles/article.md
+
+# Ingest it
+kb ingest raw/articles/article.md --type article</code></pre>
+    </div>
+    <div class="feature-card pink-top">
+      <span class="tag purple">One-shot</span>
+      <h3>URL to wiki in one step</h3>
+      <pre><code>"Save this URL to my knowledge base:
+ https://example.com/article"</code></pre>
+      <p>Fetches, saves to <code>raw/</code>, and creates all wiki pages in a single call.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ FIVE OPS -->
+<section>
+  <div class="section-label"><span class="num orange">4</span> Fully Automated Cycle</div>
+  <h2>The five operations</h2>
+  <p>A continuous, self-maintaining feedback loop — each operation feeds into the next, all fully automated:</p>
+
+  <div class="cycle">
+    <div class="cycle-item">
+      <div class="cycle-icon" style="background:var(--green-glow);">&#x1f4e5;</div>
+      <div class="cycle-name">Ingest</div>
+      <div class="cycle-desc">Extract entities, concepts, claims from raw sources</div>
+    </div>
+    <div class="cycle-item">
+      <div class="cycle-icon" style="background:var(--blue-glow);">&#x2699;&#xfe0f;</div>
+      <div class="cycle-name">Compile</div>
+      <div class="cycle-desc">Batch process all new or changed sources</div>
+    </div>
+    <div class="cycle-item">
+      <div class="cycle-icon" style="background:var(--purple-glow);">&#x1f50d;</div>
+      <div class="cycle-name">Query</div>
+      <div class="cycle-desc">BM25 + PageRank search, synthesize answers</div>
+    </div>
+    <div class="cycle-item">
+      <div class="cycle-icon" style="background:var(--orange-glow);">&#x1f9f9;</div>
+      <div class="cycle-name">Lint</div>
+      <div class="cycle-desc">Dead links, orphans, staleness, frontmatter checks</div>
+    </div>
+    <div class="cycle-item">
+      <div class="cycle-icon" style="background:rgba(244,143,177,0.12);">&#x1f331;</div>
+      <div class="cycle-name">Evolve</div>
+      <div class="cycle-desc">Gap analysis, missing coverage, connection suggestions</div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Operation</th><th>Command</th><th>What to look for in Obsidian</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Ingest</strong></td><td><code>kb ingest &lt;file&gt;</code></td><td>New pages in entities/, concepts/, summaries/</td></tr>
+        <tr><td><strong>Compile</strong></td><td><code>kb compile</code></td><td>Multiple new pages from batch processing</td></tr>
+        <tr><td><strong>Query</strong></td><td><code>kb query "..."</code></td><td>Answer with citations to wiki page IDs</td></tr>
+        <tr><td><strong>Lint</strong></td><td><code>kb lint</code></td><td>Orphan nodes in graph (no connections)</td></tr>
+        <tr><td><strong>Evolve</strong></td><td><code>kb evolve</code></td><td>Suggested new pages and connections</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ OBSIDIAN TIPS -->
+<section>
+  <div class="section-label"><span class="num purple">5</span> Obsidian</div>
+  <h2>Obsidian tips &amp; plugins</h2>
+
+  <h3>Graph view</h3>
+  <p>Press <code>Ctrl+G</code> / <code>Cmd+G</code> to open the knowledge graph:</p>
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-icon blue">&#x1f310;</div>
+      <h4>Clusters</h4>
+      <p>Related concepts connected by wikilinks form visual groups.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon orange">&#x26aa;</div>
+      <h4>Orphans</h4>
+      <p>Disconnected nodes. <code>kb lint</code> flags these for attention.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon green">&#x2b50;</div>
+      <h4>Hubs</h4>
+      <p>Well-connected entities with high PageRank — your core concepts.</p>
+    </div>
+  </div>
+
+  <h3>Recommended settings</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Setting</th><th>Location</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Default new file location</td><td>Files &amp; Links</td><td><code>summaries/</code></td></tr>
+        <tr><td>Use wikilinks</td><td>Files &amp; Links</td><td>ON</td></tr>
+        <tr><td>Detect all file extensions</td><td>Files &amp; Links</td><td>OFF</td></tr>
+        <tr><td>Excluded files</td><td>Files &amp; Links</td><td><code>_sources.md, _categories.md</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Recommended plugins</h3>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-icon purple">&#x1f4ca;</div>
+      <h4>Dataview</h4>
+      <p>Query pages by frontmatter. Filter by confidence, type, source, or date.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon blue">&#x1f578;&#xfe0f;</div>
+      <h4>Graph Analysis</h4>
+      <p>Betweenness centrality and PageRank — mirrors <code>kb_graph_viz</code>.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon green">&#x1f4c2;</div>
+      <h4>Breadcrumbs</h4>
+      <p>Visual hierarchy navigation built from wikilinks.</p>
+    </div>
+    <div class="card">
+      <div class="card-icon orange">&#x1f553;</div>
+      <h4>Recent Files</h4>
+      <p>Quick sidebar access to newly ingested pages.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ DATAVIEW -->
+<section>
+  <div class="section-label"><span class="num blue">6</span> Power User</div>
+  <h2>Dataview query examples</h2>
+  <p>Install the Dataview plugin, then create query pages in your vault:</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>Speculative claims</h4>
+      <pre><code>```dataview
+TABLE source, updated
+FROM ""
+WHERE confidence = "speculative"
+SORT updated DESC
+```</code></pre>
+    </div>
+    <div class="card">
+      <h4>Recent entities</h4>
+      <pre><code>```dataview
+TABLE title, confidence, updated
+FROM "entities"
+SORT updated DESC
+LIMIT 20
+```</code></pre>
+    </div>
+    <div class="card">
+      <h4>Pages from a source</h4>
+      <pre><code>```dataview
+TABLE title, type
+FROM ""
+WHERE contains(source,
+  "raw/articles/rag.md")
+```</code></pre>
+    </div>
+    <div class="card">
+      <h4>Stale pages</h4>
+      <pre><code>```dataview
+TABLE title, updated
+FROM ""
+WHERE updated < date(today) - dur(90d)
+SORT updated ASC
+```</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ DAILY -->
+<section>
+  <div class="section-label"><span class="num green">7</span> Workflow</div>
+  <h2>Daily routine</h2>
+
+  <div class="grid-2">
+    <div class="feature-card green-top">
+      <span class="tag green">Every day</span>
+      <h3>Grow</h3>
+      <ol>
+        <li>Find an interesting article, paper, or video</li>
+        <li>Save to <code>raw/</code> (trafilatura, crwl, yt-dlp)</li>
+        <li>Ingest via Claude Code or CLI</li>
+        <li>Open Obsidian — browse new pages, watch graph grow</li>
+      </ol>
+    </div>
+    <div class="feature-card blue-top">
+      <span class="tag blue">Every week</span>
+      <h3>Maintain</h3>
+      <ol>
+        <li><code>kb lint</code> — fix dead links, stale pages</li>
+        <li><code>kb evolve</code> — find gaps and missing connections</li>
+        <li>Browse Obsidian graph for emerging clusters</li>
+        <li><code>kb query</code> — test cross-source synthesis</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ MCP REF -->
+<section>
+  <div class="section-label"><span class="num orange">8</span> Reference</div>
+  <h2>Claude Code MCP commands</h2>
+  <p>With the MCP server configured, just talk naturally:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>What you want</th><th>What to say</th></tr></thead>
+      <tbody>
+        <tr><td>Ingest a file</td><td><code>"Ingest raw/articles/file.md into the wiki"</code></td></tr>
+        <tr><td>Ingest a URL</td><td><code>"Save this URL to my knowledge base: ..."</code></td></tr>
+        <tr><td>Ask a question</td><td><code>"What does my wiki say about transformers?"</code></td></tr>
+        <tr><td>Search pages</td><td><code>"Search my wiki for attention mechanisms"</code></td></tr>
+        <tr><td>Check health</td><td><code>"Run lint on my wiki"</code></td></tr>
+        <tr><td>Find gaps</td><td><code>"What topics are missing from my wiki?"</code></td></tr>
+        <tr><td>Review a page</td><td><code>"Review concepts/attention for accuracy"</code></td></tr>
+        <tr><td>See the graph</td><td><code>"Show me the knowledge graph"</code></td></tr>
+        <tr><td>Quality trends</td><td><code>"How is wiki quality trending?"</code></td></tr>
+        <tr><td>Stale pages</td><td><code>"Which pages have drifted from sources?"</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ TROUBLESHOOTING -->
+<section>
+  <div class="section-label"><span class="num blue">9</span> Help</div>
+  <h2>Troubleshooting</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Problem</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Obsidian shows no pages</td><td>Open <code>wiki/</code> as the vault, not the project root</td></tr>
+        <tr><td>Graph has no connections</td><td>Pages need wikilinks — run <code>kb compile</code> to inject them</td></tr>
+        <tr><td>Too many stub pages</td><td>Use <code>defer_small=True</code> for short sources</td></tr>
+        <tr><td>MCP tools not showing</td><td>Check <code>.mcp.json</code> exists and restart Claude Code</td></tr>
+        <tr><td>API key errors</td><td>Set <code>ANTHROPIC_API_KEY</code> in <code>.env</code></td></tr>
+        <tr><td>Wikilinks not clickable</td><td>"Use wikilinks" must be ON in Obsidian settings</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout success">
+    <span class="callout-icon">&#x2705;</span>
+    <p><strong>Need help?</strong> Open an issue at <a href="https://github.com/Asun28/LLM-Knowledge-Base/issues">github.com/Asun28/LLM-Knowledge-Base</a></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <p>LLM Knowledge Base &mdash; Fully automated, inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's compile-not-retrieve pattern</a> &mdash; <a href="https://github.com/Asun28/LLM-Knowledge-Base">GitHub</a></p>
+</footer>
+
+</body>
+</html>

@@ -172,7 +172,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - When updating wiki pages, prefer proposing diffs over full rewrites for auditability.
 - Keep `wiki/index.md` under 500 lines — use category groupings, one line per page.
 - Always install Python packages into the project `.venv`, never globally.
-- **Architecture diagram sync (MANDATORY)**: Source: `others/architecture-diagram.html` → Rendered: `others/architecture-diagram.png` → Displayed: `README.md` line 9. **Every time the HTML is modified**, you MUST re-render the PNG and commit it. Render command:
+- **Architecture diagram sync (MANDATORY)**: Source: `docs/architecture/architecture-diagram.html` → Rendered: `docs/architecture/architecture-diagram.png` → Displayed: `README.md`. **Every time the HTML is modified**, you MUST re-render the PNG and commit it. Render command:
   ```python
   # Run from project root with .venv activated
   .venv/Scripts/python -c "
@@ -182,12 +182,12 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
       async with async_playwright() as p:
           browser = await p.chromium.launch()
           page = await browser.new_page(viewport={'width': 1440, 'height': 900}, device_scale_factor=3)
-          await page.goto('file:///D:/Projects/LLM-Knowledge-Base/others/architecture-diagram.html')
+          await page.goto('file:///D:/Projects/LLM-Knowledge-Base/docs/architecture/architecture-diagram.html')
           await page.wait_for_timeout(1500)
           dim = await page.evaluate('() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight })')
           await page.set_viewport_size({'width': dim['w'], 'height': dim['h']})
           await page.wait_for_timeout(500)
-          await page.screenshot(path='others/architecture-diagram.png', full_page=True, type='png')
+          await page.screenshot(path='docs/architecture/architecture-diagram.png', full_page=True, type='png')
           await browser.close()
   asyncio.run(main())
   "
@@ -275,6 +275,6 @@ When asked to update docs, review `git diff` and update as needed:
 - `BACKLOG.md` — **delete** resolved items (never strikethrough); collapse empty phase sections
 - `CLAUDE.md` — update version numbers, test counts, module/tool counts, API docs
 - `README.md` — update if user-facing features or setup changed
-- `others/architecture-diagram.html` + re-render PNG if architecture changed
+- `docs/architecture/architecture-diagram.html` + re-render PNG if architecture changed
 
 All tools are auto-approved for this project (permissions in `settings.local.json`).

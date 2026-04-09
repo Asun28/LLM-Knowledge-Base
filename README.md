@@ -77,7 +77,9 @@ Or just talk to Claude Code:
 
 ## Architecture
 
-![LLM Knowledge Base Architecture](others/architecture-diagram.png)
+![LLM Knowledge Base Architecture](docs/architecture/architecture-diagram.png)
+
+[Detailed architecture diagram](docs/architecture/architecture-diagram-detailed.html)
 
 **Human curates sources. Everything else is automated** — extraction, compilation, cross-linking, querying, health checks, and gap analysis all run without human intervention.
 
