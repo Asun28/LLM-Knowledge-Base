@@ -575,3 +575,104 @@ class TestCheckSourceCoverageCustomRawDir:
         issues = check_source_coverage(wiki_dir=wiki_dir, raw_dir=raw_dir)
         uncovered_sources = [i["source"] for i in issues]
         assert "raw/articles/covered.md" not in uncovered_sources
+
+
+# ── Task 8: Lint Semantic and Trends ──
+
+
+class TestGroupByWikilinksSeenMarking:
+    """_group_by_wikilinks must mark ALL group members as seen."""
+
+    def test_no_overlapping_groups(self, tmp_wiki, create_wiki_page):
+        # Create a star topology: hub links to spoke1 and spoke2
+        create_wiki_page(
+            "concepts/hub",
+            content="Links to [[concepts/spoke1]] and [[concepts/spoke2]].",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page("concepts/spoke1", content="Content.", wiki_dir=tmp_wiki)
+        create_wiki_page("concepts/spoke2", content="Content.", wiki_dir=tmp_wiki)
+
+        from kb.lint.semantic import _group_by_wikilinks
+
+        groups = _group_by_wikilinks(tmp_wiki)
+        # Each page should appear in at most one group
+        all_pages = []
+        for g in groups:
+            all_pages.extend(g)
+        assert len(all_pages) == len(set(all_pages)), f"Overlapping groups detected: {groups}"
+
+
+class TestGroupByTermOverlapStripBeforeFilter:
+    """_group_by_term_overlap must strip punctuation before applying length filter."""
+
+    def test_short_stripped_words_excluded(self, tmp_wiki, create_wiki_page):
+        # "word." has len 5, passes len > 4, but strips to "word" (len 4)
+        # After fix, "word" should be excluded
+        create_wiki_page(
+            "concepts/page1",
+            content="word. word. word. word. word. unique1 unique1 unique1",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(
+            "concepts/page2",
+            content="word. word. word. word. word. unique2 unique2 unique2",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.lint.semantic import _group_by_term_overlap
+
+        groups = _group_by_term_overlap(tmp_wiki)
+        # "word" (4 chars after strip) should not create a false overlap
+        grouped_pages = {p for g in groups for p in g}
+        # If the only shared term is "word" (4 chars), these should NOT be grouped
+        if grouped_pages:
+            for g in groups:
+                if "concepts/page1" in g and "concepts/page2" in g:
+                    # They should only be grouped if they share 3+ terms > 4 chars
+                    pytest.fail("Pages grouped on short stripped terms only")
+
+
+class TestVerdictTrendsMinSample:
+    """compute_verdict_trends must require minimum sample for trend classification."""
+
+    def test_single_verdict_stays_stable(self, tmp_path):
+        import json
+
+        from kb.lint.trends import compute_verdict_trends
+
+        verdict_path = tmp_path / "verdicts.json"
+        verdicts = [
+            {
+                "timestamp": "2026-04-09T10:00:00",
+                "page_id": "concepts/test",
+                "type": "lint",
+                "verdict": "pass",
+                "issues": [],
+                "notes": "",
+            },
+        ]
+        verdict_path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        result = compute_verdict_trends(path=verdict_path)
+        # With only 1 verdict, trend should be "stable" (insufficient data)
+        assert result["trend"] == "stable"
+
+
+class TestAddVerdictTruncatesNotes:
+    """add_verdict must truncate long notes instead of raising ValueError."""
+
+    def test_long_notes_truncated(self, tmp_path):
+        from kb.lint.verdicts import MAX_NOTES_LEN, add_verdict
+
+        verdict_path = tmp_path / "verdicts.json"
+        long_notes = "x" * (MAX_NOTES_LEN + 500)
+
+        result = add_verdict(
+            "concepts/test",
+            "fidelity",
+            "pass",
+            notes=long_notes,
+            path=verdict_path,
+        )
+        assert len(result["notes"]) <= MAX_NOTES_LEN

@@ -176,22 +176,20 @@ class TestVerdictPathTraversal:
 
 
 class TestVerdictNotesCap:
-    """lint/verdicts.py add_verdict: notes length is capped."""
+    """lint/verdicts.py add_verdict: notes length is capped via truncation."""
 
-    def test_add_verdict_rejects_oversized_notes(self, tmp_path):
-        """add_verdict must raise ValueError when notes exceed MAX_NOTES_LEN."""
-        import pytest
+    def test_add_verdict_truncates_oversized_notes(self, tmp_path):
+        """add_verdict must truncate notes that exceed MAX_NOTES_LEN (not raise)."""
+        from kb.lint.verdicts import MAX_NOTES_LEN, add_verdict
 
-        from kb.lint.verdicts import add_verdict
-
-        with pytest.raises(ValueError, match="Notes too long"):
-            add_verdict(
-                "concepts/test",
-                "fidelity",
-                "pass",
-                notes="x" * 2001,
-                path=tmp_path / "v.json",
-            )
+        entry = add_verdict(
+            "concepts/test",
+            "fidelity",
+            "pass",
+            notes="x" * 2001,
+            path=tmp_path / "v.json",
+        )
+        assert len(entry["notes"]) <= MAX_NOTES_LEN
 
 
 # ── Task 3: Ingest Pipeline HIGH ─────────────────────────────────────────────
