@@ -26,4 +26,4 @@ class WikiPage:
     created: date | None = None
     updated: date | None = None
     wikilinks: list[str] = field(default_factory=list)
-    content_hash: str = ""
+    content_hash: str | None = None

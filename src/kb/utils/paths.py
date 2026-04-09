@@ -25,7 +25,7 @@ def make_source_ref(source_path: Path, raw_dir: Path | None = None) -> str:
     resolved_raw = raw_dir.resolve()
     try:
         rel = source_path.relative_to(resolved_raw)
-        return f"{resolved_raw.name}/{rel}".replace("\\", "/")
+        return f"raw/{rel}".replace("\\", "/")
     except ValueError:
         raise ValueError(
             f"Source path is outside raw directory: {source_path} (raw dir: {raw_dir})"

@@ -78,12 +78,15 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
     # Determine trend from last 2 periods
     trend = "stable"
     if len(sorted_periods) >= 2:
-        recent = sorted_periods[-1]["pass_rate"]
+        recent_period = sorted_periods[-1]
         previous = sorted_periods[-2]["pass_rate"]
-        if recent > previous + VERDICT_TREND_THRESHOLD:
-            trend = "improving"
-        elif recent < previous - VERDICT_TREND_THRESHOLD:
-            trend = "declining"
+        # Require minimum 3 verdicts in the latest period for meaningful trend
+        if recent_period["total"] >= 3:
+            recent = recent_period["pass_rate"]
+            if recent > previous + VERDICT_TREND_THRESHOLD:
+                trend = "improving"
+            elif recent < previous - VERDICT_TREND_THRESHOLD:
+                trend = "declining"
 
     return {
         "total": len(verdicts),

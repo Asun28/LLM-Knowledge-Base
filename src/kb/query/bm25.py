@@ -110,6 +110,10 @@ def tokenize(text: str) -> list[str]:
 
     Extracts alphanumeric tokens of length >= 2, filters stopwords.
     Keeps hyphens within words (e.g., 'fine-tuning' stays as one token).
+
+    Note: Version strings like 'v0.9.13' fragment across dots — the dot
+    is not a word character, so '0', '9', '13' become separate tokens
+    and single-digit components are dropped by the length filter.
     """
     # Match words: letters/digits/hyphens, at least 2 chars
     words = re.findall(r"\b[\w][\w-]*[\w]\b|\b\w{2,}\b", text.lower())

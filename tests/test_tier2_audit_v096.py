@@ -47,11 +47,12 @@ class TestQueryContextWholePageSkip:
         ]
 
         result = _build_query_context(pages, max_chars=500)
+        context = result["context"]
 
-        assert "concepts/small" in result
-        assert "[...truncated]" not in result
+        assert "concepts/small" in context
+        assert "[...truncated]" not in context
         # Huge page should not appear at all
-        assert "x" * 100 not in result
+        assert "x" * 100 not in context
 
     def test_includes_smaller_page_after_skip(self):
         """After skipping a big page, smaller later pages may still fit."""
@@ -75,10 +76,11 @@ class TestQueryContextWholePageSkip:
         ]
 
         result = _build_query_context(pages, max_chars=500)
+        context = result["context"]
 
         # Huge skipped, but tiny should still be included
-        assert "concepts/tiny" in result
-        assert "Small page." in result
+        assert "concepts/tiny" in context
+        assert "Small page." in context
 
     def test_logs_skip_count(self, caplog):
         """When pages are skipped, an info log reports the count."""

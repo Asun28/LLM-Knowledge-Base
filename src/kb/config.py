@@ -119,6 +119,21 @@ MAX_FEEDBACK_ENTRIES = 10_000
 MAX_VERDICTS = 10_000
 MAX_REVIEW_HISTORY_ENTRIES = 10_000
 
+# ── Feedback store input limits ────────────────────────────────
+MAX_QUESTION_LEN = 2000
+MAX_NOTES_LEN = 2000
+MAX_PAGE_ID_LEN = 200
+MAX_CITED_PAGES = 50
+
+# ── Wiki subdir → page type mapping ───────────────────────────
+WIKI_SUBDIR_TO_TYPE: dict[str, str] = {
+    "entities": "entity",
+    "concepts": "concept",
+    "comparisons": "comparison",
+    "summaries": "summary",
+    "synthesis": "synthesis",
+}
+
 # ── Verdict trend analysis ────────────────────────────────────
 # Threshold for classifying weekly trend direction as significant.
 # Used by kb.lint.trends to determine "improving", "stable", or "declining".

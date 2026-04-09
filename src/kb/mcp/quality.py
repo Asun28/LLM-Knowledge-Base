@@ -3,7 +3,7 @@
 import logging
 from datetime import date
 
-from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR
+from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
@@ -359,14 +359,7 @@ def kb_create_page(
     # Auto-detect type from path
     if not page_type:
         subdir = page_id.split("/")[0]
-        type_map = {
-            "entities": "entity",
-            "concepts": "concept",
-            "comparisons": "comparison",
-            "summaries": "summary",
-            "synthesis": "synthesis",
-        }
-        page_type = type_map.get(subdir, "")
+        page_type = WIKI_SUBDIR_TO_TYPE.get(subdir, "")
         if not page_type:
             return (
                 f"Error: Cannot detect type from '{subdir}/'. "

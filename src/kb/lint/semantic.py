@@ -114,7 +114,9 @@ def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
         if neighbors:
             group = sorted(neighbors | {node})
             groups.append(group)
-        seen.add(node)
+            seen.update(group)
+        else:
+            seen.add(node)
 
     # Deduplicate groups — the same neighbor set can be emitted by multiple nodes
     seen_keys: set[frozenset] = set()
@@ -206,7 +208,9 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
         fm_match = re.match(r"\A\s*---\n.*?\n---\n?(.*)", raw, re.DOTALL)
         body = fm_match.group(1) if fm_match else raw
         words = {
-            w.strip(".,!?()[]{}\"':-/") for w in body.lower().split() if len(w) > 4
+            stripped
+            for w in body.lower().split()
+            if len(stripped := w.strip(".,!?()[]{}\"':-/")) > 4
         } - common_words
         page_terms[pid] = words
 

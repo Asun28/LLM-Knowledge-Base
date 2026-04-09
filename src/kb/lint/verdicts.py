@@ -74,7 +74,10 @@ def add_verdict(
 
     # Cap notes length (consistent with feedback store MAX_NOTES_LEN)
     if len(notes) > MAX_NOTES_LEN:
-        raise ValueError(f"Notes too long ({len(notes)} chars). Maximum: {MAX_NOTES_LEN}")
+        logger.warning(
+            "Notes truncated from %d to %d chars for %s", len(notes), MAX_NOTES_LEN, page_id
+        )
+        notes = notes[:MAX_NOTES_LEN]
 
     if issues:
         for issue in issues:
