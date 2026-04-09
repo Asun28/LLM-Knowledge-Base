@@ -5,642 +5,749 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LLM Knowledge Base — Architecture</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    background: #0a0a14;
-    color: #e0e0f0;
-    font-family: 'Inter', -apple-system, sans-serif;
-    padding: 52px 64px 56px;
+    background: #07071a;
+    color: #e8e8f8;
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    padding: 48px 60px 52px;
     min-width: 1320px;
     max-width: 1440px;
   }
 
-  /* ─── Header ─── */
+  /* ══ Header ══ */
   .header {
     text-align: center;
-    margin-bottom: 48px;
+    margin-bottom: 44px;
   }
   .header h1 {
-    font-size: 46px;
-    font-weight: 900;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 48px;
+    font-weight: 800;
     letter-spacing: -2px;
-    background: linear-gradient(130deg, #7c9aff 0%, #b888ff 45%, #69f0ae 100%);
+    line-height: 1.1;
+    margin-bottom: 10px;
+    background: linear-gradient(120deg, #6ea8ff 0%, #c084fc 50%, #4ade80 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    line-height: 1.1;
-    margin-bottom: 10px;
   }
-  .version-badge {
+  .vbadge {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
-    color: #69f0ae;
-    background: rgba(105, 240, 174, 0.1);
-    border: 1px solid rgba(105, 240, 174, 0.3);
-    padding: 4px 14px;
-    border-radius: 16px;
-    margin-left: 12px;
+    color: #4ade80;
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.3);
+    padding: 3px 13px;
+    border-radius: 14px;
+    margin-left: 10px;
     vertical-align: middle;
-    letter-spacing: 0;
-    -webkit-text-fill-color: #69f0ae;
+    -webkit-text-fill-color: #4ade80;
   }
-  .header .tagline {
+  .tagline {
+    font-family: 'Space Grotesk', sans-serif;
     font-size: 22px;
     font-weight: 700;
-    color: #ffffff;
-    margin-bottom: 8px;
+    color: #fff;
+    margin-bottom: 6px;
   }
-  .header .subtitle {
-    font-size: 16px;
-    color: #6868a0;
+  .subtitle {
+    font-size: 15px;
+    color: #5a5a8a;
   }
 
-  /* ─── Main 5-column Grid ─── */
-  .main-flow {
+  /* ══ Main layout ══ */
+  .main {
     display: grid;
-    grid-template-columns: 210px 68px 1fr 68px 210px;
+    grid-template-columns: 200px 60px 1fr 60px 200px;
     align-items: center;
   }
 
-  /* ─── Side Panels ─── */
+  /* ══ Side Panels ══ */
   .panel {
-    border-radius: 18px;
-    padding: 28px 20px;
+    border-radius: 20px;
+    padding: 26px 18px;
     text-align: center;
   }
-  .panel-eyebrow {
+  .p-eyebrow {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 2.5px;
     text-transform: uppercase;
     margin-bottom: 10px;
   }
-  .panel-path {
+  .p-path {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 700;
-    margin-bottom: 16px;
     line-height: 1;
+    margin-bottom: 14px;
   }
-  .panel-items {
+  .p-items {
     font-size: 14px;
-    color: #8080a8;
+    color: #6a6a9a;
     line-height: 2.1;
   }
-  .panel-badge {
+  .p-badge {
     display: inline-block;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    padding: 5px 14px;
-    border-radius: 8px;
-    margin-top: 16px;
-    border: 1px solid;
-  }
-
-  .panel.source {
-    background: rgba(249, 117, 131, 0.07);
-    border: 2px dashed rgba(249, 117, 131, 0.4);
-  }
-  .panel.source .panel-eyebrow { color: #f97583; }
-  .panel.source .panel-path    { color: #ffa198; }
-  .panel.source .panel-badge   { color: #f97583; background: rgba(249,117,131,0.1); border-color: rgba(249,117,131,0.3); }
-
-  .panel.output {
-    background: rgba(179, 136, 255, 0.07);
-    border: 2px solid rgba(179, 136, 255, 0.35);
-  }
-  .panel.output .panel-eyebrow { color: #b888ff; }
-  .panel.output .panel-path    { color: #d2a8ff; }
-  .panel.output .panel-badge   { color: #b888ff; background: rgba(179,136,255,0.1); border-color: rgba(179,136,255,0.3); }
-
-  /* ─── Flow Arrows ─── */
-  .flow-arrow {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
-  .flow-label {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    color: #4a4a70;
+    padding: 5px 13px;
+    border-radius: 8px;
+    margin-top: 14px;
+    border: 1px solid;
   }
-  .arrow-line {
-    display: flex;
-    align-items: center;
+  .panel.src {
+    background: rgba(239,68,68,0.07);
+    border: 2px dashed rgba(239,68,68,0.35);
   }
-  .arrow-shaft { height: 3px; width: 42px; border-radius: 2px; }
-  .arrow-tip   { width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
-  .in  .arrow-shaft { background: #79c0ff; }
-  .in  .arrow-tip   { border-left: 12px solid #79c0ff; }
-  .out .arrow-shaft { background: #b888ff; }
-  .out .arrow-tip   { border-left: 12px solid #b888ff; }
+  .panel.src .p-eyebrow { color: #f87171; }
+  .panel.src .p-path    { color: #fca5a5; }
+  .panel.src .p-badge   { color: #f87171; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
+  .panel.out {
+    background: rgba(167,139,250,0.07);
+    border: 2px solid rgba(167,139,250,0.3);
+  }
+  .panel.out .p-eyebrow { color: #a78bfa; }
+  .panel.out .p-path    { color: #c4b5fd; }
+  .panel.out .p-badge   { color: #a78bfa; background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.25); }
 
-  /* ─── Wheel Container ─── */
+  /* ══ Connector Arrows ══ */
+  .connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+  }
+  .conn-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #3c3c60;
+  }
+  .conn-arrow { display: flex; align-items: center; }
+  .conn-shaft { height: 3px; width: 40px; border-radius: 2px; }
+  .conn-tip   { width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+  .c-in  .conn-shaft { background: #60a5fa; }
+  .c-in  .conn-tip   { border-left: 11px solid #60a5fa; }
+  .c-out .conn-shaft { background: #a78bfa; }
+  .c-out .conn-tip   { border-left: 11px solid #a78bfa; }
+
+  /* ══ Flywheel Container ══ */
   .wheel-wrap {
     position: relative;
-    width: 720px;
-    height: 720px;
+    width: 740px;
+    height: 740px;
     margin: 0 auto;
   }
 
-  /* SVG layer behind HTML nodes */
+  /* Full-size SVG background layer */
   .wheel-svg {
     position: absolute;
     inset: 0;
-    width: 720px;
-    height: 720px;
+    width: 740px;
+    height: 740px;
+    overflow: visible;
     pointer-events: none;
   }
-  /* Icon stroke styles */
-  .wheel-svg path,
-  .wheel-svg circle,
-  .wheel-svg polyline,
-  .wheel-svg line {
+
+  /* ══ Node Circles ══ */
+  /*
+    Ring: center=(370,370), r=240
+    Ingest  -90°: (370, 130)
+    Compile -18°: (370+228, 370-74) = (598, 296)
+    Query    54°: (370+141, 370+194) = (511, 564)
+    Lint    126°: (370-141, 370+194) = (229, 564)
+    Evolve  198°: (370-228, 370-74) = (142, 296)
+  */
+  .node {
+    position: absolute;
+    width: 94px;
+    height: 94px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    border: 2.5px solid;
+  }
+  .node svg {
+    width: 36px;
+    height: 36px;
+  }
+  .node svg path,
+  .node svg circle,
+  .node svg polyline,
+  .node svg line {
     stroke-width: 1.75;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
 
-  /* ─── Node Cards ─── */
-  .node {
+  /* Step badge – circle above node */
+  .node::before {
+    content: attr(data-step);
     position: absolute;
-    width: 190px;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    border-radius: 18px;
-    padding: 22px 16px 18px;
-  }
-
-  /* Step number badge */
-  .step {
-    position: absolute;
-    top: -13px;
+    top: -14px;
     left: 50%;
     transform: translateX(-50%);
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
-    font-size: 13px;
-    font-weight: 800;
+    font-size: 14px;
+    font-weight: 900;
     display: flex;
     align-items: center;
     justify-content: center;
     border: 2px solid;
+    font-family: 'Space Grotesk', sans-serif;
   }
 
-  .node-icon {
-    width: 62px;
-    height: 62px;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 8px auto 14px;
-    border: 1px solid;
+  /* Node labels (positioned separately via absolute div) */
+  .nlabel {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
   }
-  .node-icon svg {
-    width: 30px;
-    height: 30px;
-  }
-  /* Icon SVG inherits stroke from CSS class */
-  .node-icon svg path,
-  .node-icon svg circle,
-  .node-icon svg polyline,
-  .node-icon svg line { stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-
-  .node-name {
-    font-size: 21px;
-    font-weight: 800;
+  .nlabel-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
     letter-spacing: -0.5px;
-    margin-bottom: 9px;
     line-height: 1;
+    margin-bottom: 6px;
   }
-  .node-desc {
+  .nlabel-desc {
     font-size: 13px;
-    color: #8888ac;
-    line-height: 1.6;
-    margin-bottom: 11px;
+    color: #8080b0;
+    line-height: 1.55;
+    max-width: 185px;
   }
-  .node-auto {
+  .nlabel-auto {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    color: #69f0ae;
-    background: rgba(105, 240, 174, 0.1);
-    border: 1px solid rgba(105, 240, 174, 0.25);
-    padding: 3px 11px;
-    border-radius: 7px;
+    color: #4ade80;
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.2);
+    padding: 2px 8px;
+    border-radius: 6px;
     display: inline-block;
-    letter-spacing: 0.5px;
+    margin-top: 5px;
   }
 
-  /* Node positions (ring radius 235, center 360,360) */
-  /* angle: Ingest=-90°, Compile=-18°, Query=54°, Lint=126°, Evolve=198° */
-  .n-ingest  { left: 360px; top: 125px; }   /* (360, 125) */
-  .n-compile { left: 583px; top: 288px; }   /* (583, 288) */
-  .n-query   { left: 497px; top: 550px; }   /* (497, 550) */
-  .n-lint    { left: 223px; top: 550px; }   /* (223, 550) */
-  .n-evolve  { left: 137px; top: 288px; }   /* (137, 288) */
+  /* Node positions */
+  .n-ingest  { left: 370px; top: 130px; }
+  .n-compile { left: 598px; top: 296px; }
+  .n-query   { left: 511px; top: 564px; }
+  .n-lint    { left: 229px; top: 564px; }
+  .n-evolve  { left: 142px; top: 296px; }
 
-  /* ── Ingest (coral/red) */
+  /* Ingest label: centred above node (translate -50%,-50% = centre anchor) */
+  .nl-ingest  { left: 370px; top: 28px; }
+
+  /* Compile: right-side — left edge anchored after node, text flows right */
+  .nl-compile {
+    left: 650px; top: 220px;
+    transform: translate(0, -50%);
+    text-align: left;
+  }
+  .nl-compile .nlabel-desc { max-width: 195px; }
+
+  /* Query: lower-right — left edge anchored, text flows right */
+  .nl-query {
+    left: 568px; top: 658px;
+    transform: translate(0, -50%);
+    text-align: left;
+  }
+  .nl-query .nlabel-desc { max-width: 195px; }
+
+  /* Lint: lower-left — right edge anchored (left side), text flows left */
+  .nl-lint {
+    left: 172px; top: 658px;
+    transform: translate(-100%, -50%);
+    text-align: right;
+  }
+  .nl-lint .nlabel-desc { max-width: 195px; }
+
+  /* Evolve: upper-left — right edge anchored, text flows left */
+  .nl-evolve {
+    left: 94px; top: 215px;
+    transform: translate(-100%, -50%);
+    text-align: right;
+  }
+  .nl-evolve .nlabel-desc { max-width: 195px; }
+
+  /* ── Ingest (coral) */
   .n-ingest {
-    background: rgba(249,117,131,0.09);
-    border: 1.5px solid rgba(249,117,131,0.5);
-    box-shadow: 0 0 28px rgba(249,117,131,0.1);
+    background: rgba(239,68,68,0.12);
+    border-color: rgba(239,68,68,0.6);
+    box-shadow: 0 0 32px rgba(239,68,68,0.2), 0 0 8px rgba(239,68,68,0.3) inset;
   }
-  .n-ingest .step        { color: #f97583; background: rgba(249,117,131,0.12); border-color: rgba(249,117,131,0.4); }
-  .n-ingest .node-icon   { background: rgba(249,117,131,0.12); border-color: rgba(249,117,131,0.35); }
-  .n-ingest .node-icon svg { stroke: #f97583; }
-  .n-ingest .node-name   { color: #f97583; }
+  .n-ingest::before  { color: #f87171; background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.5); }
+  .n-ingest svg      { stroke: #f87171; }
+  .nl-ingest .nlabel-name { color: #f87171; }
 
-  /* ── Compile (blue) */
+  /* ── Compile (sky blue) */
   .n-compile {
-    background: rgba(121,192,255,0.09);
-    border: 1.5px solid rgba(121,192,255,0.5);
-    box-shadow: 0 0 28px rgba(121,192,255,0.1);
+    background: rgba(56,189,248,0.12);
+    border-color: rgba(56,189,248,0.6);
+    box-shadow: 0 0 32px rgba(56,189,248,0.2), 0 0 8px rgba(56,189,248,0.3) inset;
   }
-  .n-compile .step        { color: #79c0ff; background: rgba(121,192,255,0.12); border-color: rgba(121,192,255,0.4); }
-  .n-compile .node-icon   { background: rgba(121,192,255,0.12); border-color: rgba(121,192,255,0.35); }
-  .n-compile .node-icon svg { stroke: #79c0ff; }
-  .n-compile .node-name   { color: #79c0ff; }
+  .n-compile::before  { color: #38bdf8; background: rgba(56,189,248,0.15); border-color: rgba(56,189,248,0.5); }
+  .n-compile svg      { stroke: #38bdf8; }
+  .nl-compile .nlabel-name { color: #38bdf8; }
 
-  /* ── Query (purple) */
+  /* ── Query (violet) */
   .n-query {
-    background: rgba(179,136,255,0.09);
-    border: 1.5px solid rgba(179,136,255,0.5);
-    box-shadow: 0 0 28px rgba(179,136,255,0.1);
+    background: rgba(167,139,250,0.12);
+    border-color: rgba(167,139,250,0.6);
+    box-shadow: 0 0 32px rgba(167,139,250,0.2), 0 0 8px rgba(167,139,250,0.3) inset;
   }
-  .n-query .step        { color: #b888ff; background: rgba(179,136,255,0.12); border-color: rgba(179,136,255,0.4); }
-  .n-query .node-icon   { background: rgba(179,136,255,0.12); border-color: rgba(179,136,255,0.35); }
-  .n-query .node-icon svg { stroke: #b888ff; }
-  .n-query .node-name   { color: #b888ff; }
+  .n-query::before  { color: #a78bfa; background: rgba(167,139,250,0.15); border-color: rgba(167,139,250,0.5); }
+  .n-query svg      { stroke: #a78bfa; }
+  .nl-query .nlabel-name { color: #a78bfa; }
 
   /* ── Lint (amber) */
   .n-lint {
-    background: rgba(227,179,65,0.09);
-    border: 1.5px solid rgba(227,179,65,0.5);
-    box-shadow: 0 0 28px rgba(227,179,65,0.1);
+    background: rgba(251,191,36,0.12);
+    border-color: rgba(251,191,36,0.6);
+    box-shadow: 0 0 32px rgba(251,191,36,0.2), 0 0 8px rgba(251,191,36,0.3) inset;
   }
-  .n-lint .step        { color: #e3b341; background: rgba(227,179,65,0.12); border-color: rgba(227,179,65,0.4); }
-  .n-lint .node-icon   { background: rgba(227,179,65,0.12); border-color: rgba(227,179,65,0.35); }
-  .n-lint .node-icon svg { stroke: #e3b341; }
-  .n-lint .node-name   { color: #e3b341; }
+  .n-lint::before  { color: #fbbf24; background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.5); }
+  .n-lint svg      { stroke: #fbbf24; }
+  .nl-lint .nlabel-name { color: #fbbf24; }
 
-  /* ── Evolve (green) */
+  /* ── Evolve (emerald) */
   .n-evolve {
-    background: rgba(105,240,174,0.09);
-    border: 1.5px solid rgba(105,240,174,0.5);
-    box-shadow: 0 0 28px rgba(105,240,174,0.1);
+    background: rgba(52,211,153,0.12);
+    border-color: rgba(52,211,153,0.6);
+    box-shadow: 0 0 32px rgba(52,211,153,0.2), 0 0 8px rgba(52,211,153,0.3) inset;
   }
-  .n-evolve .step        { color: #69f0ae; background: rgba(105,240,174,0.12); border-color: rgba(105,240,174,0.4); }
-  .n-evolve .node-icon   { background: rgba(105,240,174,0.12); border-color: rgba(105,240,174,0.35); }
-  .n-evolve .node-icon svg { stroke: #69f0ae; }
-  .n-evolve .node-name   { color: #69f0ae; }
+  .n-evolve::before  { color: #34d399; background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.5); }
+  .n-evolve svg      { stroke: #34d399; }
+  .nl-evolve .nlabel-name { color: #34d399; }
 
-  /* ─── Center Label ─── */
+  /* ══ Center Element ══ */
   .wheel-center {
     position: absolute;
-    top: 360px;
-    left: 360px;
+    top: 370px;
+    left: 370px;
     transform: translate(-50%, -50%);
+    width: 165px;
+    height: 165px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(74,222,128,0.12) 0%, rgba(96,165,250,0.08) 50%, transparent 80%);
+    border: 1.5px solid rgba(74,222,128,0.25);
+    box-shadow: 0 0 60px rgba(74,222,128,0.12), 0 0 120px rgba(96,165,250,0.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
-    width: 176px;
-  }
-  .center-icon {
-    font-size: 28px;
-    margin-bottom: 6px;
-    line-height: 1;
+    padding: 16px;
   }
   .center-title {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 28px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
     font-weight: 700;
-    color: #69f0ae;
+    color: #4ade80;
     line-height: 1;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
-  .center-body {
-    font-size: 13px;
-    color: #505078;
+  .center-sub {
+    font-size: 12px;
+    color: #6868a0;
     line-height: 1.7;
   }
-  .center-body strong { color: #7070a0; }
+  .center-sub strong { color: #9090c0; }
 
-  /* ─── Stats Bar ─── */
-  .stats-bar {
+  /* ══ Stats ══ */
+  .stats {
     display: flex;
     justify-content: center;
     gap: 44px;
-    margin-top: 44px;
-    padding-top: 32px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    margin-top: 40px;
+    padding-top: 28px;
+    border-top: 1px solid rgba(255,255,255,0.05);
   }
   .stat { text-align: center; }
-  .stat-num {
+  .snum {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 34px;
+    font-size: 32px;
     font-weight: 700;
     line-height: 1;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
   }
-  .stat-lbl {
-    font-size: 12px;
-    color: #505070;
+  .slbl {
+    font-size: 11px;
+    color: #3c3c5c;
     text-transform: uppercase;
     letter-spacing: 1.5px;
     font-weight: 600;
   }
 
-  /* ─── Model Tiers ─── */
+  /* ══ Tiers ══ */
   .tiers {
     display: flex;
     justify-content: center;
     gap: 14px;
-    margin-top: 22px;
+    margin-top: 20px;
   }
   .chip {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
-    padding: 6px 16px;
+    padding: 5px 15px;
     border-radius: 10px;
     border: 1px solid;
   }
-  .chip-green  { color: #69f0ae; border-color: rgba(105,240,174,0.3); background: rgba(105,240,174,0.07); }
-  .chip-blue   { color: #79c0ff; border-color: rgba(121,192,255,0.3); background: rgba(121,192,255,0.07); }
-  .chip-purple { color: #b888ff; border-color: rgba(179,136,255,0.3); background: rgba(179,136,255,0.07); }
+  .cg { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.06); }
+  .cb { color: #60a5fa; border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.06); }
+  .cv { color: #a78bfa; border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.06); }
 
-  /* ─── Footer ─── */
+  /* ══ Footer ══ */
   .footer {
     text-align: center;
-    margin-top: 26px;
-    font-size: 13px;
-    color: #3c3c5c;
+    margin-top: 22px;
+    font-size: 12px;
+    color: #30304a;
   }
-  .footer a { color: #5252788; text-decoration: none; }
+  .footer a { color: #484870; text-decoration: none; }
 </style>
 </head>
 <body>
 
 <!-- ═══ Header ═══ -->
 <div class="header">
-  <h1>LLM Knowledge Base <span class="version-badge">v0.9.14</span></h1>
+  <h1>LLM Knowledge Base <span class="vbadge">v0.9.14</span></h1>
   <div class="tagline">Karpathy described the idea. This automates it.</div>
   <div class="subtitle">Drop a source in — extraction, linking, quality checks, and self-maintenance run without human intervention</div>
 </div>
 
-<!-- ═══ Main Flow ═══ -->
-<div class="main-flow">
+<!-- ═══ Main Layout ═══ -->
+<div class="main">
 
-  <!-- Source panel -->
-  <div class="panel source">
-    <div class="panel-eyebrow">Human curates</div>
-    <div class="panel-path">raw/</div>
-    <div class="panel-items">
-      articles<br>
-      papers<br>
+  <!-- Source Panel -->
+  <div class="panel src">
+    <div class="p-eyebrow">Human curates</div>
+    <div class="p-path">raw/</div>
+    <div class="p-items">
+      articles<br>papers<br>
       videos &amp; repos<br>
       books &amp; podcasts<br>
       datasets
     </div>
-    <div class="panel-badge">Only Human Step</div>
+    <div class="p-badge">Only Human Step</div>
   </div>
 
-  <!-- → arrow -->
-  <div class="flow-arrow">
-    <div class="flow-label">drop in</div>
-    <div class="arrow-line in">
-      <div class="arrow-shaft"></div>
-      <div class="arrow-tip"></div>
+  <!-- → -->
+  <div class="connector">
+    <div class="conn-label">drop in</div>
+    <div class="conn-arrow c-in">
+      <div class="conn-shaft"></div>
+      <div class="conn-tip"></div>
     </div>
   </div>
 
-  <!-- ═══ Wheel ═══ -->
+  <!-- ═══ Flywheel ═══ -->
   <div class="wheel-wrap">
 
     <!--
-      SVG layer: ring track + 5 arcs with arrowheads
-      Ring radius 235, center (360, 360)
-      Node angles (clockwise from top):
-        Ingest  = −90°  → (360, 125)
-        Compile = −18°  → (583, 288)
-        Query   =  54°  → (497, 550)
-        Lint    = 126°  → (223, 550)
-        Evolve  = 198°  → (137, 288)
+    ══════════════════════════════════════════════════
+      SVG layer: concentric rings + 5 sweeping arcs
+      Center: (370, 370)  Ring radius: 240
 
-      Arc trim: icon radius ≈ 31px → angular offset ≈ arcsin(31/235) ≈ 7.55°
+      Node centers (ring r=240):
+        Ingest  −90°: (370,       130      )
+        Compile −18°: (370+228,   370−74   ) = (598, 296)
+        Query    54°: (370+141,   370+194  ) = (511, 564)
+        Lint    126°: (370−141,   370+194  ) = (229, 564)
+        Evolve  198°: (370−228,   370−74   ) = (142, 296)
 
-      Arc start/end points (on circle r=235):
-        Ingest→Compile:
-          start angle = −90° + 7.55° = −82.45°  → (360+235·cos(−82.45°), 360+235·sin(−82.45°)) ≈ (391, 123)
-          end   angle = −18° − 7.55° = −25.45°  → (360+235·cos(−25.45°), 360+235·sin(−25.45°)) ≈ (572, 259)
-        Compile→Query:
-          start = −18° + 7.55° = −10.45° → (591, 317)
-          end   =  54° − 7.55° =  46.45° → (522, 526)
-        Query→Lint:
-          start =  54° + 7.55° =  61.55° → (472, 567)
-          end   = 126° − 7.55° = 118.45° → (248, 567)
-        Lint→Evolve:
-          start = 126° + 7.55° = 133.55° → (198, 526)
-          end   = 198° − 7.55° = 190.45° → (129, 317)
-        Evolve→Ingest:
-          start = 198° + 7.55° = 205.55° → (148, 259)
-          end   = 270° − 7.55° = 262.45° → (329, 123)
+      Outer bezier control points (mid-angle at r=330):
+        Ingest→Compile  mid=−54°: (370+330·cos(−54°), 370+330·sin(−54°)) = (370+194, 370−267) = (564, 103)
+        Compile→Query   mid= 18°: (370+330·cos( 18°), 370+330·sin( 18°)) = (370+314, 370+102) = (684, 472)
+        Query→Lint      mid= 90°: (370+330·cos( 90°), 370+330·sin( 90°)) = (370+0,   370+330) = (370, 700)
+        Lint→Evolve     mid=162°: (370+330·cos(162°), 370+330·sin(162°)) = (370−314, 370+102) = (56,  472)
+        Evolve→Ingest   mid=234°: (370+330·cos(234°), 370+330·sin(234°)) = (370−194, 370−267) = (176, 103)
+
+      Arc start/end — offset 38px from node center toward control point:
+        ① Ingest→Compile:
+           start dir (564−370, 103−130)=(194,−27)/|196| → (0.990,−0.138)
+           start = (370+38·0.990, 130+38·(−0.138)) = (408, 125)
+           end dir (from CP to Compile)=(598−564, 296−103)=(34,193)/|196| → (0.174,0.985)
+           end   = (598−38·0.174, 296−38·0.985) = (591, 258)
+           Path: M 408 125 Q 564 103 591 258
+
+        ② Compile→Query:
+           start dir (684−598, 472−296)=(86,176)/|196| → (0.439,0.899)
+           start = (598+38·0.439, 296+38·0.899) = (615, 330)
+           end dir (511−684, 564−472)=(−173,92)/|196| → (−0.883,0.469)
+           end   = (511−38·(−0.883), 564−38·0.469) = (545, 546)
+           Path: M 615 330 Q 684 472 545 546
+
+        ③ Query→Lint:
+           start dir (370−511, 700−564)=(−141,136)/|196| → (−0.720,0.694)
+           start = (511+38·(−0.720), 564+38·0.694) = (484, 590)
+           end dir (229−370, 564−700)=(−141,−136)/|196| → (−0.720,−0.694)
+           end   = (229−38·(−0.720), 564−38·(−0.694)) = (256, 590)
+           Path: M 484 590 Q 370 700 256 590
+
+        ④ Lint→Evolve:
+           start dir (56−229, 472−564)=(−173,−92)/|196| → (−0.883,−0.469)
+           start = (229+38·(−0.883), 564+38·(−0.469)) = (195, 546)
+           end dir (142−56, 296−472)=(86,−176)/|196| → (0.439,−0.899)
+           end   = (142−38·0.439, 296−38·(−0.899)) = (125, 330)
+           Path: M 195 546 Q 56 472 125 330
+
+        ⑤ Evolve→Ingest:
+           start dir (176−142, 103−296)=(34,−193)/|196| → (0.174,−0.985)
+           start = (142+38·0.174, 296+38·(−0.985)) = (149, 259)
+           end dir (370−176, 130−103)=(194,27)/|196| → (0.990,0.138)
+           end   = (370−38·0.990, 130−38·0.138) = (333, 125)
+           Path: M 149 259 Q 176 103 333 125
+    ══════════════════════════════════════════════════
     -->
-    <svg class="wheel-svg" viewBox="0 0 720 720">
+    <svg class="wheel-svg" viewBox="0 0 740 740">
       <defs>
-        <!-- Arrowhead markers -->
-        <marker id="a-red"    markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#f97583"/></marker>
-        <marker id="a-blue"   markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#79c0ff"/></marker>
-        <marker id="a-purple" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#b888ff"/></marker>
-        <marker id="a-gold"   markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#e3b341"/></marker>
-        <marker id="a-green"  markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#69f0ae"/></marker>
+        <!-- Glow filter -->
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="glow-strong" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+
+        <!-- Arrow markers — large and solid -->
+        <marker id="m-coral"  markerWidth="12" markerHeight="9" refX="11" refY="4.5" orient="auto"><polygon points="0 0,12 4.5,0 9" fill="#f87171"/></marker>
+        <marker id="m-sky"    markerWidth="12" markerHeight="9" refX="11" refY="4.5" orient="auto"><polygon points="0 0,12 4.5,0 9" fill="#38bdf8"/></marker>
+        <marker id="m-violet" markerWidth="12" markerHeight="9" refX="11" refY="4.5" orient="auto"><polygon points="0 0,12 4.5,0 9" fill="#a78bfa"/></marker>
+        <marker id="m-amber"  markerWidth="12" markerHeight="9" refX="11" refY="4.5" orient="auto"><polygon points="0 0,12 4.5,0 9" fill="#fbbf24"/></marker>
+        <marker id="m-emerald" markerWidth="12" markerHeight="9" refX="11" refY="4.5" orient="auto"><polygon points="0 0,12 4.5,0 9" fill="#34d399"/></marker>
+
+        <!-- Gradients for arcs -->
+        <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#f87171"/>
+          <stop offset="100%" stop-color="#38bdf8"/>
+        </linearGradient>
+        <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#a78bfa"/>
+        </linearGradient>
+        <linearGradient id="g3" x1="100%" y1="0%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#a78bfa"/>
+          <stop offset="100%" stop-color="#fbbf24"/>
+        </linearGradient>
+        <linearGradient id="g4" x1="100%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#fbbf24"/>
+          <stop offset="100%" stop-color="#34d399"/>
+        </linearGradient>
+        <linearGradient id="g5" x1="100%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#34d399"/>
+          <stop offset="100%" stop-color="#f87171"/>
+        </linearGradient>
       </defs>
 
-      <!-- Dashed ring track -->
-      <circle cx="360" cy="360" r="235" fill="none"
-              stroke="rgba(255,255,255,0.08)" stroke-width="1.5" stroke-dasharray="7 9"/>
+      <!-- ── Concentric background rings ── -->
+      <circle cx="370" cy="370" r="300" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1" stroke-dasharray="5 9"/>
+      <circle cx="370" cy="370" r="240" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1" stroke-dasharray="4 8"/>
+      <circle cx="370" cy="370" r="170" fill="none" stroke="rgba(74,222,128,0.06)"  stroke-width="1" stroke-dasharray="3 7"/>
+      <circle cx="370" cy="370" r="90"  fill="none" stroke="rgba(74,222,128,0.08)"  stroke-width="1"/>
 
-      <!-- Arc: Ingest → Compile (coral) -->
-      <path d="M 391 123 A 235 235 0 0 1 572 259"
-            fill="none" stroke="#f97583" stroke-width="3.5" opacity="0.8"
-            marker-end="url(#a-red)"/>
+      <!-- ── Glow layer (blurred duplicate of arcs) ── -->
+      <g filter="url(#glow-strong)" opacity="0.4">
+        <path d="M 408 125 Q 564 103 591 258" fill="none" stroke="#f87171" stroke-width="12" stroke-linecap="round"/>
+        <path d="M 615 330 Q 684 472 545 546" fill="none" stroke="#38bdf8" stroke-width="12" stroke-linecap="round"/>
+        <path d="M 484 590 Q 370 700 256 590" fill="none" stroke="#a78bfa" stroke-width="12" stroke-linecap="round"/>
+        <path d="M 195 546 Q  56 472 125 330" fill="none" stroke="#fbbf24" stroke-width="12" stroke-linecap="round"/>
+        <path d="M 149 259 Q 176 103 333 125" fill="none" stroke="#34d399" stroke-width="12" stroke-linecap="round"/>
+      </g>
 
-      <!-- Arc: Compile → Query (blue) -->
-      <path d="M 591 317 A 235 235 0 0 1 522 526"
-            fill="none" stroke="#79c0ff" stroke-width="3.5" opacity="0.8"
-            marker-end="url(#a-blue)"/>
+      <!-- ── Main sweeping arcs (with arrowheads) ── -->
+      <!-- ① Ingest → Compile  (coral→sky) -->
+      <path d="M 408 125 Q 564 103 591 258"
+            fill="none" stroke="url(#g1)" stroke-width="10" stroke-linecap="round"
+            marker-end="url(#m-coral)" filter="url(#glow)"/>
 
-      <!-- Arc: Query → Lint (purple) -->
-      <path d="M 472 567 A 235 235 0 0 1 248 567"
-            fill="none" stroke="#b888ff" stroke-width="3.5" opacity="0.8"
-            marker-end="url(#a-purple)"/>
+      <!-- ② Compile → Query   (sky→violet) -->
+      <path d="M 615 330 Q 684 472 545 546"
+            fill="none" stroke="url(#g2)" stroke-width="10" stroke-linecap="round"
+            marker-end="url(#m-sky)" filter="url(#glow)"/>
 
-      <!-- Arc: Lint → Evolve (amber) -->
-      <path d="M 198 526 A 235 235 0 0 1 129 317"
-            fill="none" stroke="#e3b341" stroke-width="3.5" opacity="0.8"
-            marker-end="url(#a-gold)"/>
+      <!-- ③ Query → Lint      (violet→amber) -->
+      <path d="M 484 590 Q 370 700 256 590"
+            fill="none" stroke="url(#g3)" stroke-width="10" stroke-linecap="round"
+            marker-end="url(#m-violet)" filter="url(#glow)"/>
 
-      <!-- Arc: Evolve → Ingest (green) -->
-      <path d="M 148 259 A 235 235 0 0 1 329 123"
-            fill="none" stroke="#69f0ae" stroke-width="3.5" opacity="0.8"
-            marker-end="url(#a-green)"/>
+      <!-- ④ Lint → Evolve     (amber→emerald) -->
+      <path d="M 195 546 Q  56 472 125 330"
+            fill="none" stroke="url(#g4)" stroke-width="10" stroke-linecap="round"
+            marker-end="url(#m-amber)" filter="url(#glow)"/>
+
+      <!-- ⑤ Evolve → Ingest   (emerald→coral) -->
+      <path d="M 149 259 Q 176 103 333 125"
+            fill="none" stroke="url(#g5)" stroke-width="10" stroke-linecap="round"
+            marker-end="url(#m-emerald)" filter="url(#glow)"/>
+
+      <!-- ── Clockwise direction hint ── -->
+      <text x="370" y="418" text-anchor="middle"
+            font-family="DM Sans, sans-serif" font-size="11" font-weight="600"
+            fill="rgba(255,255,255,0.22)" letter-spacing="2">↻ continuous cycle</text>
     </svg>
 
-    <!-- ── Node 1: Ingest (top / 12 o'clock) ── -->
-    <div class="node n-ingest">
-      <div class="step">1</div>
-      <div class="node-icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <!-- Download arrow into tray -->
-          <path d="M12 3v13"/>
-          <path d="M7.5 11.5 12 16l4.5-4.5"/>
-          <path d="M3 19h18"/>
-        </svg>
-      </div>
-      <div class="node-name">Ingest</div>
-      <div class="node-desc">Extract entities, concepts &amp; key claims from raw sources</div>
-      <div class="node-auto">● automatic</div>
+    <!-- ══ Node 1: Ingest ══ -->
+    <div class="node n-ingest" data-step="1">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5"/>
+        <path d="M3 19h18"/>
+      </svg>
+    </div>
+    <div class="nlabel nl-ingest">
+      <div class="nlabel-name">Ingest</div>
+      <div class="nlabel-desc">Extract entities, concepts &amp; claims from sources</div>
+      <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ── Node 2: Compile (upper-right) ── -->
-    <div class="node n-compile">
-      <div class="step">2</div>
-      <div class="node-icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <!-- Settings/gear -->
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
-        </svg>
-      </div>
-      <div class="node-name">Compile</div>
-      <div class="node-desc">Create pages, inject wikilinks &amp; update all indexes</div>
-      <div class="node-auto">● automatic</div>
+    <!-- ══ Node 2: Compile ══ -->
+    <div class="node n-compile" data-step="2">
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+      </svg>
+    </div>
+    <div class="nlabel nl-compile">
+      <div class="nlabel-name">Compile</div>
+      <div class="nlabel-desc">Create pages, inject wikilinks &amp; update indexes</div>
+      <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ── Node 3: Query (lower-right) ── -->
-    <div class="node n-query">
-      <div class="step">3</div>
-      <div class="node-icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <!-- Magnifying glass -->
-          <circle cx="11" cy="11" r="7.5"/>
-          <path d="m21 21-5-5"/>
-        </svg>
-      </div>
-      <div class="node-name">Query</div>
-      <div class="node-desc">BM25 + PageRank search with inline cited answers</div>
-      <div class="node-auto">● automatic</div>
+    <!-- ══ Node 3: Query ══ -->
+    <div class="node n-query" data-step="3">
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="11" cy="11" r="7.5"/>
+        <path d="m21 21-5-5"/>
+      </svg>
+    </div>
+    <div class="nlabel nl-query">
+      <div class="nlabel-name">Query</div>
+      <div class="nlabel-desc">BM25 + PageRank search with cited answers</div>
+      <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ── Node 4: Lint (lower-left) ── -->
-    <div class="node n-lint">
-      <div class="step">4</div>
-      <div class="node-icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <!-- Shield check -->
-          <path d="M12 21s-8-4-8-10V4.5L12 2l8 2.5V11c0 6-8 10-8 10z"/>
-          <path d="m8.5 12 2.5 2.5 5-5"/>
-        </svg>
-      </div>
-      <div class="node-name">Lint</div>
-      <div class="node-desc">Dead links, contradictions, staleness &amp; trust scores</div>
-      <div class="node-auto">● automatic</div>
+    <!-- ══ Node 4: Lint ══ -->
+    <div class="node n-lint" data-step="4">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 21s-8-4-8-10V4.5L12 2l8 2.5V11c0 6-8 10-8 10z"/>
+        <path d="m8.5 12 2.5 2.5 5-5"/>
+      </svg>
+    </div>
+    <div class="nlabel nl-lint">
+      <div class="nlabel-name">Lint</div>
+      <div class="nlabel-desc">Dead links, contradictions, staleness &amp; trust</div>
+      <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ── Node 5: Evolve (upper-left) ── -->
-    <div class="node n-evolve">
-      <div class="step">5</div>
-      <div class="node-icon">
-        <svg viewBox="0 0 24 24" fill="none">
-          <!-- Trending up -->
-          <polyline points="22 7 13.5 15.5 8.5 10.5 1 18"/>
-          <polyline points="16 7 22 7 22 13"/>
-        </svg>
-      </div>
-      <div class="node-name">Evolve</div>
-      <div class="node-desc">Gap analysis, missing coverage &amp; new connections</div>
-      <div class="node-auto">● automatic</div>
+    <!-- ══ Node 5: Evolve ══ -->
+    <div class="node n-evolve" data-step="5">
+      <svg viewBox="0 0 24 24" fill="none">
+        <polyline points="22 7 13.5 15.5 8.5 10.5 1 18"/>
+        <polyline points="16 7 22 7 22 13"/>
+      </svg>
+    </div>
+    <div class="nlabel nl-evolve">
+      <div class="nlabel-name">Evolve</div>
+      <div class="nlabel-desc">Gap analysis, missing coverage &amp; new connections</div>
+      <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ── Center ── -->
+    <!-- ══ Center ══ -->
     <div class="wheel-center">
       <div class="center-title">wiki/</div>
-      <div class="center-body">
+      <div class="center-sub">
         <strong>No vectors. No DB.</strong><br>
         Pure markdown<br>
         + wikilinks<br>
-        + knowledge graph
+        + graph
       </div>
     </div>
 
-  </div>
-  <!-- end wheel-wrap -->
+  </div><!-- end wheel-wrap -->
 
-  <!-- → arrow -->
-  <div class="flow-arrow">
-    <div class="flow-label">browse</div>
-    <div class="arrow-line out">
-      <div class="arrow-shaft"></div>
-      <div class="arrow-tip"></div>
+  <!-- → -->
+  <div class="connector">
+    <div class="conn-label">browse</div>
+    <div class="conn-arrow c-out">
+      <div class="conn-shaft"></div>
+      <div class="conn-tip"></div>
     </div>
   </div>
 
-  <!-- Output panel -->
-  <div class="panel output">
-    <div class="panel-eyebrow">Visual UI</div>
-    <div class="panel-path">Obsidian</div>
-    <div class="panel-items">
+  <!-- Output Panel -->
+  <div class="panel out">
+    <div class="p-eyebrow">Visual UI</div>
+    <div class="p-path">Obsidian</div>
+    <div class="p-items">
       Knowledge graph<br>
       Wikilink navigation<br>
       Dataview queries<br>
       25 MCP tools<br>
       Claude Code
     </div>
-    <div class="panel-badge">Zero Config</div>
+    <div class="p-badge">Zero Config</div>
   </div>
 
-</div>
-<!-- end main-flow -->
+</div><!-- end main -->
 
 <!-- ═══ Stats ═══ -->
-<div class="stats-bar">
+<div class="stats">
   <div class="stat">
-    <div class="stat-num" style="color:#69f0ae">692</div>
-    <div class="stat-lbl">Tests</div>
+    <div class="snum" style="color:#4ade80">692</div>
+    <div class="slbl">Tests</div>
   </div>
   <div class="stat">
-    <div class="stat-num" style="color:#b888ff">25</div>
-    <div class="stat-lbl">MCP Tools</div>
+    <div class="snum" style="color:#a78bfa">25</div>
+    <div class="slbl">MCP Tools</div>
   </div>
   <div class="stat">
-    <div class="stat-num" style="color:#79c0ff">12</div>
-    <div class="stat-lbl">Modules</div>
+    <div class="snum" style="color:#60a5fa">12</div>
+    <div class="slbl">Modules</div>
   </div>
   <div class="stat">
-    <div class="stat-num" style="color:#e3b341">8</div>
-    <div class="stat-lbl">Lint Checks</div>
+    <div class="snum" style="color:#fbbf24">8</div>
+    <div class="slbl">Lint Checks</div>
   </div>
   <div class="stat">
-    <div class="stat-num" style="color:#f97583">10</div>
-    <div class="stat-lbl">Source Types</div>
+    <div class="snum" style="color:#f87171">10</div>
+    <div class="slbl">Source Types</div>
   </div>
 </div>
 
-<!-- ═══ Model Tiers ═══ -->
+<!-- ═══ Tiers ═══ -->
 <div class="tiers">
-  <div class="chip chip-green">scan: Haiku 4.5</div>
-  <div class="chip chip-blue">write: Sonnet 4.6</div>
-  <div class="chip chip-purple">orchestrate: Opus 4.6</div>
+  <div class="chip cg">scan: Haiku 4.5</div>
+  <div class="chip cb">write: Sonnet 4.6</div>
+  <div class="chip cv">orchestrate: Opus 4.6</div>
 </div>
 
 <div class="footer">
