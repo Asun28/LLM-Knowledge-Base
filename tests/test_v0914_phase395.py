@@ -352,3 +352,58 @@ class TestParseFieldSpecWarning:
 
         # Should still parse (best-effort) but warn if field name has spaces/parens
         assert isinstance(name, str)
+
+
+# ── Task 5: Ingest Pipeline — wiki_dir Threading & Atomic Writes ──
+
+
+class TestIngestSourceWikiDirThreading:
+    """ingest_source must respect custom wiki_dir throughout the pipeline."""
+
+    def test_update_index_batch_uses_wiki_dir(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_index_batch
+
+        # Create index.md in tmp_wiki
+        index_path = tmp_wiki / "index.md"
+        index_path.write_text(
+            "# Index\n\n## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n",
+            encoding="utf-8",
+        )
+
+        _update_index_batch(
+            [("entity", "test-slug", "Test Entity")],
+            wiki_dir=tmp_wiki,
+        )
+
+        content = index_path.read_text(encoding="utf-8")
+        assert "test-slug" in content
+
+
+class TestAtomicTextWrite:
+    """atomic_text_write must write atomically like atomic_json_write."""
+
+    def test_successful_write(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        target = tmp_path / "output.md"
+        atomic_text_write("hello world", target)
+        assert target.read_text(encoding="utf-8") == "hello world"
+
+    def test_no_partial_write_on_failure(self, tmp_path, monkeypatch):
+        from kb.utils.io import atomic_text_write
+
+        target = tmp_path / "output.md"
+        target.write_text("original", encoding="utf-8")
+
+        # Monkey-patch Path.replace to fail after write
+
+        def failing_replace(self, target):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "replace", failing_replace)
+
+        with pytest.raises(OSError):
+            atomic_text_write("new content", target)
+
+        # Original content preserved
+        assert target.read_text(encoding="utf-8") == "original"

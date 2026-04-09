@@ -26,3 +26,22 @@ def atomic_json_write(data: object, path: Path) -> None:
             os.close(tmp_fd)
         Path(tmp_path).unlink(missing_ok=True)
         raise
+
+
+def atomic_text_write(content: str, path: Path) -> None:
+    """Write text to path atomically (temp file + rename).
+
+    Creates parent directories if needed. On failure, cleans up the
+    temp file and re-raises the exception.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        Path(tmp_path).replace(path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(tmp_fd)
+        Path(tmp_path).unlink(missing_ok=True)
+        raise

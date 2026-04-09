@@ -316,7 +316,9 @@ def _update_sources_mapping(
     if f"`{source_ref}`" in content:
         return  # Already listed
     content += entry
-    sources_file.write_text(content, encoding="utf-8")
+    from kb.utils.io import atomic_text_write
+
+    atomic_text_write(content, sources_file)
 
 
 _SECTION_HEADERS = {
@@ -335,14 +337,15 @@ _SUBDIR_MAP = {
 }
 
 
-def _update_index_batch(entries: list[tuple[str, str, str]]) -> None:
+def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | None = None) -> None:
     """Update wiki/index.md with multiple new page entries in a single read/write."""
     if not entries:
         return
-    if not WIKI_INDEX.exists():
+    index_path = (wiki_dir / "index.md") if wiki_dir is not None else WIKI_INDEX
+    if not index_path.exists():
         logger.warning("index.md not found — skipping index update for %d entries", len(entries))
         return
-    content = WIKI_INDEX.read_text(encoding="utf-8")
+    content = index_path.read_text(encoding="utf-8")
     changed = False
     for page_type, slug, title in entries:
         section = _SECTION_HEADERS.get(page_type)
@@ -359,7 +362,9 @@ def _update_index_batch(entries: list[tuple[str, str, str]]) -> None:
             content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
         changed = True
     if changed:
-        WIKI_INDEX.write_text(content, encoding="utf-8")
+        from kb.utils.io import atomic_text_write
+
+        atomic_text_write(content, index_path)
 
 
 def _process_item_batch(
@@ -438,6 +443,7 @@ def ingest_source(
     extraction: dict | None = None,
     *,
     defer_small: bool = False,
+    wiki_dir: Path | None = None,
 ) -> dict:
     """Ingest a single raw source into the knowledge base.
 
@@ -487,6 +493,8 @@ def ingest_source(
             "duplicate": True,
         }
 
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
+
     # Extract structured data via LLM (or use pre-extracted)
     if extraction is None:
         extraction = extract_from_source(raw_content, source_type)
@@ -508,7 +516,7 @@ def ingest_source(
             title,
             summary_slug,
         )
-    summary_path = WIKI_DIR / "summaries" / f"{summary_slug}.md"
+    summary_path = effective_wiki_dir / "summaries" / f"{summary_slug}.md"
     summary_content = _build_summary_content(extraction, source_type)
     if summary_path.exists():
         _update_existing_page(summary_path, source_ref, verb="Summarized")
@@ -537,6 +545,7 @@ def ingest_source(
         "entity",
         source_ref,
         extraction,
+        wiki_dir=effective_wiki_dir,
     )
     pages_created.extend(e_created)
     pages_updated.extend(e_updated)
@@ -551,6 +560,7 @@ def ingest_source(
         "concept",
         source_ref,
         extraction,
+        wiki_dir=effective_wiki_dir,
     )
     pages_created.extend(c_created)
     pages_updated.extend(c_updated)
@@ -561,11 +571,11 @@ def ingest_source(
     index_entries: list[tuple[str, str, str]] = [("summary", summary_slug, title)]
     index_entries.extend(("entity", slugify(e), e) for e in e_valid)
     index_entries.extend(("concept", slugify(c), c) for c in c_valid)
-    _update_index_batch(index_entries)
+    _update_index_batch(index_entries, wiki_dir=effective_wiki_dir)
 
     # 5. Update _sources.md mapping
     all_pages = pages_created + pages_updated
-    _update_sources_mapping(source_ref, all_pages)
+    _update_sources_mapping(source_ref, all_pages, wiki_dir=effective_wiki_dir)
 
     # 6. Record hash in manifest for duplicate detection
     try:
@@ -586,7 +596,7 @@ def ingest_source(
     )
 
     # 8. Compute affected pages (cascade update detection)
-    affected_pages = _find_affected_pages(pages_created + pages_updated, WIKI_DIR)
+    affected_pages = _find_affected_pages(pages_created + pages_updated, effective_wiki_dir)
 
     # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
     wikilinks_injected: list[str] = []
@@ -594,7 +604,7 @@ def ingest_source(
         try:
             from kb.compile.linker import inject_wikilinks
 
-            updated = inject_wikilinks(ptitle, pid, wiki_dir=WIKI_DIR)
+            updated = inject_wikilinks(ptitle, pid, wiki_dir=effective_wiki_dir)
             wikilinks_injected.extend(updated)
         except Exception as e:
             logger.debug("inject_wikilinks failed for %s: %s", pid, e)
