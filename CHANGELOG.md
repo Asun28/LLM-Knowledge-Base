@@ -23,6 +23,53 @@ Rules:
 
 ---
 
+## [0.9.14] - 2026-04-09 (Phase 3.95)
+
+38-item backlog fix pass across 13 source files. No new modules. All fixes have tests in `tests/test_v0914_phase395.py`.
+
+### Fixed
+- `utils/io.py` `atomic_json_write` — close fd on serialization failure (fd leak)
+- `utils/paths.py` `make_source_ref` — always use literal `"raw/"` prefix instead of resolved dir name
+- `utils/llm.py` `_make_api_call` — skip sleep after final failed retry
+- `utils/text.py` `slugify` — add `re.ASCII` flag to strip non-ASCII chars
+- `utils/wiki_log.py` `append_wiki_log` — wrap write+stat in `try/except OSError`, log warning instead of raising
+- `models/frontmatter.py` `validate_frontmatter` — flag `source: null` and non-list/str source fields
+- `models/page.py` `WikiPage` — `content_hash` defaults to `None` instead of `""`
+- `query/engine.py` `search_pages` — no mutation of input page dicts (use spread-copy for score)
+- `query/engine.py` `_build_query_context` — returns dict with `context` and `context_pages` keys; small-max_chars guard
+- `query/engine.py` `query_wiki` — includes `context_pages` in return dict; fixed missing key in no-match early return
+- `query/bm25.py` `tokenize` — documented version-string fragmentation behavior
+- `ingest/pipeline.py` `_update_existing_page` — CRLF-safe frontmatter regex (`\r?\n`)
+- `ingest/pipeline.py` `_build_summary_content` — handle dict authors via `a.get("name")`, drop non-str/non-dict with warning
+- `ingest/pipeline.py` `ingest_source` — thread `wiki_dir` through all helpers; `_update_index_batch` and `_update_sources_mapping` use `atomic_text_write`
+- `utils/io.py` — add `atomic_text_write` helper (temp file + rename for text files)
+- `ingest/extractors.py` `_parse_field_spec` — warn on non-identifier field names
+- `compile/compiler.py` `compile_wiki` — reload manifest after `find_changed_sources` to preserve template hashes
+- `compile/linker.py` `inject_wikilinks` — mask code blocks before wikilink injection; unmask before write
+- `lint/checks.py` `check_staleness` — flag pages with `None`/missing `updated` date
+- `lint/runner.py` `run_all_checks` — use `f.get("source", f.get("page"))` for dead-link key consistency
+- `lint/checks.py` `check_source_coverage` — use `make_source_ref` instead of hardcoded `raw/` prefix
+- `lint/checks.py` `check_stub_pages` — narrow `except Exception` to specific exception types
+- `lint/semantic.py` `_group_by_wikilinks` — `seen.update(group)` so all group members marked seen (prevents overlapping groups)
+- `lint/semantic.py` `_group_by_term_overlap` — strip-before-filter using walrus operator
+- `lint/trends.py` `compute_verdict_trends` — require minimum 3 verdicts in latest period for trend classification
+- `lint/verdicts.py` `add_verdict` — truncate long notes instead of raising `ValueError`
+- `graph/builder.py` `page_id` — normalize node IDs to lowercase
+- `evolve/analyzer.py` `find_connection_opportunities` — strip-before-filter using walrus operator
+- `evolve/analyzer.py` `generate_evolution_report` — narrow `except Exception` to specific types
+- `mcp/core.py` `kb_ingest_content` — return error instead of overwriting existing source file
+- `mcp/core.py` `kb_ingest` — truncate oversized content before building extraction prompt
+- `feedback/store.py` `add_feedback_entry` — UNC path guard via `os.path.isabs`; file locking via `_feedback_lock`
+- `feedback/store.py` — move constants to `config.py`
+- `config.py` — add feedback store constants (`MAX_QUESTION_LEN`, `MAX_NOTES_LEN`, `MAX_PAGE_ID_LEN`, `MAX_CITED_PAGES`)
+- `review/refiner.py` `refine_page` — write page file before appending history; OSError returns error dict
+- `mcp/quality.py` `kb_create_page` — derive `type_map` from config instead of hardcoding
+
+### Stats
+692 tests, 25 MCP tools, 12 modules.
+
+---
+
 ## [0.9.13] - 2026-04-09 (Phase 3.94)
 
 54-item backlog fix pass covering BM25, query engine, citations, lint, ingest, compile, MCP, graph, evolve, feedback, refiner, and utils. Ruff clean. Plus cross-cutting rename `raw_content` → `content_lower` in `load_all_pages` and all callers.
