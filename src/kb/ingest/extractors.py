@@ -1,12 +1,15 @@
 """Source-type-specific extraction logic (article, paper, video, etc.)."""
 
 import functools
+import logging
 import re
 
 import yaml
 
 from kb.config import SOURCE_TYPE_DIRS, TEMPLATES_DIR
 from kb.utils.llm import call_llm_json
+
+logger = logging.getLogger(__name__)
 
 VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
 
@@ -107,6 +110,14 @@ def _parse_field_spec(spec: str) -> tuple[str, str, bool]:
     else:
         name = spec.strip()
         desc = ""
+
+    # Warn on field names that won't match LLM output
+    if not re.match(r"^\w+$", name):
+        logger.warning(
+            "Field name %r contains non-identifier characters; "
+            "it may not match LLM extraction output",
+            name,
+        )
 
     is_list = name in KNOWN_LIST_FIELDS
     return name, desc, is_list

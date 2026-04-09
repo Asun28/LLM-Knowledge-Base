@@ -136,7 +136,14 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
     author = extraction.get("author") or extraction.get("speaker")
     authors = extraction.get("authors")
     if authors and isinstance(authors, list):
-        safe_authors = [str(a) for a in authors if isinstance(a, str)]
+        safe_authors = []
+        for a in authors:
+            if isinstance(a, str):
+                safe_authors.append(a)
+            elif isinstance(a, dict) and a.get("name"):
+                safe_authors.append(str(a["name"]))
+            else:
+                logger.warning("Dropping non-string author value: %r", a)
         if safe_authors:
             lines.append(f"**Authors:** {', '.join(safe_authors)}\n")
     elif author:
@@ -250,7 +257,7 @@ def _update_existing_page(
     # 1. Update frontmatter source: list
     safe_ref = yaml_escape(source_ref)
     # Split on the closing '---' to scope the regex to the frontmatter section only
-    fm_match = re.match(r"\A(---\n.*?\n---\n?)(.*)", content, re.DOTALL)
+    fm_match = re.match(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", content, re.DOTALL)
     if fm_match:
         fm_text = fm_match.group(1)
         body_text = fm_match.group(2)

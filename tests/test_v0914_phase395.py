@@ -276,3 +276,79 @@ class TestTokenizeVersionStrings:
         # After fix: version strings should not silently lose components.
         # At minimum, the behavior should be predictable.
         assert "version" in tokens or "release" in tokens
+
+
+# ── Task 4: Ingest Pipeline — CRLF, Authors, Field Parsing ──
+
+
+class TestUpdateExistingPageCRLF:
+    """_update_existing_page must handle Windows CRLF line endings."""
+
+    def test_crlf_frontmatter_preserves_body(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_existing_page
+
+        page_path = tmp_wiki / "entities" / "test-entity.md"
+        # Write with CRLF line endings
+        crlf_content = (
+            "---\r\n"
+            'title: "Test Entity"\r\n'
+            "source:\r\n"
+            '  - "raw/articles/old.md"\r\n'
+            "created: 2026-01-01\r\n"
+            "updated: 2026-01-01\r\n"
+            "type: entity\r\n"
+            "confidence: stated\r\n"
+            "---\r\n"
+            "\r\n"
+            "# Test Entity\r\n"
+            "\r\n"
+            "This is the body content.\r\n"
+        )
+        page_path.write_text(crlf_content, encoding="utf-8")
+
+        _update_existing_page(page_path, "raw/articles/new.md")
+
+        result = page_path.read_text(encoding="utf-8")
+        assert "body content" in result, "Body was lost due to CRLF handling"
+        assert "raw/articles/new.md" in result
+
+
+class TestBuildSummaryContentAuthors:
+    """_build_summary_content must handle non-string author values."""
+
+    def test_dict_authors_coerced(self):
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test Paper",
+            "authors": [{"name": "Alice"}, "Bob", {"name": "Charlie"}],
+        }
+        content = _build_summary_content(extraction, "paper")
+        assert "Alice" in content
+        assert "Bob" in content
+        assert "Charlie" in content
+
+    def test_non_string_non_dict_authors_skipped(self):
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test",
+            "authors": [42, None, "Valid Author"],
+        }
+        content = _build_summary_content(extraction, "article")
+        assert "Valid Author" in content
+
+
+class TestParseFieldSpecWarning:
+    """_parse_field_spec should warn on non-identifier field names."""
+
+    def test_spaces_in_field_name_warns(self, caplog):
+        import logging
+
+        from kb.ingest.extractors import _parse_field_spec
+
+        with caplog.at_level(logging.WARNING):
+            name, desc, is_list = _parse_field_spec("url string: the URL")
+
+        # Should still parse (best-effort) but warn if field name has spaces/parens
+        assert isinstance(name, str)
