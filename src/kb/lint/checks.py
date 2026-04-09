@@ -15,6 +15,7 @@ from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.markdown import extract_raw_refs
 from kb.utils.pages import normalize_sources
+from kb.utils.paths import make_source_ref
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,18 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
                         continue
             if isinstance(updated, datetime):
                 updated = updated.date()
-            if updated and isinstance(updated, date) and updated < cutoff:
+            if updated is None:
+                pid = page_id(page_path, wiki_dir)
+                issues.append(
+                    {
+                        "check": "staleness",
+                        "severity": "warning",
+                        "page": pid,
+                        "message": f"Page {pid} has no updated date — cannot determine staleness.",
+                    }
+                )
+                continue
+            if isinstance(updated, date) and updated < cutoff:
                 pid = page_id(page_path, wiki_dir)
                 issues.append(
                     {
@@ -291,6 +303,7 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
             logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
 
     # Find raw sources not referenced
+    effective_raw_dir = raw_dir
     issues = []
     for _type_name, type_dir in SOURCE_TYPE_DIRS.items():
         actual_dir = raw_dir / type_dir.name
@@ -298,7 +311,7 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
             continue
         for f in actual_dir.iterdir():
             if f.is_file() and f.name != ".gitkeep":
-                rel_path = f"raw/{type_dir.name}/{f.name}"
+                rel_path = make_source_ref(f, effective_raw_dir)
                 # Check if this source is referenced (exact path only — no suffix match to avoid
                 # false-positives when two subdirs contain same-named files)
                 referenced = rel_path in all_raw_refs
@@ -353,7 +366,7 @@ def check_stub_pages(wiki_dir: Path | None = None, min_content_chars: int = 100)
                         ),
                     }
                 )
-        except Exception as e:
+        except (OSError, ValueError, AttributeError, UnicodeDecodeError, yaml.YAMLError) as e:
             logger.warning("Failed to check stub status for %s: %s", page_path, e)
             continue
 

@@ -509,3 +509,69 @@ class TestInjectWikilinksSkipsCodeBlocks:
         # The inline `RAG` should NOT be converted to a wikilink
         code_line = next(line for line in result.splitlines() if "`RAG`" in line)
         assert "[[" not in code_line, f"Wikilink injected around inline code: {code_line}"
+
+
+# ── Task 7: Lint Checks and Runner ──
+
+
+class TestCheckStalenessNoneUpdated:
+    """check_staleness must flag pages with None/missing updated date."""
+
+    def test_missing_updated_flagged(self, create_wiki_page, tmp_wiki):
+        # Create a page with no updated field by writing manually
+        page_path = tmp_wiki / "concepts" / "stale.md"
+        page_path.write_text(
+            '---\ntitle: "Stale"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2020-01-01\ntype: concept\nconfidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from kb.lint.checks import check_staleness
+
+        issues = check_staleness(wiki_dir=tmp_wiki, max_days=30)
+        stale_pages = [i["page"] for i in issues]
+        assert "concepts/stale" in stale_pages
+
+
+class TestRunAllChecksDeadLinkKeyConsistency:
+    """run_all_checks dead-link filter must use consistent keys."""
+
+    def test_fixed_dead_links_removed_from_report(self, tmp_wiki, create_wiki_page):
+        create_wiki_page(
+            "concepts/test",
+            content="Link to [[concepts/nonexistent]].",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.lint.runner import run_all_checks
+
+        # Run with fix=True so dead links get fixed
+        result = run_all_checks(wiki_dir=tmp_wiki, fix=True)
+        # After fix, dead_link issues should be removed from the report
+        dead_links = [i for i in result["issues"] if i.get("check") == "dead_link"]
+        # If fix was applied, it should not appear in issues
+        fixed_targets = {f["target"] for f in result.get("fixes_applied", [])}
+        remaining = [d for d in dead_links if d.get("target") in fixed_targets]
+        assert len(remaining) == 0, f"Fixed dead links still in report: {remaining}"
+
+
+class TestCheckSourceCoverageCustomRawDir:
+    """check_source_coverage must work with non-standard raw_dir paths."""
+
+    def test_tmp_raw_dir_matches(self, tmp_project, create_wiki_page, create_raw_source):
+        wiki_dir = tmp_project / "wiki"
+        raw_dir = tmp_project / "raw"
+
+        create_raw_source("raw/articles/covered.md", "Source content.", project_dir=tmp_project)
+        create_wiki_page(
+            "summaries/covered",
+            title="Covered",
+            source_ref="raw/articles/covered.md",
+            wiki_dir=wiki_dir,
+        )
+
+        from kb.lint.checks import check_source_coverage
+
+        issues = check_source_coverage(wiki_dir=wiki_dir, raw_dir=raw_dir)
+        uncovered_sources = [i["source"] for i in issues]
+        assert "raw/articles/covered.md" not in uncovered_sources

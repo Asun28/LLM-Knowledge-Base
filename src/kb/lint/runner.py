@@ -57,7 +57,7 @@ def run_all_checks(
         fixes_applied = fix_dead_links(wiki_dir)
         if fixes_applied:
             # Remove the dead link issues that were successfully fixed
-            fixed_pairs = {(f["page"], f["target"]) for f in fixes_applied}
+            fixed_pairs = {(f.get("source", f.get("page")), f["target"]) for f in fixes_applied}
             all_issues = [
                 i
                 for i in all_issues
