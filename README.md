@@ -417,6 +417,10 @@ Python 3.12+. Ruff for linting (line length 100, rules E/F/I/W/UP).
 - **Phase 3.5–3.8 (complete, v0.9.4–v0.9.7):** Stub detection, drift detection, tier audits, observability. 490 tests
 - **Phase 3.9a (complete, v0.9.8):** Structured outputs (`call_llm_json`), shared retry, atomic writes, extraction schema builder. 518 tests
 - **Phase 3.9 (complete, v0.9.9):** Content growth infrastructure — env-configurable model tiers, PageRank-blended search, hash-based duplicate detection, verdict trend dashboard (`kb_verdict_trends`), Mermaid graph export (`kb_graph_viz`), retroactive wikilink injection (auto-triggered on ingest), content-length ingest tiering, cascade update detection (surfaced in `kb_ingest` MCP output). 3 new MCP tools (26 total), 46 new tests (564 total)
+- **Phase 3.91 (complete, v0.9.10):** Citation wikilink normalization, BM25 top-page warning. 578 tests
+- **Phase 3.92 (complete, v0.9.11):** Compile scan full-branch, CLI command coverage. 613 tests
+- **Phase 3.93 (complete, v0.9.12):** reliability.py docstring, BM25 dedup query tokens, query max_results clamp. 613 tests
+- **Phase 3.94 (complete, v0.9.13):** 54-item backlog fix pass — BM25, query engine, lint, ingest, compile, MCP, graph, evolve, feedback, refiner, utils. Cross-cutting rename `raw_content` → `content_lower`. 651 tests
 - **Phase 4 (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave, Pydantic extraction validation, arxiv MCP integration, semantic dependency tracking, URL-based smart routing. Research in `research/agent-architecture-research.md`
 
 ## Special Thanks
