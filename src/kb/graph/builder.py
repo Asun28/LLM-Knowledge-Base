@@ -25,7 +25,7 @@ def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
 def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     """Convert a wiki page path to a graph node ID (e.g., 'concepts/rag')."""
     wiki_dir = wiki_dir or WIKI_DIR
-    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md")
+    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md").lower()
 
 
 def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:

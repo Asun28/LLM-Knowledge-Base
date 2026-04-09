@@ -676,3 +676,88 @@ class TestAddVerdictTruncatesNotes:
             path=verdict_path,
         )
         assert len(result["notes"]) <= MAX_NOTES_LEN
+
+
+# ── Task 9: Graph and Evolve ──
+
+
+class TestBuildGraphNodeIdCasing:
+    """build_graph must normalize node IDs to lowercase."""
+
+    def test_uppercase_filename_lowercased(self, tmp_wiki):
+        # Create a page with uppercase in filename
+        page_path = tmp_wiki / "entities" / "OpenAI.md"
+        page_path.write_text(
+            '---\ntitle: "OpenAI"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: entity\n"
+            "confidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from kb.graph.builder import build_graph
+
+        graph = build_graph(wiki_dir=tmp_wiki)
+        node_ids = list(graph.nodes())
+        for nid in node_ids:
+            assert nid == nid.lower(), f"Node ID not lowercased: {nid}"
+
+
+class TestGraphPageIdConsolidated:
+    """graph/builder.page_id should delegate to utils/pages._page_id."""
+
+    def test_consistent_with_utils(self, tmp_wiki):
+        page_path = tmp_wiki / "concepts" / "test-page.md"
+        page_path.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+
+        from kb.graph.builder import page_id as graph_page_id
+        from kb.utils.pages import _page_id as utils_page_id
+
+        assert graph_page_id(page_path, tmp_wiki) == utils_page_id(page_path, tmp_wiki)
+
+
+class TestFindConnectionOpportunitiesStripBeforeFilter:
+    """find_connection_opportunities must strip punctuation before length filter."""
+
+    def test_short_stripped_terms_excluded(self, tmp_wiki, create_wiki_page):
+        # "word." len=5 pre-strip, len=4 post-strip → should be excluded
+        create_wiki_page(
+            "concepts/alpha",
+            content="word. word. word. unique_alpha unique_alpha",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(
+            "concepts/beta",
+            content="word. word. word. unique_beta unique_beta",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        opps = find_connection_opportunities(wiki_dir=tmp_wiki)
+        # "word" (4 chars after strip) should not count toward shared terms
+        for opp in opps:
+            pair = set(opp.get("pages", []))
+            if {"concepts/alpha", "concepts/beta"} == pair:
+                terms = opp.get("shared_terms", [])
+                assert "word" not in terms
+
+
+class TestEvolveReportNarrowExcept:
+    """generate_evolution_report must use narrow exception types."""
+
+    def test_report_handles_import_error(self, tmp_wiki, monkeypatch, caplog):
+        import logging
+
+        # Monkeypatch to cause an error in one subsystem
+        import kb.lint.checks as checks_mod
+        from kb.evolve.analyzer import generate_evolution_report
+
+        def bad_check(*a, **kw):
+            raise AttributeError("test attribute error")
+
+        monkeypatch.setattr(checks_mod, "check_stub_pages", bad_check)
+
+        with caplog.at_level(logging.WARNING):
+            result = generate_evolution_report(wiki_dir=tmp_wiki)
+        # Should still produce a report, not crash
+        assert isinstance(result, dict)

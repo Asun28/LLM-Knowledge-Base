@@ -72,7 +72,7 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
         content = re.sub(r"\A\s*---\n.*?\n---\n?", "", raw, count=1, flags=re.DOTALL).lower()
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
-        words = set(w.strip(".,!?()[]{}\"'") for w in content.split() if len(w) > 4)
+        words = {stripped for w in content.split() if len(stripped := w.strip(".,!?()[]{}\"'")) > 4}
         for word in words:
             if word not in term_index:
                 term_index[word] = []
@@ -218,7 +218,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Top stubs: {', '.join(stub_pages[:5])}. "
                 "Use kb_review_page to get context, then kb_refine_page to add content."
             )
-    except Exception as e:
+    except (ImportError, AttributeError, RuntimeError) as e:
         logger.warning("Stub check failed in evolve: %s", e)
 
     # Surface low-trust pages from feedback (closes the feedback loop)
@@ -233,7 +233,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Pages: {', '.join(flagged_pages[:5])}. "
                 "Run kb_lint_deep on these to verify source fidelity."
             )
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         logger.warning("Feedback data unavailable for evolve report: %s", e)
 
     return {
