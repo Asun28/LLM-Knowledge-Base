@@ -1,15 +1,42 @@
 """Query feedback storage — load, save, add entries to JSON."""
 
+import contextlib
 import json
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 
-from kb.config import FEEDBACK_PATH, MAX_FEEDBACK_ENTRIES
+from kb.config import (
+    FEEDBACK_PATH,
+    MAX_CITED_PAGES,
+    MAX_FEEDBACK_ENTRIES,
+    MAX_NOTES_LEN,
+    MAX_PAGE_ID_LEN,
+    MAX_QUESTION_LEN,
+)
 
-MAX_QUESTION_LEN = 2000
-MAX_NOTES_LEN = 2000
-MAX_PAGE_ID_LEN = 200
-MAX_CITED_PAGES = 50
+
+@contextlib.contextmanager
+def _feedback_lock(path: Path, timeout: float = 5.0):
+    """Acquire an exclusive file lock for the feedback store."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                # Stale lock — force break
+                lock_path.unlink(missing_ok=True)
+                continue
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock_path.unlink(missing_ok=True)
 
 
 def _default_feedback() -> dict:
@@ -77,10 +104,15 @@ def add_feedback_entry(
     for page_id in cited_pages:
         if len(page_id) > MAX_PAGE_ID_LEN:
             raise ValueError(f"Page ID too long: {page_id[:50]}...")
-        if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+        if (
+            ".." in page_id
+            or page_id.startswith("/")
+            or page_id.startswith("\\")
+            or os.path.isabs(page_id)
+        ):
             raise ValueError(f"Invalid page ID: {page_id}")
 
-    data = load_feedback(path)
+    effective_path = path or FEEDBACK_PATH
 
     entry = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -89,39 +121,44 @@ def add_feedback_entry(
         "cited_pages": cited_pages,
         "notes": notes,
     }
-    data["entries"].append(entry)
-    # Retain only the most recent entries to prevent unbounded growth
-    if len(data["entries"]) > MAX_FEEDBACK_ENTRIES:
-        data["entries"] = data["entries"][-MAX_FEEDBACK_ENTRIES:]
 
-    # Update page scores with Bayesian smoothing
-    # "wrong" is weighted 2x because incorrect information is worse than incomplete
-    # Deduplicate cited_pages to prevent inflated trust scores
-    unique_cited = list(dict.fromkeys(cited_pages))
-    for page_id in unique_cited:
-        if page_id not in data["page_scores"]:
-            data["page_scores"][page_id] = {
-                "useful": 0,
-                "wrong": 0,
-                "incomplete": 0,
-                "trust": 0.5,
-            }
-        scores = data["page_scores"][page_id]
-        scores[rating] += 1
-        weighted_negative = 2 * scores["wrong"] + scores["incomplete"]
-        scores["trust"] = round(
-            (scores["useful"] + 1) / (scores["useful"] + weighted_negative + 2), 4
-        )
+    with _feedback_lock(effective_path):
+        data = load_feedback(effective_path)
 
-    # Cap page_scores dict to prevent unbounded growth
-    if len(data["page_scores"]) > MAX_FEEDBACK_ENTRIES:
-        # Keep only pages with highest activity (most total ratings)
-        sorted_pages = sorted(
-            data["page_scores"].items(),
-            key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],
-            reverse=True,
-        )
-        data["page_scores"] = dict(sorted_pages[:MAX_FEEDBACK_ENTRIES])
+        data["entries"].append(entry)
+        # Retain only the most recent entries to prevent unbounded growth
+        if len(data["entries"]) > MAX_FEEDBACK_ENTRIES:
+            data["entries"] = data["entries"][-MAX_FEEDBACK_ENTRIES:]
 
-    save_feedback(data, path)
+        # Update page scores with Bayesian smoothing
+        # "wrong" is weighted 2x because incorrect information is worse than incomplete
+        # Deduplicate cited_pages to prevent inflated trust scores
+        unique_cited = list(dict.fromkeys(cited_pages))
+        for page_id in unique_cited:
+            if page_id not in data["page_scores"]:
+                data["page_scores"][page_id] = {
+                    "useful": 0,
+                    "wrong": 0,
+                    "incomplete": 0,
+                    "trust": 0.5,
+                }
+            scores = data["page_scores"][page_id]
+            scores[rating] += 1
+            weighted_negative = 2 * scores["wrong"] + scores["incomplete"]
+            scores["trust"] = round(
+                (scores["useful"] + 1) / (scores["useful"] + weighted_negative + 2), 4
+            )
+
+        # Cap page_scores dict to prevent unbounded growth
+        if len(data["page_scores"]) > MAX_FEEDBACK_ENTRIES:
+            # Keep only pages with highest activity (most total ratings)
+            sorted_pages = sorted(
+                data["page_scores"].items(),
+                key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],
+                reverse=True,
+            )
+            data["page_scores"] = dict(sorted_pages[:MAX_FEEDBACK_ENTRIES])
+
+        save_feedback(data, effective_path)
+
     return entry

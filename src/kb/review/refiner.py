@@ -89,10 +89,13 @@ def refine_page(
     # Reconstruct page
     new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
 
-    # Persist audit trail BEFORE writing the page file.
-    # If we crash after writing the page but before saving history,
-    # the refinement is lost from the audit trail. Reverse order:
-    # a failed page write after history save is detectable and retryable.
+    # Write the page FIRST — if this fails, no history entry is created.
+    try:
+        page_path.write_text(new_text, encoding="utf-8")
+    except OSError as e:
+        return {"error": f"Failed to write page {page_id}: {e}"}
+
+    # Persist audit trail AFTER successful page write.
     history = load_review_history(history_path)
     history.append(
         {
@@ -106,8 +109,6 @@ def refine_page(
     if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
         history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
     save_review_history(history, history_path)
-
-    page_path.write_text(new_text, encoding="utf-8")
 
     # Append to wiki/log.md (auto-creates if missing)
     log_path = wiki_dir / "log.md"
