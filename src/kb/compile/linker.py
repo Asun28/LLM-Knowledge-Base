@@ -13,6 +13,27 @@ logger = logging.getLogger(__name__)
 # Regex for splitting frontmatter from body — correct for --- inside YAML values
 _FRONTMATTER_RE = re.compile(r"\A(---\n.*?\n---\n?)(.*)", re.DOTALL)
 
+# Regex for fenced code blocks (``` ... ```) and inline code (`...`)
+_CODE_MASK_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
+
+
+def _mask_code_blocks(text: str) -> tuple[str, list[str]]:
+    """Replace code blocks and inline code with null-byte placeholders."""
+    masked: list[str] = []
+
+    def _replace(m: re.Match) -> str:
+        masked.append(m.group(0))
+        return f"\x00CODE{len(masked) - 1}\x00"
+
+    return _CODE_MASK_RE.sub(_replace, text), masked
+
+
+def _unmask_code_blocks(text: str, masked: list[str]) -> str:
+    """Restore code blocks and inline code from placeholders."""
+    for i, code in enumerate(masked):
+        text = text.replace(f"\x00CODE{i}\x00", code)
+    return text
+
 
 def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
     """Resolve all wikilinks across the wiki and report broken links.
@@ -140,7 +161,12 @@ def inject_wikilinks(
             frontmatter_section = ""
             body = content
 
-        # Check if title appears in body
+        # Save original body for final comparison, then mask code blocks so
+        # wikilink injection cannot touch content inside ``` ``` or `...` spans.
+        original_body = body
+        body, masked_code = _mask_code_blocks(body)
+
+        # Check if title appears in body (outside code blocks)
         if not pattern.search(body):
             continue
 
@@ -165,7 +191,10 @@ def inject_wikilinks(
 
         new_body = pattern.sub(_replace_if_not_in_wikilink, body, count=1)
 
-        if new_body != body:
+        # Restore code blocks before writing (compare against original to avoid
+        # spurious writes when the only match was inside a code block)
+        new_body = _unmask_code_blocks(new_body, masked_code)
+        if new_body != original_body:
             page_path.write_text(frontmatter_section + new_body, encoding="utf-8")
             updated.append(pid)
             logger.info("Injected wikilink to %s in %s", target_page_id, pid)

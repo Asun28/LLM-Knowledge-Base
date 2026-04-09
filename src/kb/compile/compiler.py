@@ -276,6 +276,8 @@ def compile_wiki(
     if incremental:
         new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path)
         sources_to_process = new_sources + changed_sources
+        # Reload manifest to include template hashes saved by find_changed_sources
+        manifest = load_manifest(manifest_path)
     else:
         sources_to_process = scan_raw_sources(raw_dir)
 
@@ -314,9 +316,12 @@ def compile_wiki(
             results["errors"].append({"source": str(source), "error": str(e)})
 
     # Save template hashes (reload manifest first to preserve per-source hashes
-    # written during the loop, then merge template hashes)
+    # written during the loop, then merge template hashes).
+    # In incremental mode, find_changed_sources already wrote template hashes;
+    # only recompute them in full mode where find_changed_sources was not called.
     current_manifest = load_manifest(manifest_path)
-    current_manifest.update(_template_hashes())
+    if not incremental:
+        current_manifest.update(_template_hashes())
     save_manifest(current_manifest, manifest_path)
 
     # Append to log

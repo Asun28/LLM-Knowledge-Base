@@ -407,3 +407,105 @@ class TestAtomicTextWrite:
 
         # Original content preserved
         assert target.read_text(encoding="utf-8") == "original"
+
+
+# ── Task 6: Compile Manifest and Linker Code Blocks ──
+
+
+class TestCompileManifestPreservesTemplateHashes:
+    """compile_wiki must not clobber template hashes written by find_changed_sources."""
+
+    def test_manifest_reload_after_find_changed(self, tmp_path, monkeypatch):
+        from kb.compile.compiler import compile_wiki, load_manifest, save_manifest
+
+        manifest_path = tmp_path / "hashes.json"
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+
+        # Pre-populate manifest with a template hash
+        save_manifest({"_template/article": "abc123"}, manifest_path)
+
+        # Monkeypatch find_changed_sources to return empty lists but update manifest
+        def mock_find(raw_dir, manifest_path, save_hashes=True):
+            if save_hashes:
+                m = load_manifest(manifest_path)
+                m["_template/article"] = "new_hash"
+                save_manifest(m, manifest_path)
+            return [], []
+
+        monkeypatch.setattr("kb.compile.compiler.find_changed_sources", mock_find)
+        monkeypatch.setattr("kb.compile.compiler.append_wiki_log", lambda *a, **kw: None)
+
+        compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+
+        # Template hash must survive the compile loop
+        final = load_manifest(manifest_path)
+        assert "_template/article" in final
+        assert final["_template/article"] == "new_hash"
+
+
+class TestInjectWikilinksSkipsCodeBlocks:
+    """inject_wikilinks must not create wikilinks inside code blocks."""
+
+    def test_fenced_code_block_preserved(self, tmp_wiki):
+        from kb.compile.linker import inject_wikilinks
+
+        # Create the target page
+        target_path = tmp_wiki / "concepts" / "rag.md"
+        target_path.write_text(
+            '---\ntitle: "RAG"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# RAG\n\nContent about RAG.\n",
+            encoding="utf-8",
+        )
+
+        # Create a page that mentions RAG inside a code block
+        code_page = tmp_wiki / "concepts" / "example.md"
+        code_page.write_text(
+            '---\ntitle: "Example"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# Example\n\n"
+            "Normal text here.\n\n"
+            "```python\n# RAG implementation\nclass RAG:\n    pass\n```\n\n"
+            "More text.\n",
+            encoding="utf-8",
+        )
+
+        inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+
+        result = code_page.read_text(encoding="utf-8")
+        # Wikilink should NOT appear inside the code block
+        lines = result.split("\n")
+        inside_code = False
+        for line in lines:
+            if line.startswith("```"):
+                inside_code = not inside_code
+            if inside_code and "[[" in line:
+                pytest.fail(f"Wikilink injected inside code block: {line}")
+
+    def test_inline_code_preserved(self, tmp_wiki):
+        from kb.compile.linker import inject_wikilinks
+
+        target_path = tmp_wiki / "concepts" / "rag.md"
+        target_path.write_text(
+            '---\ntitle: "RAG"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# RAG\n",
+            encoding="utf-8",
+        )
+
+        code_page = tmp_wiki / "concepts" / "inline.md"
+        code_page.write_text(
+            '---\ntitle: "Inline"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\nUse `RAG` for retrieval.\n",
+            encoding="utf-8",
+        )
+
+        inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+
+        result = code_page.read_text(encoding="utf-8")
+        assert "`RAG`" in result, "Inline code backticks were corrupted"
+        # The inline `RAG` should NOT be converted to a wikilink
+        code_line = next(line for line in result.splitlines() if "`RAG`" in line)
+        assert "[[" not in code_line, f"Wikilink injected around inline code: {code_line}"
