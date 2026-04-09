@@ -761,3 +761,32 @@ class TestEvolveReportNarrowExcept:
             result = generate_evolution_report(wiki_dir=tmp_wiki)
         # Should still produce a report, not crash
         assert isinstance(result, dict)
+
+
+# ── Task 10: MCP Core Fixes ──
+
+
+class TestKbIngestContentNoOverwrite:
+    """kb_ingest_content must not overwrite existing source files."""
+
+    def test_existing_file_returns_error(self, monkeypatch, tmp_path):
+        from kb.mcp.core import kb_ingest_content
+
+        # Create the target file first
+        type_dir = tmp_path / "articles"
+        type_dir.mkdir()
+        existing = type_dir / "test.md"
+        existing.write_text("original content", encoding="utf-8")
+
+        # Monkeypatch SOURCE_TYPE_DIRS to use tmp_path
+        monkeypatch.setattr("kb.mcp.core.SOURCE_TYPE_DIRS", {"article": type_dir})
+
+        result = kb_ingest_content(
+            content="new content",
+            filename="test",
+            source_type="article",
+            extraction_json='{"title": "Test"}',
+        )
+        assert "already exists" in result.lower() or "error" in result.lower()
+        # Original content preserved
+        assert existing.read_text(encoding="utf-8") == "original content"

@@ -188,11 +188,12 @@ def kb_ingest(
 
     if len(content) > QUERY_CONTEXT_MAX_CHARS:
         logger.warning(
-            "Source file %s is %d chars (> %d limit); extraction prompt may be truncated",
+            "Source file %s is %d chars (> %d limit); truncating for extraction prompt",
             _rel(path),
             len(content),
             QUERY_CONTEXT_MAX_CHARS,
         )
+        content = content[:QUERY_CONTEXT_MAX_CHARS]
     prompt = build_extraction_prompt(content, template)
 
     return (
@@ -251,6 +252,12 @@ def kb_ingest_content(
         return (
             "Error: extraction_json must contain 'title' (or 'name'). "
             "Required keys: title, entities_mentioned, concepts_mentioned."
+        )
+
+    if file_path.exists():
+        return (
+            f"Error: Source file already exists: {file_path.name}. "
+            "Use kb_save_source with overwrite=true to replace it."
         )
 
     save_content = content
