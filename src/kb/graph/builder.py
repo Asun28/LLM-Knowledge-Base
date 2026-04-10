@@ -1,6 +1,7 @@
 """Build a networkx graph from wiki pages and their wikilinks."""
 
 import logging
+import re
 from pathlib import Path
 
 import networkx as nx
@@ -8,6 +9,10 @@ import networkx as nx
 from kb.config import WIKI_DIR
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
+
+# Strip YAML frontmatter before extracting wikilinks to avoid false matches in YAML values.
+# Mirrors the pattern used in kb.compile.linker._FRONTMATTER_RE.
+_FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +63,15 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
         except (OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to read %s: %s", page_path, e)
             continue
-        links = extract_wikilinks(content)
+        # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
+        fm_match = _FRONTMATTER_RE.match(content)
+        body = fm_match.group(2) if fm_match else content
+        links = extract_wikilinks(body)
         source_id = page_id(page_path, wiki_dir)
         for link in links:
             target = link
-            if target in existing_ids:
+            # Fix 5.1: guard against self-loops (page linking to itself)
+            if target in existing_ids and target != source_id:
                 graph.add_edge(source_id, target)
 
     return graph
@@ -80,9 +89,9 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     no_inbound = [n for n, d in in_degrees.items() if d == 0 and graph.out_degree(n) > 0]
     isolated = [n for n in graph.nodes() if graph.degree(n) == 0]
 
-    # Top 10 most-linked pages
+    # Top 10 most-linked pages (Fix 5.8: exclude zero-in-degree pages)
     sorted_by_in = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)
-    most_linked = sorted_by_in[:10]
+    most_linked = [(n, d) for n, d in sorted_by_in if d > 0][:10]
 
     # Weakly connected components (treating directed graph as undirected)
     n_components = nx.number_weakly_connected_components(graph)
@@ -91,16 +100,17 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     try:
         pr = nx.pagerank(graph)
         pagerank = sorted(pr.items(), key=lambda x: x[1], reverse=True)[:10]
-    except nx.PowerIterationFailedConvergence:
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError):
         pagerank = []
 
     # Top 10 pages by betweenness centrality (bridge nodes)
-    # Use sampling approximation for large graphs to avoid O(V·E) stall
+    # Use sampling approximation for large graphs to avoid O(V·E) stall.
+    # Fix 5.4: seed=0 makes approximation deterministic across calls.
     try:
         if graph.number_of_nodes() > 500:
-            bc = nx.betweenness_centrality(graph, k=500)
+            bc = nx.betweenness_centrality(graph, k=500, seed=0)
         else:
-            bc = nx.betweenness_centrality(graph)
+            bc = nx.betweenness_centrality(graph, seed=0)
         bridge_nodes = sorted(
             ((n, c) for n, c in bc.items() if c > 0),
             key=lambda x: x[1],

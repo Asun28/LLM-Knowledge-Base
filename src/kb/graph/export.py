@@ -21,7 +21,8 @@ def _sanitize_label(text: str) -> str:
     Removes quotes, special characters, newlines, and backticks that break Mermaid syntax.
     """
     text = text.replace("\n", " ").replace("\r", " ")
-    return re.sub(r'["\[\]{}|<>`\(\)]', "", text).strip()
+    # Fix 5.6: include ';' — semicolons break Mermaid label parsing
+    return re.sub(r'["\[\]{}|<>`\(\);]', "", text).strip()
 
 
 def _safe_node_id(node: str, seen: set[str] | None = None) -> str:
@@ -31,7 +32,8 @@ def _safe_node_id(node: str, seen: set[str] | None = None) -> str:
     (e.g. 'fine-tuning' and 'fine_tuning' would both map to 'fine_tuning'
     without deduplication).
     """
-    base = node.replace("/", "_").replace("-", "_")
+    # Fix 5.7: dots in page IDs (e.g., 'v0.9') break Mermaid node identifiers
+    base = node.replace("/", "_").replace("-", "_").replace(".", "_")
     if seen is None:
         return base
     candidate = base
@@ -65,7 +67,10 @@ def export_mermaid(
     if graph.number_of_nodes() == 0:
         return "graph LR\n  %% No pages in wiki"
 
-    # Load page titles from the already-scanned pages (avoids double disk scan)
+    # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
+    # Titles require YAML frontmatter parsing which load_all_pages() handles.
+    # This is a second disk scan after build_graph(); acceptable at current scale
+    # (titles need frontmatter parsing that build_graph intentionally avoids).
     titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir)}
 
     # Auto-prune if needed
