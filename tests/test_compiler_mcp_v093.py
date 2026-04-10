@@ -9,7 +9,12 @@ from kb.mcp.core import kb_compile
 
 
 def test_compile_manifest_not_saved_on_error(tmp_path):
-    """When ingest_source raises, the manifest must NOT record that source."""
+    """When ingest_source raises, the manifest records a 'failed:' prefixed hash.
+
+    Updated in Phase 3.96 Task 3 (Fix 3.3): on ingest failure the source is now
+    recorded with a 'failed:<hash>' prefix so it is retried on the next compile,
+    rather than being silently skipped forever.
+    """
     # Create a raw source file
     raw_dir = tmp_path / "raw"
     articles_dir = raw_dir / "articles"
@@ -36,9 +41,14 @@ def test_compile_manifest_not_saved_on_error(tmp_path):
     assert len(result["errors"]) == 1
     assert "LLM failed" in result["errors"][0]["error"]
     manifest = load_manifest(manifest_path)
-    # The source should NOT be in the manifest since ingest failed
+    # The source IS recorded in the manifest, but with a 'failed:' prefix so it
+    # will be retried on the next compile run.
     source_keys = [k for k in manifest if not k.startswith("_template/")]
-    assert not any("test-fail.md" in k for k in source_keys)
+    matching_keys = [k for k in source_keys if "test-fail.md" in k]
+    assert len(matching_keys) == 1, f"Expected 1 failed entry, got: {matching_keys}"
+    assert manifest[matching_keys[0]].startswith("failed:"), (
+        f"Expected 'failed:' prefix, got: {manifest[matching_keys[0]]!r}"
+    )
 
 
 def test_compile_manifest_saved_on_success(tmp_path):

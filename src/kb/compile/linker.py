@@ -2,6 +2,7 @@
 
 import logging
 import re
+import uuid
 from pathlib import Path
 
 from kb.config import WIKI_DIR
@@ -10,28 +11,39 @@ from kb.utils.markdown import extract_wikilinks
 
 logger = logging.getLogger(__name__)
 
-# Regex for splitting frontmatter from body — correct for --- inside YAML values
+# Regex for splitting frontmatter from body.
+# Uses lazy match — may not handle all edge cases (e.g. --- inside multi-line YAML values).
 _FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 
-# Regex for fenced code blocks (``` ... ```) and inline code (`...`)
-_CODE_MASK_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
+# Regex for fenced code blocks (``` ... ```), inline code (`...`),
+# markdown links ([text](url)), and images (![alt](url)).
+_CODE_MASK_RE = re.compile(
+    r"```.*?```|`[^`\n]+`|\[(?:[^\]]*)\]\([^)]+\)|!\[(?:[^\]]*)\]\([^)]+\)",
+    re.DOTALL,
+)
 
 
-def _mask_code_blocks(text: str) -> tuple[str, list[str]]:
-    """Replace code blocks and inline code with null-byte placeholders."""
+def _mask_code_blocks(text: str) -> tuple[str, list[str], str]:
+    """Replace code blocks, inline code, and markdown links with null-byte placeholders.
+
+    Returns:
+        Tuple of (masked_text, list_of_originals, prefix) where prefix is a
+        per-call UUID hex string used to prevent placeholder collisions.
+    """
     masked: list[str] = []
+    prefix = uuid.uuid4().hex[:8]
 
     def _replace(m: re.Match) -> str:
         masked.append(m.group(0))
-        return f"\x00CODE{len(masked) - 1}\x00"
+        return f"\x00{prefix}{len(masked) - 1}\x00"
 
-    return _CODE_MASK_RE.sub(_replace, text), masked
+    return _CODE_MASK_RE.sub(_replace, text), masked, prefix
 
 
-def _unmask_code_blocks(text: str, masked: list[str]) -> str:
+def _unmask_code_blocks(text: str, masked: list[str], prefix: str) -> str:
     """Restore code blocks and inline code from placeholders."""
     for i, code in enumerate(masked):
-        text = text.replace(f"\x00CODE{i}\x00", code)
+        text = text.replace(f"\x00{prefix}{i}\x00", code)
     return text
 
 
@@ -55,7 +67,10 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
         except (OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to read %s for wikilink resolution: %s", page_path, e)
             continue
-        links = extract_wikilinks(content)
+        # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
+        fm_match = _FRONTMATTER_RE.match(content)
+        body = fm_match.group(2) if fm_match else content
+        links = extract_wikilinks(body)
         source_id = page_id(page_path, wiki_dir)
 
         for link in links:
@@ -78,7 +93,7 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
     wiki_dir = wiki_dir or WIKI_DIR
     pages = scan_wiki_pages(wiki_dir)
     existing_ids = {page_id(p, wiki_dir).lower() for p in pages}
-    backlinks: dict[str, list[str]] = {}
+    backlinks: dict[str, set[str]] = {}
 
     for page_path in pages:
         try:
@@ -86,19 +101,20 @@ def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
         except (OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to read %s for backlink index: %s", page_path, e)
             continue
-        links = extract_wikilinks(content)
-        source_id = page_id(page_path, wiki_dir)
+        # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
+        fm_match = _FRONTMATTER_RE.match(content)
+        body = fm_match.group(2) if fm_match else content
+        links = extract_wikilinks(body)
+        # Lowercase source_id to match the lowercased keys in existing_ids
+        source_id = page_id(page_path, wiki_dir).lower()
 
         for link in links:
             target = link
             if target not in existing_ids:
                 continue  # Skip broken links (consistent with build_graph)
-            if target not in backlinks:
-                backlinks[target] = []
-            if source_id not in backlinks[target]:
-                backlinks[target].append(source_id)
+            backlinks.setdefault(target, set()).add(source_id)
 
-    return backlinks
+    return {k: sorted(v) for k, v in backlinks.items()}
 
 
 def inject_wikilinks(
@@ -120,6 +136,9 @@ def inject_wikilinks(
     Returns:
         List of page IDs that were updated with new wikilinks.
     """
+    if not title or not title.strip():
+        return []
+
     wiki_dir = wiki_dir or WIKI_DIR
     target_page_id = target_page_id.lower()
     pages = scan_wiki_pages(wiki_dir)
@@ -164,36 +183,47 @@ def inject_wikilinks(
         # Save original body for final comparison, then mask code blocks so
         # wikilink injection cannot touch content inside ``` ``` or `...` spans.
         original_body = body
-        body, masked_code = _mask_code_blocks(body)
+        body, masked_code, mask_prefix = _mask_code_blocks(body)
 
         # Check if title appears in body (outside code blocks)
         if not pattern.search(body):
             continue
 
-        # Replace first occurrence in body with wikilink
+        # Replace first plain-text occurrence in body with wikilink.
+        # Use finditer loop so a blocked match (already inside [[ ]]) doesn't
+        # silently skip all subsequent occurrences.
         replacement = f"[[{target_page_id}|{title}]]"
 
-        # Only replace plain text mentions (not already inside wikilinks)
-        def _replace_if_not_in_wikilink(match):
+        new_body = body
+        for match in pattern.finditer(body):
             start = match.start()
-            # Check if this match is already inside a [[ ]] pair
-            before = body[:start]
-            open_count = before.count("[[") - before.count("]]")
-            if open_count > 0:
-                logger.warning(
-                    "inject_wikilinks: skipping replacement in %s "
-                    "— unmatched [[ before position %d",
-                    pid,
-                    start,
-                )
-                return match.group(0)  # Inside a wikilink, don't replace
-            return replacement
 
-        new_body = pattern.sub(_replace_if_not_in_wikilink, body, count=1)
+            # Capture body via default arg to avoid late-binding closure over the
+            # loop variable (Fix 3.5 defensive closure capture).
+            def _replace_if_not_in_wikilink(m, _body=body):  # noqa: B023
+                _start = m.start()
+                before = _body[:_start]
+                open_count = before.count("[[") - before.count("]]")
+                if open_count > 0:
+                    logger.warning(
+                        "inject_wikilinks: skipping replacement in %s "
+                        "— unmatched [[ before position %d",
+                        pid,
+                        _start,
+                    )
+                    return None  # signal: skip this match
+                return replacement
+
+            result = _replace_if_not_in_wikilink(match)
+            if result is None:
+                # This match is inside a wikilink — continue scanning for next
+                continue
+            new_body = body[:start] + replacement + body[match.end() :]
+            break
 
         # Restore code blocks before writing (compare against original to avoid
         # spurious writes when the only match was inside a code block)
-        new_body = _unmask_code_blocks(new_body, masked_code)
+        new_body = _unmask_code_blocks(new_body, masked_code, mask_prefix)
         if new_body != original_body:
             page_path.write_text(frontmatter_section + new_body, encoding="utf-8")
             updated.append(pid)

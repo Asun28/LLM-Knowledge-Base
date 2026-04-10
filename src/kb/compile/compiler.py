@@ -129,14 +129,28 @@ def find_changed_sources(
     new_sources = []
     changed_sources = []
 
+    # Build set of currently existing rel_paths so we can prune deleted entries
+    existing_rel_paths: set[str] = set()
+
     for source in all_sources:
         rel_path = _canonical_rel_path(source, raw_dir or RAW_DIR)
+        existing_rel_paths.add(rel_path)
         current_hash = content_hash(source)
+        stored = manifest.get(rel_path)
 
-        if rel_path not in manifest:
+        if stored is None:
             new_sources.append(source)
-        elif manifest[rel_path] != current_hash:
+        elif stored.startswith("failed:") or stored != current_hash:
             changed_sources.append(source)
+
+    # Prune manifest entries for files that no longer exist on disk
+    deleted_keys = [
+        k
+        for k in list(manifest.keys())
+        if not k.startswith("_template/") and k not in existing_rel_paths
+    ]
+    for k in deleted_keys:
+        del manifest[k]
 
     # Check for template changes — flag all sources of that type for recompilation
     current_tpl_hashes = _template_hashes()
@@ -164,8 +178,11 @@ def find_changed_sources(
                     changed_source_set.add(f.resolve())
 
     if save_hashes:
-        # Update manifest with current template hashes
+        # Update manifest with current template hashes and save (includes pruned entries)
         manifest.update(current_tpl_hashes)
+        save_manifest(manifest, manifest_path)
+    elif deleted_keys:
+        # Even if not saving hashes, persist pruned manifest so deleted sources don't linger
         save_manifest(manifest, manifest_path)
 
     return new_sources, changed_sources
@@ -255,6 +272,7 @@ def compile_wiki(
     incremental: bool = True,
     raw_dir: Path | None = None,
     manifest_path: Path | None = None,
+    wiki_dir: Path | None = None,
 ) -> dict:
     """Compile wiki pages from raw sources.
 
@@ -265,19 +283,17 @@ def compile_wiki(
         incremental: If True, only process changed sources. If False, recompile all.
         raw_dir: Path to raw directory.
         manifest_path: Path to hash manifest file.
+        wiki_dir: Path to wiki directory (forwarded to ingest_source).
 
     Returns:
         dict with keys: mode, sources_processed, pages_created, pages_updated, errors.
     """
     raw_dir = raw_dir or RAW_DIR
     manifest_path = manifest_path or HASH_MANIFEST
-    manifest = load_manifest(manifest_path)
 
     if incremental:
         new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path)
         sources_to_process = new_sources + changed_sources
-        # Reload manifest to include template hashes saved by find_changed_sources
-        manifest = load_manifest(manifest_path)
     else:
         sources_to_process = scan_raw_sources(raw_dir)
 
@@ -299,7 +315,7 @@ def compile_wiki(
             rel_path = _canonical_rel_path(source, raw_dir)
             pre_hash = content_hash(source)
 
-            ingest_result = ingest_source(source)
+            ingest_result = ingest_source(source, wiki_dir=wiki_dir)
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
             results["pages_updated"].extend(ingest_result["pages_updated"])
@@ -309,11 +325,22 @@ def compile_wiki(
             if ingest_result.get("duplicate"):
                 results["duplicates"] += 1
 
+            # Reload manifest from disk before overwriting — avoid clobbering concurrent writes
+            manifest = load_manifest(manifest_path)
             # Store pre-ingest hash and save immediately (crash-safe)
             manifest[rel_path] = pre_hash
             save_manifest(manifest, manifest_path)
         except Exception as e:
             results["errors"].append({"source": str(source), "error": str(e)})
+            # Record failed hash so the source is retried on next compile
+            try:
+                rel_path = _canonical_rel_path(source, raw_dir)
+                pre_hash = content_hash(source)
+                manifest = load_manifest(manifest_path)
+                manifest[rel_path] = f"failed:{pre_hash}"
+                save_manifest(manifest, manifest_path)
+            except Exception:
+                pass
 
     # Save template hashes (reload manifest first to preserve per-source hashes
     # written during the loop, then merge template hashes).

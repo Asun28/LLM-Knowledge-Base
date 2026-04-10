@@ -366,7 +366,7 @@ def test_compile_saves_manifest_per_source(mock_ingest, tmp_path):
     call_count = 0
     manifest_path = tmp_path / "hashes.json"
 
-    def ingest_side_effect(source):
+    def ingest_side_effect(source, **kwargs):
         nonlocal call_count
         call_count += 1
         # On second call, verify manifest already has first entry
