@@ -1,6 +1,9 @@
 """Ingest pipeline — read raw sources, create wiki summaries, update indexes."""
 
+import hashlib
+import json
 import logging
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -18,9 +21,10 @@ from kb.config import (
     WIKI_DIR,
     WIKI_INDEX,
     WIKI_SOURCES,
+    WIKI_SUBDIR_TO_TYPE,
 )
 from kb.ingest.extractors import extract_from_source
-from kb.utils.hashing import content_hash
+from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
 from kb.utils.text import slugify, yaml_escape
@@ -126,8 +130,7 @@ confidence: {confidence}
 ---
 
 '''
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(fm_text + content, encoding="utf-8")
+    atomic_text_write(fm_text + content, path)
 
 
 def _build_summary_content(extraction: dict, source_type: str) -> str:
@@ -179,7 +182,10 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         lines.append("\n## Entities Mentioned\n")
         for e in entities:
             slug = slugify(e)
-            lines.append(f"- [[entities/{slug}|{e}]]")
+            # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
+            if slug:
+                safe_name = e.replace("|", "-").replace("\n", " ").replace("\r", "")
+                lines.append(f"- [[entities/{slug}|{safe_name}]]")
         lines.append("")
 
     # Concepts
@@ -188,7 +194,10 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         lines.append("\n## Concepts\n")
         for c in concepts:
             slug = slugify(c)
-            lines.append(f"- [[concepts/{slug}|{c}]]")
+            # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
+            if slug:
+                safe_name = c.replace("|", "-").replace("\n", " ").replace("\r", "")
+                lines.append(f"- [[concepts/{slug}|{safe_name}]]")
         lines.append("")
 
     return "\n".join(lines)
@@ -248,14 +257,15 @@ def _update_existing_page(
     Updates both the YAML frontmatter source: list and the References section.
     When name and extraction are provided, enriches page with context from the new source.
     """
+    # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
     content = page_path.read_text(encoding="utf-8")
     # Check frontmatter sources specifically, not full content
     try:
-        post = frontmatter.load(str(page_path))
+        post = frontmatter.loads(content)
         existing_sources = normalize_sources(post.metadata.get("source"))
         if source_ref in existing_sources:
             return  # Already referenced in frontmatter
-    except (OSError, ValueError, AttributeError, yaml.YAMLError) as e:
+    except (ValueError, AttributeError, yaml.YAMLError) as e:
         logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
 
     # 1. Update frontmatter source: list
@@ -266,33 +276,48 @@ def _update_existing_page(
         fm_text = fm_match.group(1)
         body_text = fm_match.group(2)
     else:
+        # Fix 2.9: warn when frontmatter regex fails to match
+        logger.warning(
+            "Could not parse frontmatter block in %s; treating whole file as body", page_path
+        )
         fm_text = content
         body_text = ""
 
-    source_line_pattern = re.compile(r'^  - ".*"$', re.MULTILINE)
-    matches = list(source_line_pattern.finditer(fm_text))
-    if matches:
-        last_match = matches[-1]
-        fm_text = fm_text[: last_match.end()] + f'\n  - "{safe_ref}"' + fm_text[last_match.end() :]
+    # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
+    source_block_re = re.compile(r"^(source:\s*\n(?:  - [^\n]*\n)*)", re.MULTILINE)
+    source_match = source_block_re.search(fm_text)
+    if source_match:
+        block_end = source_match.end()
+        fm_text = fm_text[:block_end] + f'  - "{safe_ref}"\n' + fm_text[block_end:]
     elif "source:" in fm_text:
         fm_text = fm_text.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
+
+    # Fix 2.17: Apply updated date substitution only to fm_text, not body
+    today = date.today().isoformat()
+    fm_text = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", fm_text)
+
     content = fm_text + body_text
 
-    # 2. Append to References section
+    # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
     ref_line = f"- {verb} in {source_ref}"
-    if "## References" in content:
-        content = content.replace("## References\n", f"## References\n{ref_line}\n", 1)
-    else:
+    if "## References" in body_text:
+        # Append new reference at end of References block
+        body_text = re.sub(
+            r"(## References\n(?:.*\n)*?)(\n## |\Z)",
+            lambda m: m.group(1) + ref_line + "\n" + m.group(2),
+            body_text,
+            count=1,
+            flags=re.DOTALL,
+        )
+        content = fm_text + body_text
+    elif "## References" not in content:
         content += f"\n## References\n\n{ref_line}\n"
-
-    # 3. Update the 'updated' date in frontmatter
-    today = date.today().isoformat()
-    content = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", content)
 
     # 4. Enrich with context from new source (if extraction provided)
     if name and extraction:
         ctx = _extract_entity_context(name, extraction)
-        if ctx and ctx not in content:
+        # Fix 2.4: check for section header presence, not full block equality
+        if ctx and "## Context" not in content:
             # Add context before References section, or at end.
             # Use regex anchored to line start to avoid matching "## References"
             # inside body text or LLM-extracted context strings.
@@ -303,7 +328,8 @@ def _update_existing_page(
             else:
                 content += f"\n{ctx}\n"
 
-    page_path.write_text(content, encoding="utf-8")
+    # Fix 2.1: Use atomic write
+    atomic_text_write(content, page_path)
 
 
 def _update_sources_mapping(
@@ -320,24 +346,13 @@ def _update_sources_mapping(
     if f"`{source_ref}`" in content:
         return  # Already listed
     content += entry
-    from kb.utils.io import atomic_text_write
-
     atomic_text_write(content, sources_file)
 
 
-_SECTION_HEADERS = {
-    "entity": "## Entities",
-    "concept": "## Concepts",
-    "comparison": "## Comparisons",
-    "summary": "## Summaries",
-    "synthesis": "## Synthesis",
-}
-_SUBDIR_MAP = {
-    "entity": "entities",
-    "concept": "concepts",
-    "comparison": "comparisons",
-    "summary": "summaries",
-    "synthesis": "synthesis",
+# Fix 2.18: Derive from WIKI_SUBDIR_TO_TYPE at module load time — single source of truth.
+_SUBDIR_MAP: dict[str, str] = {v: k for k, v in WIKI_SUBDIR_TO_TYPE.items()}
+_SECTION_HEADERS: dict[str, str] = {
+    page_type: f"## {subdir.capitalize()}" for subdir, page_type in WIKI_SUBDIR_TO_TYPE.items()
 }
 
 
@@ -366,8 +381,6 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
             content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
         changed = True
     if changed:
-        from kb.utils.io import atomic_text_write
-
         atomic_text_write(content, index_path)
 
 
@@ -469,17 +482,22 @@ def ingest_source(
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
+    # Fix 2.12: use os.path.normcase() for Windows path case-insensitive comparison
     try:
-        source_path.relative_to(RAW_DIR.resolve())
+        source_path.relative_to(Path(os.path.normcase(str(RAW_DIR.resolve()))))
     except ValueError:
-        raise ValueError(f"Source path must be within raw/ directory: {source_path}")
+        try:
+            source_path.relative_to(RAW_DIR.resolve())
+        except ValueError:
+            raise ValueError(f"Source path must be within raw/ directory: {source_path}")
 
     if source_type is None:
         source_type = detect_source_type(source_path)
 
-    # Read source and compute hash
-    raw_content = source_path.read_text(encoding="utf-8")
-    source_hash = content_hash(source_path)
+    # Fix 2.13: Read bytes once; derive both text and hash from the same read (avoids double read).
+    raw_bytes = source_path.read_bytes()
+    raw_content = raw_bytes.decode("utf-8")
+    source_hash = hashlib.sha256(raw_bytes).hexdigest()[:32]
 
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)
@@ -514,7 +532,8 @@ def ingest_source(
     title = extraction.get("title") or extraction.get("name") or source_path.stem
     summary_slug = slugify(title)
     if not summary_slug:
-        summary_slug = slugify(source_path.stem) or source_path.stem
+        # Fix 2.19: use "untitled" as final fallback if stem also produces empty slug
+        summary_slug = slugify(source_path.stem) or "untitled"
         logger.warning(
             "Title %r produced empty slug; falling back to source stem %r",
             title,
@@ -572,9 +591,25 @@ def ingest_source(
     new_pages_with_titles.extend(c_new)
 
     # 4. Update index files (single read/write)
+    # Fix 2.7: use page IDs from created pages for slug consistency (avoids re-slugify divergence)
     index_entries: list[tuple[str, str, str]] = [("summary", summary_slug, title)]
-    index_entries.extend(("entity", slugify(e), e) for e in e_valid)
-    index_entries.extend(("concept", slugify(c), c) for c in c_valid)
+    for pid in e_created:
+        slug = pid.split("/", 1)[-1] if "/" in pid else pid
+        # Find matching name from e_valid by re-slugifying
+        name = next((e for e in e_valid if slugify(e) == slug), slug)
+        index_entries.append(("entity", slug, name))
+    for pid in e_updated:
+        slug = pid.split("/", 1)[-1] if "/" in pid else pid
+        name = next((e for e in e_valid if slugify(e) == slug), slug)
+        index_entries.append(("entity", slug, name))
+    for pid in c_created:
+        slug = pid.split("/", 1)[-1] if "/" in pid else pid
+        name = next((c for c in c_valid if slugify(c) == slug), slug)
+        index_entries.append(("concept", slug, name))
+    for pid in c_updated:
+        slug = pid.split("/", 1)[-1] if "/" in pid else pid
+        name = next((c for c in c_valid if slugify(c) == slug), slug)
+        index_entries.append(("concept", slug, name))
     _update_index_batch(index_entries, wiki_dir=effective_wiki_dir)
 
     # 5. Update _sources.md mapping
@@ -589,8 +624,11 @@ def ingest_source(
         manifest = load_manifest()
         manifest[source_ref] = source_hash
         save_manifest(manifest)
+    except (OSError, json.JSONDecodeError) as e:
+        # Fix 2.14: narrow bare except — log at WARNING, not DEBUG
+        logger.warning("Failed to update hash manifest: %s", e)
     except Exception as e:
-        logger.debug("Failed to update hash manifest: %s", e)
+        logger.debug("Failed to update hash manifest (unexpected): %s", e)
 
     # 7. Append to log
     append_wiki_log(
@@ -613,6 +651,7 @@ def ingest_source(
         except Exception as e:
             logger.debug("inject_wikilinks failed for %s: %s", pid, e)
 
+    # Fix 2.21: deduplicate wikilinks_injected
     result = {
         "source_path": str(source_path),
         "source_type": source_type,
@@ -621,7 +660,7 @@ def ingest_source(
         "pages_updated": pages_updated,
         "pages_skipped": pages_skipped,
         "affected_pages": affected_pages,
-        "wikilinks_injected": wikilinks_injected,
+        "wikilinks_injected": sorted(set(wikilinks_injected)),
     }
     if is_small_source:
         result["deferred_entities"] = True

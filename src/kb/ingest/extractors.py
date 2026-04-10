@@ -44,9 +44,6 @@ KNOWN_LIST_FIELDS = frozenset(
         "dependencies",
         "usage_patterns",
         # Book
-        "chapters",
-        "key_themes",
-        "key_arguments",
         "quotes",
         "themes",
         # Dataset
@@ -55,7 +52,6 @@ KNOWN_LIST_FIELDS = frozenset(
         # Conversation
         "participants",
         "topic_segments",
-        "key_exchanges",
         "open_questions",
     }
 )
@@ -64,6 +60,9 @@ KNOWN_LIST_FIELDS = frozenset(
 @functools.lru_cache(maxsize=16)
 def load_template(source_type: str) -> dict:
     """Load extraction template YAML for a given source type.
+
+    Results are cached per-process via LRU cache. Template changes on disk
+    will not be reflected until the process is restarted (cache is not invalidated).
 
     Raises:
         ValueError: If source_type is not in the whitelist.
@@ -89,9 +88,9 @@ def _parse_field_spec(spec: str) -> tuple[str, str, bool]:
     """
     spec = spec.strip().strip('"')
 
-    # Strip YAML-style inline comments
-    if " #" in spec:
-        spec = spec[: spec.index(" #")].strip()
+    # Fix 2.16: Strip YAML-style inline comments only when preceded by double space
+    if "  # " in spec:
+        spec = spec[: spec.index("  # ")].strip()
 
     # Check for annotated format: "name (type): description"
     annotated = _ANNOTATED_FIELD_RE.match(spec)
@@ -129,6 +128,10 @@ def build_extraction_schema(template: dict) -> dict:
     Parses template field specs into a JSON Schema object that can be
     used with Claude's tool_use feature for guaranteed structured output.
     """
+    # Fix 2.5: clear error on missing extract key
+    if "extract" not in template:
+        raise ValueError(f"Template missing 'extract' key: {template.get('name', '?')}")
+
     properties = {}
     required = []
 
@@ -149,6 +152,10 @@ def build_extraction_schema(template: dict) -> dict:
 
         if name in ("title", "name"):
             required.append(name)
+
+    # Fix 2.6: ensure at least the first field is required
+    if not required and properties:
+        required = [next(iter(properties))]
 
     return {
         "type": "object",
