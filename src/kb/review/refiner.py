@@ -2,11 +2,15 @@
 
 import json
 import re
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
 from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
+from kb.utils.io import atomic_text_write
 from kb.utils.wiki_log import append_wiki_log
+
+_history_lock = threading.Lock()
 
 
 def load_review_history(path: Path | None = None) -> list[dict]:
@@ -64,8 +68,8 @@ def refine_page(
     text = text.replace("\r\n", "\n")
 
     # Split frontmatter from content using regex for robust --- matching
-    # Matches: start-of-file, optional whitespace, ---, newline, content, ---, rest
-    fm_match = re.match(r"\A\s*---\n(.*?\n)---\n?(.*)", text, re.DOTALL)
+    # Matches: start-of-file, optional whitespace, ---, newline (LF or CRLF), content, ---, rest
+    fm_match = re.match(r"\A\s*---\r?\n(.*?\r?\n)---\r?\n?(.*)", text, re.DOTALL)
     if not fm_match:
         return {"error": f"Invalid frontmatter format in {page_id}"}
 
@@ -81,34 +85,39 @@ def refine_page(
         # Add updated field if missing
         frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
 
+    # Guard against empty or whitespace-only content
+    if not updated_content or not updated_content.strip():
+        return {"error": "updated_content cannot be empty."}
+
     # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
     stripped_content = updated_content.lstrip()
-    if re.match(r"---\n.+\n---", stripped_content, re.DOTALL):
-        return {"error": "Updated content must not start with a YAML frontmatter block"}
+    if re.match(r"---\n.*?\n?---", stripped_content, re.DOTALL):
+        return {"error": "Content looks like a frontmatter block — pass only the body text."}
 
-    # Reconstruct page
-    new_text = f"---\n{frontmatter_text}---\n\n{updated_content}\n"
+    # Reconstruct page — strip leading whitespace from body for clean output
+    new_text = f"---\n{frontmatter_text}---\n\n{updated_content.lstrip()}\n"
 
     # Write the page FIRST — if this fails, no history entry is created.
     try:
-        page_path.write_text(new_text, encoding="utf-8")
+        atomic_text_write(new_text, page_path)
     except OSError as e:
         return {"error": f"Failed to write page {page_id}: {e}"}
 
-    # Persist audit trail AFTER successful page write.
-    history = load_review_history(history_path)
-    history.append(
-        {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "page_id": page_id,
-            "revision_notes": revision_notes,
-            "content_length": len(updated_content),
-            "status": "applied",
-        }
-    )
-    if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
-        history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
-    save_review_history(history, history_path)
+    # Persist audit trail AFTER successful page write (thread-safe).
+    with _history_lock:
+        history = load_review_history(history_path)
+        history.append(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "page_id": page_id,
+                "revision_notes": revision_notes,
+                "content_length": len(updated_content),
+                "status": "applied",
+            }
+        )
+        if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
+            history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
+        save_review_history(history, history_path)
 
     # Append to wiki/log.md (auto-creates if missing)
     log_path = wiki_dir / "log.md"

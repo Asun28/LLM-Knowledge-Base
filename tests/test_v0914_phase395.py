@@ -835,15 +835,15 @@ class TestRefinePageWriteOrdering:
 
         history_path = tmp_path / "review_history.json"
 
-        # Make page write fail
-        original_write = Path.write_text
-
-        def failing_write(self, *args, **kwargs):
-            if "test.md" in str(self) and "wiki" in str(self):
+        # Make page write fail — patch atomic_text_write since refiner now uses it
+        def failing_atomic_write(content, path):
+            if "test.md" in str(path) and "wiki" in str(path):
                 raise OSError("disk full")
-            return original_write(self, *args, **kwargs)
+            from kb.utils.io import atomic_text_write as _real
 
-        monkeypatch.setattr(Path, "write_text", failing_write)
+            _real(content, path)
+
+        monkeypatch.setattr("kb.review.refiner.atomic_text_write", failing_atomic_write)
 
         result = refine_page(
             "concepts/test",

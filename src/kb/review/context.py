@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import frontmatter
+import yaml
 
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.utils.pages import normalize_sources
@@ -42,7 +43,10 @@ def pair_page_with_sources(
     if not page_path.exists():
         return {"error": f"Page not found: {page_id}", "page_id": page_id}
 
-    post = frontmatter.load(str(page_path))
+    try:
+        post = frontmatter.load(str(page_path))
+    except yaml.YAMLError as e:
+        return {"error": f"Malformed YAML in {page_id}: {e}", "page_id": page_id}
 
     # Get source paths from frontmatter
     sources_meta = normalize_sources(post.metadata.get("source"))
@@ -114,7 +118,7 @@ def build_review_checklist() -> str:
         "5. **No hallucination**: Is there information NOT present in the raw source?\n"
         "6. **Title accuracy**: Does the title accurately reflect the page content?\n\n"
         "Return your review as JSON:\n```json\n"
-        '{\n  "verdict": "approve | revise | reject",\n'
+        '{\n  "verdict": "pass | warning | fail",\n'
         '  "fidelity_score": 0.0,\n'
         '  "issues": [{"severity": "error|warning|info", '
         '"type": "unsourced_claim|missing_info|wrong_confidence|broken_link", '
