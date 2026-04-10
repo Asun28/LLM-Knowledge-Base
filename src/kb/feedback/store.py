@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import logging
 import os
 import time
 from datetime import datetime
@@ -13,14 +14,18 @@ from kb.config import (
     MAX_FEEDBACK_ENTRIES,
     MAX_NOTES_LEN,
     MAX_PAGE_ID_LEN,
+    MAX_PAGE_SCORES,
     MAX_QUESTION_LEN,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @contextlib.contextmanager
 def _feedback_lock(path: Path, timeout: float = 5.0):
     """Acquire an exclusive file lock for the feedback store."""
     lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -29,9 +34,9 @@ def _feedback_lock(path: Path, timeout: float = 5.0):
             break
         except FileExistsError:
             if time.monotonic() > deadline:
-                # Stale lock — force break
+                # Stale lock — remove and retry acquisition
                 lock_path.unlink(missing_ok=True)
-                break
+                continue
             time.sleep(0.05)
     try:
         yield
@@ -128,6 +133,9 @@ def add_feedback_entry(
         data["entries"].append(entry)
         # Retain only the most recent entries to prevent unbounded growth
         if len(data["entries"]) > MAX_FEEDBACK_ENTRIES:
+            logger.warning(
+                "Feedback store at capacity (%d entries), evicting oldest", MAX_FEEDBACK_ENTRIES
+            )
             data["entries"] = data["entries"][-MAX_FEEDBACK_ENTRIES:]
 
         # Update page scores with Bayesian smoothing
@@ -150,14 +158,14 @@ def add_feedback_entry(
             )
 
         # Cap page_scores dict to prevent unbounded growth
-        if len(data["page_scores"]) > MAX_FEEDBACK_ENTRIES:
+        if len(data["page_scores"]) > MAX_PAGE_SCORES:
             # Keep only pages with highest activity (most total ratings)
             sorted_pages = sorted(
                 data["page_scores"].items(),
                 key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],
                 reverse=True,
             )
-            data["page_scores"] = dict(sorted_pages[:MAX_FEEDBACK_ENTRIES])
+            data["page_scores"] = dict(sorted_pages[:MAX_PAGE_SCORES])
 
         save_feedback(data, effective_path)
 

@@ -30,8 +30,8 @@ def analyze_coverage(wiki_dir: Path | None = None) -> dict:
         if subdir in by_type:
             by_type[subdir] += 1
 
-    # Find under-covered types (types with zero pages)
-    under_covered = [t for t, count in by_type.items() if count == 0]
+    # Find under-covered types (types with fewer than 3 pages)
+    under_covered = [t for t, count in by_type.items() if count < 3]
 
     # Find concepts with no backlinks (nobody references them)
     orphan_concepts = []
@@ -70,10 +70,12 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
             logger.warning("Skipping unreadable page %s in connection analysis", page_path)
             continue
         # Strip YAML frontmatter to avoid false-positive matches on structural keywords
-        content = re.sub(r"\A\s*---\n.*?\n---\n?", "", raw, count=1, flags=re.DOTALL).lower()
+        content = re.sub(r"\A---\n.*?\n---\n?", "", raw, count=1, flags=re.DOTALL).lower()
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
-        words = {stripped for w in content.split() if len(stripped := w.strip(".,!?()[]{}\"'")) > 4}
+        words = {
+            stripped for w in content.split() if len(stripped := w.strip(".,!?()[]{}\"':-/")) > 4
+        }
         for word in words:
             if word not in term_index:
                 term_index[word] = []
@@ -103,13 +105,14 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
             {
                 "page_a": page_a,
                 "page_b": page_b,
+                "shared_term_count": len(shared),
                 "shared_terms": shared[:10],
                 "suggestion": f"Consider linking {page_a} ↔ {page_b} ({len(shared)} shared terms)",
             }
         )
 
     # Sort by number of shared terms (most shared first)
-    opportunities.sort(key=lambda x: len(x["shared_terms"]), reverse=True)
+    opportunities.sort(key=lambda x: x["shared_term_count"], reverse=True)
     return opportunities[:20]  # Top 20 suggestions
 
 
@@ -286,9 +289,8 @@ def format_evolution_report(report: dict) -> str:
     if report["connection_opportunities"]:
         lines.append("## Connection Opportunities\n")
         for co in report["connection_opportunities"][:10]:
-            lines.append(
-                f"- {co['page_a']} ↔ {co['page_b']} ({len(co['shared_terms'])} shared terms)"
-            )
+            count = co.get("shared_term_count", len(co["shared_terms"]))
+            lines.append(f"- {co['page_a']} ↔ {co['page_b']} ({count} shared terms)")
         lines.append("")
 
     # Recommendations

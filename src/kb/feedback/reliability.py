@@ -39,7 +39,7 @@ def get_coverage_gaps(path: Path | None = None) -> list[dict]:
     """
     data = load_feedback(path)
     return [
-        {"question": e["question"], "notes": e.get("notes", "")}
+        {"question": e.get("question", ""), "notes": e.get("notes", "")}
         for e in data.get("entries", [])
-        if e.get("rating") == "incomplete"
+        if e.get("rating") == "incomplete" and e.get("question")
     ]
