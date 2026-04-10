@@ -5,7 +5,13 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from kb.config import MAX_SEARCH_RESULTS, PROJECT_ROOT, QUERY_CONTEXT_MAX_CHARS, SOURCE_TYPE_DIRS
+from kb.config import (
+    MAX_SEARCH_RESULTS,
+    PROJECT_ROOT,
+    QUERY_CONTEXT_MAX_CHARS,
+    RAW_DIR,
+    SOURCE_TYPE_DIRS,
+)
 from kb.ingest.pipeline import ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, mcp
 from kb.utils.text import slugify, yaml_escape
@@ -29,6 +35,9 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         max_results: Maximum pages to search (default 10).
         use_api: If true, call the Anthropic API for synthesis. Default false.
     """
+    if not question or not question.strip():
+        return "Error: Question cannot be empty."
+
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
     if use_api:
@@ -37,14 +46,14 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
 
         try:
             result = query_wiki(question)
+            parts = [result["answer"]]
+            if result.get("citations"):
+                parts.append("\n" + format_citations(result["citations"]))
+            parts.append(f"\n[Searched {len(result.get('source_pages', []))} pages]")
+            return "\n".join(parts)
         except Exception as e:
             logger.exception("Error in kb_query API mode for: %s", question)
             return f"Error: Query failed — {e}"
-        parts = [result["answer"]]
-        if result["citations"]:
-            parts.append("\n" + format_citations(result["citations"]))
-        parts.append(f"\n[Searched {len(result['source_pages'])} pages]")
-        return "\n".join(parts)
 
     # Default: Claude Code mode — return context for synthesis
     from kb.query.engine import search_pages
@@ -75,7 +84,7 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         "Cite sources with [source: page_id] format.\n",
     ]
     for r in results:
-        trust_label = f", trust: {r['trust']:.2f}" if r.get("trust", 0.5) != 0.5 else ""
+        trust_label = f", trust: {r['trust']:.2f}" if abs(r.get("trust", 0.5) - 0.5) >= 1e-9 else ""
         lines.append(
             f"--- Page: {r['id']} (type: {r['type']}, "
             f"confidence: {r['confidence']}, score: {r['score']}{trust_label}) ---\n"
@@ -111,19 +120,25 @@ def kb_ingest(
             Omit to get the extraction prompt instead.
         use_api: If true, use the Anthropic API for extraction. Default false.
     """
+    _TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
+
     path = Path(source_path)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     path = path.resolve()
 
-    # Validate source path stays within project directory
+    # Validate source path stays within raw/ directory
     try:
-        path.relative_to(PROJECT_ROOT.resolve())
+        path.relative_to(RAW_DIR.resolve())
     except ValueError:
-        return f"Error: Source path must be within the project directory: {source_path}"
+        return f"Error: Source path must be within raw/ directory: {source_path}"
 
     if not path.exists():
         return f"Error: Source file not found: {path}"
+
+    # Reject binary file types
+    if path.suffix.lower() not in _TEXT_EXTENSIONS:
+        return f"Error: Unsupported file type '{path.suffix}'."
 
     # ── API mode ──
     if use_api:
@@ -196,13 +211,14 @@ def kb_ingest(
         content = content[:QUERY_CONTEXT_MAX_CHARS]
     prompt = build_extraction_prompt(content, template)
 
+    rel_path = _rel(path)
     return (
-        f"# Extraction needed for: {_rel(path)}\n\n"
+        f"# Extraction needed for: {rel_path}\n\n"
         f"**Type:** {source_type}\n"
         f"**Template:** {template['name']} — {template['description']}\n\n"
         f"Read the source below, extract the JSON, then call kb_ingest again with:\n"
-        f'  source_path="{_rel(path)}"\n'
-        f'  source_type="{source_type}"\n'
+        f'  source_path="{yaml_escape(rel_path)}"\n'
+        f'  source_type="{yaml_escape(source_type)}"\n'
         f"  extraction_json=<your JSON>\n\n"
         f"---\n\n{prompt}"
     )
@@ -230,6 +246,14 @@ def kb_ingest_content(
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
         url: Optional source URL for metadata.
     """
+    if not filename or not filename.strip():
+        return "Error: Filename cannot be empty."
+    if len(filename) > 200:
+        return "Error: Filename too long (max 200 chars)."
+    max_content = 160_000  # chars
+    if len(content) > max_content:
+        return f"Error: Content too large ({len(content)} chars). Maximum: {max_content} chars."
+
     slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
@@ -306,6 +330,14 @@ def kb_save_source(
         url: Optional source URL to include as metadata.
         overwrite: If true, overwrite existing file. Default false (returns error).
     """
+    if not filename or not filename.strip():
+        return "Error: Filename cannot be empty."
+    if len(filename) > 200:
+        return "Error: Filename too long (max 200 chars)."
+    max_content = 160_000  # chars
+    if len(content) > max_content:
+        return f"Error: Content too large ({len(content)} chars). Maximum: {max_content} chars."
+
     slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:

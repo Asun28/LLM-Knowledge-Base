@@ -65,6 +65,7 @@ def kb_read_page(page_id: str) -> str:
                             f.resolve().relative_to(WIKI_DIR.resolve())
                         except ValueError:
                             continue
+                        logger.warning("Case-insensitive match for '%s' → '%s'", page_id, f.stem)
                         page_path = f
                         break
     if not page_path.exists():
@@ -87,6 +88,9 @@ def kb_list_pages(page_type: str = "") -> str:
     try:
         pages = load_all_pages()
         if page_type:
+            # Normalize: accept singular forms like "concept" → "concepts"
+            if not page_type.endswith("s"):
+                page_type = page_type + "s"
             pages = [p for p in pages if p["id"].startswith(page_type)]
         if not pages:
             return "No pages found."

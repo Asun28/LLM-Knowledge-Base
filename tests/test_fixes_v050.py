@@ -280,7 +280,10 @@ def test_extraction_validation_missing_title(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with patch("kb.mcp.core.PROJECT_ROOT", tmp_path):
+    with (
+        patch("kb.mcp.core.PROJECT_ROOT", tmp_path),
+        patch("kb.mcp.core.RAW_DIR", tmp_path / "raw"),
+    ):
         result = kb_ingest(str(source), "article", '{"entities_mentioned": []}')
     assert "Error" in result
     assert "title" in result.lower()
@@ -294,7 +297,10 @@ def test_extraction_validation_non_dict(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_text("test content")
 
-    with patch("kb.mcp.core.PROJECT_ROOT", tmp_path):
+    with (
+        patch("kb.mcp.core.PROJECT_ROOT", tmp_path),
+        patch("kb.mcp.core.RAW_DIR", tmp_path / "raw"),
+    ):
         result = kb_ingest(str(source), "article", '["not", "a", "dict"]')
     assert "Error" in result
     assert "object" in result.lower()

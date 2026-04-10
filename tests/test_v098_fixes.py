@@ -17,6 +17,7 @@ class TestKbIngestPathTraversal:
         """Set up a temporary project root for testing."""
         monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr("kb.mcp.core.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr("kb.mcp.core.RAW_DIR", tmp_path / "raw")
         raw = tmp_path / "raw" / "articles"
         raw.mkdir(parents=True)
         return raw
@@ -32,7 +33,8 @@ class TestKbIngestPathTraversal:
 
         result = kb_ingest(source_path=str(outside))
         assert "Error:" in result
-        assert "project directory" in result.lower()
+        # Now rejects with "raw/ directory" message (tightened from project directory)
+        assert "raw/" in result.lower() or "directory" in result.lower()
 
     def test_rejects_relative_traversal(self, tmp_path, monkeypatch):
         """Relative path with .. escaping project root is rejected."""
@@ -411,9 +413,7 @@ class TestMakeApiCall:
         from kb.utils.llm import call_llm
 
         text_block = Mock(type="text", text="Hello")
-        mock_get_client.return_value.messages.create.return_value = Mock(
-            content=[text_block]
-        )
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[text_block])
         result = call_llm("Say hello", tier="write")
         assert result == "Hello"
 

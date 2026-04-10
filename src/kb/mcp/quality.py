@@ -1,6 +1,9 @@
 """Quality MCP tools — review, refine, lint deep, consistency, feedback, verdicts, page creation."""
 
+import json
 import logging
+import os
+import re
 from datetime import date
 
 from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
@@ -9,6 +12,11 @@ from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_control_chars(s: str) -> str:
+    """Remove ASCII control characters (U+0000–U+001F) from a string."""
+    return re.sub(r"[\x00-\x1f]", "", s)
 
 
 @mcp.tool()
@@ -21,6 +29,7 @@ def kb_review_page(page_id: str) -> str:
     Args:
         page_id: Page to review (e.g., 'concepts/rag').
     """
+    page_id = _strip_control_chars(page_id)
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -48,6 +57,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         updated_content: New markdown body (frontmatter preserved automatically).
         revision_notes: What changed and why.
     """
+    page_id = _strip_control_chars(page_id)
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -93,6 +103,7 @@ def kb_lint_deep(page_id: str) -> str:
     Args:
         page_id: Page to check (e.g., 'concepts/rag').
     """
+    page_id = _strip_control_chars(page_id)
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -145,10 +156,18 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         cited_pages: Comma-separated page IDs cited in the answer.
         notes: What was wrong or missing.
     """
-    from kb.feedback.store import add_feedback_entry
+    if not question or not question.strip():
+        return "Error: Question cannot be empty."
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
+    for pid in pages:
+        err = _validate_page_id(pid, check_exists=False)
+        if err:
+            return f"Error: Invalid cited page '{pid}': {err}"
+
     try:
+        from kb.feedback.store import add_feedback_entry
+
         add_feedback_entry(question, rating, pages, notes)
     except ValueError as e:
         return f"Error: {e}"
@@ -288,11 +307,13 @@ def kb_save_lint_verdict(
         issues: Optional JSON array of issue objects with severity/description.
         notes: Free-text notes about the evaluation.
     """
+    page_id = _strip_control_chars(page_id)
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
 
-    import json
+    if len(notes) > 2000:
+        return "Error: Notes too long (max 2000 chars)."
 
     from kb.lint.verdicts import add_verdict
 
@@ -343,12 +364,21 @@ def kb_create_page(
         confidence: Confidence level: 'stated', 'inferred', or 'speculative'.
         source_refs: Comma-separated source references (e.g., 'raw/articles/a.md,raw/papers/b.md').
     """
+    page_id = _strip_control_chars(page_id)
     # Validate page_id — reuse shared validator (handles traversal + resolve check)
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
+
+    # Validate subdir prefix matches a known wiki subdirectory
+    subdir_prefix = page_id.split("/")[0]
+    if subdir_prefix not in WIKI_SUBDIR_TO_TYPE:
+        return (
+            f"Error: Invalid page_id prefix '{subdir_prefix}'. "
+            f"Must be one of: {', '.join(WIKI_SUBDIR_TO_TYPE)}"
+        )
     if not title or not title.strip():
         return "Error: Title cannot be empty."
 
@@ -376,9 +406,9 @@ def kb_create_page(
     # Build source list
     sources = [s.strip() for s in source_refs.split(",") if s.strip()] if source_refs else []
 
-    # Validate source refs — reject path traversal
+    # Validate source refs — reject path traversal and absolute paths
     for src in sources:
-        if ".." in src or src.startswith("/") or src.startswith("\\"):
+        if ".." in src or src.startswith("/") or src.startswith("\\") or os.path.isabs(src):
             return (
                 f"Error: Invalid source_ref '{src}'. "
                 "Must not contain '..' or start with '/' or '\\'."

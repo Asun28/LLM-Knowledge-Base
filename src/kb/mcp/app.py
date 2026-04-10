@@ -1,6 +1,7 @@
 """MCP application instance and shared helpers."""
 
 import logging
+import os
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -55,7 +56,12 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
     Returns:
         Error message string, or None if valid.
     """
-    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+    if (
+        ".." in page_id
+        or page_id.startswith("/")
+        or page_id.startswith("\\")
+        or os.path.isabs(page_id)
+    ):
         return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
     page_path = WIKI_DIR / f"{page_id}.md"
     try:

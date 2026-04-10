@@ -18,7 +18,7 @@ def kb_lint() -> str:
         result = format_report(report)
     except Exception as e:
         logger.error("Error running lint checks: %s", e)
-        return f"Error running lint checks: {e}"
+        return f"Error: Lint checks failed — {e}"
 
     # Append feedback-flagged pages (fail-safe)
     try:
@@ -48,7 +48,7 @@ def kb_evolve() -> str:
         result = format_evolution_report(report)
     except Exception as e:
         logger.error("Error running evolution analysis: %s", e)
-        return f"Error running evolution analysis: {e}"
+        return f"Error: Evolution analysis failed — {e}"
 
     # Append coverage gaps from query feedback (fail-safe)
     try:
@@ -77,15 +77,18 @@ def kb_graph_viz(max_nodes: int = 30) -> str:
     Auto-prunes to the most-connected nodes when graph exceeds max_nodes.
     Compatible with Obsidian, GitHub, VS Code Mermaid previews.
 
+    Note: Large node counts (> 100) may produce diagrams too large to render
+    in some tools. Use max_nodes to limit output size.
+
     Args:
-        max_nodes: Maximum nodes to include (default 30). Set 0 for all.
+        max_nodes: Maximum nodes to include (default 30). Set 0 for all nodes.
     """
     max_nodes = max(0, min(max_nodes, 500))
     try:
         return export_mermaid(max_nodes=max_nodes)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)
-        return f"Error exporting graph: {e}"
+        return f"Error: Graph export failed — {e}"
 
 
 @mcp.tool()
@@ -102,7 +105,7 @@ def kb_verdict_trends() -> str:
         return format_verdict_trends(trends)
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
-        return f"Error computing verdict trends: {e}"
+        return f"Error: Verdict trends failed — {e}"
 
 
 @mcp.tool()
@@ -119,7 +122,7 @@ def kb_detect_drift() -> str:
         result = detect_source_drift()
     except Exception as e:
         logger.error("Error detecting source drift: %s", e)
-        return f"Error detecting source drift: {e}"
+        return f"Error: Source drift detection failed — {e}"
 
     lines = ["# Source Drift Detection\n", result["summary"], ""]
 
