@@ -32,6 +32,9 @@ from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
 
+# Fix 2.3 (module-level): compiled once, reused in every _update_existing_page call.
+_SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:  - [^\n]*\n)*)", re.MULTILINE)
+
 
 def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> list[str]:
     """Find existing pages affected by newly created/updated pages.
@@ -284,8 +287,7 @@ def _update_existing_page(
         body_text = ""
 
     # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
-    source_block_re = re.compile(r"^(source:\s*\n(?:  - [^\n]*\n)*)", re.MULTILINE)
-    source_match = source_block_re.search(fm_text)
+    source_match = _SOURCE_BLOCK_RE.search(fm_text)
     if source_match:
         block_end = source_match.end()
         fm_text = fm_text[:block_end] + f'  - "{safe_ref}"\n' + fm_text[block_end:]
@@ -301,13 +303,15 @@ def _update_existing_page(
     # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
     ref_line = f"- {verb} in {source_ref}"
     if "## References" in body_text:
-        # Append new reference at end of References block
+        # Append new reference at end of References block.
+        # Use MULTILINE (not DOTALL) so `.` does not cross line boundaries;
+        # match non-empty lines or blank lines until a new section or end-of-string.
         body_text = re.sub(
-            r"(## References\n(?:.*\n)*?)(\n## |\Z)",
-            lambda m: m.group(1) + ref_line + "\n" + m.group(2),
+            r"(## References\n(?:[^\n].*\n|\n)*?)(?=\n## |\Z)",
+            lambda m: m.group(1) + ref_line + "\n",
             body_text,
             count=1,
-            flags=re.DOTALL,
+            flags=re.MULTILINE,
         )
         content = fm_text + body_text
     elif "## References" not in content:
@@ -482,14 +486,14 @@ def ingest_source(
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
-    # Fix 2.12: use os.path.normcase() for Windows path case-insensitive comparison
+    # Verify source_path is within raw/ — use normcase on both sides for
+    # reliable case-insensitive comparison on Windows (Python 3.12+).
+    raw_dir_nc = Path(os.path.normcase(str(RAW_DIR.resolve())))
+    source_path_nc = Path(os.path.normcase(str(source_path)))
     try:
-        source_path.relative_to(Path(os.path.normcase(str(RAW_DIR.resolve()))))
+        source_path_nc.relative_to(raw_dir_nc)
     except ValueError:
-        try:
-            source_path.relative_to(RAW_DIR.resolve())
-        except ValueError:
-            raise ValueError(f"Source path must be within raw/ directory: {source_path}")
+        raise ValueError(f"Source path must be within raw/ directory: {source_path}")
 
     if source_type is None:
         source_type = detect_source_type(source_path)
