@@ -220,7 +220,13 @@ class TestSearchPagesNoMutation:
 class TestBuildQueryContextPages:
     """_build_query_context must separate context_pages from source_pages."""
 
-    def test_context_pages_excludes_skipped(self):
+    def test_context_pages_includes_truncated_top_page(self):
+        """Top-ranked page is truncated (not skipped) when oversized — Fix 4.5.
+
+        Updated in Phase 3.96 Task 4: the old behavior skipped the top page so
+        smaller pages could fit. The new behavior truncates the top page so the
+        LLM always has content to reason from.
+        """
         from kb.query.engine import _build_query_context
 
         pages = [
@@ -242,9 +248,10 @@ class TestBuildQueryContextPages:
         result = _build_query_context(pages, max_chars=500)
         # result is now a dict
         assert isinstance(result, dict)
-        assert "concepts/small" in result["context_pages"]
-        # "huge" was skipped because it exceeds max_chars
-        assert "concepts/huge" not in result["context_pages"]
+        # "huge" is truncated (not skipped) so it IS in context_pages
+        assert "concepts/huge" in result["context_pages"]
+        # After truncation the budget is consumed; "small" won't fit
+        assert len(result["context"]) <= 500
 
 
 class TestBuildQueryContextSmallMaxChars:

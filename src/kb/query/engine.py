@@ -9,6 +9,7 @@ from kb.config import (
     MAX_SEARCH_RESULTS,
     PAGERANK_SEARCH_WEIGHT,
     QUERY_CONTEXT_MAX_CHARS,
+    QUERY_MAX_TOKENS,
     SEARCH_TITLE_WEIGHT,
 )
 from kb.query.bm25 import BM25Index, tokenize
@@ -44,8 +45,14 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         return []
 
     # Build document corpus: title tokens (boosted) + content tokens
+    # NOTE: Index rebuilt per-query. Acceptable at current wiki size (~200 pages).
+    # Add module-level cache keyed on wiki-dir mtime before Phase 4 corpus growth.
     documents = []
     for page in pages:
+        # Title tokens are repeated SEARCH_TITLE_WEIGHT times before indexing.
+        # The muted practical effect is expected: title repetition inflates document
+        # length, which BM25's length normalization (b parameter) partially cancels out.
+        # The net effect is a moderate boost, not a multiplier.
         title_tokens = tokenize(page["title"]) * SEARCH_TITLE_WEIGHT
         content_tokens = tokenize(page["content_lower"])
         documents.append(title_tokens + content_tokens)
@@ -91,7 +98,7 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
         if max_pr == 0:
             return {}
         return {node: score / max_pr for node, score in pr.items()}
-    except Exception as e:
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError) as e:
         logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
 
@@ -118,15 +125,33 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         )
         if total + len(section) > max_chars:
             if i == 0:
-                logger.warning(
-                    "Top-ranked page %s (%d chars) exceeds context limit (%d); skipping it",
-                    page["id"],
-                    len(section),
-                    max_chars,
-                )
+                # Top-ranked page exceeds budget: truncate rather than skip so the
+                # LLM always has at least some content to work with.
+                remaining = max_chars - total
+                if remaining > len(section) - len(page["content"]):
+                    # There is room for at least the header — truncate content.
+                    truncated = section[:remaining]
+                    logger.warning(
+                        "Top-ranked page %s (%d chars) exceeds context limit (%d); truncating",
+                        page["id"],
+                        len(section),
+                        max_chars,
+                    )
+                    sections.append(truncated)
+                    context_pages.append(page["id"])
+                    total += len(truncated)
+                    # Budget is now exhausted; remaining pages will be skipped in loop
+                else:
+                    logger.warning(
+                        "Top-ranked page %s (%d chars) exceeds context limit (%d); skipping it",
+                        page["id"],
+                        len(section),
+                        max_chars,
+                    )
+                    skipped += 1
             else:
                 logger.debug("Page excluded from query context due to limit: %s", page["id"])
-            skipped += 1
+                skipped += 1
             continue
         sections.append(section)
         context_pages.append(page["id"])
@@ -213,7 +238,7 @@ INSTRUCTIONS:
             "You are a knowledge base assistant. "
             "Answer questions using wiki content with inline citations."
         ),
-        max_tokens=2048,
+        max_tokens=QUERY_MAX_TOKENS,
     )
 
     # 4. Extract citations from the answer

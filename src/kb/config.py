@@ -102,6 +102,9 @@ PAGERANK_SEARCH_WEIGHT = 0.5
 # ~4 chars/token, 100k context window → conservative 80k char limit.
 QUERY_CONTEXT_MAX_CHARS = 80_000
 
+# Maximum tokens for the LLM answer synthesis response.
+QUERY_MAX_TOKENS = 2048
+
 # ── Search result limits ──────────────────────────────────────
 MAX_SEARCH_RESULTS = 100
 

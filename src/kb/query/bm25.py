@@ -115,8 +115,12 @@ def tokenize(text: str) -> list[str]:
     is not a word character, so '0', '9', '13' become separate tokens
     and single-digit components are dropped by the length filter.
     """
+    text = text.lower()
+    # Normalize consecutive hyphens (e.g., "pre--compiled" → "pre-compiled")
+    text = re.sub(r"-{2,}", "-", text)
     # Match words: letters/digits/hyphens, at least 2 chars
-    words = re.findall(r"\b[\w][\w-]*[\w]\b|\b\w{2,}\b", text.lower())
+    # Single pattern: \b\w[\w-]*\w\b covers multi-char tokens with optional hyphens
+    words = re.findall(r"\b\w[\w-]*\w\b|\b\w{2}\b", text)
     return [w for w in words if w not in STOP_WORDS]
 
 

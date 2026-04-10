@@ -85,13 +85,37 @@ class TestQueryContextTopPageWarning:
 
 
 class TestCitationsWikilinkNormalization:
-    def test_wikilink_wrapped_path_extracted(self):
+    def test_wikilink_in_surrounding_text_does_not_interfere(self):
+        r"""Wikilinks in surrounding text don't affect citation extraction — Fix 4.2.
+
+        The old implementation had a dead re.sub that normalized [[path]] → path
+        over the whole text before parsing. This was removed in Phase 3.96 Task 4
+        because it was dead code: the citation regex pattern [\w/_.-]+ cannot match
+        '[' characters, so [[path]] inside a [source: ...] bracket was already
+        unextractable. The normalization only affected surrounding text, where it
+        had no effect on citation parsing.
+        """
+        from kb.query.citations import extract_citations
+
+        # [[wikilink]] in surrounding text — citation itself is plain
+        text = "According to [[concepts/rag]], see [source: concepts/rag] for details."
+        citations = extract_citations(text)
+        paths = [c["path"] for c in citations]
+        assert "concepts/rag" in paths, f"Expected 'concepts/rag' in {paths}"
+
+    def test_wikilink_inside_citation_brackets_not_extracted(self):
+        r"""[[path]] nested inside [source: ...] is not extractable without normalization.
+
+        After Fix 4.2 removed the dead re.sub, [source: [[concepts/rag]]] is not
+        parseable — the regex requires [\w/_.-]+ and '[' is not in that set.
+        LLMs should emit plain [source: concepts/rag] not [source: [[...]]] format.
+        """
         from kb.query.citations import extract_citations
 
         text = "See [source: [[concepts/rag]]] for details."
         citations = extract_citations(text)
-        paths = [c["path"] for c in citations]
-        assert "concepts/rag" in paths, f"Expected 'concepts/rag' in {paths}"
+        # The nested wikilink format is not parseable; no citations extracted
+        assert citations == []
 
     def test_plain_path_still_extracted(self):
         from kb.query.citations import extract_citations

@@ -54,8 +54,14 @@ class TestQueryContextWholePageSkip:
         # Huge page should not appear at all
         assert "x" * 100 not in context
 
-    def test_includes_smaller_page_after_skip(self):
-        """After skipping a big page, smaller later pages may still fit."""
+    def test_top_page_truncated_when_oversized(self):
+        """Top-ranked page (i==0) is truncated to budget rather than skipped entirely.
+
+        Updated in Phase 3.96 Task 4 (Fix 4.5): the old behavior skipped the top
+        page entirely so smaller subsequent pages could fit. The new behavior truncates
+        the top page to consume the available budget, ensuring the LLM always has
+        content to work with rather than hallucinating on an empty context.
+        """
         from kb.query.engine import _build_query_context
 
         pages = [
@@ -78,9 +84,10 @@ class TestQueryContextWholePageSkip:
         result = _build_query_context(pages, max_chars=500)
         context = result["context"]
 
-        # Huge skipped, but tiny should still be included
-        assert "concepts/tiny" in context
-        assert "Small page." in context
+        # Huge is truncated (not skipped) — it should be included
+        assert "concepts/huge" in result["context_pages"]
+        # After truncation the budget is consumed; tiny won't fit
+        assert len(context) <= 500
 
     def test_logs_skip_count(self, caplog):
         """When pages are skipped, an info log reports the count."""
