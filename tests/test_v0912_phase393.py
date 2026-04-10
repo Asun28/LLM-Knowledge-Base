@@ -424,23 +424,25 @@ class TestConfigFixes:
 class TestCLIFixes:
     """cli.py fixes."""
 
-    def test_ingest_type_accepts_comparison(self):
+    def test_ingest_type_rejects_comparison(self):
+        """Fix 10.2: comparison is not a valid CLI ingest type (no raw/ dir)."""
         from click.testing import CliRunner
 
         from kb.cli import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["ingest", "--type", "comparison", "/nonexistent.md"])
-        assert "Invalid value for '--type'" not in (result.output or "")
+        assert "Invalid value for '--type'" in (result.output or "")
 
-    def test_ingest_type_accepts_synthesis(self):
+    def test_ingest_type_rejects_synthesis(self):
+        """Fix 10.2: synthesis is not a valid CLI ingest type (no raw/ dir)."""
         from click.testing import CliRunner
 
         from kb.cli import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["ingest", "--type", "synthesis", "/nonexistent.md"])
-        assert "Invalid value for '--type'" not in (result.output or "")
+        assert "Invalid value for '--type'" in (result.output or "")
 
     def test_mcp_command_handles_startup_error_gracefully(self, monkeypatch):
         from click.testing import CliRunner

@@ -28,8 +28,6 @@ def cli():
             "book",
             "dataset",
             "conversation",
-            "comparison",
-            "synthesis",
         ]
     ),
     help="Source type (auto-detected if omitted)",
@@ -42,6 +40,10 @@ def ingest(source_path: str, source_type: str | None):
     click.echo(f"Ingesting: {source}")
     try:
         result = ingest_source(source, source_type)
+        # Fix 10.1: Show duplicate indicator if detected
+        if result.get("duplicate"):
+            click.echo(f"  Duplicate skipped (hash: {result['content_hash']})")
+            return
         click.echo(f"  Type: {result['source_type']}")
         click.echo(f"  Hash: {result['content_hash']}")
         click.echo(f"  Pages created: {len(result['pages_created'])}")
@@ -116,6 +118,7 @@ def lint(fix: bool):
             click.echo(f"\nAuto-fixed {len(report['fixes_applied'])} issue(s):")
             for f in report["fixes_applied"]:
                 click.echo(f"  Fixed: {f['message']}")
+        # Fix 10.3: Exit with code 1 if any errors found
         if report["summary"].get("error", 0) > 0:
             raise SystemExit(1)
     except SystemExit:

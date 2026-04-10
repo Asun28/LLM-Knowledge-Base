@@ -100,6 +100,7 @@ def create_raw_source(tmp_path: Path):
         content: str = "Sample source content.",
         project_dir: Path | None = None,
     ) -> Path:
+        assert source_ref.startswith("raw/"), f"source_ref must start with 'raw/': {source_ref}"
         base = project_dir or tmp_path
         source_path = base / source_ref
         source_path.parent.mkdir(parents=True, exist_ok=True)
