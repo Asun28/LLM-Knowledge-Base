@@ -339,8 +339,10 @@ def compile_wiki(
                 manifest = load_manifest(manifest_path)
                 manifest[rel_path] = f"failed:{pre_hash}"
                 save_manifest(manifest, manifest_path)
-            except Exception:
-                pass
+            except Exception as inner_exc:
+                logger.warning(
+                    "Failed to record failed hash for %s: %s", source, inner_exc
+                )
 
     # Save template hashes (reload manifest first to preserve per-source hashes
     # written during the loop, then merge template hashes).

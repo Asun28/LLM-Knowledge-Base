@@ -18,7 +18,9 @@ _FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 # Regex for fenced code blocks (``` ... ```), inline code (`...`),
 # markdown links ([text](url)), and images (![alt](url)).
 _CODE_MASK_RE = re.compile(
-    r"```.*?```|`[^`\n]+`|\[(?:[^\]]*)\]\([^)]+\)|!\[(?:[^\]]*)\]\([^)]+\)",
+    r"```.*?```|`[^`\n]+`"
+    r"|!\[(?:[^\]]*)\]\((?:[^()]*|\([^()]*\))*\)"
+    r"|\[(?:[^\]]*)\]\((?:[^()]*|\([^()]*\))*\)",
     re.DOTALL,
 )
 

@@ -294,6 +294,46 @@ class TestInjectWikilinksFinditer:
         # This test confirms the code at least doesn't crash with the new finditer loop
         assert isinstance(updated, list)
 
+    def test_second_occurrence_linked_when_first_inside_unrelated_wikilink(
+        self, tmp_wiki, create_wiki_page
+    ):
+        """Fix 3.8 core case: first occurrence of title is a display name inside an
+        *unrelated* wikilink ([[some/other|Target]]).  Because the target_page_id
+        ('entities/target') is NOT yet linked, the existing_links guard does NOT
+        skip the page.  The finditer loop must skip the blocked match and still
+        inject a wikilink for the second plain-text occurrence."""
+        from kb.compile.linker import inject_wikilinks
+
+        # Create the target page and an unrelated page that will appear as the wikilink host.
+        create_wiki_page("entities/target", content="Target page.", wiki_dir=tmp_wiki)
+        create_wiki_page("concepts/other", content="Some other concept.", wiki_dir=tmp_wiki)
+
+        # Source: "Target" appears first as a display name in [[concepts/other|Target]],
+        # then again as plain text.  The target_page_id (entities/target) is NOT linked.
+        create_wiki_page(
+            "concepts/source",
+            content="[[concepts/other|Target]] is interesting. Target deserves a link.",
+            wiki_dir=tmp_wiki,
+        )
+
+        updated = inject_wikilinks("Target", "entities/target", wiki_dir=tmp_wiki)
+
+        # The source page must be in the updated list.
+        assert "concepts/source" in updated, (
+            f"Expected concepts/source to be updated; got: {updated}"
+        )
+
+        # Verify the second plain-text occurrence was actually replaced.
+        source_file = tmp_wiki / "concepts" / "source.md"
+        content = source_file.read_text(encoding="utf-8")
+        assert "[[entities/target|Target]]" in content, (
+            f"Expected wikilink injected for second occurrence; content:\n{content}"
+        )
+        # The original unrelated wikilink must remain untouched.
+        assert "[[concepts/other|Target]]" in content, (
+            f"Original wikilink was modified; content:\n{content}"
+        )
+
     def test_plain_mention_injected_when_not_blocked(self, tmp_wiki, create_wiki_page):
         """Plain text mention is injected correctly."""
         from kb.compile.linker import inject_wikilinks
