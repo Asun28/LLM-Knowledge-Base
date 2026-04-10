@@ -34,7 +34,7 @@ def check_dead_links(wiki_dir: Path | None = None) -> list[dict]:
             {
                 "check": "dead_link",
                 "severity": "error",
-                "source": broken["source"],
+                "page": broken["source"],
                 "target": broken["target"],
                 "message": f"Broken wikilink: [[{broken['target']}]] in {broken['source']}",
             }
@@ -42,22 +42,33 @@ def check_dead_links(wiki_dir: Path | None = None) -> list[dict]:
     return issues
 
 
-def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
+def fix_dead_links(
+    wiki_dir: Path | None = None,
+    broken_links: list[dict] | None = None,
+) -> list[dict]:
     """Fix broken wikilinks by replacing them with plain text.
 
     ``[[broken/link]]`` becomes ``broken/link`` (basename if path contains ``/``).
     ``[[broken/link|Display Text]]`` becomes ``Display Text``.
 
+    Args:
+        wiki_dir: Path to wiki directory.
+        broken_links: Pre-computed list of broken link dicts (with 'source' and 'target' keys).
+            If None, resolve_wikilinks() is called to compute them (avoids duplicate call
+            when run_all_checks already computed the broken links).
+
     Returns:
         List of dicts: {check, severity, page, target, message} for each fix applied.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    result = resolve_wikilinks(wiki_dir)
+    if broken_links is None:
+        result = resolve_wikilinks(wiki_dir)
+        broken_links = result["broken"]
     fixes: list[dict] = []
 
     # Group broken links by source page
     broken_by_page: dict[str, list[str]] = {}
-    for broken in result["broken"]:
+    for broken in broken_links:
         broken_by_page.setdefault(broken["source"], []).append(broken["target"])
 
     for source_pid, targets in broken_by_page.items():
@@ -103,7 +114,7 @@ def fix_dead_links(wiki_dir: Path | None = None) -> list[dict]:
         from kb.utils.wiki_log import append_wiki_log
 
         fixed_count = len(fixes)
-        pages_fixed = len(broken_by_page)
+        pages_fixed = len({f["page"] for f in fixes})
         append_wiki_log(
             "lint-fix",
             f"Auto-fixed {fixed_count} broken wikilink(s) across {pages_fixed} page(s)",
@@ -181,14 +192,19 @@ def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) 
     return issues
 
 
-def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_DAYS) -> list[dict]:
+def check_staleness(
+    wiki_dir: Path | None = None,
+    max_days: int = STALENESS_MAX_DAYS,
+    pages: list[Path] | None = None,
+) -> list[dict]:
     """Find pages not updated within max_days.
 
     Returns:
         List of dicts: {page, last_updated, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
     cutoff = date.today() - timedelta(days=max_days)
     issues = []
 
@@ -229,6 +245,18 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
                         "message": f"Stale page (last updated {updated}): {pid}",
                     }
                 )
+            elif updated is not None and not isinstance(updated, date):
+                pid = page_id(page_path, wiki_dir)
+                issues.append(
+                    {
+                        "check": "staleness",
+                        "severity": "warning",
+                        "page": pid,
+                        "message": (
+                            f"Page {pid} has unrecognised updated type: {type(updated).__name__}"
+                        ),
+                    }
+                )
         except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Failed to load wiki page %s: %s", page_path, e)
             continue
@@ -236,14 +264,18 @@ def check_staleness(wiki_dir: Path | None = None, max_days: int = STALENESS_MAX_
     return issues
 
 
-def check_frontmatter(wiki_dir: Path | None = None) -> list[dict]:
+def check_frontmatter(
+    wiki_dir: Path | None = None,
+    pages: list[Path] | None = None,
+) -> list[dict]:
     """Validate frontmatter on all wiki pages.
 
     Returns:
         List of dicts: {page, errors, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
     issues = []
 
     for page_path in pages:
@@ -261,7 +293,7 @@ def check_frontmatter(wiki_dir: Path | None = None) -> list[dict]:
                         "message": f"Frontmatter issues in {pid}: {'; '.join(errors)}",
                     }
                 )
-        except Exception as e:
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             pid = page_id(page_path, wiki_dir)
             issues.append(
                 {
@@ -276,7 +308,11 @@ def check_frontmatter(wiki_dir: Path | None = None) -> list[dict]:
     return issues
 
 
-def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = None) -> list[dict]:
+def check_source_coverage(
+    wiki_dir: Path | None = None,
+    raw_dir: Path | None = None,
+    pages: list[Path] | None = None,
+) -> list[dict]:
     """Find raw sources not referenced in any wiki page.
 
     Returns:
@@ -284,7 +320,8 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
     """
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
 
     # Collect all raw references across wiki pages (single pass per file)
     all_raw_refs = set()
@@ -303,7 +340,6 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
             logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
 
     # Find raw sources not referenced
-    effective_raw_dir = raw_dir
     issues = []
     for _type_name, type_dir in SOURCE_TYPE_DIRS.items():
         actual_dir = raw_dir / type_dir.name
@@ -311,7 +347,7 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
             continue
         for f in actual_dir.iterdir():
             if f.is_file() and f.name != ".gitkeep":
-                rel_path = make_source_ref(f, effective_raw_dir)
+                rel_path = make_source_ref(f, raw_dir)
                 # Check if this source is referenced (exact path only — no suffix match to avoid
                 # false-positives when two subdirs contain same-named files)
                 referenced = rel_path in all_raw_refs
@@ -328,7 +364,11 @@ def check_source_coverage(wiki_dir: Path | None = None, raw_dir: Path | None = N
     return issues
 
 
-def check_stub_pages(wiki_dir: Path | None = None, min_content_chars: int = 100) -> list[dict]:
+def check_stub_pages(
+    wiki_dir: Path | None = None,
+    min_content_chars: int = 100,
+    pages: list[Path] | None = None,
+) -> list[dict]:
     """Find wiki pages with minimal body content (stubs needing enrichment).
 
     A stub is a page where the body content (after frontmatter) is less than
@@ -337,12 +377,14 @@ def check_stub_pages(wiki_dir: Path | None = None, min_content_chars: int = 100)
     Args:
         wiki_dir: Path to wiki directory.
         min_content_chars: Minimum chars for non-stub content. Default 100.
+        pages: Pre-scanned list of page paths. If None, scan_wiki_pages() is called.
 
     Returns:
         List of dicts: {page, content_length, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
     issues = []
 
     for page_path in pages:

@@ -79,10 +79,11 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
     trend = "stable"
     if len(sorted_periods) >= 2:
         recent_period = sorted_periods[-1]
-        previous = sorted_periods[-2]["pass_rate"]
-        # Require minimum 3 verdicts in the latest period for meaningful trend
-        if recent_period["total"] >= 3:
+        previous_period = sorted_periods[-2]
+        # Require minimum 3 verdicts in BOTH periods for a meaningful trend comparison
+        if recent_period["total"] >= 3 and previous_period["total"] >= 3:
             recent = recent_period["pass_rate"]
+            previous = previous_period["pass_rate"]
             if recent > previous + VERDICT_TREND_THRESHOLD:
                 trend = "improving"
             elif recent < previous - VERDICT_TREND_THRESHOLD:
@@ -106,7 +107,7 @@ def format_verdict_trends(trends: dict) -> str:
     # Overall
     o = trends["overall"]
     total = trends["total"]
-    pass_rate = o["pass"] / total if total > 0 else 0.0
+    pass_rate = o["pass"] / sum(o.values()) if sum(o.values()) > 0 else 0.0
     lines.append(f"**Total verdicts:** {total}")
     lines.append(f"**Overall pass rate:** {pass_rate:.0%}")
     lines.append(f"  Pass: {o['pass']} | Fail: {o['fail']} | Warning: {o['warning']}")

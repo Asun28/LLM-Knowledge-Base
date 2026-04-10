@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from kb.config import RAW_DIR, WIKI_DIR
-from kb.graph.builder import build_graph
+from kb.graph.builder import build_graph, scan_wiki_pages
 from kb.lint.checks import (
     check_cycles,
     check_dead_links,
@@ -39,6 +39,9 @@ def run_all_checks(
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
 
+    # Scan wiki pages once — shared by staleness, frontmatter, source_coverage, stub checks
+    shared_pages = scan_wiki_pages(wiki_dir)
+
     # Build the wikilink graph once — shared by orphan and cycle checks
     shared_graph = build_graph(wiki_dir)
 
@@ -54,16 +57,23 @@ def run_all_checks(
     # Auto-fix dead links if requested; remove fixed issues from report
     fixes_applied: list[dict] = []
     if fix and dead_links:
-        fixes_applied = fix_dead_links(wiki_dir)
+        # Pass the already-computed broken list to avoid a second resolve_wikilinks() call
+        # dead_link issues now use "page" key (standardized in Fix 6.14)
+        broken = [
+            {"source": i["page"], "target": i["target"]}
+            for i in dead_links
+            if i.get("check") == "dead_link"
+        ]
+        fixes_applied = fix_dead_links(wiki_dir, broken_links=broken)
         if fixes_applied:
-            # Remove the dead link issues that were successfully fixed
-            fixed_pairs = {(f.get("source", f.get("page")), f["target"]) for f in fixes_applied}
+            # Remove the dead link issues that were successfully fixed — both dicts use "page"
+            fixed_pairs = {(f["page"], f["target"]) for f in fixes_applied}
             all_issues = [
                 i
                 for i in all_issues
                 if not (
                     i.get("check") == "dead_link"
-                    and (i.get("source"), i.get("target")) in fixed_pairs
+                    and (i.get("page"), i.get("target")) in fixed_pairs
                 )
             ]
 
@@ -71,15 +81,15 @@ def run_all_checks(
     all_issues.extend(orphans)
     checks_run.append({"name": "orphan_pages", "issues": len(orphans)})
 
-    stale = check_staleness(wiki_dir)
+    stale = check_staleness(wiki_dir, pages=shared_pages)
     all_issues.extend(stale)
     checks_run.append({"name": "staleness", "issues": len(stale)})
 
-    fm = check_frontmatter(wiki_dir)
+    fm = check_frontmatter(wiki_dir, pages=shared_pages)
     all_issues.extend(fm)
     checks_run.append({"name": "frontmatter", "issues": len(fm)})
 
-    coverage = check_source_coverage(wiki_dir, raw_dir)
+    coverage = check_source_coverage(wiki_dir, raw_dir, pages=shared_pages)
     all_issues.extend(coverage)
     checks_run.append({"name": "source_coverage", "issues": len(coverage)})
 
@@ -87,7 +97,7 @@ def run_all_checks(
     all_issues.extend(cycles)
     checks_run.append({"name": "wikilink_cycles", "issues": len(cycles)})
 
-    stubs = check_stub_pages(wiki_dir)
+    stubs = check_stub_pages(wiki_dir, pages=shared_pages)
     all_issues.extend(stubs)
     checks_run.append({"name": "stub_pages", "issues": len(stubs)})
 

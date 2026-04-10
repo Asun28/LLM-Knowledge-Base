@@ -2,10 +2,13 @@
 
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 
 from kb.config import MAX_VERDICTS, VERDICTS_PATH
+
+_verdicts_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +71,8 @@ def add_verdict(
             "Must be 'fidelity', 'consistency', 'completeness', or 'review'"
         )
 
-    # Validate page_id against path traversal
-    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\"):
+    # Validate page_id against path traversal and null bytes
+    if ".." in page_id or page_id.startswith("/") or page_id.startswith("\\") or "\x00" in page_id:
         raise ValueError(f"Invalid page_id: {page_id!r}. Must not contain '..' or start with '/'.")
 
     # Cap notes length (consistent with feedback store MAX_NOTES_LEN)
@@ -90,20 +93,21 @@ def add_verdict(
                     f"Must be one of: {', '.join(VALID_SEVERITIES)}"
                 )
 
-    verdicts = load_verdicts(path)
-    entry = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "page_id": page_id,
-        "verdict_type": verdict_type,
-        "verdict": verdict,
-        "issues": issues or [],
-        "notes": notes,
-    }
-    verdicts.append(entry)
-    # Retain only the most recent verdicts to prevent unbounded growth
-    if len(verdicts) > MAX_VERDICTS:
-        verdicts = verdicts[-MAX_VERDICTS:]
-    save_verdicts(verdicts, path)
+    with _verdicts_lock:
+        verdicts = load_verdicts(path)
+        entry = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "page_id": page_id,
+            "verdict_type": verdict_type,
+            "verdict": verdict,
+            "issues": issues or [],
+            "notes": notes,
+        }
+        verdicts.append(entry)
+        # Retain only the most recent verdicts to prevent unbounded growth
+        if len(verdicts) > MAX_VERDICTS:
+            verdicts = verdicts[-MAX_VERDICTS:]
+        save_verdicts(verdicts, path)
     return entry
 
 
@@ -111,8 +115,8 @@ def get_page_verdicts(page_id: str, path: Path | None = None) -> list[dict]:
     """Get all verdicts for a specific page, most recent first."""
     verdicts = load_verdicts(path)
     return sorted(
-        [v for v in verdicts if v["page_id"] == page_id],
-        key=lambda v: v["timestamp"],
+        [v for v in verdicts if v.get("page_id") == page_id],
+        key=lambda v: v.get("timestamp", ""),
         reverse=True,
     )
 

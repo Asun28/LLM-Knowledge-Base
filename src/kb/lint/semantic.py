@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 
 import frontmatter
+import networkx as nx
+import yaml
 
 from kb.config import (
     MAX_CONSISTENCY_GROUP_SIZE,
@@ -93,7 +95,7 @@ def _group_by_shared_sources(wiki_dir: Path) -> list[list[str]]:
             sources = normalize_sources(post.metadata.get("source"))
             for src in sources:
                 source_to_pages.setdefault(src, []).append(pid)
-        except Exception as e:
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
             continue
 
@@ -101,32 +103,10 @@ def _group_by_shared_sources(wiki_dir: Path) -> list[list[str]]:
 
 
 def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
-    """Group pages connected by wikilinks (direct neighbors in the graph)."""
+    """Group pages connected by wikilinks (connected components in the undirected graph)."""
     graph = build_graph(wiki_dir)
-    groups = []
-    seen: set[str] = set()
-
-    for node in graph.nodes():
-        if node in seen:
-            continue
-        neighbors = set(graph.successors(node)) | set(graph.predecessors(node))
-        # All neighbors are existing nodes by construction (build_graph only adds edges to existing)
-        if neighbors:
-            group = sorted(neighbors | {node})
-            groups.append(group)
-            seen.update(group)
-        else:
-            seen.add(node)
-
-    # Deduplicate groups — the same neighbor set can be emitted by multiple nodes
-    seen_keys: set[frozenset] = set()
-    unique: list[list[str]] = []
-    for g in groups:
-        key = frozenset(g)
-        if key not in seen_keys:
-            seen_keys.add(key)
-            unique.append(g)
-    return [g for g in unique if len(g) >= 2]
+    components = list(nx.connected_components(graph.to_undirected()))
+    return [sorted(c) for c in components if len(c) >= 2]
 
 
 def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
@@ -204,8 +184,8 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
             logger.warning("Skipping unreadable page %s in term overlap: %s", page_path, e)
             continue
         pid = page_id(page_path, wiki_dir)
-        # Strip YAML frontmatter before tokenizing
-        fm_match = re.match(r"\A\s*---\n.*?\n---\n?(.*)", raw, re.DOTALL)
+        # Strip YAML frontmatter before tokenizing (handle both LF and CRLF line endings)
+        fm_match = re.match(r"\A\s*---\r?\n.*?\r?\n---\r?\n?(.*)", raw, re.DOTALL)
         body = fm_match.group(1) if fm_match else raw
         words = {
             stripped
@@ -216,17 +196,13 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
 
     groups = []
     page_ids_list = list(page_terms.keys())
-    seen_pairs: set[tuple[str, str]] = set()
 
+    # j > i loop structure already prevents duplicates — no seen_pairs set needed
     for i, pid_a in enumerate(page_ids_list):
         for pid_b in page_ids_list[i + 1 :]:
-            pair = (pid_a, pid_b)
-            if pair in seen_pairs:
-                continue
             shared = page_terms[pid_a] & page_terms[pid_b]
             if len(shared) >= MIN_SHARED_TERMS:
                 groups.append(sorted([pid_a, pid_b]))
-                seen_pairs.add(pair)
 
     return groups
 
@@ -259,12 +235,20 @@ def build_consistency_context(
 
         # Deduplicate by sorted tuple
         seen: set[tuple[str, ...]] = set()
-        groups = []
+        deduped = []
         for group in all_groups:
             key = tuple(sorted(group))
             if key not in seen:
                 seen.add(key)
-                groups.append(list(key))
+                deduped.append(list(key))
+
+        # Apply size cap — chunk large groups so no group exceeds MAX_CONSISTENCY_GROUP_SIZE
+        groups = []
+        for g in deduped:
+            for i in range(0, len(g), MAX_CONSISTENCY_GROUP_SIZE):
+                chunk = g[i : i + MAX_CONSISTENCY_GROUP_SIZE]
+                if len(chunk) >= 2:
+                    groups.append(chunk)
 
     if not groups:
         return "No page groups found for consistency checking."
