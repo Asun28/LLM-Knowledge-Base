@@ -145,6 +145,8 @@ def get_verdict_summary(path: Path | None = None) -> dict:
         if vtype in summary["by_type"]:
             summary["by_type"][vtype] += 1
         if vrd == "fail":
-            failed_pages.add(v["page_id"])
+            pid = v.get("page_id", "")
+            if pid:
+                failed_pages.add(pid)
     summary["pages_with_failures"] = sorted(failed_pages)
     return summary
