@@ -17,7 +17,7 @@ def atomic_json_write(data: object, path: Path) -> None:
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, allow_nan=False)
         Path(tmp_path).replace(path)
     except BaseException:
         # If os.fdopen succeeded, the with-block already closed the fd.

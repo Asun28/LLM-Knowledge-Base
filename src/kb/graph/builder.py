@@ -7,6 +7,7 @@ import networkx as nx
 
 from kb.config import WIKI_DIR
 from kb.utils.markdown import extract_wikilinks
+from kb.utils.pages import WIKI_SUBDIRS
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
     """Find all markdown files in wiki subdirectories (excluding index files)."""
     wiki_dir = wiki_dir or WIKI_DIR
     pages = []
-    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+    for subdir in WIKI_SUBDIRS:
         subdir_path = wiki_dir / subdir
         if subdir_path.exists():
             pages.extend(subdir_path.glob("*.md"))

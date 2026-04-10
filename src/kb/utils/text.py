@@ -26,6 +26,7 @@ def yaml_escape(value: str) -> str:
     if "\0" in value:
         logger.warning("Null byte removed from YAML value (possible data corruption)")
         value = value.replace("\0", "")
+    value = re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]", "", value)
     return (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')

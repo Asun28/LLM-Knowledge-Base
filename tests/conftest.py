@@ -65,17 +65,20 @@ def create_wiki_page(tmp_path: Path):
         source_ref: str = "raw/articles/test.md",
         page_type: str = "concept",
         confidence: str = "stated",
+        created: str | None = None,
         updated: str | None = None,
         wiki_dir: Path | None = None,
     ) -> Path:
         wiki_dir_actual = wiki_dir or (tmp_path / "wiki")
         page_path = wiki_dir_actual / f"{page_id}.md"
         page_path.parent.mkdir(parents=True, exist_ok=True)
-        today = updated or date.today().isoformat()
+        today = date.today().isoformat()
+        effective_updated = updated or today
+        effective_created = created or updated or today
         page_title = title or page_id.split("/")[-1].replace("-", " ").title()
         fm = (
             f'---\ntitle: "{page_title}"\nsource:\n  - "{source_ref}"\n'
-            f"created: {today}\nupdated: {today}\ntype: {page_type}\n"
+            f"created: {effective_created}\nupdated: {effective_updated}\ntype: {page_type}\n"
             f"confidence: {confidence}\n---\n\n"
         )
         page_path.write_text(fm + content, encoding="utf-8")

@@ -50,6 +50,7 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
 # ── Model tiering (from tooling-research.md) ──────────────────
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
 # Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
+# NOTE: Env vars are read once at import time. Process restart required for changes.
 MODEL_TIERS = {
     "scan": os.environ.get("CLAUDE_SCAN_MODEL", "").strip() or "claude-haiku-4-5-20251001",
     "write": os.environ.get("CLAUDE_WRITE_MODEL", "").strip() or "claude-sonnet-4-6",

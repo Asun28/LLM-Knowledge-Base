@@ -6,16 +6,16 @@ from pathlib import Path
 import frontmatter
 import yaml
 
-from kb.config import WIKI_DIR
+from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 
 logger = logging.getLogger(__name__)
 
-WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
+WIKI_SUBDIRS = tuple(WIKI_SUBDIR_TO_TYPE.keys())
 
 
 def _page_id(page_path: Path, wiki_dir: Path) -> str:
     """Convert a wiki page path to a page ID (e.g., 'concepts/rag')."""
-    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md")
+    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md").lower()
 
 
 def normalize_sources(sources: str | list | None) -> list[str]:
@@ -24,6 +24,9 @@ def normalize_sources(sources: str | list | None) -> list[str]:
         return []
     if isinstance(sources, str):
         return [sources]
+    if not isinstance(sources, list):
+        logger.warning("Unexpected source type %r, returning empty list", type(sources).__name__)
+        return []
     return [str(s) for s in sources if s is not None]
 
 
@@ -52,8 +55,8 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "type": post.metadata.get("type", "unknown"),
                         "confidence": post.metadata.get("confidence", "unknown"),
                         "sources": sources,
-                        "created": str(post.metadata.get("created", "")),
-                        "updated": str(post.metadata.get("updated", "")),
+                        "created": str(post.metadata.get("created") or ""),
+                        "updated": str(post.metadata.get("updated") or ""),
                         "content": post.content,
                         "content_lower": post.content.lower(),
                     }

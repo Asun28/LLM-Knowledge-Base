@@ -97,6 +97,10 @@ def detect_source_type(source_path: Path) -> str:
     """Auto-detect source type from the raw/ subdirectory path."""
     rel = source_path.resolve().relative_to(RAW_DIR.resolve())
     first_part = rel.parts[0] if rel.parts else ""
+    if first_part == "assets":
+        raise ValueError(
+            "raw/assets/ files are not ingestable — assets are referenced by other sources"
+        )
     # Map plural directory names to singular source types
     type_map = {v.name: k for k, v in SOURCE_TYPE_DIRS.items()}
     if first_part in type_map:

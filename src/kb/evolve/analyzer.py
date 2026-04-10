@@ -8,6 +8,7 @@ from kb.compile.linker import build_backlinks
 from kb.config import MAX_PAGES_FOR_TERM, MIN_PAGES_FOR_TERM, MIN_SHARED_TERMS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.utils.markdown import extract_wikilinks
+from kb.utils.pages import WIKI_SUBDIRS
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def analyze_coverage(wiki_dir: Path | None = None) -> dict:
     pages = scan_wiki_pages(wiki_dir)
     backlinks = build_backlinks(wiki_dir)
 
-    by_type = {"entities": 0, "concepts": 0, "comparisons": 0, "summaries": 0, "synthesis": 0}
+    by_type = {subdir: 0 for subdir in WIKI_SUBDIRS}
     for page_path in pages:
         subdir = page_path.parent.name
         if subdir in by_type:

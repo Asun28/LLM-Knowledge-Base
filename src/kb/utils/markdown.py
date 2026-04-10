@@ -2,7 +2,12 @@
 
 import re
 
-WIKILINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+WIKILINK_PATTERN = re.compile(r"(?<!\[)\[\[([^\]|]{1,200})(?:\|[^\]]+)?\]\](?!\])")
+
+# Matches raw/ file references that are NOT mid-URL (lookbehind rejects / and \w before raw/)
+_RAW_REF_PATTERN = re.compile(
+    r"(?<![/\w])raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)"
+)
 
 
 def extract_wikilinks(text: str) -> list[str]:
@@ -16,6 +21,6 @@ def extract_wikilinks(text: str) -> list[str]:
 
 def extract_raw_refs(text: str) -> list[str]:
     """Extract all references to raw/ source files from markdown text."""
-    matches = re.findall(r"raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)", text)
+    matches = _RAW_REF_PATTERN.findall(text)
     # Reject path traversal — consistent with extract_citations()
     return [ref for ref in matches if ".." not in ref]
