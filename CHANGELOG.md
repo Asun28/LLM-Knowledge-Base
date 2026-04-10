@@ -23,6 +23,56 @@ Rules:
 
 ---
 
+## [0.9.15] — 2026-04-11
+
+### Fixed
+- **CRITICAL**: Non-atomic wiki page writes — crash mid-write could leave truncated files (ingest/pipeline, compile/linker, review/refiner)
+- **CRITICAL**: TOCTOU race in `_update_existing_page` — double file read replaced with in-memory parse
+- **CRITICAL**: Frontmatter guard regex allowed empty `---\n---` blocks through, causing double-frontmatter corruption
+- **CRITICAL**: `kb_query` MCP tool missing empty-question guard
+- `yaml_escape` now strips ASCII control characters (0x01-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F) that cause PyYAML ScannerError
+- `normalize_sources` returns empty list for dict/int/float types instead of silently returning dict keys or raising TypeError
+- `WIKILINK_PATTERN` rejects triple brackets `[[[...]]]` and caps match length at 200 chars
+- `wiki_log` sanitizes newline/carriage return characters in operation and message fields
+- `_page_id` in `utils/pages.py` now lowercases, consistent with `graph/builder.py`
+- `WIKI_SUBDIRS` derived from `config.WIKI_SUBDIR_TO_TYPE` instead of hardcoded in 3 modules
+- `load_all_pages` converts `null` dates to empty string instead of literal `"None"`
+- `content_hash` uses streaming reads instead of loading entire file into memory
+- `atomic_json_write` rejects `NaN`/`Infinity` values (`allow_nan=False`)
+- `compile_wiki` forwards `wiki_dir` parameter to `ingest_source`
+- Manifest double-write race fixed — compile loop reloads manifest after each ingest
+- Partial ingest failure records hash with `failed:` prefix to prevent infinite retry
+- `inject_wikilinks` guards against empty titles, fixes closure bug, skips blocked matches correctly
+- Source ref injection targets `source:` block specifically, not any YAML list item
+- Context block dedup checks for `## Context` header, not full block substring
+- `extract_citations` dead code removed, `./` path traversal blocked
+- Graph builder: self-loop guard, deterministic betweenness centrality (seed=0), frontmatter stripped before wikilink extraction
+- Backlinks dedup changed from O(n²) list scan to O(1) set operations
+- Code masking extended to markdown links/images, UUID-prefix placeholders prevent collision
+- Lint: `fix_dead_links` count corrected, `resolve_wikilinks` deduped, threading locks added for verdicts/history
+- Star-topology grouping uses `nx.connected_components` for complete coverage
+- `check_staleness` handles unexpected `updated` types (int, etc.)
+- Consistency groups auto-capped at `MAX_CONSISTENCY_GROUP_SIZE`
+- Stale lock recovery retries acquisition instead of falling through unprotected
+- Feedback lock creates `.data/` directory if missing
+- Cross-link opportunity ranking uses uncapped term count
+- MCP: path boundary tightened to `RAW_DIR`, filename/content length caps, page_id validation for cited_pages
+- Review checklist verdict vocabulary aligned with `add_verdict()` accepted values
+- CLI shows duplicate detection, removes invalid `comparison`/`synthesis` from source type choices
+- `query_wiki` API documentation corrected in CLAUDE.md
+
+### Changed
+- `validate_frontmatter` checks date field types and source list item types
+- `conftest.py` `create_wiki_page` fixture supports separate `created` parameter
+- `extract_raw_refs` uses word-boundary anchor to avoid URL false positives
+- `detect_source_type` gives clear error message for `raw/assets/` files
+- Bare `except Exception` narrowed to specific exception tuples in lint/semantic modules
+
+### Stats
+952 tests, 25 MCP tools, 12 modules.
+
+---
+
 ## [0.9.14] - 2026-04-09 (Phase 3.95)
 
 38-item backlog fix pass across 13 source files. No new modules. All fixes have tests in `tests/test_v0914_phase395.py`.
