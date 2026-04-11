@@ -23,11 +23,18 @@ def normalize_sources(sources: str | list | None) -> list[str]:
     if sources is None:
         return []
     if isinstance(sources, str):
-        return [sources]
+        return [sources] if sources else []
     if not isinstance(sources, list):
         logger.warning("Unexpected source type %r, returning empty list", type(sources).__name__)
         return []
-    return [str(s) for s in sources if s is not None]
+    result = []
+    for s in sources:
+        if s is None or (isinstance(s, str) and not s):
+            continue
+        if not isinstance(s, str):
+            logger.warning("Non-string source item %r (type %s), converting", s, type(s).__name__)
+        result.append(str(s))
+    return result
 
 
 def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
@@ -51,7 +58,7 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                     {
                         "id": pid,
                         "path": str(page_path),
-                        "title": post.metadata.get("title", page_path.stem),
+                        "title": str(post.metadata.get("title", page_path.stem)),
                         "type": post.metadata.get("type", "unknown"),
                         "confidence": post.metadata.get("confidence", "unknown"),
                         "sources": sources,

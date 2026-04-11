@@ -16,7 +16,13 @@ def _is_valid_date(value: object) -> bool:
     if isinstance(value, (datetime.date, datetime.datetime)):
         return True
     if isinstance(value, str):
-        return True
+        if not value:
+            return False
+        try:
+            datetime.date.fromisoformat(value)
+            return True
+        except ValueError:
+            return False
     return False
 
 

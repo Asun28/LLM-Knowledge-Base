@@ -2,11 +2,12 @@
 
 import re
 
-WIKILINK_PATTERN = re.compile(r"(?<!\[)\[\[([^\]|]{1,200})(?:\|[^\]]+)?\]\](?!\])")
+WIKILINK_PATTERN = re.compile(r"(?<![!\[])\[\[([^\]|]{1,200})(?:\|[^\]]+)?\]\](?!\])")
 
-# Matches raw/ file references that are NOT mid-URL (lookbehind rejects / and \w before raw/)
+# Matches raw/ file references that are NOT mid-URL (lookbehind rejects /, \w, and - before raw/)
 _RAW_REF_PATTERN = re.compile(
-    r"(?<![/\w])raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)"
+    r"(?<![/\w-])raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)",
+    re.IGNORECASE,
 )
 
 

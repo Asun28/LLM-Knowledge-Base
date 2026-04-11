@@ -47,6 +47,16 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
     "conversation": RAW_CONVERSATIONS,
 }
 
+# ── Supported source file extensions ─────────────────────────────────
+# Single source of truth — imported by both compiler.py and mcp/core.py.
+SUPPORTED_SOURCE_EXTENSIONS = frozenset({
+    ".md", ".txt", ".pdf", ".json", ".yaml", ".yml", ".rst", ".csv"
+})
+
+# ── Valid source types for extraction ────────────────────────────────
+# Includes comparison/synthesis which have templates but no raw/ subdirectory.
+VALID_SOURCE_TYPES = frozenset(list(SOURCE_TYPE_DIRS.keys()) + ["comparison", "synthesis"])
+
 # ── Model tiering (from tooling-research.md) ──────────────────
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
 # Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
@@ -78,6 +88,8 @@ MAX_CONSISTENCY_GROUP_SIZE = 5
 
 # ── Lint tuning ──────────────────────────────────────────────
 STALENESS_MAX_DAYS = 90
+UNDER_COVERED_TYPE_THRESHOLD = 3
+STUB_MIN_CONTENT_CHARS = 100
 
 # ── Evolve / connection discovery tuning ─────────────────────
 MIN_PAGES_FOR_TERM = 2
@@ -111,6 +123,7 @@ MAX_SEARCH_RESULTS = 100
 # ── Ingest limits ────────────────────────────────────────────
 MAX_ENTITIES_PER_INGEST = 50
 MAX_CONCEPTS_PER_INGEST = 50
+MAX_INGEST_CONTENT_CHARS = 160_000
 
 # ── Content-length ingest tiering ────────────────────────────
 # Sources under this character count get simplified processing:

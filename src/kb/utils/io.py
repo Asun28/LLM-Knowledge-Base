@@ -16,7 +16,7 @@ def atomic_json_write(data: object, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, indent=2, allow_nan=False)
         Path(tmp_path).replace(path)
     except BaseException:
@@ -37,7 +37,7 @@ def atomic_text_write(content: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
         Path(tmp_path).replace(path)
     except BaseException:

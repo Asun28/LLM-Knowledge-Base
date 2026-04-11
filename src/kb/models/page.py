@@ -11,7 +11,7 @@ class RawSource:
 
     path: Path
     source_type: str  # article, paper, repo, video, podcast, book, dataset, conversation
-    content_hash: str = ""
+    content_hash: str | None = None
 
 
 @dataclass
