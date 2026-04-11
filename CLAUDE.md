@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 3.96 complete (v0.9.15).** 952 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
+**Phase 3.97 complete (v0.9.16).** 1033 tests, 25 MCP tools, 12 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -92,7 +92,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `load_all_pages(wiki_dir=None)` — In `kb.utils.pages`. Returns list of dicts. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
 - `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached. Use `_build_schema_cached(source_type)` for cached schema lookups (avoids rebuilding on every extraction call).
-- `query_wiki(question, wiki_dir=None, max_results=10)` — In `kb.query.engine`. Returns dict with `answer` (str), `citations` (list[str] page IDs extracted from answer), `source_pages` (list[str] page IDs retrieved for context), and `context_pages` (list[str] page IDs actually included in LLM context window). `context_pages` is empty list on no-match.
+- `query_wiki(question, wiki_dir=None, max_results=10)` — In `kb.query.engine`. Returns dict with `answer` (str), `citations` (list[dict] with keys `type` ('wiki'|'raw'), `path` (str), `context` (str)), `source_pages` (list[str] page IDs retrieved), `context_pages` (list[str] page IDs in LLM context). `context_pages` is empty list on no-match.
 - `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 
 ### Wiki Index Files
@@ -252,7 +252,7 @@ Key usage:
 
 See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.9.12). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
 
-**Current:** Phase 3.96 (v0.9.15) — 952 tests, 25 MCP tools, 12 modules.
+**Current:** Phase 3.97 (v0.9.16) — 1033 tests, 25 MCP tools, 12 modules. Plus v0.9.16 hardening release (4 remaining non-atomic writes, MCP exception guards, slugify symbol-to-word mapping, CRLF line ending fix, integer title coercion, date validation, citation type override, feedback null-type guard, code block masking in dead-link fixer).
 
 **Known issues:** See `BACKLOG.md` for active backlog items. Format guide is in the HTML comment at the top of that file. Severity levels: CRITICAL (blocks release), HIGH (silent wrong results / security), MEDIUM (quality gaps / missing coverage), LOW (style/naming). Items grouped by severity then by module area. Resolved items are deleted (fix recorded in CHANGELOG.md); resolved phases collapse to a one-liner under "Resolved Phases".
 

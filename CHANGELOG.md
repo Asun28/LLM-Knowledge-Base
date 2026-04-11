@@ -23,6 +23,84 @@ Rules:
 
 ---
 
+## [0.9.16] - 2026-04-12
+
+Phase 3.97 — 62 fixes from 6-domain code review of v0.9.15.
+
+### Fixed
+
+#### CRITICAL
+- Non-atomic writes in `fix_dead_links`, `kb_create_page`, `inject_wikilinks` replaced with `atomic_text_write`
+- MCP exception guard on `kb_query` non-API path (search failures no longer crash sessions)
+- `kb_save_lint_verdict` now catches `OSError` alongside `ValueError`
+- Confirmed `refine_page` atomic write was already fixed in v0.9.15
+
+#### HIGH
+- `slugify` now maps C++→cpp, C#→csharp, .NET→dotnet to prevent cross-ingest entity merging
+- `load_all_pages` coerces integer titles to strings (prevents `AttributeError` in BM25 search)
+- `kb_query` API mode now forwards `max_results` parameter
+- `kb_ingest_content`/`kb_save_source` raw file writes are now atomic
+- `fix_dead_links` masks code blocks before modifying wikilinks
+- `_is_valid_date` rejects empty strings and non-ISO date values
+- `refine_page` catches `OSError`/`UnicodeDecodeError` on file read
+- `load_review_history` catches `OSError`/`UnicodeDecodeError`, validates list shape
+- `check_source_coverage` guards against `ValueError` from symlinks
+- `load_feedback` validates `entries` is list and `page_scores` is dict (not null)
+- `add_feedback_entry` initializes missing keys with defaults before arithmetic
+- `kb_reliability_map` uses `.get()` for all score keys
+- `kb_create_page` rejects nested page_id with more than one slash
+- `kb_read_page` catches `UnicodeDecodeError`
+- Feedback lock adds sleep after stale lock eviction
+
+#### MEDIUM
+- `atomic_text_write`/`atomic_json_write` write LF line endings on Windows (fixes cross-platform hash mismatches)
+- `yaml_escape` strips Unicode NEL (`\x85`)
+- `_update_index_batch` uses wikilink-boundary match instead of substring
+- Title sanitization in `_update_index_batch`, `inject_wikilinks`, `_build_item_content`, `_build_summary_content`
+- `build_extraction_schema` rejects `extract: None` templates
+- `VALID_SOURCE_TYPES` includes comparison/synthesis
+- `SUPPORTED_SOURCE_EXTENSIONS` shared constant replaces duplicate extension lists
+- Binary PDF files get clear error instead of silent `UnicodeDecodeError`
+- `detect_source_type` accepts custom `raw_dir` parameter
+- PageRank returns empty for edge-free graphs instead of uniform 1.0
+- `_compute_pagerank_scores` catches `OSError`
+- `export_mermaid` uses `graph.subgraph()` for efficient edge iteration
+- `_sanitize_label` falls back to slug on empty result
+- `extract_citations` overrides type based on path prefix (raw/ paths → "raw")
+- Citation regex hoisted to module level
+- `compile` CLI exits code 1 on errors
+- Verdict trends checks explicit verdict values, not dict membership
+- `build_consistency_context` shows missing pages, filters single-page chunks
+- Evolve frontmatter strip regex handles CRLF
+- `generate_evolution_report` catches all exceptions in stub check
+- `kb_create_page` requires source_refs to start with "raw/"
+- `kb_query` coerces `None` trust to 0.5
+- `kb_query_feedback` sanitizes question/notes control chars
+- `_validate_page_id` rejects empty strings
+- Various control character sanitization in MCP tools
+
+#### LOW
+- `WIKILINK_PATTERN` excludes `![[embed]]` syntax
+- `_RAW_REF_PATTERN` case-insensitive, excludes hyphen before `raw/`
+- `normalize_sources` filters empty strings and warns on non-string items
+- `RawSource.content_hash` default standardized to `None`
+- `RESEARCH_DIR` annotated as reserved
+- Config constants for `UNDER_COVERED_TYPE_THRESHOLD`, `STUB_MIN_CONTENT_CHARS`
+- `kb_list_sources` excludes `.gitkeep` files
+- `kb_save_lint_verdict` uses `MAX_NOTES_LEN` constant
+- Template cache clear helper added
+- `ingest_source` uses `content_hash()` utility
+- CLI source type list derived from `SOURCE_TYPE_DIRS`
+- `graph_stats` narrows betweenness_centrality exception, adds `ValueError` to PageRank
+- BM25 tokenize regex dead branch removed
+- `query_wiki` docstring documents citation dict structure
+- `get_coverage_gaps` deduplicates repeated questions
+
+### Stats
+1033 tests, 25 MCP tools, 12 modules.
+
+---
+
 ## [0.9.15] — 2026-04-11
 
 ### Fixed
