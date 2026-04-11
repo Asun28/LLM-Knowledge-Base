@@ -169,8 +169,11 @@ def inject_wikilinks(
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Skip if already links to target (case-insensitive — extract_wikilinks returns lowercased)
-        existing_links = extract_wikilinks(content)
+        # Strip frontmatter before checking existing links — a [[target]] in YAML
+        # should not block body injection.
+        fm_match = _FRONTMATTER_RE.match(content)
+        body_for_check = fm_match.group(2) if fm_match else content
+        existing_links = extract_wikilinks(body_for_check)
         if target_page_id in existing_links:
             continue
 
@@ -195,7 +198,8 @@ def inject_wikilinks(
         # Replace first plain-text occurrence in body with wikilink.
         # Use finditer loop so a blocked match (already inside [[ ]]) doesn't
         # silently skip all subsequent occurrences.
-        replacement = f"[[{target_page_id}|{title}]]"
+        safe_title = title.replace("|", "\u2014").replace("\n", " ").replace("\r", "")
+        replacement = f"[[{target_page_id}|{safe_title}]]"
 
         new_body = body
         for match in pattern.finditer(body):

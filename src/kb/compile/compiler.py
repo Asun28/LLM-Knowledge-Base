@@ -6,7 +6,13 @@ from pathlib import Path
 
 import yaml
 
-from kb.config import PROJECT_ROOT, RAW_DIR, SOURCE_TYPE_DIRS, TEMPLATES_DIR
+from kb.config import (
+    PROJECT_ROOT,
+    RAW_DIR,
+    SOURCE_TYPE_DIRS,
+    SUPPORTED_SOURCE_EXTENSIONS,
+    TEMPLATES_DIR,
+)
 from kb.ingest.extractors import VALID_SOURCE_TYPES
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
@@ -84,7 +90,7 @@ def scan_raw_sources(raw_dir: Path | None = None) -> list[Path]:
         for f in sorted(actual_dir.iterdir()):
             if (
                 f.is_file()
-                and f.suffix in (".md", ".txt", ".pdf", ".json", ".yaml")
+                and f.suffix.lower() in SUPPORTED_SOURCE_EXTENSIONS
                 and f.name != ".gitkeep"
             ):
                 sources.append(f)
@@ -170,7 +176,7 @@ def find_changed_sources(
             for f in sorted(type_dir.iterdir()):
                 if (
                     f.is_file()
-                    and f.suffix in (".md", ".txt", ".pdf", ".json", ".yaml")
+                    and f.suffix.lower() in SUPPORTED_SOURCE_EXTENSIONS
                     and f.name != ".gitkeep"
                     and f.resolve() not in changed_source_set
                 ):
@@ -349,6 +355,16 @@ def compile_wiki(
     current_manifest = load_manifest(manifest_path)
     if not incremental:
         current_manifest.update(_template_hashes())
+        # Prune manifest entries for sources that no longer exist on disk
+        existing_refs = {_canonical_rel_path(s, raw_dir) for s in sources_to_process}
+        stale_keys = [
+            k for k in current_manifest
+            if not k.startswith("_template/") and k not in existing_refs
+        ]
+        if stale_keys:
+            for k in stale_keys:
+                del current_manifest[k]
+            logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
     save_manifest(current_manifest, manifest_path)
 
     # Append to log
