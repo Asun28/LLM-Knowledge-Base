@@ -1,12 +1,7 @@
 """Phase 3.97 Task 02 — Foundation: config, utils, models fixes."""
 
-import re
 from datetime import date
 from pathlib import Path
-
-import frontmatter as fm
-import pytest
-
 
 # ── config.py ──────────────────────────────────────────────────────────
 
