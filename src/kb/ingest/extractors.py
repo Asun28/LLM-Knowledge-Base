@@ -11,6 +11,8 @@ from kb.utils.llm import call_llm_json
 
 logger = logging.getLogger(__name__)
 
+# Restrict to types that have raw/ directory mappings (excludes comparison/synthesis).
+# compiler.py imports this to guard template-change detection and looks up SOURCE_TYPE_DIRS.
 VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
 
 # Fields that are always lists across all extraction templates.
@@ -128,9 +130,12 @@ def build_extraction_schema(template: dict) -> dict:
     Parses template field specs into a JSON Schema object that can be
     used with Claude's tool_use feature for guaranteed structured output.
     """
-    # Fix 2.5: clear error on missing extract key
-    if "extract" not in template:
-        raise ValueError(f"Template missing 'extract' key: {template.get('name', '?')}")
+    # Fix 2.5: clear error on missing or invalid extract key
+    if "extract" not in template or not isinstance(template["extract"], list):
+        raise ValueError(
+            f"Template missing 'extract' key or invalid value: {template.get('name', '?')}. "
+            "Expected a list of field specs."
+        )
 
     properties = {}
     required = []
@@ -162,6 +167,15 @@ def build_extraction_schema(template: dict) -> dict:
         "properties": properties,
         "required": required,
     }
+
+
+def clear_template_cache() -> None:
+    """Clear the LRU caches for template loading and schema building.
+
+    Useful during long-running processes or interactive template development.
+    """
+    load_template.cache_clear()
+    _build_schema_cached.cache_clear()
 
 
 @functools.lru_cache(maxsize=16)

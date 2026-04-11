@@ -1,6 +1,5 @@
 """Ingest pipeline — read raw sources, create wiki summaries, update indexes."""
 
-import hashlib
 import json
 import logging
 import os
@@ -24,6 +23,7 @@ from kb.config import (
     WIKI_SUBDIR_TO_TYPE,
 )
 from kb.ingest.extractors import extract_from_source
+from kb.utils.hashing import content_hash as compute_hash
 from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
@@ -100,9 +100,10 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     return False
 
 
-def detect_source_type(source_path: Path) -> str:
+def detect_source_type(source_path: Path, raw_dir: Path | None = None) -> str:
     """Auto-detect source type from the raw/ subdirectory path."""
-    rel = source_path.resolve().relative_to(RAW_DIR.resolve())
+    effective_raw = (raw_dir or RAW_DIR).resolve()
+    rel = source_path.resolve().relative_to(effective_raw)
     first_part = rel.parts[0] if rel.parts else ""
     if first_part == "assets":
         raise ValueError(
@@ -140,7 +141,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
     """Build summary page content from extracted data."""
     lines = []
     title = extraction.get("title") or extraction.get("name") or "Untitled"
-    lines.append(f"# {title}\n")
+    safe_title = title.replace("\n", " ").replace("\r", "")
+    lines.append(f"# {safe_title}\n")
 
     # Author/speaker info
     author = extraction.get("author") or extraction.get("speaker")
@@ -208,8 +210,9 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
 
 def _build_item_content(name: str, source_ref: str, context: str, verb: str) -> str:
     """Build entity or concept page content."""
+    safe_name = name.replace("\n", " ").replace("\r", "")
     lines = [
-        f"# {name}\n",
+        f"# {safe_name}\n",
         "## References\n",
         f"- {verb} in {source_ref}",
     ]
@@ -375,9 +378,12 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
         if not section or section not in content:
             continue
         subdir = _SUBDIR_MAP.get(page_type)
-        if not subdir or f"{subdir}/{slug}" in content:
+        if not subdir:
             continue
-        entry = f"- [[{subdir}/{slug}|{title}]]"
+        if f"[[{subdir}/{slug}|" in content or f"[[{subdir}/{slug}]]" in content:
+            continue
+        safe_title = title.replace("|", "-").replace("\n", " ").replace("\r", "")
+        entry = f"- [[{subdir}/{slug}|{safe_title}]]"
         placeholder = f"{section}\n\n*No pages yet.*"
         if placeholder in content:
             content = content.replace(placeholder, f"{section}\n\n{entry}")
@@ -500,8 +506,14 @@ def ingest_source(
 
     # Fix 2.13: Read bytes once; derive both text and hash from the same read (avoids double read).
     raw_bytes = source_path.read_bytes()
-    raw_content = raw_bytes.decode("utf-8")
-    source_hash = hashlib.sha256(raw_bytes).hexdigest()[:32]
+    try:
+        raw_content = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(
+            f"Binary file cannot be ingested: {source_path.name}. "
+            "Convert to markdown first (e.g., markitdown or docling)."
+        )
+    source_hash = compute_hash(source_path)
 
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)
