@@ -1,9 +1,6 @@
 """Phase 3.97 Task 04 — Compile / linker fixes."""
 
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 
 class TestInjectWikilinksTitleSanitization:
