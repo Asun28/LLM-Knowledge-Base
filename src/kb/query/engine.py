@@ -12,6 +12,7 @@ from kb.config import (
     QUERY_MAX_TOKENS,
     SEARCH_TITLE_WEIGHT,
 )
+from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.utils.llm import call_llm
@@ -88,17 +89,18 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
     try:
         import networkx as nx
 
-        from kb.graph.builder import build_graph
-
         graph = build_graph(wiki_dir)
         if graph.number_of_nodes() == 0:
+            return {}
+        if graph.number_of_edges() == 0:
+            logger.debug("No wikilink edges — PageRank blending skipped")
             return {}
         pr = nx.pagerank(graph)
         max_pr = max(pr.values()) if pr else 1.0
         if max_pr == 0:
             return {}
         return {node: score / max_pr for node, score in pr.items()}
-    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError) as e:
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError, OSError) as e:
         logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
 
@@ -197,7 +199,13 @@ def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 1
         max_results: Maximum number of pages to retrieve for context.
 
     Returns:
-        dict with keys: question, answer, citations, source_pages, context_pages.
+        dict with keys:
+            question: The original question.
+            answer: LLM-synthesized answer text.
+            citations: list of dicts, each with keys 'type' ('wiki'|'raw'),
+                'path' (str), 'context' (str surrounding text).
+            source_pages: list of page IDs retrieved by BM25 search.
+            context_pages: list of page IDs actually included in LLM context.
     """
     # 1. Search for relevant pages
     matching_pages = search_pages(question, wiki_dir, max_results=max_results)

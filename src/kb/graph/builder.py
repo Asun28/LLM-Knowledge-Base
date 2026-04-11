@@ -100,7 +100,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     try:
         pr = nx.pagerank(graph)
         pagerank = sorted(pr.items(), key=lambda x: x[1], reverse=True)[:10]
-    except (nx.PowerIterationFailedConvergence, nx.NetworkXError):
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError):
         pagerank = []
 
     # Top 10 pages by betweenness centrality (bridge nodes)
@@ -116,7 +116,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
             key=lambda x: x[1],
             reverse=True,
         )[:10]
-    except Exception as e:
+    except (nx.NetworkXError, ValueError, RuntimeError) as e:
         logger.warning("betweenness_centrality failed: %s", e)
         bridge_nodes = []
 

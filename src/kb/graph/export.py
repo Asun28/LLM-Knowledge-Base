@@ -107,12 +107,14 @@ def export_mermaid(
         lines.append(f'  subgraph "{page_type}"')
         for node in nodes:
             title = _sanitize_label(titles.get(node, node.split("/")[-1]))
+            if not title:
+                title = node.split("/")[-1]
             lines.append(f'    {node_id_map[node]}["{title}"]')
         lines.append("  end")
 
     # Define edges (only between included nodes)
-    for source, target in graph.edges():
-        if source in nodes_to_include and target in nodes_to_include:
-            lines.append(f"  {node_id_map[source]} --> {node_id_map[target]}")
+    subgraph = graph.subgraph(nodes_to_include)
+    for source, target in subgraph.edges():
+        lines.append(f"  {node_id_map[source]} --> {node_id_map[target]}")
 
     return "\n".join(lines)

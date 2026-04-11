@@ -120,7 +120,7 @@ def tokenize(text: str) -> list[str]:
     text = re.sub(r"-{2,}", "-", text)
     # Match words: letters/digits/hyphens, at least 2 chars
     # Single pattern: \b\w[\w-]*\w\b covers multi-char tokens with optional hyphens
-    words = re.findall(r"\b\w[\w-]*\w\b|\b\w{2}\b", text)
+    words = re.findall(r"\b\w[\w-]*\w\b", text)
     return [w for w in words if w not in STOP_WORDS]
 
 

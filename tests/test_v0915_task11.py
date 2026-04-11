@@ -80,10 +80,10 @@ class TestComputePageRankScores:
     def test_single_page_scores(self, tmp_wiki, create_wiki_page):
         from kb.query.engine import _compute_pagerank_scores
 
+        # Edge-free graph (single page, no wikilinks) returns {} — PageRank blending skipped
         create_wiki_page("concepts/single", wiki_dir=tmp_wiki, content="No links.")
         scores = _compute_pagerank_scores(tmp_wiki)
-        assert "concepts/single" in scores
-        assert 0.0 <= scores["concepts/single"] <= 1.0
+        assert scores == {}
 
     def test_hub_page_has_higher_score(self, tmp_wiki, create_wiki_page):
         from kb.query.engine import _compute_pagerank_scores
