@@ -1,9 +1,6 @@
 """Phase 3.97 Task 08 — Feedback store fixes."""
 
 import json
-from pathlib import Path
-
-import pytest
 
 
 class TestLoadFeedbackNullTypes:
@@ -110,10 +107,26 @@ class TestGetCoverageGapsDedup:
             json.dumps(
                 {
                     "entries": [
-                        {"question": "What is RAG?", "rating": "incomplete", "notes": "missing context"},
-                        {"question": "What is RAG?", "rating": "incomplete", "notes": "still incomplete"},
-                        {"question": "What is RAG?", "rating": "incomplete", "notes": "again"},
-                        {"question": "What is LLM?", "rating": "incomplete", "notes": "need more"},
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "missing context",
+                        },
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "still incomplete",
+                        },
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "again",
+                        },
+                        {
+                            "question": "What is LLM?",
+                            "rating": "incomplete",
+                            "notes": "need more",
+                        },
                     ],
                     "page_scores": {},
                 }

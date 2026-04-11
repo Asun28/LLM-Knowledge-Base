@@ -36,6 +36,7 @@ def _feedback_lock(path: Path, timeout: float = 5.0):
             if time.monotonic() > deadline:
                 # Stale lock — remove and retry acquisition
                 lock_path.unlink(missing_ok=True)
+                time.sleep(0.05)
                 continue
             time.sleep(0.05)
     try:
