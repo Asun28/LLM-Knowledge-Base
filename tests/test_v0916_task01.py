@@ -1,11 +1,6 @@
 """Phase 3.97 Task 01 — CRITICAL atomic write + MCP exception tests."""
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import patch
 
 # ── CRITICAL: Non-atomic writes ────────────────────────────────────────
 
