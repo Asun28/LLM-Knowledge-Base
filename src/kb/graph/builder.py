@@ -116,7 +116,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
             key=lambda x: x[1],
             reverse=True,
         )[:10]
-    except (nx.NetworkXError, ValueError) as e:
+    except (nx.NetworkXError, ValueError, RuntimeError) as e:
         logger.warning("betweenness_centrality failed: %s", e)
         bridge_nodes = []
 
