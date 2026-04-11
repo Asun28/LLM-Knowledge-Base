@@ -1,10 +1,6 @@
 """Phase 3.97 Task 07 — MCP server fixes."""
 
-import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 
 class TestKbQueryMaxResultsForwarding:
