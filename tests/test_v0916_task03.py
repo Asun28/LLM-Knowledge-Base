@@ -1,8 +1,6 @@
 """Phase 3.97 Task 03 — Ingest pipeline fixes."""
 
 import hashlib
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
