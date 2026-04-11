@@ -34,12 +34,18 @@ def get_flagged_pages(path: Path | None = None, threshold: float | None = None) 
 def get_coverage_gaps(path: Path | None = None) -> list[dict]:
     """Get questions where the answer was rated 'incomplete'.
 
+    Deduplicates by question text, keeping the first occurrence.
+
     Returns:
         List of dicts with 'question' and 'notes' keys.
     """
     data = load_feedback(path)
-    return [
-        {"question": e.get("question", ""), "notes": e.get("notes", "")}
-        for e in data.get("entries", [])
-        if e.get("rating") == "incomplete" and e.get("question")
-    ]
+    seen: set[str] = set()
+    gaps = []
+    for e in data.get("entries", []):
+        if e.get("rating") == "incomplete" and e.get("question"):
+            q = e["question"]
+            if q not in seen:
+                seen.add(q)
+                gaps.append({"question": q, "notes": e.get("notes", "")})
+    return gaps

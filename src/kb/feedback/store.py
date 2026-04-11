@@ -60,7 +60,13 @@ def load_feedback(path: Path | None = None) -> dict:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return _default_feedback()
-        if not isinstance(data, dict) or "entries" not in data or "page_scores" not in data:
+        if (
+            not isinstance(data, dict)
+            or "entries" not in data
+            or "page_scores" not in data
+            or not isinstance(data["entries"], list)
+            or not isinstance(data["page_scores"], dict)
+        ):
             return _default_feedback()
         return data
     return _default_feedback()
@@ -151,6 +157,9 @@ def add_feedback_entry(
                     "trust": 0.5,
                 }
             scores = data["page_scores"][page_id]
+            # Initialize missing keys from older code versions
+            for key, default in [("useful", 0), ("wrong", 0), ("incomplete", 0), ("trust", 0.5)]:
+                scores.setdefault(key, default)
             scores[rating] += 1
             weighted_negative = 2 * scores["wrong"] + scores["incomplete"]
             scores["trust"] = round(
