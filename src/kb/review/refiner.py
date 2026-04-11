@@ -18,9 +18,12 @@ def load_review_history(path: Path | None = None) -> list[dict]:
     path = path or REVIEW_HISTORY_PATH
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return []
+        if not isinstance(data, list):
+            return []
+        return data
     return []
 
 
@@ -63,7 +66,10 @@ def refine_page(
     if not page_path.exists():
         return {"error": f"Page not found: {page_id}"}
 
-    text = page_path.read_text(encoding="utf-8")
+    try:
+        text = page_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return {"error": f"Cannot read {page_id}: {e}"}
     # Normalize CRLF → LF for consistent frontmatter parsing on Windows
     text = text.replace("\r\n", "\n")
 
@@ -88,6 +94,9 @@ def refine_page(
     # Guard against empty or whitespace-only content
     if not updated_content or not updated_content.strip():
         return {"error": "updated_content cannot be empty."}
+
+    # Normalize CRLF in caller-supplied content before guard check
+    updated_content = updated_content.replace("\r\n", "\n")
 
     # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
     stripped_content = updated_content.lstrip()

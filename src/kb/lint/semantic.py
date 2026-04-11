@@ -222,10 +222,11 @@ def build_consistency_context(
     wiki_dir = wiki_dir or WIKI_DIR
 
     if page_ids:
-        groups = [
+        all_chunks = [
             page_ids[i : i + MAX_CONSISTENCY_GROUP_SIZE]
             for i in range(0, len(page_ids), MAX_CONSISTENCY_GROUP_SIZE)
         ]
+        groups = [chunk for chunk in all_chunks if len(chunk) >= 2]
     else:
         # Auto-select using three strategies (priority order per spec)
         all_groups: list[list[str]] = []
@@ -272,6 +273,8 @@ def build_consistency_context(
                 lines.append(f"### {pid}\n")
                 lines.append(content)
                 lines.append("\n---\n")
+            else:
+                lines.append(f"### {pid}\n*Page not found*\n---\n")
 
     return "\n".join(lines)
 

@@ -278,7 +278,7 @@ class TestEvolveStubCheckLogging:
 
         with (
             patch(
-                "kb.lint.checks.check_stub_pages",
+                "kb.evolve.analyzer.check_stub_pages",
                 side_effect=RuntimeError("test error"),
             ),
             caplog.at_level(logging.DEBUG),

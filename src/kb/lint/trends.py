@@ -54,7 +54,7 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
         period_start = ts - timedelta(days=ts.weekday())
         period_key = period_start.strftime("%Y-%m-%d")
 
-        if vrd in period_buckets[period_key]:
+        if vrd in ("pass", "fail", "warning"):
             period_buckets[period_key][vrd] += 1
         period_buckets[period_key]["total"] += 1
 

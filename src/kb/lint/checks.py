@@ -9,8 +9,15 @@ import frontmatter
 import networkx as nx
 import yaml
 
-from kb.compile.linker import resolve_wikilinks
-from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
+from kb.compile.linker import _mask_code_blocks, _unmask_code_blocks, resolve_wikilinks
+from kb.config import (
+    RAW_DIR,
+    SOURCE_TYPE_DIRS,
+    STALENESS_MAX_DAYS,
+    STUB_MIN_CONTENT_CHARS,
+    SUPPORTED_SOURCE_EXTENSIONS,
+    WIKI_DIR,
+)
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.io import atomic_text_write
@@ -78,6 +85,8 @@ def fix_dead_links(
             continue
 
         content = page_path.read_text(encoding="utf-8")
+        # Mask code blocks to prevent modifying wikilinks inside code examples
+        content, masked_code, mask_prefix = _mask_code_blocks(content)
         modified = False
 
         for target in targets:
@@ -107,6 +116,8 @@ def fix_dead_links(
                     }
                 )
 
+        # Unmask code blocks before writing
+        content = _unmask_code_blocks(content, masked_code, mask_prefix)
         if modified:
             atomic_text_write(content, page_path)
 
@@ -347,8 +358,16 @@ def check_source_coverage(
         if not actual_dir.exists():
             continue
         for f in actual_dir.iterdir():
-            if f.is_file() and f.name != ".gitkeep":
-                rel_path = make_source_ref(f, raw_dir)
+            if (
+                f.is_file()
+                and f.name != ".gitkeep"
+                and f.suffix.lower() in SUPPORTED_SOURCE_EXTENSIONS
+            ):
+                try:
+                    rel_path = make_source_ref(f, raw_dir)
+                except ValueError:
+                    logger.warning("Skipping source outside raw_dir: %s", f)
+                    continue
                 # Check if this source is referenced (exact path only — no suffix match to avoid
                 # false-positives when two subdirs contain same-named files)
                 referenced = rel_path in all_raw_refs
@@ -367,7 +386,7 @@ def check_source_coverage(
 
 def check_stub_pages(
     wiki_dir: Path | None = None,
-    min_content_chars: int = 100,
+    min_content_chars: int = STUB_MIN_CONTENT_CHARS,
     pages: list[Path] | None = None,
 ) -> list[dict]:
     """Find wiki pages with minimal body content (stubs needing enrichment).

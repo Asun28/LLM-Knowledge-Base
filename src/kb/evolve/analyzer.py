@@ -5,8 +5,15 @@ import re
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
-from kb.config import MAX_PAGES_FOR_TERM, MIN_PAGES_FOR_TERM, MIN_SHARED_TERMS, WIKI_DIR
+from kb.config import (
+    MAX_PAGES_FOR_TERM,
+    MIN_PAGES_FOR_TERM,
+    MIN_SHARED_TERMS,
+    UNDER_COVERED_TYPE_THRESHOLD,
+    WIKI_DIR,
+)
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
+from kb.lint.checks import check_stub_pages
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
 
@@ -30,8 +37,8 @@ def analyze_coverage(wiki_dir: Path | None = None) -> dict:
         if subdir in by_type:
             by_type[subdir] += 1
 
-    # Find under-covered types (types with fewer than 3 pages)
-    under_covered = [t for t, count in by_type.items() if count < 3]
+    # Find under-covered types (types with fewer than threshold pages)
+    under_covered = [t for t, count in by_type.items() if count < UNDER_COVERED_TYPE_THRESHOLD]
 
     # Find concepts with no backlinks (nobody references them)
     orphan_concepts = []
@@ -70,7 +77,7 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
             logger.warning("Skipping unreadable page %s in connection analysis", page_path)
             continue
         # Strip YAML frontmatter to avoid false-positive matches on structural keywords
-        content = re.sub(r"\A---\n.*?\n---\n?", "", raw, count=1, flags=re.DOTALL).lower()
+        content = re.sub(r"\A---\r?\n.*?\r?\n---\r?\n?", "", raw, count=1, flags=re.DOTALL).lower()
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
         words = {
@@ -212,8 +219,6 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
 
     # Suggest enriching stubs
     try:
-        from kb.lint.checks import check_stub_pages
-
         stubs = check_stub_pages(wiki_dir)
         if stubs:
             stub_pages = [s["page"] for s in stubs]
@@ -222,7 +227,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Top stubs: {', '.join(stub_pages[:5])}. "
                 "Use kb_review_page to get context, then kb_refine_page to add content."
             )
-    except (ImportError, AttributeError, RuntimeError) as e:
+    except (ImportError, AttributeError, RuntimeError, OSError) as e:
         logger.warning("Stub check failed in evolve: %s", e)
 
     # Surface low-trust pages from feedback (closes the feedback loop)
@@ -289,8 +294,9 @@ def format_evolution_report(report: dict) -> str:
     if report["connection_opportunities"]:
         lines.append("## Connection Opportunities\n")
         for co in report["connection_opportunities"][:10]:
-            count = co.get("shared_term_count", len(co["shared_terms"]))
-            lines.append(f"- {co['page_a']} ↔ {co['page_b']} ({count} shared terms)")
+            lines.append(
+                f"- {co['page_a']} ↔ {co['page_b']} ({co['shared_term_count']} shared terms)"
+            )
         lines.append("")
 
     # Recommendations
