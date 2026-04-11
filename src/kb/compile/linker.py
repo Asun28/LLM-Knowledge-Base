@@ -7,6 +7,7 @@ from pathlib import Path
 
 from kb.config import WIKI_DIR
 from kb.graph.builder import page_id, scan_wiki_pages
+from kb.utils.io import atomic_text_write
 from kb.utils.markdown import extract_wikilinks
 
 logger = logging.getLogger(__name__)
@@ -227,7 +228,7 @@ def inject_wikilinks(
         # spurious writes when the only match was inside a code block)
         new_body = _unmask_code_blocks(new_body, masked_code, mask_prefix)
         if new_body != original_body:
-            page_path.write_text(frontmatter_section + new_body, encoding="utf-8")
+            atomic_text_write(frontmatter_section + new_body, page_path)
             updated.append(pid)
             logger.info("Injected wikilink to %s in %s", target_page_id, pid)
 

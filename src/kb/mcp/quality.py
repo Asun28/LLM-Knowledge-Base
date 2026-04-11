@@ -7,16 +7,20 @@ import re
 from datetime import date
 
 from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _validate_page_id, mcp
+from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)
 
+_CTRL_CHAR_RE = re.compile(r"[\x00-\x1f]")
+
 
 def _strip_control_chars(s: str) -> str:
     """Remove ASCII control characters (U+0000–U+001F) from a string."""
-    return re.sub(r"[\x00-\x1f]", "", s)
+    return _CTRL_CHAR_RE.sub("", s)
 
 
 @mcp.tool()
@@ -230,6 +234,7 @@ def kb_affected_pages(page_id: str) -> str:
     Args:
         page_id: Page that was changed (e.g., 'concepts/rag').
     """
+    page_id = _strip_control_chars(page_id)
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
@@ -315,8 +320,6 @@ def kb_save_lint_verdict(
     if len(notes) > 2000:
         return "Error: Notes too long (max 2000 chars)."
 
-    from kb.lint.verdicts import add_verdict
-
     issue_list = None
     if issues:
         try:
@@ -328,7 +331,7 @@ def kb_save_lint_verdict(
 
     try:
         entry = add_verdict(page_id, verdict_type, verdict, issue_list, notes)
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         return f"Error: {e}"
 
     return (
@@ -438,7 +441,7 @@ confidence: {confidence}
 
     try:
         page_path.parent.mkdir(parents=True, exist_ok=True)
-        page_path.write_text(frontmatter + content, encoding="utf-8")
+        atomic_text_write(frontmatter + content, page_path)
     except OSError as e:
         return f"Error: Failed to write page: {e}"
 

@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from kb.config import (
+    MAX_INGEST_CONTENT_CHARS,
     MAX_SEARCH_RESULTS,
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
@@ -14,9 +15,26 @@ from kb.config import (
 )
 from kb.ingest.pipeline import ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, mcp
+from kb.query.engine import search_pages
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
+
+_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
+
+
+def _validate_file_inputs(filename: str, content: str) -> str | None:
+    """Validate filename and content size. Returns error string or None if valid."""
+    if not filename or not filename.strip():
+        return "Error: Filename cannot be empty."
+    if len(filename) > 200:
+        return "Error: Filename too long (max 200 chars)."
+    if len(content) > MAX_INGEST_CONTENT_CHARS:
+        return (
+            f"Error: Content too large ({len(content)} chars). "
+            f"Maximum: {MAX_INGEST_CONTENT_CHARS} chars."
+        )
+    return None
 
 
 @mcp.tool()
@@ -56,9 +74,12 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
             return f"Error: Query failed — {e}"
 
     # Default: Claude Code mode — return context for synthesis
-    from kb.query.engine import search_pages
+    try:
+        results = search_pages(question, max_results=max_results)
+    except Exception as e:
+        logger.exception("Error in kb_query search for: %s", question)
+        return f"Error: Search failed — {e}"
 
-    results = search_pages(question, max_results=max_results)
     if not results:
         return (
             "No relevant wiki pages found for this question. "
@@ -120,8 +141,6 @@ def kb_ingest(
             Omit to get the extraction prompt instead.
         use_api: If true, use the Anthropic API for extraction. Default false.
     """
-    _TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
-
     path = Path(source_path)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -246,13 +265,9 @@ def kb_ingest_content(
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
         url: Optional source URL for metadata.
     """
-    if not filename or not filename.strip():
-        return "Error: Filename cannot be empty."
-    if len(filename) > 200:
-        return "Error: Filename too long (max 200 chars)."
-    max_content = 160_000  # chars
-    if len(content) > max_content:
-        return f"Error: Content too large ({len(content)} chars). Maximum: {max_content} chars."
+    err = _validate_file_inputs(filename, content)
+    if err:
+        return err
 
     slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
@@ -330,13 +345,9 @@ def kb_save_source(
         url: Optional source URL to include as metadata.
         overwrite: If true, overwrite existing file. Default false (returns error).
     """
-    if not filename or not filename.strip():
-        return "Error: Filename cannot be empty."
-    if len(filename) > 200:
-        return "Error: Filename too long (max 200 chars)."
-    max_content = 160_000  # chars
-    if len(content) > max_content:
-        return f"Error: Content too large ({len(content)} chars). Maximum: {max_content} chars."
+    err = _validate_file_inputs(filename, content)
+    if err:
+        return err
 
     slug = slugify(filename) or "untitled"
     type_dir = SOURCE_TYPE_DIRS.get(source_type)

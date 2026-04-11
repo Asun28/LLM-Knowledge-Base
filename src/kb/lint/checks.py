@@ -13,6 +13,7 @@ from kb.compile.linker import resolve_wikilinks
 from kb.config import RAW_DIR, SOURCE_TYPE_DIRS, STALENESS_MAX_DAYS, WIKI_DIR
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
+from kb.utils.io import atomic_text_write
 from kb.utils.markdown import extract_raw_refs
 from kb.utils.pages import normalize_sources
 from kb.utils.paths import make_source_ref
@@ -107,7 +108,7 @@ def fix_dead_links(
                 )
 
         if modified:
-            page_path.write_text(content, encoding="utf-8")
+            atomic_text_write(content, page_path)
 
     # Log fixes to audit trail
     if fixes:

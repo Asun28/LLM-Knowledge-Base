@@ -358,7 +358,7 @@ def test_kb_query_clamps_max_results_low(tmp_path):
     """kb_query clamps max_results to minimum 1."""
     from kb.mcp.core import kb_query
 
-    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+    with patch("kb.mcp.core.search_pages", return_value=[]) as mock:
         kb_query("test question", max_results=-5)
     mock.assert_called_once_with("test question", max_results=1)
 
@@ -367,7 +367,7 @@ def test_kb_query_clamps_max_results_high(tmp_path):
     """kb_query clamps max_results to maximum 100."""
     from kb.mcp.core import kb_query
 
-    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+    with patch("kb.mcp.core.search_pages", return_value=[]) as mock:
         kb_query("test question", max_results=9999)
     mock.assert_called_once_with("test question", max_results=100)
 
@@ -394,7 +394,7 @@ def test_kb_query_normal_max_results():
     """kb_query passes through valid max_results unchanged."""
     from kb.mcp.core import kb_query
 
-    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+    with patch("kb.mcp.core.search_pages", return_value=[]) as mock:
         kb_query("test question", max_results=25)
     mock.assert_called_once_with("test question", max_results=25)
 
