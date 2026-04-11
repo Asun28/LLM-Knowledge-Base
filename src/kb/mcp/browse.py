@@ -2,11 +2,14 @@
 
 import logging
 
-from kb.config import MAX_SEARCH_RESULTS, RAW_DIR, WIKI_DIR
+from kb.config import MAX_SEARCH_RESULTS, RAW_DIR, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
+
+# Maps singular type names to subdir names: "entity" → "entities", etc.
+_TYPE_TO_SUBDIR = {v: k for k, v in WIKI_SUBDIR_TO_TYPE.items()}
 
 
 @mcp.tool()
@@ -72,7 +75,7 @@ def kb_read_page(page_id: str) -> str:
         return f"Page not found: {page_id}"
     try:
         return page_path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         logger.error("Error reading page %s: %s", page_id, e)
         return f"Error: Could not read page {page_id}: {e}"
 
@@ -88,10 +91,9 @@ def kb_list_pages(page_type: str = "") -> str:
     try:
         pages = load_all_pages()
         if page_type:
-            # Normalize: accept singular forms like "concept" → "concepts"
-            if not page_type.endswith("s"):
-                page_type = page_type + "s"
-            pages = [p for p in pages if p["id"].startswith(page_type)]
+            # Accept both singular ("concept") and plural ("concepts") subdir names
+            page_type = _TYPE_TO_SUBDIR.get(page_type, page_type)
+            pages = [p for p in pages if p["id"].startswith(f"{page_type}/")]
         if not pages:
             return "No pages found."
         lines = [f"Total: {len(pages)} page(s)\n"]
@@ -121,7 +123,7 @@ def kb_list_sources() -> str:
             if not subdir.is_dir() or subdir.name.startswith("."):
                 continue
             files = sorted(subdir.glob("*"))
-            files = [f for f in files if f.is_file()]
+            files = [f for f in files if f.is_file() and f.name != ".gitkeep"]
             if files:
                 lines.append(f"\n## {subdir.name}/ ({len(files)} files)")
                 for f in files:

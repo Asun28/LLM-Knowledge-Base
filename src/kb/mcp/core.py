@@ -13,9 +13,11 @@ from kb.config import (
     RAW_DIR,
     SOURCE_TYPE_DIRS,
 )
+from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, mcp
-from kb.query.engine import search_pages
+from kb.query.engine import query_wiki, search_pages
+from kb.utils.io import atomic_text_write
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
@@ -60,10 +62,9 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
 
     if use_api:
         from kb.query.citations import format_citations
-        from kb.query.engine import query_wiki
 
         try:
-            result = query_wiki(question)
+            result = query_wiki(question, max_results=max_results)
             parts = [result["answer"]]
             if result.get("citations"):
                 parts.append("\n" + format_citations(result["citations"]))
@@ -87,10 +88,10 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         )
 
     # Merge trust scores from feedback (fail-safe)
+    pages_with_feedback: set[str] = set()
     try:
-        from kb.feedback.reliability import compute_trust_scores
-
         scores = compute_trust_scores()
+        pages_with_feedback = set(scores.keys())
         for r in results:
             trust_data = scores.get(r["id"], {})
             r["trust"] = trust_data.get("trust", 0.5)
@@ -105,7 +106,8 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         "Cite sources with [source: page_id] format.\n",
     ]
     for r in results:
-        trust_label = f", trust: {r['trust']:.2f}" if abs(r.get("trust", 0.5) - 0.5) >= 1e-9 else ""
+        trust = r.get("trust") or 0.5
+        trust_label = f", trust: {trust:.2f}" if r["id"] in pages_with_feedback else ""
         lines.append(
             f"--- Page: {r['id']} (type: {r['type']}, "
             f"confidence: {r['confidence']}, score: {r['score']}{trust_label}) ---\n"
@@ -305,7 +307,7 @@ def kb_ingest_content(
         save_content = header + content
 
     try:
-        file_path.write_text(save_content, encoding="utf-8")
+        atomic_text_write(save_content, file_path)
     except OSError as e:
         return f"Error: Failed to write source file: {e}"
 
@@ -370,7 +372,7 @@ def kb_save_source(
         content = header + content
 
     try:
-        file_path.write_text(content, encoding="utf-8")
+        atomic_text_write(content, file_path)
     except OSError as e:
         return f"Error: Failed to write source file: {e}"
     return (

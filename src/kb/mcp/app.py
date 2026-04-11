@@ -56,6 +56,8 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
     Returns:
         Error message string, or None if valid.
     """
+    if not page_id or not page_id.strip():
+        return "page_id cannot be empty."
     if (
         ".." in page_id
         or page_id.startswith("/")

@@ -394,25 +394,21 @@ class TestKbIngestContentOSError:
 
     def test_write_oserror_returns_error_string(self, monkeypatch, tmp_project):
         """OSError during file write must return 'Error: ...' string."""
-        from pathlib import Path
+        from unittest.mock import patch
 
         from kb.mcp import core as mcp_core
 
-        original_write = Path.write_text
-
-        def failing_write(self, *a, **kw):
-            if "test-content" in str(self):
+        def failing_atomic_write(content, path):
+            if "test-content" in str(path):
                 raise OSError("disk full")
-            return original_write(self, *a, **kw)
 
-        monkeypatch.setattr(Path, "write_text", failing_write)
-
-        result = mcp_core.kb_ingest_content(
-            content="Some article content",
-            filename="test-content",
-            source_type="article",
-            extraction_json='{"title":"Test","entities_mentioned":[],"concepts_mentioned":[]}',
-        )
+        with patch.object(mcp_core, "atomic_text_write", side_effect=failing_atomic_write):
+            result = mcp_core.kb_ingest_content(
+                content="Some article content",
+                filename="test-content",
+                source_type="article",
+                extraction_json='{"title":"Test","entities_mentioned":[],"concepts_mentioned":[]}',
+            )
         assert result.startswith("Error:"), f"Expected error string, got: {result[:80]}"
 
     def test_orphan_file_cleaned_up_on_ingest_failure(self, monkeypatch, tmp_project):

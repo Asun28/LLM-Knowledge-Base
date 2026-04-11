@@ -6,7 +6,8 @@ import os
 import re
 from datetime import date
 
-from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.config import CONFIDENCE_LEVELS, MAX_NOTES_LEN, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.io import atomic_text_write
@@ -195,8 +196,6 @@ def kb_reliability_map() -> str:
     Pages cited in wrong answers score lower and are flagged for re-lint.
     """
     try:
-        from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
-
         scores = compute_trust_scores()
         if not scores:
             return "No feedback recorded yet. Use kb_query_feedback after queries."
@@ -211,8 +210,9 @@ def kb_reliability_map() -> str:
     for pid, s in sorted_pages:
         flag = " **[FLAGGED]**" if pid in flagged else ""
         lines.append(
-            f"- {pid}: trust={s['trust']:.2f} "
-            f"(useful={s['useful']}, wrong={s['wrong']}, incomplete={s['incomplete']}){flag}"
+            f"- {pid}: trust={s.get('trust', 0.5):.2f} "
+            f"(useful={s.get('useful', 0)}, wrong={s.get('wrong', 0)}, "
+            f"incomplete={s.get('incomplete', 0)}){flag}"
         )
 
     if flagged:
@@ -317,8 +317,8 @@ def kb_save_lint_verdict(
     if err:
         return f"Error: {err}"
 
-    if len(notes) > 2000:
-        return "Error: Notes too long (max 2000 chars)."
+    if len(notes) > MAX_NOTES_LEN:
+        return f"Error: Notes too long (max {MAX_NOTES_LEN} chars)."
 
     issue_list = None
     if issues:
@@ -368,12 +368,14 @@ def kb_create_page(
         source_refs: Comma-separated source references (e.g., 'raw/articles/a.md,raw/papers/b.md').
     """
     page_id = _strip_control_chars(page_id)
-    # Validate page_id — reuse shared validator (handles traversal + resolve check)
-    if "/" not in page_id:
-        return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
+    # Validate page_id — reuse shared validator first (handles traversal + resolve check)
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
+    if "/" not in page_id:
+        return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
+    if page_id.count("/") != 1:
+        return "Error: page_id must have exactly one '/' (e.g., 'comparisons/rag-vs-finetuning')."
 
     # Validate subdir prefix matches a known wiki subdirectory
     subdir_prefix = page_id.split("/")[0]
@@ -384,10 +386,6 @@ def kb_create_page(
         )
     if not title or not title.strip():
         return "Error: Title cannot be empty."
-
-    page_path = WIKI_DIR / f"{page_id}.md"
-    if page_path.exists():
-        return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
 
     # Auto-detect type from path
     if not page_type:
@@ -406,7 +404,7 @@ def kb_create_page(
         valid = ", ".join(CONFIDENCE_LEVELS)
         return f"Error: Invalid confidence '{confidence}'. Use one of: {valid}"
 
-    # Build source list
+    # Build source list and validate before checking existence
     sources = [s.strip() for s in source_refs.split(",") if s.strip()] if source_refs else []
 
     # Validate source refs — reject path traversal and absolute paths
@@ -416,6 +414,12 @@ def kb_create_page(
                 f"Error: Invalid source_ref '{src}'. "
                 "Must not contain '..' or start with '/' or '\\'."
             )
+        if not src.startswith("raw/"):
+            return f"Error: source_ref '{src}' must start with 'raw/'."
+
+    page_path = WIKI_DIR / f"{page_id}.md"
+    if page_path.exists():
+        return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
 
     # Write page with frontmatter
     today = date.today().isoformat()
