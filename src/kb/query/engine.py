@@ -185,6 +185,55 @@ def _flag_stale_results(
     return flagged
 
 
+def search_raw_sources(
+    question: str, raw_dir: Path | None = None, max_results: int = 5
+) -> list[dict]:
+    """Search raw/ source files using BM25 for verbatim context fallback.
+
+    Returns list of dicts with keys: id, path, content, score.
+    """
+    from kb.config import RAW_DIR
+
+    raw_dir = raw_dir or RAW_DIR
+    if not raw_dir.exists():
+        return []
+
+    query_tokens = tokenize(question)
+    if not query_tokens:
+        return []
+
+    sources = []
+    for subdir in raw_dir.iterdir():
+        if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
+            continue
+        for f in subdir.glob("*.md"):
+            try:
+                content = f.read_text(encoding="utf-8")
+                sources.append({
+                    "id": f"raw/{subdir.name}/{f.name}",
+                    "path": str(f),
+                    "content": content,
+                    "content_lower": content.lower(),
+                })
+            except (OSError, UnicodeDecodeError):
+                continue
+
+    if not sources:
+        return []
+
+    documents = [tokenize(s["content_lower"]) for s in sources]
+    index = BM25Index(documents)
+    scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
+
+    scored = []
+    for i, score in enumerate(scores):
+        if score > 0:
+            scored.append({**sources[i], "score": round(score, 4)})
+
+    scored.sort(key=lambda s: s["score"], reverse=True)
+    return scored[:max_results]
+
+
 def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> dict:
     """Build context string from matching wiki pages using tiered loading.
 
@@ -314,6 +363,24 @@ def query_wiki(
     # 2. Build context from matching pages
     ctx = _build_query_context(matching_pages)
     context = ctx["context"]
+
+    # Raw-source fallback: supplement thin wiki context with verbatim raw source content
+    raw_context = ""
+    if len(ctx["context"]) < QUERY_CONTEXT_MAX_CHARS // 2:
+        raw_results = search_raw_sources(effective_question, max_results=3)
+        if raw_results:
+            raw_sections = []
+            budget = QUERY_CONTEXT_MAX_CHARS - len(ctx["context"])
+            for rs in raw_results:
+                section = f"--- Raw Source: {rs['id']} (verbatim) ---\n{rs['content']}\n"
+                if len(section) > budget:
+                    break
+                raw_sections.append(section)
+                budget -= len(section)
+            if raw_sections:
+                raw_context = "\n" + "\n".join(raw_sections)
+
+    context = ctx["context"] + raw_context
 
     # 3. Synthesize answer with LLM
     prompt = f"""You are answering a question using a knowledge wiki as your source.
