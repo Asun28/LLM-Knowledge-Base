@@ -30,6 +30,8 @@ def _template_hashes() -> dict[str, str]:
     if not TEMPLATES_DIR.exists():
         return hashes
     for tpl in sorted(TEMPLATES_DIR.glob("*.yaml")):
+        if tpl.stem.startswith(("~", ".")):
+            continue
         hashes[f"_template/{tpl.stem}"] = content_hash(tpl)
     return hashes
 
@@ -315,12 +317,19 @@ def compile_wiki(
         "errors": [],
     }
 
+    processed_count = 0
     for source in sources_to_process:
+        # Capture rel_path and hash BEFORE the try block so that if content_hash
+        # raises, the except block can still record the failure without re-calling
+        # content_hash (which would re-raise the same error).
+        rel_path = _canonical_rel_path(source, raw_dir)
         try:
-            # Capture hash BEFORE ingest_source (file may be modified by ingest tools)
-            rel_path = _canonical_rel_path(source, raw_dir)
             pre_hash = content_hash(source)
-
+        except OSError as e:
+            logger.warning("compile_wiki: cannot hash %s, skipping: %s", source, e)
+            results["errors"].append({"source": str(source), "error": str(e)})
+            continue
+        try:
             ingest_result = ingest_source(source, wiki_dir=wiki_dir)
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
@@ -336,13 +345,13 @@ def compile_wiki(
             # Store pre-ingest hash and save immediately (crash-safe)
             manifest[rel_path] = pre_hash
             save_manifest(manifest, manifest_path)
+            processed_count += 1
         except Exception as e:
             logger.exception("compile_wiki: ingest failed for %s", source)
             results["errors"].append({"source": str(source), "error": str(e)})
-            # Record failed hash so the source is retried on next compile
+            # Record failed hash so the source is retried on next compile.
+            # pre_hash is already captured above; no need to re-call content_hash.
             try:
-                rel_path = _canonical_rel_path(source, raw_dir)
-                pre_hash = content_hash(source)
                 manifest = load_manifest(manifest_path)
                 manifest[rel_path] = f"failed:{pre_hash}"
                 save_manifest(manifest, manifest_path)
@@ -353,19 +362,22 @@ def compile_wiki(
     # written during the loop, then merge template hashes).
     # In incremental mode, find_changed_sources already wrote template hashes;
     # only recompute them in full mode where find_changed_sources was not called.
-    current_manifest = load_manifest(manifest_path)
-    if not incremental:
-        current_manifest.update(_template_hashes())
-        # Prune manifest entries for sources that no longer exist on disk
-        stale_keys = [
-            k for k in current_manifest
-            if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
-        ]
-        if stale_keys:
-            for k in stale_keys:
-                del current_manifest[k]
-            logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
-    save_manifest(current_manifest, manifest_path)
+    # Skip the save entirely in incremental mode when nothing was processed — there
+    # is no new information to persist and the unnecessary write wastes I/O.
+    if not incremental or processed_count > 0:
+        current_manifest = load_manifest(manifest_path)
+        if not incremental:
+            current_manifest.update(_template_hashes())
+            # Prune manifest entries for sources that no longer exist on disk
+            stale_keys = [
+                k for k in current_manifest
+                if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
+            ]
+            if stale_keys:
+                for k in stale_keys:
+                    del current_manifest[k]
+                logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
+        save_manifest(current_manifest, manifest_path)
 
     # Append to log
     append_wiki_log(

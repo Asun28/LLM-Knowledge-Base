@@ -13,10 +13,31 @@ from kb.utils.markdown import extract_wikilinks
 
 logger = logging.getLogger(__name__)
 
+
+def _check_not_in_wikilink(match: re.Match, body: str, pid: str, replacement: str) -> str | None:
+    """Return replacement text if match is not inside an open [[ ]], else None.
+
+    Defined at module scope so inject_wikilinks does not re-create it on every
+    loop iteration (avoids the function-redefinition-in-loop anti-pattern).
+    """
+    start = match.start()
+    before = body[:start]
+    open_count = before.count("[[") - before.count("]]")
+    if open_count > 0:
+        logger.warning(
+            "inject_wikilinks: skipping replacement in %s "
+            "— unmatched [[ before position %d",
+            pid,
+            start,
+        )
+        return None
+    return replacement
+
+
 # Regex for fenced code blocks (``` ... ```), inline code (`...`),
 # markdown links ([text](url)), and images (![alt](url)).
 _CODE_MASK_RE = re.compile(
-    r"```.*?```|`[^`\n]+`"
+    r"```.*?```|~~~.*?~~~|`[^`\n]+`"
     r"|!\[(?:[^\]]*)\]\((?:[^()]*|\([^()]*\))*\)"
     r"|\[(?:[^\]]*)\]\((?:[^()]*|\([^()]*\))*\)",
     re.DOTALL,
@@ -202,23 +223,7 @@ def inject_wikilinks(
         for match in pattern.finditer(body):
             start = match.start()
 
-            # Capture body via default arg to avoid late-binding closure over the
-            # loop variable (Fix 3.5 defensive closure capture).
-            def _replace_if_not_in_wikilink(m, _body=body):  # noqa: B023
-                _start = m.start()
-                before = _body[:_start]
-                open_count = before.count("[[") - before.count("]]")
-                if open_count > 0:
-                    logger.warning(
-                        "inject_wikilinks: skipping replacement in %s "
-                        "— unmatched [[ before position %d",
-                        pid,
-                        _start,
-                    )
-                    return None  # signal: skip this match
-                return replacement
-
-            result = _replace_if_not_in_wikilink(match)
+            result = _check_not_in_wikilink(match, body, pid, replacement)
             if result is None:
                 # This match is inside a wikilink — continue scanning for next
                 continue
