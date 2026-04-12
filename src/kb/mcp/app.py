@@ -58,6 +58,8 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
     """
     if not page_id or not page_id.strip():
         return "page_id cannot be empty."
+    if "\x00" in page_id:
+        return "page_id contains null byte."
     if (
         ".." in page_id
         or page_id.startswith("/")

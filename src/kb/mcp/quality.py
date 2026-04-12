@@ -6,7 +6,14 @@ import os
 import re
 from datetime import date
 
-from kb.config import CONFIDENCE_LEVELS, MAX_NOTES_LEN, PAGE_TYPES, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.config import (
+    CONFIDENCE_LEVELS,
+    MAX_INGEST_CONTENT_CHARS,
+    MAX_NOTES_LEN,
+    PAGE_TYPES,
+    WIKI_DIR,
+    WIKI_SUBDIR_TO_TYPE,
+)
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _validate_page_id, mcp
@@ -66,6 +73,12 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
+    if len(updated_content) > MAX_INGEST_CONTENT_CHARS:
+        return (
+            f"Error: Content too large "
+            f"({len(updated_content):,} chars; "
+            f"max {MAX_INGEST_CONTENT_CHARS:,})."
+        )
 
     try:
         from kb.review.refiner import refine_page
@@ -372,6 +385,12 @@ def kb_create_page(
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
+    if len(content) > MAX_INGEST_CONTENT_CHARS:
+        return (
+            f"Error: Content too large "
+            f"({len(content):,} chars; "
+            f"max {MAX_INGEST_CONTENT_CHARS:,})."
+        )
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
     if page_id.count("/") != 1:
