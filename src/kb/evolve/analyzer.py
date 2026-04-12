@@ -20,15 +20,20 @@ from kb.utils.pages import WIKI_SUBDIRS
 logger = logging.getLogger(__name__)
 
 
-def analyze_coverage(wiki_dir: Path | None = None) -> dict:
+def analyze_coverage(wiki_dir: Path | None = None, pages: list | None = None) -> dict:
     """Analyze wiki coverage by page type and identify gaps.
+
+    Args:
+        wiki_dir: Path to wiki directory.
+        pages: Pre-scanned page list from scan_wiki_pages(). If None, scans internally.
 
     Returns:
         dict with keys: total_pages, by_type (dict), under_covered_types,
         orphan_concepts (concepts with no backlinks).
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
     backlinks = build_backlinks(wiki_dir)
 
     by_type = {subdir: 0 for subdir in WIKI_SUBDIRS}
@@ -55,18 +60,28 @@ def analyze_coverage(wiki_dir: Path | None = None) -> dict:
     }
 
 
-def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
+MAX_CONNECTION_PAIRS = 50_000
+
+
+def find_connection_opportunities(
+    wiki_dir: Path | None = None, pages: list | None = None
+) -> list[dict]:
     """Find pages that could be linked but aren't.
 
     Looks for pages that share entities/concepts in their content but have
     no direct wikilink between them.
+
+    Args:
+        wiki_dir: Path to wiki directory.
+        pages: Pre-scanned page list from scan_wiki_pages(). If None, scans internally.
 
     Returns:
         List of dicts: {page_a, page_b, shared_terms, suggestion}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
     graph = build_graph(wiki_dir)
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
 
     # Build term index: which terms appear in which pages
     term_index: dict[str, list[str]] = {}
@@ -92,14 +107,26 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
 
     # Accumulate shared terms per pair incrementally (avoids O(V×T) re-scan)
     pair_shared_terms: dict[tuple, list[str]] = {}
+    _pairs_truncated = False
 
     for term, page_ids in term_index.items():
+        if _pairs_truncated:
+            break
         if len(page_ids) < MIN_PAGES_FOR_TERM or len(page_ids) > MAX_PAGES_FOR_TERM:
             continue
         for i, page_a in enumerate(page_ids):
+            if _pairs_truncated:
+                break
             for page_b in page_ids[i + 1 :]:
                 pair = tuple(sorted([page_a, page_b]))
                 if pair not in pair_shared_terms:
+                    if len(pair_shared_terms) >= MAX_CONNECTION_PAIRS:
+                        logger.warning(
+                            "pair_shared_terms exceeded %d pairs; connection analysis truncated",
+                            MAX_CONNECTION_PAIRS,
+                        )
+                        _pairs_truncated = True
+                        break
                     pair_shared_terms[pair] = []
                 pair_shared_terms[pair].append(term)
 
@@ -125,17 +152,22 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
     return opportunities[:20]  # Top 20 suggestions
 
 
-def suggest_new_pages(wiki_dir: Path | None = None) -> list[dict]:
+def suggest_new_pages(wiki_dir: Path | None = None, pages: list | None = None) -> list[dict]:
     """Suggest new wiki pages based on dead links and graph analysis.
 
     Dead links (wikilinks pointing to non-existent pages) are natural
     candidates for new pages.
 
+    Args:
+        wiki_dir: Path to wiki directory.
+        pages: Pre-scanned page path list from scan_wiki_pages(). If None, scans internally.
+
     Returns:
         List of dicts: {target, referenced_by, suggestion}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
     existing_ids = {page_id(p, wiki_dir) for p in pages}
 
     # Find all targets that don't exist (dead links = page opportunities)
@@ -179,11 +211,12 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
         graph_stats, recommendations.
     """
     wiki_dir = wiki_dir or WIKI_DIR
+    pages = scan_wiki_pages(wiki_dir)
     graph = build_graph(wiki_dir)
 
-    coverage = analyze_coverage(wiki_dir)
-    connections = find_connection_opportunities(wiki_dir)
-    new_pages = suggest_new_pages(wiki_dir)
+    coverage = analyze_coverage(wiki_dir, pages=pages)
+    connections = find_connection_opportunities(wiki_dir, pages=pages)
+    new_pages = suggest_new_pages(wiki_dir, pages=pages)
     stats = graph_stats(graph)
 
     # Build recommendations
@@ -244,7 +277,7 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Pages: {', '.join(flagged_pages[:5])}. "
                 "Run kb_lint_deep on these to verify source fidelity."
             )
-    except (ImportError, AttributeError) as e:
+    except (ImportError, AttributeError, OSError, ValueError) as e:
         logger.warning("Feedback data unavailable for evolve report: %s", e)
 
     return {
