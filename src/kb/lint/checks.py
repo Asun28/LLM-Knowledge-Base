@@ -21,7 +21,7 @@ from kb.config import (
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.io import atomic_text_write
-from kb.utils.markdown import extract_raw_refs
+from kb.utils.markdown import extract_raw_refs, extract_wikilinks
 from kb.utils.pages import normalize_sources
 from kb.utils.paths import make_source_ref
 
@@ -135,6 +135,9 @@ def fix_dead_links(
     return fixes
 
 
+_INDEX_FILES = ("index.md", "_sources.md", "_categories.md", "log.md")
+
+
 def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) -> list[dict]:
     """Find pages with no incoming links (except summaries, which are entry points).
 
@@ -144,6 +147,29 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     wiki_dir = wiki_dir or WIKI_DIR
     if graph is None:
         graph = build_graph(wiki_dir)
+
+    # Augment graph with backlinks from index/log files — these are not wiki pages
+    # (not in any subdir) so build_graph skips them, causing false orphan reports.
+    existing_ids = set(graph.nodes())
+    for name in _INDEX_FILES:
+        idx_path = wiki_dir / name
+        if not idx_path.exists():
+            continue
+        try:
+            text = idx_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for target in extract_wikilinks(text):
+            if target in existing_ids:
+                # Add a virtual edge from "_index:<name>" sentinel to the target.
+                # The sentinel node is added on demand; it has no effect on orphan/
+                # isolated detection for real wiki pages since we only inspect
+                # in-degree of existing page nodes.
+                sentinel = f"_index:{name}"
+                if not graph.has_node(sentinel):
+                    graph.add_node(sentinel)
+                graph.add_edge(sentinel, target)
+
     stats = graph_stats(graph)
     issues = []
 
@@ -246,18 +272,22 @@ def check_staleness(
                     }
                 )
                 continue
-            if isinstance(updated, date) and updated < cutoff:
-                pid = page_id(page_path, wiki_dir)
-                issues.append(
-                    {
-                        "check": "stale_page",
-                        "severity": "info",
-                        "page": pid,
-                        "last_updated": updated.isoformat(),
-                        "message": f"Stale page (last updated {updated}): {pid}",
-                    }
-                )
-            elif updated is not None and not isinstance(updated, date):
+            if isinstance(updated, date):
+                if updated < cutoff:
+                    pid = page_id(page_path, wiki_dir)
+                    issues.append(
+                        {
+                            "check": "stale_page",
+                            "severity": "info",
+                            "page": pid,
+                            "last_updated": updated.isoformat(),
+                            "message": f"Stale page (last updated {updated}): {pid}",
+                        }
+                    )
+                # else: fresh page — no issue
+            else:
+                # YAML parsed the field as a non-date type (integer, list, etc.).
+                # Unlikely in practice but treat as a warning for safety.
                 pid = page_id(page_path, wiki_dir)
                 issues.append(
                     {
@@ -357,7 +387,7 @@ def check_source_coverage(
         actual_dir = raw_dir / type_dir.name
         if not actual_dir.exists():
             continue
-        for f in actual_dir.iterdir():
+        for f in actual_dir.rglob("*"):
             if (
                 f.is_file()
                 and f.name != ".gitkeep"

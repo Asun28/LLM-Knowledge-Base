@@ -2,11 +2,27 @@
 
 import logging
 from collections import defaultdict
+from datetime import date as _date
 from datetime import datetime, timedelta
+from datetime import time as _time
 from pathlib import Path
 
 from kb.config import VERDICT_TREND_THRESHOLD
 from kb.lint.verdicts import load_verdicts
+
+
+def _parse_timestamp(ts: str) -> datetime:
+    """Parse ISO-8601 timestamp, accepting date-only strings.
+
+    Forward-compatible: Python 3.11+ accepts date-only strings in fromisoformat,
+    but Python 3.10 and earlier raise ValueError. This helper handles both.
+    """
+    ts = ts.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        # Date-only string (e.g. '2024-01-01') — treat as midnight UTC
+        return datetime.combine(_date.fromisoformat(ts), _time.min)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +62,7 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
 
         ts_str = v.get("timestamp", "")
         try:
-            ts = datetime.fromisoformat(ts_str)
+            ts = _parse_timestamp(ts_str)
         except (ValueError, TypeError):
             continue
 

@@ -34,7 +34,7 @@ def _render_sources(sources: list[dict], lines: list[str]) -> None:
     Mutates `lines` in place. Tracks cumulative size so later sources
     get progressively less budget — prevents LLM context overflow.
     """
-    used = sum(len(line) for line in lines)
+    used = sum(len(line) for line in lines) + max(0, len(lines) - 1)
     for i, source in enumerate(sources, 1):
         header = f"## Source {i}: {source['path']}\n"
         if source.get("content"):
@@ -196,6 +196,15 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
 
     groups = []
     page_ids_list = list(page_terms.keys())
+
+    _MAX_OVERLAP_PAGES = 500
+    if len(page_ids_list) > _MAX_OVERLAP_PAGES:
+        logger.info(
+            "Skipping O(n^2) term-overlap grouping for %d pages (limit=%d)",
+            len(page_ids_list),
+            _MAX_OVERLAP_PAGES,
+        )
+        return []
 
     # j > i loop structure already prevents duplicates — no seen_pairs set needed
     for i, pid_a in enumerate(page_ids_list):
