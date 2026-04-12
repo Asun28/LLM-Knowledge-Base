@@ -145,7 +145,10 @@ def add_feedback_entry(
 
         # Cap page_scores dict to prevent unbounded growth
         if len(data["page_scores"]) > MAX_PAGE_SCORES:
-            # Keep only pages with highest activity (most total ratings)
+            # Eviction policy: sort by total activity count (helpful + wrong + incomplete).
+            # Intentionally uses raw activity count rather than trust score — a page with many
+            # mixed signals stays in the store over one with few interactions. The 2x wrong-
+            # penalty from the trust formula does NOT drive eviction.
             sorted_pages = sorted(
                 data["page_scores"].items(),
                 key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],

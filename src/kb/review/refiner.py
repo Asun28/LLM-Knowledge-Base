@@ -83,9 +83,13 @@ def refine_page(
 
     # Update the 'updated' date in frontmatter
     today = date.today().isoformat()
-    if re.search(r"updated: \d{4}-\d{2}-\d{2}", frontmatter_text):
+    if re.search(r"^updated: \d{4}-\d{2}-\d{2}", frontmatter_text, re.MULTILINE):
         frontmatter_text = re.sub(
-            r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", frontmatter_text
+            r"^updated: \d{4}-\d{2}-\d{2}",
+            f"updated: {today}",
+            frontmatter_text,
+            count=1,
+            flags=re.MULTILINE,
         )
     else:
         # Add updated field if missing
