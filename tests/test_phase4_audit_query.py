@@ -76,3 +76,39 @@ def test_raw_fallback_skips_when_context_already_full(tmp_path, monkeypatch):
 
     eng.query_wiki("test question", wiki_dir=tmp_path)
     assert not raw_called, "Raw fallback was triggered even though wiki context was already full"
+
+
+def test_bm25_limit_independent_of_vector_multiplier():
+    """BM25 candidate count must not be coupled to VECTOR_SEARCH_LIMIT_MULTIPLIER."""
+    from kb.config import VECTOR_SEARCH_LIMIT_MULTIPLIER, BM25_SEARCH_LIMIT_MULTIPLIER
+    from kb.query.hybrid import hybrid_search
+
+    bm25_calls = []
+    vector_calls = []
+
+    def fake_bm25(q, lim):
+        bm25_calls.append(lim)
+        return []
+
+    def fake_vector(q, lim):
+        vector_calls.append(lim)
+        return []
+
+    # hybrid_search(question, bm25_fn, vector_fn, expand_fn=None, *, limit=N)
+    hybrid_search("test", fake_bm25, fake_vector, limit=5)
+
+    assert bm25_calls, "BM25 was not called"
+    assert vector_calls, "Vector search was not called"
+    # BM25 limit must equal limit * BM25_SEARCH_LIMIT_MULTIPLIER
+    assert bm25_calls[0] == 5 * BM25_SEARCH_LIMIT_MULTIPLIER, (
+        f"BM25 limit was {bm25_calls[0]}, expected {5 * BM25_SEARCH_LIMIT_MULTIPLIER}"
+    )
+    # Vector search limit must equal limit * VECTOR_SEARCH_LIMIT_MULTIPLIER
+    assert all(v == 5 * VECTOR_SEARCH_LIMIT_MULTIPLIER for v in vector_calls), (
+        f"Vector limit mismatch: {vector_calls}"
+    )
+    # BM25 and vector limits must differ (since multipliers differ)
+    if BM25_SEARCH_LIMIT_MULTIPLIER != VECTOR_SEARCH_LIMIT_MULTIPLIER:
+        assert bm25_calls[0] != vector_calls[0], (
+            "BM25 and vector limits are identical — decoupling had no effect"
+        )

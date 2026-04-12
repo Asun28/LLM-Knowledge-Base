@@ -123,6 +123,7 @@ MAX_SEARCH_RESULTS = 100
 # ── RRF hybrid search ─────────────────────────────────────────
 RRF_K = 60  # RRF fusion constant: score = 1/(K + rank)
 VECTOR_SEARCH_LIMIT_MULTIPLIER = 2  # Vector search fetches limit * N candidates
+BM25_SEARCH_LIMIT_MULTIPLIER = 1    # BM25 candidates = limit * this (intentionally 1×)
 EMBEDDING_MODEL = "minishlab/potion-base-8M"  # model2vec model (~8MB, local)
 EMBEDDING_DIM = 256  # Embedding dimensions for potion-base-8M
 VECTOR_INDEX_PATH_SUFFIX = ".data/vector_index.db"  # sqlite-vec index file

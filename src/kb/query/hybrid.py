@@ -2,7 +2,7 @@
 
 import logging
 
-from kb.config import RRF_K, VECTOR_SEARCH_LIMIT_MULTIPLIER
+from kb.config import BM25_SEARCH_LIMIT_MULTIPLIER, RRF_K, VECTOR_SEARCH_LIMIT_MULTIPLIER
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,10 @@ def hybrid_search(
     all_lists: list[list[dict]] = []
 
     # BM25 on original query only
-    bm25_results = bm25_fn(question, vector_limit)
+    bm25_limit = limit * BM25_SEARCH_LIMIT_MULTIPLIER
+    # Intentional: BM25 uses original query only; expanded variants are for vector
+    # search where semantic drift is handled by cosine similarity.
+    bm25_results = bm25_fn(question, bm25_limit)
     if bm25_results:
         all_lists.append(bm25_results)
 
