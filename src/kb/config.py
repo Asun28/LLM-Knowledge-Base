@@ -120,6 +120,28 @@ QUERY_MAX_TOKENS = 2048
 # ── Search result limits ──────────────────────────────────────
 MAX_SEARCH_RESULTS = 100
 
+# ── RRF hybrid search ─────────────────────────────────────────
+RRF_K = 60  # RRF fusion constant: score = 1/(K + rank)
+VECTOR_SEARCH_LIMIT_MULTIPLIER = 2  # Vector search fetches limit * N candidates
+EMBEDDING_MODEL = "minishlab/potion-base-8M"  # model2vec model (~8MB, local)
+EMBEDDING_DIM = 256  # Embedding dimensions for potion-base-8M
+VECTOR_INDEX_PATH_SUFFIX = ".data/vector_index.db"  # sqlite-vec index file
+
+# ── Search dedup parameters ─────────────────────────────────
+DEDUP_JACCARD_THRESHOLD = 0.85  # Text similarity threshold for dedup layer 2
+DEDUP_MAX_TYPE_RATIO = 0.6  # Max fraction of results from one page type
+DEDUP_MAX_PER_PAGE = 2  # Max results per page in final output
+
+# ── Layered context assembly ────────────────────────────────
+CONTEXT_TIER1_BUDGET = 20_000  # Chars for summaries tier
+CONTEXT_TIER2_BUDGET = 60_000  # Additional chars for full pages on demand
+
+# ── Contradiction detection ──────────────────────────────────
+CONTRADICTION_MAX_CLAIMS_TO_CHECK = 10  # Max existing claims to compare per ingest
+
+# ── Multi-turn query rewriting ───────────────────────────────
+MAX_CONVERSATION_CONTEXT_CHARS = 4000  # Max chars of conversation history for rewriting
+
 # ── Ingest limits ────────────────────────────────────────────
 MAX_ENTITIES_PER_INGEST = 50
 MAX_CONCEPTS_PER_INGEST = 50
