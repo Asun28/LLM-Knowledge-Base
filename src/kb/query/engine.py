@@ -385,7 +385,7 @@ def query_wiki(
     # 3. Synthesize answer with LLM
     prompt = f"""You are answering a question using a knowledge wiki as your source.
 
-QUESTION: {question}
+QUESTION: {effective_question[:2000].replace(chr(10), " ").replace(chr(13), " ")}
 
 WIKI CONTEXT:
 {context}
