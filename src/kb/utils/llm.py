@@ -63,58 +63,95 @@ def _make_api_call(kwargs: dict, model: str):
         except anthropic.RateLimitError as e:
             last_error = e
             delay = _backoff_delay(attempt)
-            logger.warning(
-                "Rate limited by %s (attempt %d/%d), retrying in %.1fs",
-                model,
-                attempt + 1,
-                MAX_RETRIES + 1,
-                delay,
-            )
-            if attempt < MAX_RETRIES:
-                time.sleep(delay)
-
-        except anthropic.APIStatusError as e:
-            if e.status_code in (500, 502, 503, 529):
-                last_error = e
-                delay = _backoff_delay(attempt)
+            will_retry = attempt < MAX_RETRIES
+            if will_retry:
                 logger.warning(
-                    "API error %d from %s (attempt %d/%d), retrying in %.1fs",
-                    e.status_code,
+                    "Rate limited by %s (attempt %d/%d), retrying in %.1fs",
                     model,
                     attempt + 1,
                     MAX_RETRIES + 1,
                     delay,
                 )
-                if attempt < MAX_RETRIES:
+                time.sleep(delay)
+            else:
+                logger.warning(
+                    "Rate limited by %s (attempt %d/%d), giving up after %d attempts",
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    MAX_RETRIES + 1,
+                )
+
+        except anthropic.APIStatusError as e:
+            if e.status_code in (500, 502, 503, 529):
+                last_error = e
+                delay = _backoff_delay(attempt)
+                will_retry = attempt < MAX_RETRIES
+                if will_retry:
+                    logger.warning(
+                        "API error %d from %s (attempt %d/%d), retrying in %.1fs",
+                        e.status_code,
+                        model,
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        delay,
+                    )
                     time.sleep(delay)
+                else:
+                    logger.warning(
+                        "API error %d from %s (attempt %d/%d), giving up after %d attempts",
+                        e.status_code,
+                        model,
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        MAX_RETRIES + 1,
+                    )
             else:
                 raise LLMError(f"API error from {model}: {e.status_code} — {e.message}") from e
 
         except anthropic.APIConnectionError as e:
             last_error = e
             delay = _backoff_delay(attempt)
-            logger.warning(
-                "Connection error to %s (attempt %d/%d), retrying in %.1fs",
-                model,
-                attempt + 1,
-                MAX_RETRIES + 1,
-                delay,
-            )
-            if attempt < MAX_RETRIES:
+            will_retry = attempt < MAX_RETRIES
+            if will_retry:
+                logger.warning(
+                    "Connection error to %s (attempt %d/%d), retrying in %.1fs",
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    delay,
+                )
                 time.sleep(delay)
+            else:
+                logger.warning(
+                    "Connection error to %s (attempt %d/%d), giving up after %d attempts",
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    MAX_RETRIES + 1,
+                )
 
         except anthropic.APITimeoutError as e:
             last_error = e
             delay = _backoff_delay(attempt)
-            logger.warning(
-                "Timeout calling %s (attempt %d/%d), retrying in %.1fs",
-                model,
-                attempt + 1,
-                MAX_RETRIES + 1,
-                delay,
-            )
-            if attempt < MAX_RETRIES:
+            will_retry = attempt < MAX_RETRIES
+            if will_retry:
+                logger.warning(
+                    "Timeout calling %s (attempt %d/%d), retrying in %.1fs",
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    delay,
+                )
                 time.sleep(delay)
+            else:
+                logger.warning(
+                    "Timeout calling %s (attempt %d/%d), giving up after %d attempts",
+                    model,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    MAX_RETRIES + 1,
+                )
 
     # Unreachable with valid config (MAX_RETRIES >= 0): range(MAX_RETRIES + 1)
     # ensures the loop always runs at least once and sets last_error.

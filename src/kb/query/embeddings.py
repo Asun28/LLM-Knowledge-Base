@@ -86,7 +86,10 @@ class VectorIndex:
 
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "sqlite_vec extension load failed — vector search disabled: %s", e
+            )
             conn.close()
             return []
 

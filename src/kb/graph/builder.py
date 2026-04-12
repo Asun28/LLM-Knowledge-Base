@@ -100,7 +100,11 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     try:
         pr = nx.pagerank(graph)
         pagerank = sorted(pr.items(), key=lambda x: x[1], reverse=True)[:10]
-    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError):
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError) as e:
+        logger.warning(
+            "PageRank failed to converge on %d-node graph: %s",
+            graph.number_of_nodes(), e,
+        )
         pagerank = []
 
     # Top 10 pages by betweenness centrality (bridge nodes)

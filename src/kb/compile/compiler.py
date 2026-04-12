@@ -337,6 +337,7 @@ def compile_wiki(
             manifest[rel_path] = pre_hash
             save_manifest(manifest, manifest_path)
         except Exception as e:
+            logger.exception("compile_wiki: ingest failed for %s", source)
             results["errors"].append({"source": str(source), "error": str(e)})
             # Record failed hash so the source is retried on next compile
             try:
