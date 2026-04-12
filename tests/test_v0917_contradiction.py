@@ -27,6 +27,7 @@ class TestDetectContradictions:
             assert "new_claim" in item
             assert "existing_page" in item
             assert "existing_text" in item
+            assert "reason" in item
 
     def test_no_false_positives_on_unrelated(self):
         new_claims = ["Python is a programming language."]

@@ -50,27 +50,29 @@ class VectorIndex:
 
         dim = len(entries[0][1])
         conn = sqlite3.connect(str(self.db_path))
-        conn.enable_load_extension(True)
-        import sqlite_vec
+        try:
+            conn.enable_load_extension(True)
+            import sqlite_vec
 
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
 
-        conn.execute("DROP TABLE IF EXISTS page_ids")
-        conn.execute("DROP TABLE IF EXISTS vec_pages")
-        conn.execute("CREATE TABLE page_ids (rowid INTEGER PRIMARY KEY, page_id TEXT)")
-        conn.execute(f"CREATE VIRTUAL TABLE vec_pages USING vec0(embedding float[{dim}])")
+            conn.execute("DROP TABLE IF EXISTS page_ids")
+            conn.execute("DROP TABLE IF EXISTS vec_pages")
+            conn.execute("CREATE TABLE page_ids (rowid INTEGER PRIMARY KEY, page_id TEXT)")
+            conn.execute(f"CREATE VIRTUAL TABLE vec_pages USING vec0(embedding float[{dim}])")
 
-        for i, (page_id, vec) in enumerate(entries):
-            rowid = i + 1
-            conn.execute("INSERT INTO page_ids VALUES (?, ?)", (rowid, page_id))
-            conn.execute(
-                "INSERT INTO vec_pages (rowid, embedding) VALUES (?, ?)",
-                (rowid, sqlite_vec.serialize_float32(vec)),
-            )
+            for i, (page_id, vec) in enumerate(entries):
+                rowid = i + 1
+                conn.execute("INSERT INTO page_ids VALUES (?, ?)", (rowid, page_id))
+                conn.execute(
+                    "INSERT INTO vec_pages (rowid, embedding) VALUES (?, ?)",
+                    (rowid, sqlite_vec.serialize_float32(vec)),
+                )
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
     def query(self, query_vec: list[float], limit: int = 10) -> list[tuple[str, float]]:
         """Query for nearest neighbors. Returns [(page_id, distance), ...]."""
