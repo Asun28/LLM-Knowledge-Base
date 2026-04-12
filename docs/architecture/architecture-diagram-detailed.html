@@ -395,7 +395,7 @@
      TITLE
      ════════════════════════════════════════════════════════ -->
 <div class="title-block">
-  <h1>LLM Knowledge Base <span class="version">v0.9.14</span></h1>
+  <h1>LLM Knowledge Base <span class="version">v0.10.0</span></h1>
   <div class="subtitle"><strong>Fully automated.</strong> Human curates sources. Everything else runs without intervention &mdash; extraction, linking, quality checks, self-maintenance.</div>
   <div class="cycle-ring" style="justify-content: flex-start; margin-top: 12px;">
     <span class="cycle-step ingest">Ingest</span>
@@ -487,6 +487,8 @@
         <li data-n="4">Create/update wiki pages <span class="auto-tag">auto</span></li>
         <li data-n="5">Inject retroactive wikilinks <span class="auto-tag">auto</span></li>
         <li data-n="6">Track cascade affected pages <span class="auto-tag">auto</span></li>
+        <li data-n="7">Append evidence trail entry <span class="auto-tag">auto</span></li>
+        <li data-n="8">Detect contradictions with existing wiki <span class="auto-tag">auto</span></li>
       </ol>
     </div>
 
@@ -536,8 +538,8 @@
     </div>
 
     <div class="card wiki-layer">
-      <h3>Retrieval (No Vectors)</h3>
-      <div class="desc">BM25 ranking + PageRank blending. Title-boosted search. 80K context assembly.</div>
+      <h3>Hybrid Retrieval</h3>
+      <div class="desc">BM25 + vector search (model2vec + sqlite-vec) fused via RRF. 4-layer dedup. Tiered context assembly. Stale truth flagging.</div>
     </div>
 
     <div class="card wiki-layer">
@@ -550,7 +552,7 @@
       <div class="desc">index.md &middot; _sources.md &middot; _categories.md &middot; log.md &middot; contradictions.md</div>
     </div>
 
-    <div class="tagline">No vectors. No embeddings. Just markdown.</div>
+    <div class="tagline">BM25 + semantic vectors. Evidence trails. Pure markdown.</div>
   </div>
 
   <!-- ──── Arrow 3 to 4: Wiki to Runtime ──── -->
@@ -593,7 +595,7 @@
 
     <div class="card runtime-inner">
       <h3>Grounded Query</h3>
-      <div class="desc">BM25 + PageRank + trust scores. Multi-page context assembly. Inline citation-backed answers.</div>
+      <div class="desc">Hybrid BM25 + vector RRF + PageRank + trust scores. Tiered context assembly. Raw-source fallback. Inline citation-backed answers.</div>
       <div class="stat-row">
         <span class="tier-badge tier-orchestrate">orchestrate: Opus 4.6</span>
       </div>
@@ -724,7 +726,7 @@
   <div class="credits">
     Fully automated. Compile, don't retrieve. Not just another vector wrapper.<br>
     Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a>
-    &middot; 692 tests &middot; 25 MCP tools &middot; 12 modules
+    &middot; 1111 tests &middot; 25 MCP tools &middot; 18 modules
   </div>
 </div>
 
