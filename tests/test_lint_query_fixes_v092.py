@@ -224,15 +224,15 @@ def test_query_context_exclusion_logging(caplog):
 
 
 def test_bm25_empty_corpus_avgdl_warning(caplog):
-    """BM25Index with all-empty documents should log a warning about avgdl fallback."""
+    """BM25Index with all-empty documents should log a debug message about avgdl fallback."""
     from kb.query.bm25 import BM25Index
 
-    with caplog.at_level(logging.WARNING, logger="kb.query.bm25"):
+    with caplog.at_level(logging.DEBUG, logger="kb.query.bm25"):
         index = BM25Index([[], [], []])
 
     assert index.avgdl == 1.0
     assert any("avgdl" in r.message.lower() for r in caplog.records), (
-        f"Expected avgdl warning, got: {[r.message for r in caplog.records]}"
+        f"Expected avgdl debug message, got: {[r.message for r in caplog.records]}"
     )
 
 

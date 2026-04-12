@@ -1,10 +1,23 @@
 """Multi-turn query rewriting — expand pronouns/references using conversation context."""
 
 import logging
+import re as _re
 
 from kb.config import MAX_CONVERSATION_CONTEXT_CHARS
+from kb.utils.llm import call_llm
 
 logger = logging.getLogger(__name__)
+
+_REFERENCE_WORDS = _re.compile(r"\b(it|this|that|they|these|those|there|then)\b", _re.I)
+
+
+def _should_rewrite(question: str) -> bool:
+    """Return True if this question likely needs rewriting (has deictic/pronoun refs)."""
+    if _REFERENCE_WORDS.search(question):
+        return True
+    words = question.split()
+    long_words = [w for w in words if len(w) > 3]
+    return len(long_words) < 5
 
 
 def rewrite_query(
@@ -33,26 +46,28 @@ def rewrite_query(
     # Truncate context to budget
     context = conversation_context[:MAX_CONVERSATION_CONTEXT_CHARS]
 
-    # Heuristic skip: if question has enough content words, likely standalone
-    words = question.split()
-    content_words = [w for w in words if len(w) > 3]
-    if len(content_words) >= 5:
+    # Heuristic skip: if question is already standalone (no deictic refs, enough content words)
+    if not _should_rewrite(question):
         return question
 
     try:
-        from kb.utils.llm import call_llm
-
         prompt = (
             "Rewrite the following follow-up question into a standalone question "
             "that can be understood without prior conversation context. "
             "Expand any pronouns (it, they, this) and references to be specific. "
-            "If the question is already standalone, return it unchanged.\n\n"
+            "If the question is already standalone, return it unchanged. "
+            "Reply with ONLY the rewritten question, no explanation.\n\n"
             f"CONVERSATION CONTEXT:\n{context}\n\n"
             f"FOLLOW-UP QUESTION: {question}\n\n"
             "STANDALONE QUESTION:"
         )
         rewritten = call_llm(prompt, tier="scan", max_tokens=200)
         rewritten = rewritten.strip().strip('"')
+        if len(rewritten) > 3 * len(question):
+            logger.debug(
+                "Rewrite too long (%d chars vs %d); falling back", len(rewritten), len(question)
+            )
+            return question
         if rewritten:
             return rewritten
     except Exception as e:

@@ -19,6 +19,9 @@ def extract_citations(text: str) -> list[dict]:
         path = match.group(2)
         if ".." in path or path.startswith("/") or path.startswith("."):
             continue
+        # Reject paths with empty components (e.g. raw//page) or consecutive dots mid-component
+        if any(not part or ".." in part for part in path.split("/")):
+            continue
         cite_type = "wiki" if match.group(1) == "source" else "raw"
         # Override type based on path prefix
         if path.startswith("raw/"):

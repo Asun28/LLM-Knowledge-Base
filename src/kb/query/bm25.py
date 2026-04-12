@@ -74,7 +74,7 @@ class BM25Index:
         self.avgdl = sum(self.doc_lengths) / self.n_docs if self.n_docs > 0 else 1.0
         if self.avgdl == 0:
             self.avgdl = 1.0
-            logger.warning(
+            logger.debug(
                 "BM25 corpus has zero average document length — using fallback avgdl=1.0"
             )
 

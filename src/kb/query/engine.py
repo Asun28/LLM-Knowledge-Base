@@ -156,8 +156,6 @@ def _flag_stale_results(
     Adds 'stale': True/False to each result dict. Non-destructive — modifies
     copies of the input dicts.
     """
-    from kb.config import PROJECT_ROOT
-
     root = project_root or PROJECT_ROOT
     flagged = []
     for r in results:
@@ -310,6 +308,7 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         )
 
     if not sections and pages:
+        skipped = max(0, skipped - 1)
         top = pages[0]
         header = (
             f"--- Page: {top['id']} (type: {top['type']}, "
