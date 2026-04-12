@@ -81,7 +81,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
 
     def vector_search(query: str, lim: int) -> list[dict]:
         try:
-            from kb.query.embeddings import VectorIndex, embed_texts
+            from kb.query.embeddings import embed_texts, get_vector_index
 
             vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
             if not vec_path.exists():
@@ -89,7 +89,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
             vecs = embed_texts([query])
             if not vecs:
                 return []
-            idx = VectorIndex(vec_path)
+            idx = get_vector_index(str(vec_path))
             hits = idx.query(vecs[0], limit=lim)
             page_map = {p["id"]: p for p in pages}
             results = []
@@ -260,8 +260,8 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     def _try_add(page: dict) -> bool:
         nonlocal total, skipped
         section = (
-            f"--- Page: {page['id']} (type: {page['type']}, "
-            f"confidence: {page['confidence']}) ---\n"
+            f"--- Page: {page['id']} (type: {page.get('type', 'unknown')}, "
+            f"confidence: {page.get('confidence', 'unknown')}) ---\n"
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
         if total + len(section) > effective_max:
@@ -311,8 +311,8 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         skipped = max(0, skipped - 1)
         top = pages[0]
         header = (
-            f"--- Page: {top['id']} (type: {top['type']}, "
-            f"confidence: {top['confidence']}) ---\n"
+            f"--- Page: {top['id']} (type: {top.get('type', 'unknown')}, "
+            f"confidence: {top.get('confidence', 'unknown')}) ---\n"
             f"Title: {top['title']}\n\n"
         )
         if effective_max <= len(header):

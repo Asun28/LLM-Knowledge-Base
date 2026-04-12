@@ -8,8 +8,27 @@ Layers:
 """
 
 import math
+import re as _re
 
 from kb.config import DEDUP_JACCARD_THRESHOLD, DEDUP_MAX_PER_PAGE, DEDUP_MAX_TYPE_RATIO
+
+_WIKILINK_RE = _re.compile(r"\[\[[^\]]*\]\]")
+_TRAIL_SECTION_RE = _re.compile(
+    r"^## (Evidence Trail|References).*$", _re.MULTILINE | _re.DOTALL
+)
+
+
+def _content_tokens(content: str) -> set[str]:
+    """Tokenize content for Jaccard similarity, stripping wikilinks and boilerplate sections.
+
+    Wikilinks (``[[page/slug]]``) are structural markup shared by many pages — including
+    them inflates Jaccard similarity between pages that happen to link the same entities
+    but have completely different substantive content. Evidence Trail / References
+    sections are similarly shared and not indicative of content similarity.
+    """
+    cleaned = _WIKILINK_RE.sub(" ", content)
+    cleaned = _TRAIL_SECTION_RE.sub(" ", cleaned)
+    return {w for w in cleaned.split() if len(w) > 2}
 
 
 def dedup_results(
@@ -44,10 +63,10 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
     """Layer 2: Remove results with Jaccard similarity > threshold to kept results."""
     kept: list[dict] = []
     for r in results:
-        r_words = set(r.get("content_lower", "").split())
+        r_words = _content_tokens(r.get("content_lower", ""))
         too_similar = False
         for k in kept:
-            k_words = set(k.get("content_lower", "").split())
+            k_words = _content_tokens(k.get("content_lower", ""))
             intersection = r_words & k_words
             union = r_words | k_words
             jaccard = len(intersection) / len(union) if union else 0.0
@@ -60,7 +79,13 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
 
 
 def _enforce_type_diversity(results: list[dict], max_ratio: float) -> list[dict]:
-    """Layer 3: No page type exceeds max_ratio of total results."""
+    """Layer 3: No page type exceeds max_ratio of total results.
+
+    Note: ``max_per_type`` is computed against the INPUT length, not the output.
+    After filtering, the ratio for a dominant type may slightly exceed ``max_ratio``
+    when other types are scarce. This is an intentional approximation — exact
+    enforcement would require an expensive second pass over the filtered list.
+    """
     max_per_type = max(1, math.ceil(len(results) * max_ratio))
     type_counts: dict[str, int] = {}
     kept: list[dict] = []

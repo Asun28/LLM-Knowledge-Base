@@ -60,10 +60,11 @@ def hybrid_search(
     # Collect all result lists
     all_lists: list[list[dict]] = []
 
-    # BM25 on original query only
+    # Intentional asymmetry: BM25 scores the ORIGINAL query only. Vector search uses
+    # original + semantically expanded variants. BM25 is sensitive to exact-token drift
+    # from expansion; cosine similarity handles semantic equivalence naturally, so
+    # expanded queries are safe for vector search but degrade BM25 precision.
     bm25_limit = limit * BM25_SEARCH_LIMIT_MULTIPLIER
-    # Intentional: BM25 uses original query only; expanded variants are for vector
-    # search where semantic drift is handled by cosine similarity.
     bm25_results = bm25_fn(question, bm25_limit)
     if bm25_results:
         all_lists.append(bm25_results)

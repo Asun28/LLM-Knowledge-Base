@@ -11,6 +11,22 @@ logger = logging.getLogger(__name__)
 
 _model = None
 _model_lock = threading.Lock()
+_index_cache: dict[str, "VectorIndex"] = {}
+
+
+def _reset_model() -> None:
+    """Reset cached model and index. Call in test teardown."""
+    global _model
+    _model = None
+    _index_cache.clear()
+
+
+def get_vector_index(vec_path: str) -> "VectorIndex":
+    """Return a cached VectorIndex keyed by path. Avoids re-instantiation per query."""
+    key = str(vec_path)
+    if key not in _index_cache:
+        _index_cache[key] = VectorIndex(Path(vec_path))
+    return _index_cache[key]
 
 
 def _get_model():

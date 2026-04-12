@@ -105,7 +105,8 @@ def kb_query(
         for r in results:
             trust_data = scores.get(r["id"], {})
             r["trust"] = trust_data.get("trust", 0.5)
-    except Exception:
+    except Exception as e:
+        logger.debug("Trust score merge failed: %s", e, exc_info=True)
         for r in results:
             r["trust"] = 0.5
 
