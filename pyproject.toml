@@ -1,5 +1,5 @@
 [project]
-name = "llm-knowledge-base"
+name = "llm-wiki-flywheel"
 version = "0.9.10"
 description = "LLM-maintained knowledge wiki — compile raw sources into structured, interlinked markdown."
 requires-python = ">=3.12"

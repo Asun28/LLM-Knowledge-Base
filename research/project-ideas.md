@@ -1,4 +1,4 @@
-# Project Ideas for LLM-Knowledge-Base
+# Project Ideas for llm-wiki-flywheel
 
 Ideas distilled from Karpathy's pattern, community reactions, and gaps nobody has filled yet.
 

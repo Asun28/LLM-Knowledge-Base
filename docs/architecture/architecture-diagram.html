@@ -3,450 +3,529 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Knowledge Base — Architecture</title>
+<title>LLM Knowledge Base v0.9.16 — Architecture</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-  body {
-    background: #07071a;
-    color: #e8e8f8;
-    font-family: 'DM Sans', -apple-system, sans-serif;
-    padding: 48px 60px 52px;
-    min-width: 1320px;
-    max-width: 1440px;
-  }
+body {
+  background: #07071a;
+  color: #e2e2f4;
+  font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+  padding: 44px 60px 48px;
+  min-width: 1320px;
+  max-width: 1440px;
+  position: relative;
+}
 
-  /* ══ Header ══ */
-  .header {
-    text-align: center;
-    margin-bottom: 44px;
-  }
-  .header h1 {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 48px;
-    font-weight: 800;
-    letter-spacing: -2px;
-    line-height: 1.1;
-    margin-bottom: 10px;
-    background: linear-gradient(120deg, #6ea8ff 0%, #c084fc 50%, #4ade80 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .vbadge {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 600;
-    color: #4ade80;
-    background: rgba(74,222,128,0.1);
-    border: 1px solid rgba(74,222,128,0.3);
-    padding: 3px 13px;
-    border-radius: 14px;
-    margin-left: 10px;
-    vertical-align: middle;
-    -webkit-text-fill-color: #4ade80;
-  }
-  .tagline {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
-    margin-bottom: 6px;
-  }
-  .subtitle {
-    font-size: 15px;
-    color: #5a5a8a;
-  }
+/* Dot-grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+body > * { position: relative; z-index: 1; }
 
-  /* ══ Main layout ══ */
-  .main {
-    display: grid;
-    grid-template-columns: 200px 60px 1fr 60px 200px;
-    align-items: center;
-  }
+/* ── Header ── */
+.header { text-align: center; margin-bottom: 36px; }
+.header-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(74,222,128,0.7);
+  margin-bottom: 14px;
+}
+.header h1 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: -2px;
+  line-height: 1.1;
+  margin-bottom: 10px;
+  background: linear-gradient(120deg, #6ea8ff 0%, #c084fc 45%, #4ade80 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: inline-block;
+}
+.vbadge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4ade80;
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.3);
+  padding: 3px 13px;
+  border-radius: 20px;
+  margin-left: 12px;
+  vertical-align: middle;
+  -webkit-text-fill-color: #4ade80;
+  letter-spacing: 0;
+}
+.tagline {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  color: #e2e2f4;
+  margin-bottom: 7px;
+}
+.karpathy-ref {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: #5050a0;
+  margin: 6px auto 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.karpathy-ref a {
+  color: #7878c0;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(120,120,192,0.4);
+  transition: color 0.2s, border-color 0.2s;
+}
+.karpathy-ref a:hover { color: #a0a0e0; border-color: rgba(160,160,224,0.6); }
+.karp-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #38386a;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+.subtitle {
+  font-size: 14px;
+  color: #46467a;
+  max-width: 660px;
+  margin: 0 auto 18px;
+  line-height: 1.7;
+}
 
-  /* ══ Side Panels ══ */
-  .panel {
-    border-radius: 20px;
-    padding: 26px 18px;
-    text-align: center;
-  }
-  .p-eyebrow {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    margin-bottom: 10px;
-  }
-  .p-path {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 24px;
-    font-weight: 700;
-    line-height: 1;
-    margin-bottom: 14px;
-  }
-  .p-items {
-    font-size: 14px;
-    color: #6a6a9a;
-    line-height: 2.1;
-  }
-  .p-badge {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    padding: 5px 13px;
-    border-radius: 8px;
-    margin-top: 14px;
-    border: 1px solid;
-  }
-  .panel.src {
-    background: rgba(239,68,68,0.07);
-    border: 2px dashed rgba(239,68,68,0.35);
-  }
-  .panel.src .p-eyebrow { color: #f87171; }
-  .panel.src .p-path    { color: #fca5a5; }
-  .panel.src .p-badge   { color: #f87171; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
-  .panel.out {
-    background: rgba(167,139,250,0.07);
-    border: 2px solid rgba(167,139,250,0.3);
-  }
-  .panel.out .p-eyebrow { color: #a78bfa; }
-  .panel.out .p-path    { color: #c4b5fd; }
-  .panel.out .p-badge   { color: #a78bfa; background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.25); }
+/* GitHub CTA */
+.github-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 10px;
+  padding: 9px 20px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #d0d0f0;
+  text-decoration: none;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+  cursor: pointer;
+}
+.github-cta:hover {
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(255,255,255,0.25);
+  transform: translateY(-1px);
+}
+.github-cta svg { width: 18px; height: 18px; fill: #d0d0f0; flex-shrink: 0; }
+.star-text { color: #fbbf24; font-size: 13px; font-family: 'JetBrains Mono', monospace; }
 
-  /* ══ Connector Arrows ══ */
-  .connector {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 7px;
-  }
-  .conn-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: #3c3c60;
-  }
-  .conn-arrow { display: flex; align-items: center; }
-  .conn-shaft { height: 3px; width: 40px; border-radius: 2px; }
-  .conn-tip   { width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
-  .c-in  .conn-shaft { background: #60a5fa; }
-  .c-in  .conn-tip   { border-left: 11px solid #60a5fa; }
-  .c-out .conn-shaft { background: #a78bfa; }
-  .c-out .conn-tip   { border-left: 11px solid #a78bfa; }
+/* ── Main 5-col grid ── */
+.main {
+  display: grid;
+  grid-template-columns: 215px 54px 1fr 54px 215px;
+  align-items: center;
+}
 
-  /* ══ Flywheel Container ══ */
-  .wheel-wrap {
-    position: relative;
-    width: 740px;
-    height: 740px;
-    margin: 0 auto;
-  }
+/* ── Side Panels ── */
+.panel {
+  border-radius: 18px;
+  padding: 22px 16px;
+  text-align: center;
+}
+.p-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.p-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+.p-items {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #42427a;
+  line-height: 2.2;
+}
+.p-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 8px;
+  margin-top: 14px;
+  border: 1px solid;
+  font-family: 'JetBrains Mono', monospace;
+}
+.panel.src {
+  background: rgba(239,68,68,0.06);
+  border: 1.5px dashed rgba(239,68,68,0.28);
+}
+.panel.src .p-eyebrow { color: #f87171; }
+.panel.src .p-path    { color: #fca5a5; }
+.panel.src .p-badge   { color: #f87171; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
+.panel.out {
+  background: rgba(167,139,250,0.06);
+  border: 1.5px solid rgba(167,139,250,0.22);
+}
+.panel.out .p-eyebrow { color: #a78bfa; }
+.panel.out .p-path    { color: #c4b5fd; }
+.panel.out .p-badge   { color: #a78bfa; background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.25); }
 
-  /* Full-size SVG background layer */
-  .wheel-svg {
-    position: absolute;
-    inset: 0;
-    width: 740px;
-    height: 740px;
-    overflow: visible;
-    pointer-events: none;
-  }
+/* Access-layer items */
+.out-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(167,139,250,0.05);
+  border: 1px solid rgba(167,139,250,0.1);
+  margin-bottom: 7px;
+  text-align: left;
+}
+.out-item-icon {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.out-item-label {
+  font-size: 12px; font-weight: 600;
+  color: #c4b5fd;
+  font-family: 'IBM Plex Sans', sans-serif;
+  line-height: 1.2;
+}
+.out-item-sub {
+  font-size: 10px; color: #404070;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.3;
+}
 
-  /* ══ Node Circles ══ */
-  /*
-    Ring: center=(370,370), r=240
-    Ingest  -90°: (370, 130)
-    Compile -18°: (370+228, 370-74) = (598, 296)
-    Query    54°: (370+141, 370+194) = (511, 564)
-    Lint    126°: (370-141, 370+194) = (229, 564)
-    Evolve  198°: (370-228, 370-74) = (142, 296)
-  */
-  .node {
-    position: absolute;
-    width: 94px;
-    height: 94px;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    border: 2.5px solid;
-  }
-  .node svg {
-    width: 36px;
-    height: 36px;
-  }
-  .node svg path,
-  .node svg circle,
-  .node svg polyline,
-  .node svg line {
-    stroke-width: 1.75;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
+/* ── Connectors ── */
+.connector {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.conn-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: #26264a;
+  font-family: 'JetBrains Mono', monospace;
+}
+.conn-arrow { display: flex; align-items: center; }
+.conn-shaft { height: 2.5px; width: 38px; border-radius: 2px; }
+.conn-tip   { width: 0; height: 0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
+.c-in  .conn-shaft { background: #60a5fa; }
+.c-in  .conn-tip   { border-left: 10px solid #60a5fa; }
+.c-out .conn-shaft { background: #a78bfa; }
+.c-out .conn-tip   { border-left: 10px solid #a78bfa; }
 
-  /* Step badge – circle above node */
-  .node::before {
-    content: attr(data-step);
-    position: absolute;
-    top: -14px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    font-size: 14px;
-    font-weight: 900;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2px solid;
-    font-family: 'Space Grotesk', sans-serif;
-  }
+/* ── Flywheel ── */
+.wheel-wrap {
+  position: relative;
+  width: 740px; height: 740px;
+  margin: 0 auto;
+}
+.wheel-svg {
+  position: absolute; inset: 0;
+  width: 740px; height: 740px;
+  overflow: visible; pointer-events: none;
+}
 
-  /* Node labels (positioned separately via absolute div) */
-  .nlabel {
-    position: absolute;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    pointer-events: none;
-  }
-  .nlabel-name {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    line-height: 1;
-    margin-bottom: 6px;
-  }
-  .nlabel-desc {
-    font-size: 13px;
-    color: #8080b0;
-    line-height: 1.55;
-    max-width: 185px;
-  }
-  .nlabel-auto {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    font-weight: 600;
-    color: #4ade80;
-    background: rgba(74,222,128,0.1);
-    border: 1px solid rgba(74,222,128,0.2);
-    padding: 2px 8px;
-    border-radius: 6px;
-    display: inline-block;
-    margin-top: 5px;
-  }
+/* ── Nodes ── */
+.node {
+  position: absolute;
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  border: 2px solid;
+  cursor: default;
+  transition: transform 0.2s ease, box-shadow 0.25s ease;
+}
+.node:hover { transform: translate(-50%, -50%) scale(1.1); }
+.node svg { width: 34px; height: 34px; }
+.node svg path, .node svg circle,
+.node svg polyline, .node svg line {
+  stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+}
+.node::before {
+  content: attr(data-step);
+  position: absolute; top: -14px; left: 50%;
+  transform: translateX(-50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  font-size: 13px; font-weight: 900;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid;
+  font-family: 'JetBrains Mono', monospace;
+}
 
-  /* Node positions */
-  .n-ingest  { left: 370px; top: 130px; }
-  .n-compile { left: 598px; top: 296px; }
-  .n-query   { left: 511px; top: 564px; }
-  .n-lint    { left: 229px; top: 564px; }
-  .n-evolve  { left: 142px; top: 296px; }
+/* Node labels */
+.nlabel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  text-align: center; pointer-events: none;
+}
+.nlabel-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 17px; font-weight: 700;
+  letter-spacing: -0.5px; line-height: 1;
+  margin-bottom: 5px;
+}
+.nlabel-desc {
+  font-size: 12px; color: #5a5a98;
+  line-height: 1.6; max-width: 180px;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+.nlabel-auto {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; font-weight: 600;
+  color: #4ade80;
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.2);
+  padding: 2px 7px; border-radius: 5px;
+  display: inline-block; margin-top: 5px;
+}
 
-  /* Ingest label: centred above node (translate -50%,-50% = centre anchor) */
-  .nl-ingest  { left: 370px; top: 28px; }
+/* Node positions */
+.n-ingest  { left: 370px; top: 130px; }
+.n-compile { left: 598px; top: 296px; }
+.n-query   { left: 511px; top: 564px; }
+.n-lint    { left: 229px; top: 564px; }
+.n-evolve  { left: 142px; top: 296px; }
 
-  /* Compile: right-side — left edge anchored after node, text flows right */
-  .nl-compile {
-    left: 650px; top: 220px;
-    transform: translate(0, -50%);
-    text-align: left;
-  }
-  .nl-compile .nlabel-desc { max-width: 195px; }
+.nl-ingest  { left: 370px; top: 28px; }
+.nl-compile { left: 652px; top: 218px; transform: translate(0,-50%); text-align: left; }
+.nl-compile .nlabel-desc { max-width: 190px; }
+.nl-query   { left: 568px; top: 655px; transform: translate(0,-50%); text-align: left; }
+.nl-query   .nlabel-desc { max-width: 190px; }
+.nl-lint    { left: 172px; top: 655px; transform: translate(-100%,-50%); text-align: right; }
+.nl-lint    .nlabel-desc { max-width: 190px; }
+.nl-evolve  { left: 90px;  top: 213px; transform: translate(-100%,-50%); text-align: right; }
+.nl-evolve  .nlabel-desc { max-width: 190px; }
 
-  /* Query: lower-right — left edge anchored, text flows right */
-  .nl-query {
-    left: 568px; top: 658px;
-    transform: translate(0, -50%);
-    text-align: left;
-  }
-  .nl-query .nlabel-desc { max-width: 195px; }
+/* Node colour themes */
+.n-ingest {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.6);
+  box-shadow: 0 0 32px rgba(239,68,68,0.2), 0 0 8px rgba(239,68,68,0.28) inset;
+}
+.n-ingest::before  { color:#f87171; background:rgba(239,68,68,0.15); border-color:rgba(239,68,68,0.5); }
+.n-ingest svg      { stroke:#f87171; }
+.nl-ingest .nlabel-name { color:#f87171; }
+.n-ingest:hover { box-shadow: 0 0 56px rgba(239,68,68,0.42), 0 0 14px rgba(239,68,68,0.36) inset; }
 
-  /* Lint: lower-left — right edge anchored (left side), text flows left */
-  .nl-lint {
-    left: 172px; top: 658px;
-    transform: translate(-100%, -50%);
-    text-align: right;
-  }
-  .nl-lint .nlabel-desc { max-width: 195px; }
+.n-compile {
+  background: rgba(56,189,248,0.12);
+  border-color: rgba(56,189,248,0.6);
+  box-shadow: 0 0 32px rgba(56,189,248,0.2), 0 0 8px rgba(56,189,248,0.28) inset;
+}
+.n-compile::before  { color:#38bdf8; background:rgba(56,189,248,0.15); border-color:rgba(56,189,248,0.5); }
+.n-compile svg      { stroke:#38bdf8; }
+.nl-compile .nlabel-name { color:#38bdf8; }
+.n-compile:hover { box-shadow: 0 0 56px rgba(56,189,248,0.42), 0 0 14px rgba(56,189,248,0.36) inset; }
 
-  /* Evolve: upper-left — right edge anchored, text flows left */
-  .nl-evolve {
-    left: 94px; top: 215px;
-    transform: translate(-100%, -50%);
-    text-align: right;
-  }
-  .nl-evolve .nlabel-desc { max-width: 195px; }
+.n-query {
+  background: rgba(167,139,250,0.12);
+  border-color: rgba(167,139,250,0.6);
+  box-shadow: 0 0 32px rgba(167,139,250,0.2), 0 0 8px rgba(167,139,250,0.28) inset;
+}
+.n-query::before  { color:#a78bfa; background:rgba(167,139,250,0.15); border-color:rgba(167,139,250,0.5); }
+.n-query svg      { stroke:#a78bfa; }
+.nl-query .nlabel-name { color:#a78bfa; }
+.n-query:hover { box-shadow: 0 0 56px rgba(167,139,250,0.42), 0 0 14px rgba(167,139,250,0.36) inset; }
 
-  /* ── Ingest (coral) */
-  .n-ingest {
-    background: rgba(239,68,68,0.12);
-    border-color: rgba(239,68,68,0.6);
-    box-shadow: 0 0 32px rgba(239,68,68,0.2), 0 0 8px rgba(239,68,68,0.3) inset;
-  }
-  .n-ingest::before  { color: #f87171; background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.5); }
-  .n-ingest svg      { stroke: #f87171; }
-  .nl-ingest .nlabel-name { color: #f87171; }
+.n-lint {
+  background: rgba(251,191,36,0.12);
+  border-color: rgba(251,191,36,0.6);
+  box-shadow: 0 0 32px rgba(251,191,36,0.2), 0 0 8px rgba(251,191,36,0.28) inset;
+}
+.n-lint::before  { color:#fbbf24; background:rgba(251,191,36,0.15); border-color:rgba(251,191,36,0.5); }
+.n-lint svg      { stroke:#fbbf24; }
+.nl-lint .nlabel-name { color:#fbbf24; }
+.n-lint:hover { box-shadow: 0 0 56px rgba(251,191,36,0.42), 0 0 14px rgba(251,191,36,0.36) inset; }
 
-  /* ── Compile (sky blue) */
-  .n-compile {
-    background: rgba(56,189,248,0.12);
-    border-color: rgba(56,189,248,0.6);
-    box-shadow: 0 0 32px rgba(56,189,248,0.2), 0 0 8px rgba(56,189,248,0.3) inset;
-  }
-  .n-compile::before  { color: #38bdf8; background: rgba(56,189,248,0.15); border-color: rgba(56,189,248,0.5); }
-  .n-compile svg      { stroke: #38bdf8; }
-  .nl-compile .nlabel-name { color: #38bdf8; }
+.n-evolve {
+  background: rgba(52,211,153,0.12);
+  border-color: rgba(52,211,153,0.6);
+  box-shadow: 0 0 32px rgba(52,211,153,0.2), 0 0 8px rgba(52,211,153,0.28) inset;
+}
+.n-evolve::before  { color:#34d399; background:rgba(52,211,153,0.15); border-color:rgba(52,211,153,0.5); }
+.n-evolve svg      { stroke:#34d399; }
+.nl-evolve .nlabel-name { color:#34d399; }
+.n-evolve:hover { box-shadow: 0 0 56px rgba(52,211,153,0.42), 0 0 14px rgba(52,211,153,0.36) inset; }
 
-  /* ── Query (violet) */
-  .n-query {
-    background: rgba(167,139,250,0.12);
-    border-color: rgba(167,139,250,0.6);
-    box-shadow: 0 0 32px rgba(167,139,250,0.2), 0 0 8px rgba(167,139,250,0.3) inset;
-  }
-  .n-query::before  { color: #a78bfa; background: rgba(167,139,250,0.15); border-color: rgba(167,139,250,0.5); }
-  .n-query svg      { stroke: #a78bfa; }
-  .nl-query .nlabel-name { color: #a78bfa; }
+/* ── Center element ── */
+.wheel-center {
+  position: absolute;
+  top: 370px; left: 370px;
+  transform: translate(-50%, -50%);
+  width: 162px; height: 162px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(74,222,128,0.1) 0%, rgba(96,165,250,0.06) 55%, transparent 80%);
+  border: 1.5px solid rgba(74,222,128,0.2);
+  box-shadow: 0 0 60px rgba(74,222,128,0.1), 0 0 100px rgba(96,165,250,0.06);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 14px;
+  animation: centerPulse 4s ease-in-out infinite;
+}
+@keyframes centerPulse {
+  0%,100% { box-shadow: 0 0 60px rgba(74,222,128,0.10), 0 0 100px rgba(96,165,250,0.06); }
+  50%      { box-shadow: 0 0 80px rgba(74,222,128,0.18), 0 0 130px rgba(96,165,250,0.10); }
+}
+.center-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px; font-weight: 700;
+  color: #4ade80; line-height: 1; margin-bottom: 8px;
+}
+.center-sub {
+  font-size: 11px; color: #525290; line-height: 1.85;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+.center-sub strong { color: #8080c0; }
 
-  /* ── Lint (amber) */
-  .n-lint {
-    background: rgba(251,191,36,0.12);
-    border-color: rgba(251,191,36,0.6);
-    box-shadow: 0 0 32px rgba(251,191,36,0.2), 0 0 8px rgba(251,191,36,0.3) inset;
-  }
-  .n-lint::before  { color: #fbbf24; background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.5); }
-  .n-lint svg      { stroke: #fbbf24; }
-  .nl-lint .nlabel-name { color: #fbbf24; }
+/* ── Infrastructure bar ── */
+.infra {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+}
+.infra-chip {
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 12px;
+  padding: 9px 15px;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+  cursor: default;
+}
+.infra-chip:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.14);
+  transform: translateY(-2px);
+}
+.infra-icon {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.infra-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 12px; font-weight: 600;
+  color: #b0b0d8; line-height: 1.2;
+}
+.infra-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: #363660; line-height: 1.3;
+}
 
-  /* ── Evolve (emerald) */
-  .n-evolve {
-    background: rgba(52,211,153,0.12);
-    border-color: rgba(52,211,153,0.6);
-    box-shadow: 0 0 32px rgba(52,211,153,0.2), 0 0 8px rgba(52,211,153,0.3) inset;
-  }
-  .n-evolve::before  { color: #34d399; background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.5); }
-  .n-evolve svg      { stroke: #34d399; }
-  .nl-evolve .nlabel-name { color: #34d399; }
+/* ── Stats ── */
+.stats {
+  display: flex; justify-content: center; gap: 44px;
+  margin-top: 32px; padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.stat { text-align: center; }
+.snum {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 30px; font-weight: 700; line-height: 1; margin-bottom: 5px;
+}
+.slbl {
+  font-size: 10px; color: #2e2e58;
+  text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
 
-  /* ══ Center Element ══ */
-  .wheel-center {
-    position: absolute;
-    top: 370px;
-    left: 370px;
-    transform: translate(-50%, -50%);
-    width: 165px;
-    height: 165px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(74,222,128,0.12) 0%, rgba(96,165,250,0.08) 50%, transparent 80%);
-    border: 1.5px solid rgba(74,222,128,0.25);
-    box-shadow: 0 0 60px rgba(74,222,128,0.12), 0 0 120px rgba(96,165,250,0.08);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 16px;
-  }
-  .center-title {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 26px;
-    font-weight: 700;
-    color: #4ade80;
-    line-height: 1;
-    margin-bottom: 8px;
-  }
-  .center-sub {
-    font-size: 12px;
-    color: #6868a0;
-    line-height: 1.7;
-  }
-  .center-sub strong { color: #9090c0; }
+/* ── Model tier chips ── */
+.tiers {
+  display: flex; justify-content: center; gap: 10px; margin-top: 16px;
+}
+.chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 500;
+  padding: 4px 13px; border-radius: 8px; border: 1px solid;
+}
+.cg { color:#4ade80; border-color:rgba(74,222,128,0.25); background:rgba(74,222,128,0.05); }
+.cb { color:#60a5fa; border-color:rgba(96,165,250,0.25); background:rgba(96,165,250,0.05); }
+.cv { color:#a78bfa; border-color:rgba(167,139,250,0.25); background:rgba(167,139,250,0.05); }
 
-  /* ══ Stats ══ */
-  .stats {
-    display: flex;
-    justify-content: center;
-    gap: 44px;
-    margin-top: 40px;
-    padding-top: 28px;
-    border-top: 1px solid rgba(255,255,255,0.05);
-  }
-  .stat { text-align: center; }
-  .snum {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-    margin-bottom: 5px;
-  }
-  .slbl {
-    font-size: 11px;
-    color: #3c3c5c;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    font-weight: 600;
-  }
+/* ── Footer ── */
+.footer {
+  text-align: center; margin-top: 18px;
+  font-size: 11px; color: #242445;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+.footer a { color: #34345c; text-decoration: none; }
 
-  /* ══ Tiers ══ */
-  .tiers {
-    display: flex;
-    justify-content: center;
-    gap: 14px;
-    margin-top: 20px;
-  }
-  .chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 15px;
-    border-radius: 10px;
-    border: 1px solid;
-  }
-  .cg { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.06); }
-  .cb { color: #60a5fa; border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.06); }
-  .cv { color: #a78bfa; border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.06); }
-
-  /* ══ Footer ══ */
-  .footer {
-    text-align: center;
-    margin-top: 22px;
-    font-size: 12px;
-    color: #30304a;
-  }
-  .footer a { color: #484870; text-decoration: none; }
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  .wheel-center { animation: none !important; }
+}
 </style>
 </head>
 <body>
 
 <!-- ═══ Header ═══ -->
 <div class="header">
-  <h1>LLM Knowledge Base <span class="vbadge">v0.9.14</span></h1>
-  <div class="tagline">Karpathy described the idea. This automates it.</div>
-  <div class="subtitle">Drop a source in — extraction, linking, quality checks, and self-maintenance run without human intervention</div>
+  <div class="header-eyebrow">Open Source &nbsp;·&nbsp; Python &nbsp;·&nbsp; Claude Code native</div>
+  <div>
+    <h1>LLM Wiki Flywheel</h1><span class="vbadge">v0.9.16</span>
+  </div>
+  <div class="karpathy-ref">
+    <span class="karp-label">About</span>
+    Inspired by
+    <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f" target="_blank">Karpathy's LLM Knowledge Bases</a>
+    — then fully automated
+  </div>
+  <div class="tagline">Drop a source in. The flywheel does the rest.</div>
+  <div class="subtitle">Extraction, linking, quality checks, and self-maintenance run without human intervention. No vectors. No embeddings. Pure compiled markdown + wikilink graph.</div>
+  <a class="github-cta" href="https://github.com/asun28/llm-wiki-flywheel" target="_blank">
+    <!-- GitHub mark SVG -->
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+    <span>Star on GitHub</span>
+    <span class="star-text">★ asun28/llm-wiki-flywheel</span>
+  </a>
 </div>
 
 <!-- ═══ Main Layout ═══ -->
 <div class="main">
 
-  <!-- Source Panel -->
+  <!-- Left: Source Panel -->
   <div class="panel src">
     <div class="p-eyebrow">Human curates</div>
     <div class="p-path">raw/</div>
     <div class="p-items">
-      articles<br>papers<br>
-      videos &amp; repos<br>
-      books &amp; podcasts<br>
-      datasets
+      articles<br>papers<br>repos<br>videos<br>
+      podcasts<br>books<br>datasets<br>conversations
     </div>
     <div class="p-badge">Only Human Step</div>
   </div>
@@ -455,136 +534,55 @@
   <div class="connector">
     <div class="conn-label">drop in</div>
     <div class="conn-arrow c-in">
-      <div class="conn-shaft"></div>
-      <div class="conn-tip"></div>
+      <div class="conn-shaft"></div><div class="conn-tip"></div>
     </div>
   </div>
 
   <!-- ═══ Flywheel ═══ -->
   <div class="wheel-wrap">
 
-    <!--
-    ══════════════════════════════════════════════════
-      SVG layer: concentric rings + 5 sweeping arcs
-      Center: (370, 370)  Ring radius: 240
-
-      Node centers (ring r=240):
-        Ingest  −90°: (370,       130      )
-        Compile −18°: (370+228,   370−74   ) = (598, 296)
-        Query    54°: (370+141,   370+194  ) = (511, 564)
-        Lint    126°: (370−141,   370+194  ) = (229, 564)
-        Evolve  198°: (370−228,   370−74   ) = (142, 296)
-
-      Outer bezier control points (mid-angle at r=330):
-        Ingest→Compile  mid=−54°: (370+330·cos(−54°), 370+330·sin(−54°)) = (370+194, 370−267) = (564, 103)
-        Compile→Query   mid= 18°: (370+330·cos( 18°), 370+330·sin( 18°)) = (370+314, 370+102) = (684, 472)
-        Query→Lint      mid= 90°: (370+330·cos( 90°), 370+330·sin( 90°)) = (370+0,   370+330) = (370, 700)
-        Lint→Evolve     mid=162°: (370+330·cos(162°), 370+330·sin(162°)) = (370−314, 370+102) = (56,  472)
-        Evolve→Ingest   mid=234°: (370+330·cos(234°), 370+330·sin(234°)) = (370−194, 370−267) = (176, 103)
-
-      Arc start/end — offset 38px from node center toward control point:
-        ① Ingest→Compile:
-           start dir (564−370, 103−130)=(194,−27)/|196| → (0.990,−0.138)
-           start = (370+38·0.990, 130+38·(−0.138)) = (408, 125)
-           end dir (from CP to Compile)=(598−564, 296−103)=(34,193)/|196| → (0.174,0.985)
-           end   = (598−38·0.174, 296−38·0.985) = (591, 258)
-           Path: M 408 125 Q 564 103 591 258
-
-        ② Compile→Query:
-           start dir (684−598, 472−296)=(86,176)/|196| → (0.439,0.899)
-           start = (598+38·0.439, 296+38·0.899) = (615, 330)
-           end dir (511−684, 564−472)=(−173,92)/|196| → (−0.883,0.469)
-           end   = (511−38·(−0.883), 564−38·0.469) = (545, 546)
-           Path: M 615 330 Q 684 472 545 546
-
-        ③ Query→Lint:
-           start dir (370−511, 700−564)=(−141,136)/|196| → (−0.720,0.694)
-           start = (511+38·(−0.720), 564+38·0.694) = (484, 590)
-           end dir (229−370, 564−700)=(−141,−136)/|196| → (−0.720,−0.694)
-           end   = (229−38·(−0.720), 564−38·(−0.694)) = (256, 590)
-           Path: M 484 590 Q 370 700 256 590
-
-        ④ Lint→Evolve:
-           start dir (56−229, 472−564)=(−173,−92)/|196| → (−0.883,−0.469)
-           start = (229+38·(−0.883), 564+38·(−0.469)) = (195, 546)
-           end dir (142−56, 296−472)=(86,−176)/|196| → (0.439,−0.899)
-           end   = (142−38·0.439, 296−38·(−0.899)) = (125, 330)
-           Path: M 195 546 Q 56 472 125 330
-
-        ⑤ Evolve→Ingest:
-           start dir (176−142, 103−296)=(34,−193)/|196| → (0.174,−0.985)
-           start = (142+38·0.174, 296+38·(−0.985)) = (149, 259)
-           end dir (370−176, 130−103)=(194,27)/|196| → (0.990,0.138)
-           end   = (370−38·0.990, 130−38·0.138) = (333, 125)
-           Path: M 149 259 Q 176 103 333 125
-    ══════════════════════════════════════════════════
-    -->
-    <svg class="wheel-svg" viewBox="0 0 740 740">
+    <svg class="wheel-svg" viewBox="0 0 740 740" id="wheel-svg">
       <defs>
-        <!-- Neon halo: wide soft ambient glow -->
+        <!-- Wide soft halo -->
         <filter id="halo" x="-100%" y="-100%" width="300%" height="300%">
           <feGaussianBlur in="SourceGraphic" stdDeviation="14"/>
         </filter>
-        <!-- Bloom: tight glow bloom around the wire -->
+        <!-- Tight bloom -->
         <filter id="bloom" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
-          <feMerge>
-            <feMergeNode in="blur"/>
-            <feMergeNode in="blur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <!-- Particle glow -->
+        <filter id="pglow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
 
-        <!-- Gradients: userSpaceOnUse = exact node-center-to-node-center direction -->
-        <!-- Arc 1: Ingest(370,130) → Compile(598,296) -->
+        <!-- Arc gradients (userSpaceOnUse, node-to-node) -->
         <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="370" y1="130" x2="598" y2="296">
-          <stop offset="0%" stop-color="#f87171"/>
-          <stop offset="100%" stop-color="#38bdf8"/>
+          <stop offset="0%" stop-color="#f87171"/><stop offset="100%" stop-color="#38bdf8"/>
         </linearGradient>
-        <!-- Arc 2: Compile(598,296) → Query(511,564) -->
         <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="598" y1="296" x2="511" y2="564">
-          <stop offset="0%" stop-color="#38bdf8"/>
-          <stop offset="100%" stop-color="#a78bfa"/>
+          <stop offset="0%" stop-color="#38bdf8"/><stop offset="100%" stop-color="#a78bfa"/>
         </linearGradient>
-        <!-- Arc 3: Query(511,564) → Lint(229,564) -->
         <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="511" y1="564" x2="229" y2="564">
-          <stop offset="0%" stop-color="#a78bfa"/>
-          <stop offset="100%" stop-color="#fbbf24"/>
+          <stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#fbbf24"/>
         </linearGradient>
-        <!-- Arc 4: Lint(229,564) → Evolve(142,296) -->
         <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="229" y1="564" x2="142" y2="296">
-          <stop offset="0%" stop-color="#fbbf24"/>
-          <stop offset="100%" stop-color="#34d399"/>
+          <stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#34d399"/>
         </linearGradient>
-        <!-- Arc 5: Evolve(142,296) → Ingest(370,130) -->
         <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="142" y1="296" x2="370" y2="130">
-          <stop offset="0%" stop-color="#34d399"/>
-          <stop offset="100%" stop-color="#f87171"/>
+          <stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#f87171"/>
         </linearGradient>
       </defs>
 
-      <!-- ── Concentric background rings (r=240 omitted — replaced by neon arcs) ── -->
-      <circle cx="370" cy="370" r="300" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1" stroke-dasharray="5 9"/>
-      <circle cx="370" cy="370" r="170" fill="none" stroke="rgba(74,222,128,0.06)"  stroke-width="1" stroke-dasharray="3 7"/>
-      <circle cx="370" cy="370" r="90"  fill="none" stroke="rgba(74,222,128,0.08)"  stroke-width="1"/>
+      <!-- Background rings -->
+      <circle cx="370" cy="370" r="300" fill="none" stroke="rgba(255,255,255,0.022)" stroke-width="1" stroke-dasharray="4 9"/>
+      <circle cx="370" cy="370" r="170" fill="none" stroke="rgba(74,222,128,0.05)"  stroke-width="1" stroke-dasharray="3 7"/>
+      <circle cx="370" cy="370" r="90"  fill="none" stroke="rgba(74,222,128,0.07)"  stroke-width="1"/>
 
-      <!-- ══════════════════════════════════════════════════════════════════
-           RING ARCS: 5 segments following the r=240 circle (clockwise)
-           SVG arc: M start A rx ry x-rot large-arc-flag sweep-flag end
-             sweep-flag=1 = clockwise  |  large-arc-flag=0 = short arc (72°)
-           Node centers (ring r=240, center 370,370):
-             Ingest  -90°: (370, 130)   Compile -18°: (598, 296)
-             Query    54°: (511, 564)   Lint    126°: (229, 564)
-             Evolve  198°: (142, 296)
-           Arc midpoints (at the 5 interstitial angles on r=240):
-             ①-54°→(511,176)  ②18°→(598,444)  ③90°→(370,610)
-             ④162°→(142,444)  ⑤234°→(229,176)
-           Clockwise tangent at angle t: (-sin t, cos t) → degrees for rotate()
-             ①36°  ②108°  ③180°  ④252°  ⑤324°
-      ══════════════════════════════════════════════════════════════════ -->
-
-      <!-- ── Layer 1: Ambient halo (wide soft glow following ring) ── -->
-      <g opacity="0.14" filter="url(#halo)">
+      <!-- Halo layer -->
+      <g opacity="0.13" filter="url(#halo)">
         <path d="M 370 130 A 240 240 0 0 1 598 296" fill="none" stroke="#f87171" stroke-width="22" stroke-linecap="round"/>
         <path d="M 598 296 A 240 240 0 0 1 511 564" fill="none" stroke="#38bdf8" stroke-width="22" stroke-linecap="round"/>
         <path d="M 511 564 A 240 240 0 0 1 229 564" fill="none" stroke="#a78bfa" stroke-width="22" stroke-linecap="round"/>
@@ -592,37 +590,39 @@
         <path d="M 142 296 A 240 240 0 0 1 370 130" fill="none" stroke="#34d399" stroke-width="22" stroke-linecap="round"/>
       </g>
 
-      <!-- ── Layer 2: Bloom (tight glow right around the wire) ── -->
-      <g opacity="0.55" filter="url(#bloom)">
-        <path d="M 370 130 A 240 240 0 0 1 598 296" fill="none" stroke="#f87171" stroke-width="4" stroke-linecap="round"/>
-        <path d="M 598 296 A 240 240 0 0 1 511 564" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
-        <path d="M 511 564 A 240 240 0 0 1 229 564" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round"/>
-        <path d="M 229 564 A 240 240 0 0 1 142 296" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round"/>
-        <path d="M 142 296 A 240 240 0 0 1 370 130" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round"/>
+      <!-- Bloom layer -->
+      <g opacity="0.52" filter="url(#bloom)">
+        <path d="M 370 130 A 240 240 0 0 1 598 296" fill="none" stroke="#f87171" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 598 296 A 240 240 0 0 1 511 564" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 511 564 A 240 240 0 0 1 229 564" fill="none" stroke="#a78bfa" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 229 564 A 240 240 0 0 1 142 296" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M 142 296 A 240 240 0 0 1 370 130" fill="none" stroke="#34d399" stroke-width="3.5" stroke-linecap="round"/>
       </g>
 
-      <!-- ── Layer 3: Sharp gradient neon-wire core ── -->
-      <path d="M 370 130 A 240 240 0 0 1 598 296" fill="none" stroke="url(#g1)" stroke-width="3" stroke-linecap="round"/>
-      <path d="M 598 296 A 240 240 0 0 1 511 564" fill="none" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
-      <path d="M 511 564 A 240 240 0 0 1 229 564" fill="none" stroke="url(#g3)" stroke-width="3" stroke-linecap="round"/>
-      <path d="M 229 564 A 240 240 0 0 1 142 296" fill="none" stroke="url(#g4)" stroke-width="3" stroke-linecap="round"/>
-      <path d="M 142 296 A 240 240 0 0 1 370 130" fill="none" stroke="url(#g5)" stroke-width="3" stroke-linecap="round"/>
+      <!-- Sharp gradient wire -->
+      <path id="arc1" d="M 370 130 A 240 240 0 0 1 598 296" fill="none" stroke="url(#g1)" stroke-width="2.5" stroke-linecap="round"/>
+      <path id="arc2" d="M 598 296 A 240 240 0 0 1 511 564" fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linecap="round"/>
+      <path id="arc3" d="M 511 564 A 240 240 0 0 1 229 564" fill="none" stroke="url(#g3)" stroke-width="2.5" stroke-linecap="round"/>
+      <path id="arc4" d="M 229 564 A 240 240 0 0 1 142 296" fill="none" stroke="url(#g4)" stroke-width="2.5" stroke-linecap="round"/>
+      <path id="arc5" d="M 142 296 A 240 240 0 0 1 370 130" fill="none" stroke="url(#g5)" stroke-width="2.5" stroke-linecap="round"/>
 
-      <!-- ── Clockwise direction chevrons at arc midpoints ── -->
-      <!-- Chevron base shape points right (+x); rotate() aims it along flow  -->
-      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(511,176) rotate(36)"  fill="#f87171" opacity="0.9" filter="url(#bloom)"/>
-      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(598,444) rotate(108)" fill="#38bdf8" opacity="0.9" filter="url(#bloom)"/>
-      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(370,610) rotate(180)" fill="#a78bfa" opacity="0.9" filter="url(#bloom)"/>
-      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(142,444) rotate(252)" fill="#fbbf24" opacity="0.9" filter="url(#bloom)"/>
-      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(229,176) rotate(324)" fill="#34d399" opacity="0.9" filter="url(#bloom)"/>
+      <!-- Particle layer — JS-driven circles will be appended here -->
+      <g id="particles"></g>
 
-      <!-- ── Centre cycle label ── -->
+      <!-- Clockwise chevrons at arc midpoints -->
+      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(511,176) rotate(36)"  fill="#f87171" opacity="0.85" filter="url(#bloom)"/>
+      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(598,444) rotate(108)" fill="#38bdf8" opacity="0.85" filter="url(#bloom)"/>
+      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(370,610) rotate(180)" fill="#a78bfa" opacity="0.85" filter="url(#bloom)"/>
+      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(142,444) rotate(252)" fill="#fbbf24" opacity="0.85" filter="url(#bloom)"/>
+      <polygon points="-2,-5 9,0 -2,5 1,0" transform="translate(229,176) rotate(324)" fill="#34d399" opacity="0.85" filter="url(#bloom)"/>
+
+      <!-- Cycle label -->
       <text x="370" y="420" text-anchor="middle"
-            font-family="DM Sans, sans-serif" font-size="11" font-weight="600"
-            fill="rgba(255,255,255,0.20)" letter-spacing="2">↻ continuous cycle</text>
+            font-family="IBM Plex Sans, sans-serif" font-size="10" font-weight="500"
+            fill="rgba(255,255,255,0.14)" letter-spacing="2.5">↻ continuous cycle</text>
     </svg>
 
-    <!-- ══ Node 1: Ingest ══ -->
+    <!-- Node 1: Ingest -->
     <div class="node n-ingest" data-step="1">
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M12 3v13m0 0-4.5-4.5M12 16l4.5-4.5"/>
@@ -635,7 +635,7 @@
       <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ══ Node 2: Compile ══ -->
+    <!-- Node 2: Compile -->
     <div class="node n-compile" data-step="2">
       <svg viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="3"/>
@@ -644,11 +644,11 @@
     </div>
     <div class="nlabel nl-compile">
       <div class="nlabel-name">Compile</div>
-      <div class="nlabel-desc">Create pages, inject wikilinks &amp; update indexes</div>
+      <div class="nlabel-desc">Build pages, inject wikilinks &amp; update indexes</div>
       <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ══ Node 3: Query ══ -->
+    <!-- Node 3: Query -->
     <div class="node n-query" data-step="3">
       <svg viewBox="0 0 24 24" fill="none">
         <circle cx="11" cy="11" r="7.5"/>
@@ -661,7 +661,7 @@
       <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ══ Node 4: Lint ══ -->
+    <!-- Node 4: Lint -->
     <div class="node n-lint" data-step="4">
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M12 21s-8-4-8-10V4.5L12 2l8 2.5V11c0 6-8 10-8 10z"/>
@@ -674,7 +674,7 @@
       <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ══ Node 5: Evolve ══ -->
+    <!-- Node 5: Evolve -->
     <div class="node n-evolve" data-step="5">
       <svg viewBox="0 0 24 24" fill="none">
         <polyline points="22 7 13.5 15.5 8.5 10.5 1 18"/>
@@ -687,48 +687,177 @@
       <div class="nlabel-auto">● automatic</div>
     </div>
 
-    <!-- ══ Center ══ -->
+    <!-- Center -->
     <div class="wheel-center">
       <div class="center-title">wiki/</div>
       <div class="center-sub">
-        <strong>No vectors. No DB.</strong><br>
-        Pure markdown<br>
-        + wikilinks<br>
-        + graph
+        <strong>No vectors.<br>No DB.</strong><br>
+        Pure markdown<br>+ wikilinks + graph
       </div>
     </div>
 
   </div><!-- end wheel-wrap -->
 
-  <!-- → -->
+  <!-- ← -->
   <div class="connector">
     <div class="conn-label">browse</div>
     <div class="conn-arrow c-out">
-      <div class="conn-shaft"></div>
-      <div class="conn-tip"></div>
+      <div class="conn-shaft"></div><div class="conn-tip"></div>
     </div>
   </div>
 
-  <!-- Output Panel -->
+  <!-- Right: Output Panel -->
   <div class="panel out">
-    <div class="p-eyebrow">Visual UI</div>
-    <div class="p-path">Obsidian</div>
-    <div class="p-items">
-      Knowledge graph<br>
-      Wikilink navigation<br>
-      Dataview queries<br>
-      25 MCP tools<br>
-      Claude Code
+    <div class="p-eyebrow">Access layer</div>
+    <div class="p-path">wiki/</div>
+
+    <div class="out-item">
+      <div class="out-item-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" fill="rgba(167,139,250,0.25)" stroke="#a78bfa" stroke-width="1.5"/>
+          <path d="M8 12l4-4 4 4-4 4-4-4z" fill="#a78bfa" opacity="0.85"/>
+        </svg>
+      </div>
+      <div>
+        <div class="out-item-label">Obsidian</div>
+        <div class="out-item-sub">graph · wikilinks</div>
+      </div>
     </div>
+
+    <div class="out-item">
+      <div class="out-item-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="3" width="18" height="18" rx="4" fill="rgba(96,165,250,0.15)" stroke="#60a5fa" stroke-width="1.5"/>
+          <path d="M7 9h10M7 12h7M7 15h5" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="out-item-label">Claude Code MCP</div>
+        <div class="out-item-sub">25 tools · kb_query</div>
+      </div>
+    </div>
+
+    <div class="out-item">
+      <div class="out-item-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="4" width="20" height="16" rx="3" fill="rgba(74,222,128,0.1)" stroke="#4ade80" stroke-width="1.5"/>
+          <path d="M6 9l3 3-3 3M12 15h6" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="out-item-label">CLI</div>
+        <div class="out-item-sub">kb query · kb lint</div>
+      </div>
+    </div>
+
+    <div class="out-item">
+      <div class="out-item-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="1.5"/>
+          <polyline points="14,2 14,8 20,8" stroke="#fbbf24" stroke-width="1.5" stroke-linejoin="round"/>
+          <line x1="8" y1="13" x2="16" y2="13" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="8" y1="17" x2="12" y2="17" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="out-item-label">Direct files</div>
+        <div class="out-item-sub">entities · concepts</div>
+      </div>
+    </div>
+
     <div class="p-badge">Zero Config</div>
   </div>
 
 </div><!-- end main -->
 
+<!-- ═══ Infrastructure bar ═══ -->
+<div class="infra">
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(96,165,250,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <rect x="2" y="3" width="20" height="14" rx="2" stroke="#60a5fa" stroke-width="1.5"/>
+        <path d="M8 21h8M12 17v4" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">MCP Server</div>
+      <div class="infra-sub">25 tools</div>
+    </div>
+  </div>
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(251,191,36,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <circle cx="11" cy="11" r="7" stroke="#fbbf24" stroke-width="1.5"/>
+        <path d="m21 21-5-5" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">BM25 Engine</div>
+      <div class="infra-sub">tf-sat · IDF · PageRank</div>
+    </div>
+  </div>
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(167,139,250,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2l3 6.5 7 1-5 4.9 1.2 7L12 18l-6.2 3.4L7 14.4 2 9.5l7-1z" stroke="#a78bfa" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">Model Tiers</div>
+      <div class="infra-sub">Haiku · Sonnet · Opus</div>
+    </div>
+  </div>
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(74,222,128,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <ellipse cx="12" cy="5" rx="9" ry="3" stroke="#4ade80" stroke-width="1.5"/>
+        <path d="M3 5v6c0 1.657 4.03 3 9 3s9-1.343 9-3V5" stroke="#4ade80" stroke-width="1.5"/>
+        <path d="M3 11v6c0 1.657 4.03 3 9 3s9-1.343 9-3v-6" stroke="#4ade80" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">SQLite DB</div>
+      <div class="infra-sub">graph · history · lint</div>
+    </div>
+  </div>
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(239,68,68,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <circle cx="5" cy="5"  r="2" stroke="#f87171" stroke-width="1.5"/>
+        <circle cx="19" cy="5"  r="2" stroke="#f87171" stroke-width="1.5"/>
+        <circle cx="12" cy="19" r="2" stroke="#f87171" stroke-width="1.5"/>
+        <path d="M7 5h10M6.5 6.5l4 11M17.5 6.5l-4 11" stroke="#f87171" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">Memory Graph</div>
+      <div class="infra-sub">entity relations</div>
+    </div>
+  </div>
+
+  <div class="infra-chip">
+    <div class="infra-icon" style="background:rgba(192,132,252,0.1)">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#c084fc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="infra-name">Obsidian</div>
+      <div class="infra-sub">zero-config vault</div>
+    </div>
+  </div>
+
+</div>
+
 <!-- ═══ Stats ═══ -->
 <div class="stats">
   <div class="stat">
-    <div class="snum" style="color:#4ade80">692</div>
+    <div class="snum" style="color:#4ade80">1033</div>
     <div class="slbl">Tests</div>
   </div>
   <div class="stat">
@@ -747,6 +876,10 @@
     <div class="snum" style="color:#f87171">10</div>
     <div class="slbl">Source Types</div>
   </div>
+  <div class="stat">
+    <div class="snum" style="color:#34d399">43</div>
+    <div class="slbl">Test Files</div>
+  </div>
 </div>
 
 <!-- ═══ Tiers ═══ -->
@@ -756,9 +889,88 @@
   <div class="chip cv">orchestrate: Opus 4.6</div>
 </div>
 
+<!-- ═══ Footer ═══ -->
 <div class="footer">
-  Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a> &mdash; then fully automated
+  Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a>
+  &mdash; then fully automated &nbsp;·&nbsp;
+  <a href="https://github.com/asun28/llm-wiki-flywheel">github.com/asun28/llm-wiki-flywheel</a>
 </div>
+
+<script>
+// ── Particle animation along flywheel arcs ──
+(function () {
+  // Skip if user prefers reduced motion
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const container = document.getElementById('particles');
+
+  const arcs = [
+    { id: 'arc1', color: '#f87171', delay: 0.00 },
+    { id: 'arc1', color: '#fca5a5', delay: 1.10 },
+    { id: 'arc2', color: '#38bdf8', delay: 0.44 },
+    { id: 'arc2', color: '#7dd3fc', delay: 1.54 },
+    { id: 'arc3', color: '#a78bfa', delay: 0.88 },
+    { id: 'arc3', color: '#c4b5fd', delay: 1.98 },
+    { id: 'arc4', color: '#fbbf24', delay: 1.32 },
+    { id: 'arc4', color: '#fde68a', delay: 2.42 },
+    { id: 'arc5', color: '#34d399', delay: 1.76 },
+    { id: 'arc5', color: '#6ee7b7', delay: 0.66 },
+  ];
+
+  const SPEED = 0.055; // fraction of arc length per frame at 60fps (≈ 2.4s per arc)
+
+  const particles = arcs.map(({ id, color, delay }) => {
+    const path = document.getElementById(id);
+    const length = path.getTotalLength();
+
+    const circle = document.createElementNS(SVG_NS, 'circle');
+    circle.setAttribute('r', '4.5');
+    circle.setAttribute('fill', color);
+    circle.setAttribute('filter', 'url(#pglow)');
+    circle.setAttribute('opacity', '0');
+    container.appendChild(circle);
+
+    return {
+      path,
+      length,
+      progress: -delay * length * SPEED * 60, // phase offset
+      circle,
+    };
+  });
+
+  let last = null;
+  function frame(ts) {
+    if (last === null) last = ts;
+    const dt = Math.min(ts - last, 33); // clamp at ~30fps min
+    last = ts;
+
+    particles.forEach(p => {
+      p.progress += SPEED * dt * 0.06; // normalise: SPEED per 60fps frame → per ms
+      // Wrap
+      if (p.progress >= p.length) p.progress -= p.length;
+      if (p.progress < 0) p.progress += p.length;
+
+      const pt = p.path.getPointAtLength(p.progress);
+      p.circle.setAttribute('cx', pt.x);
+      p.circle.setAttribute('cy', pt.y);
+
+      // Fade in at 0-8%, fade out at 92-100% of arc
+      const ratio = p.progress / p.length;
+      const fade = ratio < 0.08
+        ? ratio / 0.08
+        : ratio > 0.92
+          ? (1 - ratio) / 0.08
+          : 1;
+      p.circle.setAttribute('opacity', (fade * 0.88).toFixed(3));
+    });
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
 
 </body>
 </html>

@@ -1,5 +1,11 @@
 # LLM Knowledge Base
 
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1033-brightgreen)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-25-blueviolet)](#claude-code-integration-mcp-server)
+[![Version](https://img.shields.io/badge/version-v0.9.16-orange)](CHANGELOG.md)
+
 > **Compile, don't retrieve.** Drop a source in. Everything else is automatic — Claude extracts entities, builds interlinked wiki pages, injects wikilinks into existing pages, tracks trust scores, detects contradictions, and self-maintains. No vectors. No embeddings. No chunking. Just clean markdown you can browse in Obsidian.
 
 Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**.
@@ -92,8 +98,8 @@ Or just talk to Claude Code:
 ## Quick Start
 
 ```bash
-git clone https://github.com/Asun28/LLM-Knowledge-Base.git
-cd LLM-Knowledge-Base
+git clone https://github.com/Asun28/llm-wiki-flywheel.git
+cd llm-wiki-flywheel
 
 python -m venv .venv
 .venv\Scripts\activate        # Windows
@@ -106,6 +112,8 @@ kb --version
 **API key:** Copy `.env.example` to `.env` and add `ANTHROPIC_API_KEY` — or skip this entirely if you're using Claude Code Max (MCP tools use Claude Code as the LLM by default).
 
 **Obsidian:** Open `wiki/` as a vault. Press `Ctrl+G` for the knowledge graph. See the **[full Obsidian guide](docs/guides/quickstart-obsidian.md)** ([HTML version](docs/guides/quickstart-obsidian.html)).
+
+**New here?** Browse the [`demo/`](demo/) folder — it contains the full folder structure with annotated placeholder files so you can see exactly how everything fits together before adding real content.
 
 ## Five Operations
 
@@ -242,7 +250,7 @@ Three Claude tiers balance cost and quality. Override via environment variables:
 <summary><b>Project structure</b></summary>
 
 ```
-LLM-Knowledge-Base/
+llm-wiki-flywheel/
   raw/                     # Immutable source documents
     articles/papers/repos/videos/podcasts/books/datasets/conversations/assets/
   wiki/                    # LLM-generated wiki pages
@@ -263,7 +271,7 @@ LLM-Knowledge-Base/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 692 tests across 43 files
+  tests/                   # 1033 tests across 43 files
 ```
 
 </details>
@@ -276,7 +284,7 @@ LLM-Knowledge-Base/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 692 tests
+python -m pytest                # 1033 tests
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```
@@ -287,8 +295,8 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 
 ## Roadmap
 
-- **Phase 4 (next):** Layered context assembly, raw-source fallback retrieval, multi-turn query rewriting, auto-contradiction detection on ingest
-- **Phase 5 (deferred):** Two-phase compile pipeline, pre-publish validation gate, multi-hop retrieval, answer trace enforcement, temporal claim tracking, BM25 + LLM reranking
+- **Phase 4 (next):** Layered context assembly, raw-source fallback retrieval, multi-turn query rewriting, auto-contradiction detection on ingest, LLM keyword query expansion with strong-signal skip
+- **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification, URL-aware `kb_ingest` with 5-state adapter model, page status lifecycle (seed→developing→mature→evergreen), inline quality callout markers, autonomous research loop in evolve, conversation capture `kb_capture` MCP tool, chunk-level BM25 sub-page indexing, typed semantic relations on graph edges, interactive graph HTML viewer (vis.js), semantic edge inference (LLM-inferred implicit relationships), living overview page, actionable gap-fill source suggestions, two-phase compile pipeline, multi-hop retrieval, conversation→KB promotion, temporal claim tracking, BM25 + LLM reranking
 - **Phase 6 (future):** DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling
 
 <details>
@@ -303,6 +311,8 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 - **v0.9.0–v0.9.9:** Hardening, comprehensive audit, structured outputs, content growth. 564 tests
 - **v0.9.10–v0.9.13:** Citation fixes, compile scan, BM25 dedup, 54-item backlog fix. 651 tests
 - **v0.9.14:** Phase 3.95 — 38-item backlog remediation. 692 tests
+- **v0.9.15:** Phase 3.96 — 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW). 952 tests
+- **v0.9.16:** Phase 3.97 — 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF fix, integer title coercion, contradiction detection improvements. 1033 tests
 
 </details>
 
@@ -332,8 +342,22 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 | [awesome-llm-knowledge-bases](https://github.com/SingggggYee/awesome-llm-knowledge-bases) | Curated tool list |
 | [qmd](https://github.com/tobi/qmd) | Markdown-native querying |
 | [Quartz](https://github.com/jackyzha0/quartz) | Static site generation from wiki |
+| [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) | Hot cache pattern, page status lifecycle, inline quality callouts, autonomous research loop |
+| [llm-wiki-skill](https://github.com/sdyckjq-lab/llm-wiki-skill) | Inline claim-level confidence annotation, 5-state adapter model for URL-aware ingest |
 
 </details>
+
+## Contributing
+
+This project is actively developed and ideas/issues are welcome.
+
+- **Found a bug?** Open an issue on [GitHub](https://github.com/Asun28/llm-wiki-flywheel/issues)
+- **Have an idea?** Check the [Roadmap](#roadmap) first — if it's not there, open an issue to discuss
+- **Want to follow along?** Star the repo and watch for releases — each phase ships meaningful new features
+
+The codebase is intentionally readable: no magic frameworks, just Python + BM25 + NetworkX + FastMCP. If you've built knowledge systems, RAG pipelines, or LLM tooling before, the code should be familiar territory within 30 minutes.
+
+> **Not accepting PRs yet** — the architecture is still evolving quickly and merging external changes is expensive. Issues, feedback, and ideas are the best way to contribute right now.
 
 ## License
 

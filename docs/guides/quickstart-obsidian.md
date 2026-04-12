@@ -26,8 +26,8 @@ raw/articles/rag-overview.md     -->  wiki/summaries/rag-overview.md       (auto
 ### 1. Install the knowledge base
 
 ```bash
-git clone https://github.com/Asun28/LLM-Knowledge-Base.git
-cd LLM-Knowledge-Base
+git clone https://github.com/Asun28/llm-wiki-flywheel.git
+cd llm-wiki-flywheel
 
 python -m venv .venv
 .venv\Scripts\activate        # Windows
