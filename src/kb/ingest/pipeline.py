@@ -38,11 +38,20 @@ logger = logging.getLogger(__name__)
 _SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:  - [^\n]*\n)*)", re.MULTILINE)
 
 
-def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> list[str]:
+def _find_affected_pages(
+    page_ids: list[str],
+    wiki_dir: Path | None = None,
+    pages: list[dict] | None = None,
+) -> list[str]:
     """Find existing pages affected by newly created/updated pages.
 
     Checks backlinks (pages that link to the new pages) and shared sources.
     Returns a deduplicated, sorted list of affected page IDs.
+
+    Args:
+        page_ids: Page IDs of newly created/updated pages.
+        wiki_dir: Wiki directory (uses config default if None).
+        pages: Pre-loaded list of all wiki pages. If None, loads from disk.
     """
     if not page_ids:
         return []
@@ -61,7 +70,7 @@ def _find_affected_pages(page_ids: list[str], wiki_dir: Path | None = None) -> l
         logger.debug("Failed to compute backlinks for cascade: %s", e)
 
     try:
-        all_pages = load_all_pages(wiki_dir)
+        all_pages = pages if pages is not None else load_all_pages(wiki_dir)
         new_sources: set[str] = set()
         for page in all_pages:
             if page["id"] in page_id_set:
@@ -674,8 +683,15 @@ def ingest_source(
         f"updated {len(pages_updated)} pages",
     )
 
+    # Load all pages once — shared by affected-pages analysis and contradiction detection
+    all_wiki_pages = load_all_pages(wiki_dir=effective_wiki_dir)
+
     # 8. Compute affected pages (cascade update detection)
-    affected_pages = _find_affected_pages(pages_created + pages_updated, effective_wiki_dir)
+    affected_pages = _find_affected_pages(
+        pages_created + pages_updated,
+        wiki_dir=effective_wiki_dir,
+        pages=all_wiki_pages,
+    )
 
     # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
     wikilinks_injected: list[str] = []
@@ -694,10 +710,9 @@ def ingest_source(
         key_claims = extraction.get("key_claims") or extraction.get("key_points") or []
         if key_claims and isinstance(key_claims, list):
             try:
-                existing = load_all_pages(effective_wiki_dir)
                 contradiction_warnings = detect_contradictions(
                     [str(c) for c in key_claims if isinstance(c, str)],
-                    existing,
+                    all_wiki_pages,
                 )
                 if contradiction_warnings:
                     logger.warning(

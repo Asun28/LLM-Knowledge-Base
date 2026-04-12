@@ -96,3 +96,57 @@ def test_contradiction_strips_wikilinks():
     assert "[[" not in stripped
     assert "entities/transformer" not in stripped
     assert "Transformer" in stripped  # display text preserved
+
+
+def test_load_all_pages_called_at_most_once_per_ingest(tmp_path, monkeypatch):
+    """load_all_pages must be called at most once during ingest_source."""
+    import kb.utils.pages as pages_mod
+    import kb.ingest.pipeline as pipeline_mod
+    from kb.ingest.pipeline import ingest_source
+
+    # Set up minimal wiki and raw directories
+    wiki = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki / subdir).mkdir(parents=True)
+    (wiki / "index.md").write_text("", encoding="utf-8")
+    (wiki / "_sources.md").write_text("", encoding="utf-8")
+    (wiki / "_categories.md").write_text("", encoding="utf-8")
+    (wiki / "log.md").write_text("", encoding="utf-8")
+
+    raw = tmp_path / "raw" / "articles"
+    raw.mkdir(parents=True)
+    source = raw / "test.md"
+    source.write_text("# Test\nContent here.\n", encoding="utf-8")
+
+    # Patch module-level config names so the path-validation check passes
+    monkeypatch.setattr(pipeline_mod, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(pipeline_mod, "WIKI_DIR", wiki)
+    monkeypatch.setattr(pipeline_mod, "WIKI_INDEX", wiki / "index.md")
+    monkeypatch.setattr(pipeline_mod, "WIKI_SOURCES", wiki / "_sources.md")
+    monkeypatch.setattr("kb.utils.paths.RAW_DIR", tmp_path / "raw")
+
+    call_count = [0]
+    real_load = pages_mod.load_all_pages
+
+    def counting_load(wiki_dir=None):
+        call_count[0] += 1
+        return real_load(wiki_dir=wiki_dir)
+
+    # Patch the load_all_pages reference inside pipeline module
+    monkeypatch.setattr(pipeline_mod, "load_all_pages", counting_load)
+
+    # Patch out the LLM extraction and other side-effectful operations
+    monkeypatch.setattr(pipeline_mod, "extract_from_source", lambda *a, **kw: {
+        "key_claims": ["claim one"],
+        "entities_mentioned": [],
+        "concepts_mentioned": [],
+        "title": "Test",
+        "summary": "A test document.",
+    })
+    monkeypatch.setattr(pipeline_mod, "_is_duplicate_content", lambda *a: False)
+
+    ingest_source(source, wiki_dir=wiki)
+
+    assert call_count[0] <= 1, (
+        f"load_all_pages was called {call_count[0]} times in a single ingest — expected ≤1"
+    )
