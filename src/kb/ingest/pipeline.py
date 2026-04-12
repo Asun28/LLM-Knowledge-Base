@@ -25,7 +25,7 @@ from kb.config import (
 from kb.ingest.contradiction import detect_contradictions
 from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
-from kb.utils.hashing import content_hash as compute_hash
+from kb.utils.hashing import content_hash as compute_hash, hash_bytes
 from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
@@ -348,7 +348,11 @@ def _update_existing_page(
 def _update_sources_mapping(
     source_ref: str, wiki_pages: list[str], wiki_dir: Path | None = None
 ) -> None:
-    """Update wiki/_sources.md with the source -> wiki page mapping."""
+    """Update wiki/_sources.md with source -> wiki page mapping.
+
+    First ingest: appends new entry. Re-ingest: merges new page IDs into
+    the existing line rather than silently skipping.
+    """
     sources_file = (wiki_dir / "_sources.md") if wiki_dir is not None else WIKI_SOURCES
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
     entry = f"- `{source_ref}` → {pages_str}\n"
@@ -356,10 +360,21 @@ def _update_sources_mapping(
         logger.warning("_sources.md not found — skipping source mapping for %s", source_ref)
         return
     content = sources_file.read_text(encoding="utf-8")
-    if f"`{source_ref}`" in content:
-        return  # Already listed
-    content += entry
-    atomic_text_write(content, sources_file)
+    if f"`{source_ref}`" not in content:
+        content += entry
+        atomic_text_write(content, sources_file)
+        return
+    # Re-ingest: merge new page IDs into the existing line
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if f"`{source_ref}`" in line:
+            existing_ids = set(re.findall(r"\[\[([^\]]+)\]\]", line))
+            missing = [p for p in wiki_pages if p not in existing_ids]
+            if missing:
+                extra = ", ".join(f"[[{p}]]" for p in missing)
+                lines[i] = line.rstrip("\n") + f", {extra}\n"
+                atomic_text_write("".join(lines), sources_file)
+            return
 
 
 # Fix 2.18: Derive from WIKI_SUBDIR_TO_TYPE at module load time — single source of truth.
@@ -519,7 +534,7 @@ def ingest_source(
             f"Binary file cannot be ingested: {source_path.name}. "
             "Convert to markdown first (e.g., markitdown or docling)."
         )
-    source_hash = compute_hash(source_path)
+    source_hash = hash_bytes(raw_bytes)
 
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)

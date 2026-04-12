@@ -5,6 +5,19 @@ import re
 
 from kb.config import CONTRADICTION_MAX_CLAIMS_TO_CHECK
 
+
+def _strip_markdown_structure(content: str) -> str:
+    """Remove wikilinks and section headers before tokenizing for contradiction detection."""
+    # Wikilinks: [[entities/foo|Display]] → Display (or foo if no display text)
+    content = re.sub(
+        r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]",
+        lambda m: m.group(2) or m.group(1),
+        content,
+    )
+    # Section headers: ## Evidence Trail → (removed)
+    content = re.sub(r"^##+ .+$", "", content, flags=re.MULTILINE)
+    return content
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +47,7 @@ def detect_contradictions(
             continue
 
         for page in existing_pages:
-            page_content = page.get("content", "")
+            page_content = _strip_markdown_structure(page.get("content", ""))
             page_tokens = _extract_significant_tokens(page_content)
 
             # Need substantial overlap to even consider checking

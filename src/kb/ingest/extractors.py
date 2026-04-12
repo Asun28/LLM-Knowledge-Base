@@ -193,10 +193,12 @@ def build_extraction_prompt(content: str, template: dict) -> str:
     """Build the LLM prompt for extracting structured data from a raw source."""
     fields = template["extract"]
     field_descriptions = "\n".join(f"- {f}" for f in fields)
+    source_name = template.get("name", "document")
+    source_desc = template.get("description", "")
 
     return f"""Extract structured information from the following source document.
 
-Source type: {template["name"]} — {template["description"]}
+Source type: {source_name} — {source_desc}
 
 Extract these fields as a JSON object:
 {field_descriptions}
