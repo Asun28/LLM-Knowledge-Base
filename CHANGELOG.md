@@ -21,6 +21,8 @@ Rules:
 
 ## [Unreleased]
 
+Post-release audit fixes for Phase 4 v0.10.0 — all 23 HIGH-severity items. MEDIUM and LOW audit items remain open in `BACKLOG.md`.
+
 ### Added
 - `research/gbrain-analysis.md` — deep analysis of garrytan/gbrain patterns applicable to llm-wiki-flywheel roadmap
 - `src/kb/utils/hashing.py` `hash_bytes()` — hash already-loaded bytes without re-reading the file; fixes TOCTOU inconsistency in ingest pipeline
