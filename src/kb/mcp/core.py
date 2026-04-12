@@ -2,11 +2,13 @@
 
 import json
 import logging
+import os
 from datetime import date
 from pathlib import Path
 
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
+    MAX_QUESTION_LEN,
     MAX_SEARCH_RESULTS,
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
@@ -63,6 +65,10 @@ def kb_query(
     """
     if not question or not question.strip():
         return "Error: Question cannot be empty."
+    if len(question) > MAX_QUESTION_LEN:
+        return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
+    if conversation_context and len(conversation_context) > MAX_QUESTION_LEN * 4:
+        return f"Error: conversation_context too long (max {MAX_QUESTION_LEN * 4} chars)."
 
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
@@ -160,9 +166,11 @@ def kb_ingest(
         path = PROJECT_ROOT / path
     path = path.resolve()
 
-    # Validate source path stays within raw/ directory
+    # Validate source path stays within raw/ directory (normcase for Windows)
+    raw_norm = Path(os.path.normcase(str(RAW_DIR.resolve())))
+    path_norm = Path(os.path.normcase(str(path)))
     try:
-        path.relative_to(RAW_DIR.resolve())
+        path_norm.relative_to(raw_norm)
     except ValueError:
         return f"Error: Source path must be within raw/ directory: {source_path}"
 
@@ -307,21 +315,33 @@ def kb_ingest_content(
             "Required keys: title, entities_mentioned, concepts_mentioned."
         )
 
-    if file_path.exists():
-        return (
-            f"Error: Source file already exists: {file_path.name}. "
-            "Use kb_save_source with overwrite=true to replace it."
-        )
-
     save_content = content
     if url:
         header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         save_content = header + content
 
+    # Atomic exclusive create — avoid TOCTOU race between existence check and write
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
-        atomic_text_write(save_content, file_path)
-    except OSError as e:
-        return f"Error: Failed to write source file: {e}"
+        fd = os.open(str(file_path), flags, 0o644)
+    except FileExistsError:
+        return (
+            f"Error: Source file already exists: {file_path.name}. "
+            "Use kb_save_source with overwrite=true to replace it."
+        )
+    fd_transferred = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            fd_transferred = True
+            f.write(save_content)
+    except BaseException:
+        if not fd_transferred:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        file_path.unlink(missing_ok=True)
+        raise
 
     try:
         result = ingest_source(file_path, source_type, extraction=extraction)
@@ -373,20 +393,38 @@ def kb_save_source(
     type_dir.mkdir(parents=True, exist_ok=True)
     file_path = type_dir / f"{slug}.md"
 
-    if file_path.exists() and not overwrite:
-        return (
-            f"Error: Source file already exists: {_rel(file_path)}. "
-            "Use overwrite=true to replace it."
-        )
-
     if url:
         header = f'---\nurl: "{yaml_escape(url)}"\nfetched: {date.today().isoformat()}\n---\n\n'
         content = header + content
 
-    try:
-        atomic_text_write(content, file_path)
-    except OSError as e:
-        return f"Error: Failed to write source file: {e}"
+    if overwrite:
+        try:
+            atomic_text_write(content, file_path)
+        except OSError as e:
+            return f"Error: Failed to write source file: {e}"
+    else:
+        # Atomic exclusive create — avoid TOCTOU race between existence check and write
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        try:
+            fd = os.open(str(file_path), flags, 0o644)
+        except FileExistsError:
+            return (
+                f"Error: Source file already exists: {_rel(file_path)}. "
+                "Use overwrite=true to replace it."
+            )
+        fd_transferred = False
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                fd_transferred = True
+                f.write(content)
+        except BaseException:
+            if not fd_transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            file_path.unlink(missing_ok=True)
+            raise
     return (
         f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
         f'To ingest: kb_ingest("{_rel(file_path)}", "{source_type}")'

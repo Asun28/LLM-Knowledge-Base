@@ -92,7 +92,11 @@ def kb_list_pages(page_type: str = "") -> str:
         pages = load_all_pages()
         if page_type:
             # Accept both singular ("concept") and plural ("concepts") subdir names
-            page_type = _TYPE_TO_SUBDIR.get(page_type, page_type)
+            resolved_type = _TYPE_TO_SUBDIR.get(page_type, page_type)
+            if resolved_type not in WIKI_SUBDIR_TO_TYPE:
+                valid = ", ".join(sorted(WIKI_SUBDIR_TO_TYPE))
+                return f"Error: Unknown page_type '{page_type}'. Valid: {valid}"
+            page_type = resolved_type
             pages = [p for p in pages if p["id"].startswith(f"{page_type}/")]
         if not pages:
             return "No pages found."

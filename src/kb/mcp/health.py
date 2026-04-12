@@ -83,7 +83,9 @@ def kb_graph_viz(max_nodes: int = 30) -> str:
     Args:
         max_nodes: Maximum nodes to include (default 30). Set 0 for all nodes.
     """
-    max_nodes = max(0, min(max_nodes, 500))
+    if max_nodes == 0:
+        max_nodes = 30
+    max_nodes = max(1, min(max_nodes, 500))
     try:
         return export_mermaid(max_nodes=max_nodes)
     except Exception as e:
@@ -135,7 +137,7 @@ def kb_detect_drift() -> str:
     if result["affected_pages"]:
         lines.append(f"## Affected Wiki Pages ({len(result['affected_pages'])})\n")
         for ap in result["affected_pages"]:
-            sources_str = ", ".join(ap["changed_sources"])
+            sources_str = ", ".join(ap.get("changed_sources") or [])
             lines.append(f"- **{ap['page_id']}** ← {sources_str}")
         lines.append("")
         lines.append("Run `kb_review_page(page_id)` on affected pages to check for stale content.")

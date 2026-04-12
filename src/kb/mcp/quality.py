@@ -10,6 +10,7 @@ from kb.config import (
     CONFIDENCE_LEVELS,
     MAX_INGEST_CONTENT_CHARS,
     MAX_NOTES_LEN,
+    MAX_QUESTION_LEN,
     PAGE_TYPES,
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
@@ -153,6 +154,8 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         from kb.lint.semantic import build_consistency_context
 
         ids = [p.strip() for p in page_ids.split(",") if p.strip()] if page_ids else None
+        if ids and len(ids) > 50:
+            return "Error: Too many page IDs — max 50."
         if ids:
             for pid in ids:
                 err = _validate_page_id(pid, check_exists=True)
@@ -176,6 +179,8 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
     """
     if not question or not question.strip():
         return "Error: Question cannot be empty."
+    if len(question) > MAX_QUESTION_LEN:
+        return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
     for pid in pages:
@@ -339,6 +344,8 @@ def kb_save_lint_verdict(
             issue_list = json.loads(issues)
             if not isinstance(issue_list, list):
                 return "Error: issues must be a JSON array."
+            if len(issue_list) > 100:
+                return "Error: Too many issues — max 100 per verdict."
         except json.JSONDecodeError as e:
             return f"Error: Invalid issues JSON — {e}"
 
