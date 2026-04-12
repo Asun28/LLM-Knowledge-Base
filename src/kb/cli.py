@@ -8,6 +8,11 @@ from kb import __version__
 from kb.config import SOURCE_TYPE_DIRS
 
 
+def _truncate(msg: str, limit: int = 500) -> str:
+    """Truncate long error messages to avoid terminal flooding."""
+    return msg if len(msg) <= limit else msg[:limit] + "..."
+
+
 @click.group()
 @click.version_option(__version__)
 def cli():
@@ -47,7 +52,7 @@ def ingest(source_path: str, source_type: str | None):
                 click.echo(f"    ! {page}")
         click.echo("Done.")
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
 
 
@@ -72,7 +77,7 @@ def compile(incremental: bool):
             ctx.exit(1)
         click.echo("Done.")
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
 
 
@@ -91,7 +96,7 @@ def query(question: str):
             click.echo(format_citations(result["citations"]))
         click.echo(f"\n[Searched {len(result['source_pages'])} pages]")
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
 
 
@@ -114,7 +119,7 @@ def lint(fix: bool):
     except SystemExit:
         raise
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
 
 
@@ -128,7 +133,7 @@ def evolve():
         report = generate_evolution_report()
         click.echo(format_evolution_report(report))
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
 
 
