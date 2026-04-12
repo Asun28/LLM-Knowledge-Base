@@ -1,4 +1,4 @@
-"""Query engine — BM25 search + LLM synthesis with citations."""
+"""Query engine — BM25 + vector hybrid search + LLM synthesis with citations."""
 
 import logging
 from datetime import date
@@ -9,13 +9,17 @@ from kb.config import (
     BM25_K1,
     MAX_SEARCH_RESULTS,
     PAGERANK_SEARCH_WEIGHT,
+    PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
     QUERY_MAX_TOKENS,
     SEARCH_TITLE_WEIGHT,
+    VECTOR_INDEX_PATH_SUFFIX,
 )
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
+from kb.query.dedup import dedup_results
+from kb.query.hybrid import hybrid_search
 from kb.utils.llm import call_llm
 from kb.utils.pages import load_all_pages
 
@@ -23,10 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
-    """Search wiki pages using BM25 ranking.
+    """Search wiki pages using hybrid BM25 + vector ranking with RRF fusion.
 
-    Builds a BM25 index over all wiki pages, with title tokens boosted by
-    SEARCH_TITLE_WEIGHT. Returns pages ranked by BM25 relevance score.
+    Builds a BM25 index over all wiki pages (title tokens boosted by
+    SEARCH_TITLE_WEIGHT) and combines it with vector search via RRF fusion.
+    Falls back gracefully to BM25-only when the vector index does not exist.
 
     Args:
         question: The search query.
@@ -59,25 +64,61 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         content_tokens = tokenize(page["content_lower"])
         documents.append(title_tokens + content_tokens)
 
-    # Score with BM25
+    # Build BM25 index once — shared by the bm25_search closure below
     index = BM25Index(documents)
-    scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
 
-    # Blend PageRank into BM25 scores if weight > 0
+    def bm25_search(query: str, lim: int) -> list[dict]:
+        qtoks = tokenize(query)
+        if not qtoks:
+            return []
+        sc = index.score(qtoks, k1=BM25_K1, b=BM25_B)
+        hits = []
+        for i, score in enumerate(sc):
+            if score > 0:
+                hits.append({**pages[i], "score": round(score, 4)})
+        hits.sort(key=lambda p: p["score"], reverse=True)
+        return hits[:lim]
+
+    def vector_search(query: str, lim: int) -> list[dict]:
+        try:
+            from kb.query.embeddings import VectorIndex, embed_texts
+
+            vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
+            if not vec_path.exists():
+                return []
+            vecs = embed_texts([query])
+            if not vecs:
+                return []
+            idx = VectorIndex(vec_path)
+            hits = idx.query(vecs[0], limit=lim)
+            page_map = {p["id"]: p for p in pages}
+            results = []
+            for pid, dist in hits:
+                if pid in page_map:
+                    results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
+            return results
+        except Exception as e:
+            logger.debug("Vector search unavailable: %s", e)
+            return []
+
+    # Hybrid search: RRF fusion of BM25 + vector results
+    scored = hybrid_search(question, bm25_search, vector_search, limit=max_results * 2)
+    scored = dedup_results(scored)
+
+    # Blend PageRank into scores if weight > 0
     pagerank_scores: dict[str, float] = {}
     if PAGERANK_SEARCH_WEIGHT > 0:
         pagerank_scores = _compute_pagerank_scores(wiki_dir)
 
-    # Pair scores with pages, filter zero scores
-    scored = []
-    for i, score in enumerate(scores):
-        if score > 0:
-            # Blend: final = bm25 * (1 + weight * normalized_pagerank)
-            pr = pagerank_scores.get(pages[i]["id"].lower(), 0.0)
-            blended = score * (1 + PAGERANK_SEARCH_WEIGHT * pr)
-            scored.append({**pages[i], "score": round(blended, 4)})
+    if pagerank_scores:
+        blended = []
+        for r in scored:
+            pr = pagerank_scores.get(r["id"].lower(), 0.0)
+            new_score = r["score"] * (1 + PAGERANK_SEARCH_WEIGHT * pr)
+            blended.append({**r, "score": round(new_score, 4)})
+        blended.sort(key=lambda p: p["score"], reverse=True)
+        scored = blended
 
-    scored.sort(key=lambda p: p["score"], reverse=True)
     scored = _flag_stale_results(scored[:max_results])
     return scored
 

@@ -189,13 +189,19 @@ class TestPageRankBlendedSearch:
                 f"Fan {i} discusses machine learning. See [[concepts/popular]].",
                 source_ref=f"raw/articles/fan-{i}.md",
             )
-        # Create an isolated page with similar content
+        # Create an isolated page with similar content but distinct enough text to
+        # survive dedup (Jaccard threshold 0.85). The content matches the query but
+        # differs from popular's content word-set enough to not be deduplicated.
         _make_wiki_page(
             wiki_dir,
             "concepts",
             "isolated",
             "Machine Learning Isolated",
-            "Machine learning is a popular topic.",
+            (
+                "Machine learning algorithms learn patterns from training data. "
+                "Supervised learning and unsupervised learning are core paradigms. "
+                "Neural networks are a fundamental tool in modern machine learning research."
+            ),
             source_ref="raw/articles/isolated.md",
         )
 
