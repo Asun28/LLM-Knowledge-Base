@@ -1,10 +1,8 @@
 """Query feedback storage — load, save, add entries to JSON."""
 
-import contextlib
 import json
 import logging
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -17,32 +15,12 @@ from kb.config import (
     MAX_PAGE_SCORES,
     MAX_QUESTION_LEN,
 )
+from kb.utils.io import atomic_json_write, file_lock
 
 logger = logging.getLogger(__name__)
 
-
-@contextlib.contextmanager
-def _feedback_lock(path: Path, timeout: float = 5.0):
-    """Acquire an exclusive file lock for the feedback store."""
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            break
-        except FileExistsError:
-            if time.monotonic() > deadline:
-                # Stale lock — remove and retry acquisition
-                lock_path.unlink(missing_ok=True)
-                time.sleep(0.05)
-                continue
-            time.sleep(0.05)
-    try:
-        yield
-    finally:
-        lock_path.unlink(missing_ok=True)
+# Delegate to the shared file_lock utility (PID-verified, cross-process safe)
+_feedback_lock = file_lock
 
 
 def _default_feedback() -> dict:
@@ -75,8 +53,6 @@ def load_feedback(path: Path | None = None) -> dict:
 
 def save_feedback(data: dict, path: Path | None = None) -> None:
     """Save feedback data to JSON file (atomic write via temp file)."""
-    from kb.utils.io import atomic_json_write
-
     path = path or FEEDBACK_PATH
     atomic_json_write(data, path)
 

@@ -2,13 +2,11 @@
 
 import json
 import logging
-import threading
 from datetime import datetime
 from pathlib import Path
 
 from kb.config import MAX_VERDICTS, VERDICTS_PATH
-
-_verdicts_lock = threading.Lock()
+from kb.utils.io import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +91,8 @@ def add_verdict(
                     f"Must be one of: {', '.join(VALID_SEVERITIES)}"
                 )
 
-    with _verdicts_lock:
+    path = path or VERDICTS_PATH
+    with file_lock(path):
         verdicts = load_verdicts(path)
         entry = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),

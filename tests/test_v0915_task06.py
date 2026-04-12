@@ -175,14 +175,14 @@ class TestAddVerdictThreadingLock:
         result = load_verdicts(path)
         assert len(result) == n_threads
 
-    def test_lock_module_attribute_exists(self):
-        """The _verdicts_lock attribute should exist in the verdicts module."""
+    def test_lock_module_attribute_does_not_use_threading(self):
+        """add_verdict must not use threading.Lock — file_lock is the cross-process guard."""
         import kb.lint.verdicts as verdicts_mod
 
-        assert hasattr(verdicts_mod, "_verdicts_lock")
-        import threading as threading_mod
-
-        assert isinstance(verdicts_mod._verdicts_lock, type(threading_mod.Lock()))
+        # _verdicts_lock was replaced by file_lock; no threading.Lock at module level
+        assert not hasattr(verdicts_mod, "_verdicts_lock") or not hasattr(
+            getattr(verdicts_mod, "_verdicts_lock", None), "acquire"
+        ), "_verdicts_lock is still a threading.Lock — replace with file_lock"
 
 
 # ── Fix 6.11 — get_page_verdicts KeyError ────────────────────────────────────
