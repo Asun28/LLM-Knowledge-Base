@@ -74,7 +74,7 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
         fm_match = _FRONTMATTER_RE.match(content)
         body = fm_match.group(2) if fm_match else content
         links = extract_wikilinks(body)
-        source_id = page_id(page_path, wiki_dir)
+        source_id = page_id(page_path, wiki_dir).lower()
 
         for link in links:
             total += 1

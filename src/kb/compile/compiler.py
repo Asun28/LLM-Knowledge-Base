@@ -357,10 +357,9 @@ def compile_wiki(
     if not incremental:
         current_manifest.update(_template_hashes())
         # Prune manifest entries for sources that no longer exist on disk
-        existing_refs = {_canonical_rel_path(s, raw_dir) for s in sources_to_process}
         stale_keys = [
             k for k in current_manifest
-            if not k.startswith("_template/") and k not in existing_refs
+            if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
         ]
         if stale_keys:
             for k in stale_keys:

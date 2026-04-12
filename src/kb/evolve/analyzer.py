@@ -81,7 +81,9 @@ def find_connection_opportunities(wiki_dir: Path | None = None) -> list[dict]:
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
         words = {
-            stripped for w in content.split() if len(stripped := w.strip(".,!?()[]{}\"':-/")) > 4
+            stripped
+            for w in content.split()
+            if len(stripped := re.sub(r"[^\w]", "", w)) > 4
         }
         for word in words:
             if word not in term_index:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from kb.config import WIKI_DIR
+from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
 
@@ -70,6 +70,17 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
         source_id = page_id(page_path, wiki_dir)
         for link in links:
             target = link
+            # Resolve bare slugs (e.g. [[foo]] → entities/foo) by trying known subdirs
+            if target not in existing_ids:
+                for subdir in WIKI_SUBDIR_TO_TYPE:
+                    candidate = f"{subdir}/{target}"
+                    if candidate in existing_ids:
+                        logger.debug(
+                            "Resolved bare-slug [[%s]] → %s in %s",
+                            link, candidate, source_id,
+                        )
+                        target = candidate
+                        break
             # Fix 5.1: guard against self-loops (page linking to itself)
             if target in existing_ids and target != source_id:
                 graph.add_edge(source_id, target)
