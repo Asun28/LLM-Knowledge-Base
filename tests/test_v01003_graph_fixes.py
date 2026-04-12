@@ -10,7 +10,7 @@ def test_graph_stats_uses_precomputed_out_degrees():
     import inspect
 
     import networkx as nx
-    from kb.graph import builder as _builder
+
     from kb.graph.builder import graph_stats
 
     # Verify source code uses out_degrees dict, not graph.degree(n) per-node

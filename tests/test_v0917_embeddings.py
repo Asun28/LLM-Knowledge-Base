@@ -1,8 +1,7 @@
 """Tests for embedding wrapper and vector index (Phase 4)."""
 
-import pytest
 
-from kb.query.embeddings import embed_texts, VectorIndex
+from kb.query.embeddings import VectorIndex, embed_texts
 
 
 class TestEmbedTexts:

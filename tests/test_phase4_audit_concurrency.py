@@ -1,9 +1,7 @@
 """Tests for file-locking correctness — Phase 4 audit."""
 import os
-import time
 import threading
-import pytest
-from pathlib import Path
+import time
 
 
 def test_file_lock_basic_mutual_exclusion(tmp_path):

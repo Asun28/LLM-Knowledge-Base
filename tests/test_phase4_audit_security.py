@@ -1,8 +1,8 @@
 """Tests for HIGH-severity MCP security fixes — Phase 4 audit."""
-import pytest
 from unittest.mock import patch
-from kb.mcp.app import _validate_page_id
+
 from kb.config import MAX_INGEST_CONTENT_CHARS
+from kb.mcp.app import _validate_page_id
 
 
 def test_validate_page_id_rejects_null_byte():
