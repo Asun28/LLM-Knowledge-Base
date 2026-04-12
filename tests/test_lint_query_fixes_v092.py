@@ -172,9 +172,12 @@ def test_query_context_truncation_logging(caplog):
     # The second page (excluded-page) must not appear at all
     assert "y" * 100 not in context, "Second page should not appear in fallback result"
 
-    # Should have logged exclusion of pages
-    assert any("excluded" in r.message.lower() for r in caplog.records), (
-        f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
+    # Should have logged that pages were skipped/excluded
+    assert any(
+        "skipped" in r.message.lower() or "excluded" in r.message.lower()
+        for r in caplog.records
+    ), (
+        f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
     )
 
 
@@ -209,8 +212,11 @@ def test_query_context_exclusion_logging(caplog):
     with caplog.at_level(logging.DEBUG, logger="kb.query.engine"):
         _build_query_context(pages, max_chars=max_chars)
 
-    assert any("excluded" in r.message.lower() for r in caplog.records), (
-        f"Expected exclusion log message, got: {[r.message for r in caplog.records]}"
+    assert any(
+        "skipped" in r.message.lower() or "excluded" in r.message.lower()
+        for r in caplog.records
+    ), (
+        f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
     )
 
 

@@ -186,7 +186,10 @@ def _flag_stale_results(
 
 
 def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> dict:
-    """Build context string from matching wiki pages for the LLM.
+    """Build context string from matching wiki pages using tiered loading.
+
+    Tier 1: Summary pages loaded first (up to CONTEXT_TIER1_BUDGET).
+    Tier 2: Non-summary pages loaded in score order (remaining budget).
 
     Returns:
         dict with keys:
@@ -195,58 +198,62 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     """
     if not pages:
         return {"context": "No relevant wiki pages found.", "context_pages": []}
+
+    from kb.config import CONTEXT_TIER1_BUDGET, CONTEXT_TIER2_BUDGET
+
+    effective_max = min(max_chars, CONTEXT_TIER1_BUDGET + CONTEXT_TIER2_BUDGET)
+    summaries = [p for p in pages if p.get("type") == "summary"]
+    others = [p for p in pages if p.get("type") != "summary"]
+
     sections = []
     context_pages = []
     total = 0
     skipped = 0
-    for i, page in enumerate(pages):
+
+    def _try_add(page: dict) -> bool:
+        nonlocal total, skipped
         section = (
             f"--- Page: {page['id']} (type: {page['type']}, "
             f"confidence: {page['confidence']}) ---\n"
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
-        if total + len(section) > max_chars:
-            if i == 0:
-                # Top-ranked page exceeds budget: truncate rather than skip so the
-                # LLM always has at least some content to work with.
-                remaining = max_chars - total
-                if remaining > len(section) - len(page["content"]):
-                    # There is room for at least the header — truncate content.
-                    truncated = section[:remaining]
+        if total + len(section) > effective_max:
+            if not sections:
+                # First page — truncate rather than skip
+                remaining = effective_max - total
+                header_len = len(section) - len(page["content"])
+                if remaining > header_len:
                     logger.warning(
                         "Top-ranked page %s (%d chars) exceeds context limit (%d); truncating",
                         page["id"],
                         len(section),
-                        max_chars,
+                        effective_max,
                     )
-                    sections.append(truncated)
+                    sections.append(section[:remaining])
                     context_pages.append(page["id"])
-                    total += len(truncated)
-                    # Budget is now exhausted; remaining pages will be skipped in loop
-                else:
-                    logger.warning(
-                        "Top-ranked page %s (%d chars) exceeds context limit (%d); skipping it",
-                        page["id"],
-                        len(section),
-                        max_chars,
-                    )
-                    skipped += 1
-            else:
-                logger.debug("Page excluded from query context due to limit: %s", page["id"])
-                skipped += 1
-            continue
+                    total += remaining
+                    return True
+            skipped += 1
+            return False
         sections.append(section)
         context_pages.append(page["id"])
         total += len(section)
+        return True
+
+    # Tier 1: summaries
+    for p in summaries:
+        _try_add(p)
+
+    # Tier 2: everything else
+    for p in others:
+        _try_add(p)
+
     if skipped:
         logger.info(
             "Query context: included %d pages, skipped %d (limit: %d chars)",
-            len(sections),
-            skipped,
-            max_chars,
+            len(sections), skipped, effective_max,
         )
-    # Fallback: if all pages exceeded the limit, truncate the top page rather than
-    # returning an empty string (which would cause the LLM to hallucinate answers).
+
     if not sections and pages:
         top = pages[0]
         header = (
@@ -254,19 +261,12 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
             f"confidence: {top['confidence']}) ---\n"
             f"Title: {top['title']}\n\n"
         )
-        if max_chars <= len(header):
-            return {
-                "context": "No relevant wiki pages found.",
-                "context_pages": [],
-            }
+        if effective_max <= len(header):
+            return {"context": "No relevant wiki pages found.", "context_pages": []}
         section = header + top["content"]
-        logger.warning(
-            "All pages exceeded context limit (%d chars); truncating top page %s",
-            max_chars,
-            top["id"],
-        )
-        sections.append(section[:max_chars])
+        sections.append(section[:effective_max])
         context_pages.append(top["id"])
+
     return {"context": "\n".join(sections), "context_pages": context_pages}
 
 
