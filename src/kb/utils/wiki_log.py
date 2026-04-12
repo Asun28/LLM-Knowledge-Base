@@ -23,8 +23,8 @@ def append_wiki_log(operation: str, message: str, log_path: Path | None = None) 
         log_path: Path to log file (defaults to config WIKI_LOG).
     """
     log_path = log_path or WIKI_LOG
-    safe_op = operation.replace("|", "-").replace("\n", " ").replace("\r", "")
-    safe_msg = message.replace("|", "-").replace("\n", " ").replace("\r", "")
+    safe_op = operation.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    safe_msg = message.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
     entry = f"- {date.today().isoformat()} | {safe_op} | {safe_msg}\n"
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)

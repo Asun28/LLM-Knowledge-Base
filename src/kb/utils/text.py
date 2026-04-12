@@ -32,6 +32,7 @@ def slugify(text: str) -> str:
     # Replace suffix symbols that follow a word character (e.g. "mylib++" → "mylibplus")
     text = re.sub(r"(\w)\+\+", r"\1plus", text)
     text = re.sub(r"(\w)#", r"\1sharp", text)
+    text = re.sub(r"(?<=\d)\.(?=\d)", "-", text)
     text = re.sub(r"[^\w\s-]", "", text, flags=re.ASCII)
     text = re.sub(r"[\s_]+", "-", text)
     return re.sub(r"-+", "-", text).strip("-")

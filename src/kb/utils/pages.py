@@ -1,5 +1,6 @@
 """Wiki page loading utilities — shared by query engine and MCP server."""
 
+import datetime as _dt
 import logging
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 logger = logging.getLogger(__name__)
 
 WIKI_SUBDIRS = tuple(WIKI_SUBDIR_TO_TYPE.keys())
+
+
+def _date_str(value: object) -> str:
+    """Convert a date/datetime/str frontmatter value to an ISO-8601 date string."""
+    if value is None:
+        return ""
+    if isinstance(value, _dt.datetime):
+        return value.date().isoformat()
+    if isinstance(value, _dt.date):
+        return value.isoformat()
+    return str(value)
 
 
 def _page_id(page_path: Path, wiki_dir: Path) -> str:
@@ -62,8 +74,8 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                         "type": post.metadata.get("type", "unknown"),
                         "confidence": post.metadata.get("confidence", "unknown"),
                         "sources": sources,
-                        "created": str(post.metadata.get("created") or ""),
-                        "updated": str(post.metadata.get("updated") or ""),
+                        "created": _date_str(post.metadata.get("created")),
+                        "updated": _date_str(post.metadata.get("updated")),
                         "content": post.content,
                         "content_lower": post.content.lower(),
                     }
