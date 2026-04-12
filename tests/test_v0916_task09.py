@@ -46,9 +46,9 @@ class TestCliSourceTypeList:
 
 
 class TestVersionBump:
-    """Version must be bumped to 0.9.16."""
+    """Version must be bumped to 0.10.0."""
 
     def test_version_is_0_9_16(self):
         from kb import __version__
 
-        assert __version__ == "0.9.16"
+        assert __version__ == "0.10.0"

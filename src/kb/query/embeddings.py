@@ -5,7 +5,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from kb.config import EMBEDDING_DIM, EMBEDDING_MODEL
+from kb.config import EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
