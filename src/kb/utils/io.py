@@ -68,7 +68,7 @@ def file_lock(path: Path, timeout: float = 5.0):
             os.write(fd, my_pid_bytes)
             os.close(fd)
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
             if time.monotonic() > deadline:
                 # Stale lock — verify the recorded PID is no longer running
                 try:
