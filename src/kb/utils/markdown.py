@@ -4,6 +4,10 @@ import re
 
 WIKILINK_PATTERN = re.compile(r"(?<![!\[])\[\[([^\]|]{1,200})(?:\|[^\]]+)?\]\](?!\])")
 
+# Splits YAML frontmatter from page body. Matches the opening ``---`` fence,
+# captures the entire frontmatter block and the remainder of the file.
+FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
+
 # Matches raw/ file references that are NOT mid-URL (lookbehind rejects /, \w, and - before raw/)
 _RAW_REF_PATTERN = re.compile(
     r"(?<![/\w-])raw/[\w/.-]+\.(?:md|txt|pdf|json|yaml|csv|png|jpg|jpeg|svg|gif)",

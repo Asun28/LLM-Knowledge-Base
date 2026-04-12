@@ -1,18 +1,14 @@
 """Build a networkx graph from wiki pages and their wikilinks."""
 
 import logging
-import re
 from pathlib import Path
 
 import networkx as nx
 
 from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
-
-# Strip YAML frontmatter before extracting wikilinks to avoid false matches in YAML values.
-# Mirrors the pattern used in kb.compile.linker._FRONTMATTER_RE.
-_FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 

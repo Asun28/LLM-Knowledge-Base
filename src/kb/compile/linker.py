@@ -8,13 +8,10 @@ from pathlib import Path
 from kb.config import WIKI_DIR
 from kb.graph.builder import page_id, scan_wiki_pages
 from kb.utils.io import atomic_text_write
+from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 
 logger = logging.getLogger(__name__)
-
-# Regex for splitting frontmatter from body.
-# Uses lazy match — may not handle all edge cases (e.g. --- inside multi-line YAML values).
-_FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
 
 # Regex for fenced code blocks (``` ... ```), inline code (`...`),
 # markdown links ([text](url)), and images (![alt](url)).

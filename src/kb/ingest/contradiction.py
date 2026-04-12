@@ -4,6 +4,7 @@ import logging
 import re
 
 from kb.config import CONTRADICTION_MAX_CLAIMS_TO_CHECK
+from kb.utils.text import STOPWORDS as _STOPWORDS
 
 
 def _strip_markdown_structure(content: str) -> str:
@@ -77,12 +78,6 @@ _CONTRADICTION_SIGNALS = re.compile(
     r"\b(not|never|no longer|instead|rather than|unlike|contrary|wrong|incorrect|"
     r"false|replaced|deprecated|obsolete|outdated)\b",
     re.IGNORECASE,
-)
-
-_STOPWORDS = frozenset(
-    "a an the is are was were be been being have has had do does did "
-    "will would shall should may might can could of in to for with on at by from "
-    "and or but if then else this that these those it its".split()
 )
 
 

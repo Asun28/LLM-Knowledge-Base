@@ -11,6 +11,7 @@ from kb.utils.io import file_lock
 logger = logging.getLogger(__name__)
 
 VALID_SEVERITIES = ("error", "warning", "info")
+VALID_VERDICT_TYPES: tuple[str, ...] = ("fidelity", "consistency", "completeness", "review")
 MAX_NOTES_LEN = 2000
 
 
@@ -63,10 +64,10 @@ def add_verdict(
     """
     if verdict not in ("pass", "fail", "warning"):
         raise ValueError(f"Invalid verdict: {verdict}. Must be 'pass', 'fail', or 'warning'")
-    if verdict_type not in ("fidelity", "consistency", "completeness", "review"):
+    if verdict_type not in VALID_VERDICT_TYPES:
         raise ValueError(
             f"Invalid verdict_type: {verdict_type}. "
-            "Must be 'fidelity', 'consistency', 'completeness', or 'review'"
+            f"Must be one of: {', '.join(repr(t) for t in VALID_VERDICT_TYPES)}"
         )
 
     # Validate page_id against path traversal and null bytes
@@ -132,7 +133,7 @@ def get_verdict_summary(path: Path | None = None) -> dict:
     summary = {
         "total": len(verdicts),
         "by_verdict": {"pass": 0, "fail": 0, "warning": 0},
-        "by_type": {"fidelity": 0, "consistency": 0, "completeness": 0, "review": 0},
+        "by_type": {t: 0 for t in VALID_VERDICT_TYPES},
         "pages_with_failures": [],
     }
     failed_pages = set()
