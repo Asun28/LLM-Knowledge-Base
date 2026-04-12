@@ -295,7 +295,7 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 
 ## Roadmap
 
-- **Phase 4 (next):** Layered context assembly, raw-source fallback retrieval, multi-turn query rewriting, auto-contradiction detection on ingest, LLM keyword query expansion with strong-signal skip
+- **Phase 4 (v0.10.0 shipped 2026-04-12):** Hybrid search with RRF fusion, 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit fixed 23 HIGH-severity items (unreleased); MEDIUM/LOW items tracked in `BACKLOG.md`.
 - **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification, URL-aware `kb_ingest` with 5-state adapter model, page status lifecycle (seed→developing→mature→evergreen), inline quality callout markers, autonomous research loop in evolve, conversation capture `kb_capture` MCP tool, chunk-level BM25 sub-page indexing, typed semantic relations on graph edges, interactive graph HTML viewer (vis.js), semantic edge inference (LLM-inferred implicit relationships), living overview page, actionable gap-fill source suggestions, two-phase compile pipeline, multi-hop retrieval, conversation→KB promotion, temporal claim tracking, BM25 + LLM reranking
 - **Phase 6 (future):** DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling
 
