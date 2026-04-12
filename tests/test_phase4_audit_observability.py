@@ -1,14 +1,15 @@
 """Tests for observability fixes — Phase 4 audit."""
 import logging
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import anthropic
+import pytest
 
 
 def test_llm_last_retry_logs_giving_up(caplog):
     """On final attempt, log must say 'giving up', not 'retrying'."""
     from kb.utils import llm as llm_mod
-    from kb.utils.llm import _make_api_call, MAX_RETRIES
+    from kb.utils.llm import _make_api_call
 
     mock_resp = MagicMock(status_code=429, headers={})
 
@@ -34,7 +35,7 @@ def test_llm_last_retry_logs_giving_up(caplog):
 def test_llm_intermediate_retry_logs_retrying(caplog):
     """Before the final attempt, log must say 'retrying'."""
     from kb.utils import llm as llm_mod
-    from kb.utils.llm import _make_api_call, MAX_RETRIES
+    from kb.utils.llm import MAX_RETRIES, _make_api_call
 
     if MAX_RETRIES < 1:
         pytest.skip("Need at least 1 retry to test intermediate logs")
@@ -63,6 +64,7 @@ def test_llm_intermediate_retry_logs_retrying(caplog):
 def test_pagerank_failure_logs_warning(caplog):
     """PageRank convergence failure must emit a warning with the graph size."""
     import networkx as nx
+
     from kb.graph.builder import graph_stats
 
     g = nx.DiGraph()
@@ -74,13 +76,17 @@ def test_pagerank_failure_logs_warning(caplog):
 
     assert stats["pagerank"] == []
     warning_texts = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
-    assert "pagerank" in warning_texts.lower() or "converge" in warning_texts.lower() or "failed" in warning_texts.lower()
+    assert (
+        "pagerank" in warning_texts.lower()
+        or "converge" in warning_texts.lower()
+        or "failed" in warning_texts.lower()
+    )
 
 
 def test_vector_search_failure_logs_warning(caplog, tmp_path):
     """sqlite_vec load failure must emit a WARNING, not silently return []."""
+
     from kb.query.embeddings import VectorIndex
-    import sqlite3
 
     idx = VectorIndex(tmp_path / "test.db")
 
@@ -106,4 +112,8 @@ def test_vector_search_failure_logs_warning(caplog, tmp_path):
 
     assert results == []
     warning_texts = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
-    assert "sqlite_vec" in warning_texts.lower() or "vector" in warning_texts.lower() or "extension" in warning_texts.lower()
+    assert (
+        "sqlite_vec" in warning_texts.lower()
+        or "vector" in warning_texts.lower()
+        or "extension" in warning_texts.lower()
+    )

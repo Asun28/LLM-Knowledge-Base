@@ -1,11 +1,9 @@
 """Tests for ingest data-integrity fixes — Phase 4 audit."""
-import pytest
-from pathlib import Path
 
 
 def test_hash_bytes_matches_content_hash(tmp_path):
     """hash_bytes(data) must produce the same result as content_hash(path)."""
-    from kb.utils.hashing import hash_bytes, content_hash
+    from kb.utils.hashing import content_hash, hash_bytes
     path = tmp_path / "test.md"
     data = b"hello world content for hashing"
     path.write_bytes(data)
@@ -25,7 +23,9 @@ def test_sources_mapping_merges_on_reingest(tmp_path):
     from kb.ingest.pipeline import _update_sources_mapping
 
     sources_file = tmp_path / "_sources.md"
-    sources_file.write_text("- `raw/articles/foo.md` → [[summaries/foo-summary]]\n", encoding="utf-8")
+    sources_file.write_text(
+        "- `raw/articles/foo.md` → [[summaries/foo-summary]]\n", encoding="utf-8"
+    )
 
     _update_sources_mapping(
         "raw/articles/foo.md",
@@ -100,8 +100,8 @@ def test_contradiction_strips_wikilinks():
 
 def test_load_all_pages_called_at_most_once_per_ingest(tmp_path, monkeypatch):
     """load_all_pages must be called at most once during ingest_source."""
-    import kb.utils.pages as pages_mod
     import kb.ingest.pipeline as pipeline_mod
+    import kb.utils.pages as pages_mod
     from kb.ingest.pipeline import ingest_source
 
     # Set up minimal wiki and raw directories

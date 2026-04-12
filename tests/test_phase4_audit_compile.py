@@ -1,7 +1,5 @@
 """Tests for compile, linker, graph, and evolve correctness fixes — Phase 4 audit."""
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def test_manifest_pruning_keeps_unchanged_source(tmp_path):
@@ -26,7 +24,10 @@ def test_manifest_pruning_keeps_unchanged_source(tmp_path):
     # load_manifest is called twice: once in the loop (no-op) and once at pruning time.
     # We return a fresh copy each time so the pruning logic has a real manifest to work with.
     with patch("kb.compile.compiler.scan_raw_sources", return_value=[]):
-        with patch("kb.compile.compiler.load_manifest", side_effect=lambda *a, **kw: dict(manifest_before)):
+        with patch(
+            "kb.compile.compiler.load_manifest",
+            side_effect=lambda *a, **kw: dict(manifest_before),
+        ):
             with patch("kb.compile.compiler.save_manifest") as mock_save:
                 with patch("kb.compile.compiler._template_hashes", return_value={}):
                     from kb.compile.compiler import compile_wiki
@@ -49,7 +50,9 @@ def test_linker_source_id_is_lowercased(tmp_wiki):
     # Create a page in a path that would yield a mixed-case page_id
     # (page_id lowercases the result — verify source_id in broken list is also lowercased)
     page = tmp_wiki / "entities" / "MyEntity.md"
-    page.write_text("---\ntitle: MyEntity\ntype: entity\nconfidence: stated\n---\n[[entities/nonexistent]]\n")
+    page.write_text(
+        "---\ntitle: MyEntity\ntype: entity\nconfidence: stated\n---\n[[entities/nonexistent]]\n"
+    )
 
     result = resolve_wikilinks(wiki_dir=tmp_wiki)
     for entry in result["broken"]:

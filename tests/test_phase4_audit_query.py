@@ -1,5 +1,4 @@
 """Tests for query engine correctness — Phase 4 audit."""
-import pytest
 from kb.config import CONTEXT_TIER1_BUDGET, QUERY_CONTEXT_MAX_CHARS
 from kb.query.engine import _build_query_context
 
@@ -50,9 +49,11 @@ def test_raw_fallback_truncates_first_oversized_section(tmp_path, monkeypatch):
     tiny_page = _make_page("entities/tiny", "entity", 50)
     monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [tiny_page])
     captured_prompts = []
-    monkeypatch.setattr(eng, "call_llm", lambda prompt, **kw: (captured_prompts.append(prompt) or "answer"))
+    monkeypatch.setattr(
+        eng, "call_llm", lambda prompt, **kw: (captured_prompts.append(prompt) or "answer")
+    )
 
-    result = eng.query_wiki("test question", wiki_dir=tmp_path)
+    eng.query_wiki("test question", wiki_dir=tmp_path)
 
     # raw source content must appear in the prompt (truncated, not absent)
     assert captured_prompts, "call_llm was not called"
@@ -80,7 +81,7 @@ def test_raw_fallback_skips_when_context_already_full(tmp_path, monkeypatch):
 
 def test_bm25_limit_independent_of_vector_multiplier():
     """BM25 candidate count must not be coupled to VECTOR_SEARCH_LIMIT_MULTIPLIER."""
-    from kb.config import VECTOR_SEARCH_LIMIT_MULTIPLIER, BM25_SEARCH_LIMIT_MULTIPLIER
+    from kb.config import BM25_SEARCH_LIMIT_MULTIPLIER, VECTOR_SEARCH_LIMIT_MULTIPLIER
     from kb.query.hybrid import hybrid_search
 
     bm25_calls = []

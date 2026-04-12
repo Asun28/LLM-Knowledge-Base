@@ -1,9 +1,8 @@
 """Tests for evidence trail sections in wiki pages (Phase 4)."""
 
 from datetime import date
-from pathlib import Path
 
-from kb.ingest.evidence import build_evidence_entry, append_evidence_trail
+from kb.ingest.evidence import append_evidence_trail, build_evidence_entry
 
 
 class TestBuildEvidenceEntry:
@@ -70,7 +69,7 @@ class TestAppendEvidenceTrail:
         # New entry at top (reverse chronological)
         trail_idx = text.index("## Evidence Trail")
         trail = text[trail_idx:]
-        lines = [l for l in trail.split("\n") if l.startswith("- ")]
+        lines = [line for line in trail.split("\n") if line.startswith("- ")]
         assert len(lines) == 2
         assert "raw/articles/b.md" in lines[0]  # Newest first
         assert "raw/articles/a.md" in lines[1]

@@ -34,7 +34,9 @@ class TestDedupByTextSimilarity:
     def test_removes_near_duplicate_text(self):
         results = [
             _result("concepts/a", 5.0, text="the transformer architecture uses attention"),
-            _result("concepts/b", 4.0, text="the transformer architecture uses attention mechanisms"),
+            _result(
+                "concepts/b", 4.0, text="the transformer architecture uses attention mechanisms"
+            ),
         ]
         deduped = dedup_results(results, jaccard_threshold=0.7)
         assert len(deduped) == 1
