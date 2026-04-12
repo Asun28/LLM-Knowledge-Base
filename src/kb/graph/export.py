@@ -46,6 +46,7 @@ def _safe_node_id(node: str, seen: set[str] | None = None) -> str:
 
 
 def export_mermaid(
+    graph=None,
     wiki_dir: Path | None = None,
     max_nodes: int = DEFAULT_MAX_NODES,
 ) -> str:
@@ -55,23 +56,24 @@ def export_mermaid(
     Uses node degree (in + out) for pruning priority.
 
     Args:
+        graph: Pre-built nx.DiGraph. If a Path is passed here (legacy positional
+            call), it is treated as ``wiki_dir`` for backwards compatibility.
         wiki_dir: Path to wiki directory.
         max_nodes: Maximum nodes to include. Set to 0 for no limit.
 
     Returns:
         Mermaid diagram string (graph LR format).
     """
+    # Backwards-compat: callers that did export_mermaid(wiki_dir) pass a Path here
+    if isinstance(graph, Path):
+        wiki_dir = graph
+        graph = None
     wiki_dir = wiki_dir or WIKI_DIR
-    graph = build_graph(wiki_dir)
+    if graph is None:
+        graph = build_graph(wiki_dir)
 
     if graph.number_of_nodes() == 0:
         return "graph LR\n  %% No pages in wiki"
-
-    # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
-    # Titles require YAML frontmatter parsing which load_all_pages() handles.
-    # This is a second disk scan after build_graph(); acceptable at current scale
-    # (titles need frontmatter parsing that build_graph intentionally avoids).
-    titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir)}
 
     # Auto-prune if needed
     nodes_to_include: set[str]
@@ -86,6 +88,15 @@ def export_mermaid(
         )
     else:
         nodes_to_include = set(graph.nodes())
+
+    # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
+    # Titles require YAML frontmatter parsing which load_all_pages() handles.
+    # Load AFTER pruning and filter to included nodes only to avoid unnecessary disk reads.
+    titles = {
+        p["id"]: p["title"]
+        for p in load_all_pages(wiki_dir)
+        if p["id"] in nodes_to_include
+    }
 
     # Build Mermaid output
     lines = ["graph LR"]
@@ -114,7 +125,7 @@ def export_mermaid(
 
     # Define edges (only between included nodes)
     subgraph = graph.subgraph(nodes_to_include)
-    for source, target in subgraph.edges():
+    for source, target in sorted(subgraph.edges()):
         lines.append(f"  {node_id_map[source]} --> {node_id_map[target]}")
 
     return "\n".join(lines)

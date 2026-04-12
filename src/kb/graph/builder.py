@@ -25,7 +25,11 @@ def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
 
 
 def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
-    """Convert a wiki page path to a graph node ID (e.g., 'concepts/rag')."""
+    """Convert a wiki page path to a graph node ID (e.g., 'concepts/rag').
+
+    Note: The returned ID is lowercased for consistent node naming. The ``path``
+    node attribute retains original filesystem case and must be used for all file I/O.
+    """
     wiki_dir = wiki_dir or WIKI_DIR
     return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md").lower()
 
@@ -93,8 +97,9 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         pagerank (top 10 by PageRank), bridge_nodes (top 10 by betweenness centrality).
     """
     in_degrees = dict(graph.in_degree())
-    no_inbound = [n for n, d in in_degrees.items() if d == 0 and graph.out_degree(n) > 0]
-    isolated = [n for n in graph.nodes() if graph.degree(n) == 0]
+    out_degrees = dict(graph.out_degree())
+    no_inbound = [n for n, d in in_degrees.items() if d == 0 and out_degrees[n] > 0]
+    isolated = [n for n in graph.nodes() if in_degrees[n] == 0 and out_degrees[n] == 0]
 
     # Top 10 most-linked pages (Fix 5.8: exclude zero-in-degree pages)
     sorted_by_in = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)
@@ -137,6 +142,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         "components": n_components,
         "no_inbound": no_inbound,
         "isolated": isolated,
+        "orphans": isolated,  # alias for isolated (degree-zero nodes)
         "most_linked": most_linked,
         "pagerank": pagerank,
         "bridge_nodes": bridge_nodes,
