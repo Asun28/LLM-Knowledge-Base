@@ -289,9 +289,15 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         total += len(section)
         return True
 
-    # Tier 1: summaries
+    # Tier 1: summaries — capped by CONTEXT_TIER1_BUDGET
+    tier1_used = 0
     for p in summaries:
-        _try_add(p)
+        if tier1_used >= CONTEXT_TIER1_BUDGET:
+            skipped += 1
+            continue
+        before = total
+        if _try_add(p):
+            tier1_used += total - before  # how much _try_add added
 
     # Tier 2: everything else
     for p in others:
@@ -374,6 +380,8 @@ def query_wiki(
             for rs in raw_results:
                 section = f"--- Raw Source: {rs['id']} (verbatim) ---\n{rs['content']}\n"
                 if len(section) > budget:
+                    if not raw_sections:  # first section — truncate rather than skip
+                        raw_sections.append(section[:budget])
                     break
                 raw_sections.append(section)
                 budget -= len(section)
