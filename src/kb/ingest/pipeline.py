@@ -22,6 +22,8 @@ from kb.config import (
     WIKI_SOURCES,
     WIKI_SUBDIR_TO_TYPE,
 )
+from kb.ingest.contradiction import detect_contradictions
+from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import content_hash as compute_hash
 from kb.utils.io import atomic_text_write
@@ -135,6 +137,7 @@ confidence: {confidence}
 
 '''
     atomic_text_write(fm_text + content, path)
+    append_evidence_trail(path, source_ref, f"Initial extraction: {page_type} page created")
 
 
 def _build_summary_content(extraction: dict, source_type: str) -> str:
@@ -337,6 +340,9 @@ def _update_existing_page(
 
     # Fix 2.1: Use atomic write
     atomic_text_write(content, page_path)
+    append_evidence_trail(
+        page_path, source_ref, f"{verb} in new source — source reference added"
+    )
 
 
 def _update_sources_mapping(
@@ -667,6 +673,26 @@ def ingest_source(
         except Exception as e:
             logger.debug("inject_wikilinks failed for %s: %s", pid, e)
 
+    # Auto-contradiction detection
+    contradiction_warnings: list[dict] = []
+    if extraction:
+        key_claims = extraction.get("key_claims") or extraction.get("key_points") or []
+        if key_claims and isinstance(key_claims, list):
+            try:
+                existing = load_all_pages(effective_wiki_dir)
+                contradiction_warnings = detect_contradictions(
+                    [str(c) for c in key_claims if isinstance(c, str)],
+                    existing,
+                )
+                if contradiction_warnings:
+                    logger.warning(
+                        "Detected %d potential contradiction(s) during ingest of %s",
+                        len(contradiction_warnings),
+                        source_ref,
+                    )
+            except Exception as e:
+                logger.debug("Contradiction detection failed (non-fatal): %s", e)
+
     # Fix 2.21: deduplicate wikilinks_injected
     result = {
         "source_path": str(source_path),
@@ -680,4 +706,6 @@ def ingest_source(
     }
     if is_small_source:
         result["deferred_entities"] = True
+    if contradiction_warnings:
+        result["contradictions"] = contradiction_warnings
     return result

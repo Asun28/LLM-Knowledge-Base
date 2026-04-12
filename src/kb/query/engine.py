@@ -1,6 +1,7 @@
 """Query engine — BM25 search + LLM synthesis with citations."""
 
 import logging
+from datetime import date
 from pathlib import Path
 
 from kb.config import (
@@ -77,7 +78,8 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
             scored.append({**pages[i], "score": round(blended, 4)})
 
     scored.sort(key=lambda p: p["score"], reverse=True)
-    return scored[:max_results]
+    scored = _flag_stale_results(scored[:max_results])
+    return scored
 
 
 def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
@@ -103,6 +105,43 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
     except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError, OSError) as e:
         logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
+
+
+def _flag_stale_results(
+    results: list[dict], project_root: Path | None = None
+) -> list[dict]:
+    """Flag results where page updated date is older than newest source mtime.
+
+    Adds 'stale': True/False to each result dict. Non-destructive — modifies
+    copies of the input dicts.
+    """
+    from kb.config import PROJECT_ROOT
+
+    root = project_root or PROJECT_ROOT
+    flagged = []
+    for r in results:
+        r = {**r, "stale": False}
+        updated_str = r.get("updated", "")
+        sources = r.get("sources", [])
+        if not updated_str or not sources:
+            flagged.append(r)
+            continue
+        try:
+            page_date = date.fromisoformat(str(updated_str))
+        except (ValueError, TypeError):
+            flagged.append(r)
+            continue
+        newest_source_mtime = None
+        for src in sources:
+            src_path = root / src
+            if src_path.exists():
+                mtime = date.fromtimestamp(src_path.stat().st_mtime)
+                if newest_source_mtime is None or mtime > newest_source_mtime:
+                    newest_source_mtime = mtime
+        if newest_source_mtime and newest_source_mtime > page_date:
+            r["stale"] = True
+        flagged.append(r)
+    return flagged
 
 
 def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_CHARS) -> dict:
@@ -190,13 +229,19 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     return {"context": "\n".join(sections), "context_pages": context_pages}
 
 
-def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> dict:
+def query_wiki(
+    question: str,
+    wiki_dir: Path | None = None,
+    max_results: int = 10,
+    conversation_context: str | None = None,
+) -> dict:
     """Query the knowledge base and synthesize an answer.
 
     Args:
         question: The user's question.
         wiki_dir: Path to wiki directory (uses config default if None).
         max_results: Maximum number of pages to retrieve for context.
+        conversation_context: Recent conversation history for follow-up query rewriting.
 
     Returns:
         dict with keys:
@@ -207,8 +252,14 @@ def query_wiki(question: str, wiki_dir: Path | None = None, max_results: int = 1
             source_pages: list of page IDs retrieved by BM25 search.
             context_pages: list of page IDs actually included in LLM context.
     """
+    # Rewrite follow-up queries into standalone queries
+    effective_question = question
+    if conversation_context:
+        from kb.query.rewriter import rewrite_query
+        effective_question = rewrite_query(question, conversation_context)
+
     # 1. Search for relevant pages
-    matching_pages = search_pages(question, wiki_dir, max_results=max_results)
+    matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)
 
     if not matching_pages:
         return {

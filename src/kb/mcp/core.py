@@ -40,7 +40,12 @@ def _validate_file_inputs(filename: str, content: str) -> str | None:
 
 
 @mcp.tool()
-def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str:
+def kb_query(
+    question: str,
+    max_results: int = 10,
+    use_api: bool = False,
+    conversation_context: str = "",
+) -> str:
     """Query the knowledge base.
 
     Default (Claude Code mode): returns wiki search results with full page
@@ -54,6 +59,7 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         question: Natural language question.
         max_results: Maximum pages to search (default 10).
         use_api: If true, call the Anthropic API for synthesis. Default false.
+        conversation_context: Recent conversation history for follow-up query rewriting.
     """
     if not question or not question.strip():
         return "Error: Question cannot be empty."
@@ -64,7 +70,11 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
         from kb.query.citations import format_citations
 
         try:
-            result = query_wiki(question, max_results=max_results)
+            result = query_wiki(
+                question,
+                max_results=max_results,
+                conversation_context=conversation_context or None,
+            )
             parts = [result["answer"]]
             if result.get("citations"):
                 parts.append("\n" + format_citations(result["citations"]))
@@ -108,9 +118,10 @@ def kb_query(question: str, max_results: int = 10, use_api: bool = False) -> str
     for r in results:
         trust = r.get("trust") or 0.5
         trust_label = f", trust: {trust:.2f}" if r["id"] in pages_with_feedback else ""
+        stale_label = " [STALE]" if r.get("stale") else ""
         lines.append(
             f"--- Page: {r['id']} (type: {r['type']}, "
-            f"confidence: {r['confidence']}, score: {r['score']}{trust_label}) ---\n"
+            f"confidence: {r['confidence']}, score: {r['score']}{trust_label}){stale_label} ---\n"
             f"Title: {r['title']}\n\n{r['content']}\n"
         )
     return "\n".join(lines)
