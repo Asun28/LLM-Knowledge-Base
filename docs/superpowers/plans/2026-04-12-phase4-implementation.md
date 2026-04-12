@@ -1,6 +1,6 @@
 # Phase 4 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement 8 features upgrading search quality, epistemic integrity, and query intelligence for the llm-wiki-flywheel knowledge base.
 
@@ -42,7 +42,7 @@
 **Files:**
 - Modify: `src/kb/config.py:99-121`
 
-- [ ] **Step 1: Add Phase 4 config constants**
+- [x] **Step 1: Add Phase 4 config constants**
 
 ```python
 # Add after line 121 (after MAX_SEARCH_RESULTS = 100):
@@ -70,7 +70,7 @@ CONTRADICTION_MAX_CLAIMS_TO_CHECK = 10  # Max existing claims to compare per ing
 MAX_CONVERSATION_CONTEXT_CHARS = 4000  # Max chars of conversation history for rewriting
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add src/kb/config.py
@@ -86,7 +86,7 @@ git commit -m "feat(config): add Phase 4 constants — RRF, dedup, layered conte
 - Modify: `src/kb/ingest/pipeline.py:119-138,254-339,547-567`
 - Create: `tests/test_v0917_evidence_trail.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_evidence_trail.py
@@ -182,12 +182,12 @@ class TestAppendEvidenceTrail:
         assert 'title: "Test"' in text
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_evidence_trail.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.ingest.evidence'`
 
-- [ ] **Step 3: Write the evidence trail module**
+- [x] **Step 3: Write the evidence trail module**
 
 ```python
 # src/kb/ingest/evidence.py
@@ -239,12 +239,12 @@ def append_evidence_trail(
     atomic_text_write(content, page_path)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_evidence_trail.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Wire evidence trail into ingest pipeline**
+- [x] **Step 5: Wire evidence trail into ingest pipeline**
 
 In `src/kb/ingest/pipeline.py`, add import at top (after line 30):
 ```python
@@ -268,12 +268,12 @@ In `_update_existing_page` (line 339, just before the atomic_text_write call), a
     )
 ```
 
-- [ ] **Step 6: Run full test suite to check for regressions**
+- [x] **Step 6: Run full test suite to check for regressions**
 
 Run: `python -m pytest -x -q`
 Expected: All existing tests pass (some may need minor adjustment if they check exact page content)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/kb/ingest/evidence.py src/kb/ingest/pipeline.py tests/test_v0917_evidence_trail.py
@@ -288,7 +288,7 @@ git commit -m "feat(ingest): add evidence trail sections to wiki pages — appen
 - Create: `src/kb/query/dedup.py`
 - Create: `tests/test_v0917_dedup.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_dedup.py
@@ -374,12 +374,12 @@ class TestDedupEndToEnd:
         assert len(dedup_results(results)) == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_dedup.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.query.dedup'`
 
-- [ ] **Step 3: Write the dedup module**
+- [x] **Step 3: Write the dedup module**
 
 ```python
 # src/kb/query/dedup.py
@@ -471,12 +471,12 @@ def _cap_per_page(results: list[dict], max_per_page: int) -> list[dict]:
     return kept
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_dedup.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/kb/query/dedup.py tests/test_v0917_dedup.py
@@ -492,7 +492,7 @@ git commit -m "feat(query): add 4-layer search dedup pipeline — source, text s
 - Modify: `src/kb/mcp/core.py:102-116`
 - Create: `tests/test_v0917_stale_query.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_stale_query.py
@@ -574,12 +574,12 @@ class TestFlagStaleResults:
         assert flagged[0].get("stale") is False
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_stale_query.py -v`
 Expected: FAIL — `ImportError: cannot import name '_flag_stale_results'`
 
-- [ ] **Step 3: Implement stale flagging in engine.py**
+- [x] **Step 3: Implement stale flagging in engine.py**
 
 Add to `src/kb/query/engine.py` (after `_compute_pagerank_scores`, before `_build_query_context`):
 
@@ -626,7 +626,7 @@ Add the `date` import at the top of engine.py (line 1 area):
 from datetime import date
 ```
 
-- [ ] **Step 4: Wire stale flagging into search_pages**
+- [x] **Step 4: Wire stale flagging into search_pages**
 
 In `search_pages()` (line 79, after the sort, before the return), add:
 
@@ -638,7 +638,7 @@ In `search_pages()` (line 79, after the sort, before the return), add:
 
 Replace the existing `return scored[:max_results]` line.
 
-- [ ] **Step 5: Surface stale flag in MCP kb_query output**
+- [x] **Step 5: Surface stale flag in MCP kb_query output**
 
 In `src/kb/mcp/core.py`, in the Claude Code mode section (line 111-114), update the page header format to include stale indicator:
 
@@ -651,17 +651,17 @@ In `src/kb/mcp/core.py`, in the Claude Code mode section (line 111-114), update 
         )
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_stale_query.py -v`
 Expected: PASS
 
-- [ ] **Step 7: Run full test suite**
+- [x] **Step 7: Run full test suite**
 
 Run: `python -m pytest -x -q`
 Expected: All tests pass
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/kb/query/engine.py src/kb/mcp/core.py tests/test_v0917_stale_query.py
@@ -676,7 +676,7 @@ git commit -m "feat(query): flag stale results at query time — compare page up
 - Create: `src/kb/query/embeddings.py`
 - Create: `tests/test_v0917_embeddings.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_embeddings.py
@@ -739,12 +739,12 @@ class TestVectorIndex:
         assert results == []
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_embeddings.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.query.embeddings'`
 
-- [ ] **Step 3: Write the embeddings module**
+- [x] **Step 3: Write the embeddings module**
 
 ```python
 # src/kb/query/embeddings.py
@@ -864,12 +864,12 @@ class VectorIndex:
             conn.close()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_embeddings.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/kb/query/embeddings.py tests/test_v0917_embeddings.py
@@ -886,7 +886,7 @@ git commit -m "feat(query): add model2vec embedding wrapper + sqlite-vec vector 
 - Modify: `src/kb/query/__init__.py`
 - Create: `tests/test_v0917_hybrid.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_hybrid.py
@@ -939,12 +939,12 @@ class TestRRFFusion:
         assert all(r["score"] > 0 for r in fused)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_hybrid.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.query.hybrid'`
 
-- [ ] **Step 3: Write the hybrid search module**
+- [x] **Step 3: Write the hybrid search module**
 
 ```python
 # src/kb/query/hybrid.py
@@ -1027,12 +1027,12 @@ def hybrid_search(
     return rrf_fusion(all_lists)[:limit]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_hybrid.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Wire hybrid search into engine.py**
+- [x] **Step 5: Wire hybrid search into engine.py**
 
 In `src/kb/query/engine.py`, update `search_pages()` to use hybrid search when a vector index exists. Add imports at the top:
 
@@ -1092,7 +1092,7 @@ The key change is wrapping the existing BM25 logic into a lambda for `hybrid_sea
     scored = hybrid_search(question, bm25_search, vector_search, limit=max_results * 2)
 ```
 
-- [ ] **Step 6: Update query __init__.py**
+- [x] **Step 6: Update query __init__.py**
 
 ```python
 # src/kb/query/__init__.py
@@ -1105,12 +1105,12 @@ __all__ = ["query_wiki", "search_pages"]
 
 (No change needed — search_pages and query_wiki signatures remain the same.)
 
-- [ ] **Step 7: Run full test suite**
+- [x] **Step 7: Run full test suite**
 
 Run: `python -m pytest -x -q`
 Expected: All tests pass (hybrid falls back to BM25-only when no vector index exists)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/kb/query/hybrid.py src/kb/query/engine.py tests/test_v0917_hybrid.py
@@ -1125,7 +1125,7 @@ git commit -m "feat(query): hybrid search with RRF fusion — BM25 + vector via 
 - Modify: `src/kb/query/engine.py:108-190`
 - Create: `tests/test_v0917_layered_context.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_layered_context.py
@@ -1176,12 +1176,12 @@ class TestLayeredContextAssembly:
         assert "concepts/b" in ctx["context_pages"]
 ```
 
-- [ ] **Step 2: Run tests to verify current behavior**
+- [x] **Step 2: Run tests to verify current behavior**
 
 Run: `python -m pytest tests/test_v0917_layered_context.py -v`
 Expected: Tests should pass with current implementation (the refactored version must maintain the same contract)
 
-- [ ] **Step 3: Refactor _build_query_context for tiered loading**
+- [x] **Step 3: Refactor _build_query_context for tiered loading**
 
 Replace `_build_query_context` in `src/kb/query/engine.py` with a tiered version that:
 
@@ -1264,12 +1264,12 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     return {"context": "\n".join(sections), "context_pages": context_pages}
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `python -m pytest tests/test_v0917_layered_context.py -v && python -m pytest -x -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/kb/query/engine.py tests/test_v0917_layered_context.py
@@ -1284,7 +1284,7 @@ git commit -m "feat(query): layered context assembly — summaries first, then f
 - Modify: `src/kb/query/engine.py`
 - Create: `tests/test_v0917_raw_fallback.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_raw_fallback.py
@@ -1316,12 +1316,12 @@ class TestSearchRawSources:
             assert r["id"].startswith("raw/")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_raw_fallback.py -v`
 Expected: FAIL — `ImportError: cannot import name 'search_raw_sources'`
 
-- [ ] **Step 3: Implement raw-source search**
+- [x] **Step 3: Implement raw-source search**
 
 Add to `src/kb/query/engine.py`:
 
@@ -1375,7 +1375,7 @@ def search_raw_sources(
     return scored[:max_results]
 ```
 
-- [ ] **Step 4: Wire raw fallback into query_wiki context**
+- [x] **Step 4: Wire raw fallback into query_wiki context**
 
 In `query_wiki()`, after building context from wiki pages but before synthesizing, add raw source context if wiki context is thin. Add after line 223 (`ctx = _build_query_context(matching_pages)`):
 
@@ -1403,12 +1403,12 @@ Then include `raw_context` in the LLM prompt context:
     context = ctx["context"] + raw_context
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `python -m pytest tests/test_v0917_raw_fallback.py -v && python -m pytest -x -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/kb/query/engine.py tests/test_v0917_raw_fallback.py
@@ -1424,7 +1424,7 @@ git commit -m "feat(query): raw-source fallback retrieval — search raw/ alongs
 - Modify: `src/kb/ingest/pipeline.py`
 - Create: `tests/test_v0917_contradiction.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_contradiction.py
@@ -1477,12 +1477,12 @@ class TestDetectContradictions:
         assert isinstance(result, list)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_contradiction.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.ingest.contradiction'`
 
-- [ ] **Step 3: Write the contradiction detection module**
+- [x] **Step 3: Write the contradiction detection module**
 
 ```python
 # src/kb/ingest/contradiction.py
@@ -1589,12 +1589,12 @@ def _has_contradiction_signal(claim: str, existing_sentence: str) -> bool:
     return claim_has_signal != existing_has_signal
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_contradiction.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Wire into ingest pipeline**
+- [x] **Step 5: Wire into ingest pipeline**
 
 In `src/kb/ingest/pipeline.py`, add import:
 ```python
@@ -1632,12 +1632,12 @@ Add `contradiction_warnings` to the return dict (after line 679):
         result["contradictions"] = contradiction_warnings
 ```
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 Run: `python -m pytest -x -q`
 Expected: All tests pass
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/kb/ingest/contradiction.py src/kb/ingest/pipeline.py tests/test_v0917_contradiction.py
@@ -1654,7 +1654,7 @@ git commit -m "feat(ingest): auto-contradiction detection — flag conflicts wit
 - Modify: `src/kb/mcp/core.py`
 - Create: `tests/test_v0917_rewriter.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_v0917_rewriter.py
@@ -1685,12 +1685,12 @@ class TestRewriteQuery:
         assert result == ""
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_v0917_rewriter.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'kb.query.rewriter'`
 
-- [ ] **Step 3: Write the rewriter module**
+- [x] **Step 3: Write the rewriter module**
 
 ```python
 # src/kb/query/rewriter.py
@@ -1757,12 +1757,12 @@ def rewrite_query(
     return question
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_v0917_rewriter.py -v`
 Expected: PASS (the no-context and standalone cases don't hit the LLM)
 
-- [ ] **Step 5: Wire rewriter into query_wiki**
+- [x] **Step 5: Wire rewriter into query_wiki**
 
 In `src/kb/query/engine.py`, update `query_wiki` signature and body:
 
@@ -1791,7 +1791,7 @@ Then use `effective_question` for the search call:
     matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)
 ```
 
-- [ ] **Step 6: Add conversation_context param to MCP kb_query**
+- [x] **Step 6: Add conversation_context param to MCP kb_query**
 
 In `src/kb/mcp/core.py`, update `kb_query` signature:
 
@@ -1805,12 +1805,12 @@ Pass it through to `query_wiki` in the API mode branch:
         result = query_wiki(question, max_results=max_results, conversation_context=conversation_context or None)
 ```
 
-- [ ] **Step 7: Run full test suite**
+- [x] **Step 7: Run full test suite**
 
 Run: `python -m pytest -x -q`
 Expected: All tests pass
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/kb/query/rewriter.py src/kb/query/engine.py src/kb/mcp/core.py tests/test_v0917_rewriter.py
@@ -1825,37 +1825,37 @@ git commit -m "feat(query): multi-turn query rewriting — expand pronouns/refer
 - Modify: `CLAUDE.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `python -m pytest -v`
 Expected: All tests pass (1033 existing + new Phase 4 tests)
 
-- [ ] **Step 2: Count new tests**
+- [x] **Step 2: Count new tests**
 
 Run: `python -m pytest tests/test_v0917_*.py -v --co -q | tail -1`
 Expected: Shows count of new test functions
 
-- [ ] **Step 3: Run ruff lint**
+- [x] **Step 3: Run ruff lint**
 
 Run: `ruff check src/kb/query/dedup.py src/kb/query/embeddings.py src/kb/query/hybrid.py src/kb/query/rewriter.py src/kb/ingest/evidence.py src/kb/ingest/contradiction.py`
 Expected: No lint errors
 
-- [ ] **Step 4: Update CLAUDE.md**
+- [x] **Step 4: Update CLAUDE.md**
 
 Update version, test count, module count, and Implementation Status to reflect Phase 4 completion. Update Phase 4 section to say "Phase 4 complete" and move items to history.
 
-- [ ] **Step 5: Update CHANGELOG.md**
+- [x] **Step 5: Update CHANGELOG.md**
 
 Add `[0.10.0]` entry under `[Unreleased]` with all Phase 4 changes grouped by Added/Changed.
 
-- [ ] **Step 6: Bump version**
+- [x] **Step 6: Bump version**
 
 Update `src/kb/__init__.py`:
 ```python
 __version__ = "0.10.0"
 ```
 
-- [ ] **Step 7: Commit docs and version bump**
+- [x] **Step 7: Commit docs and version bump**
 
 ```bash
 git add CLAUDE.md CHANGELOG.md src/kb/__init__.py
