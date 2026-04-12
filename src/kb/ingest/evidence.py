@@ -20,6 +20,15 @@ def build_evidence_entry(
     return f"- {d} | {source_ref} | {action}"
 
 
+def format_evidence_entry(date_str: str, source: str, summary: str) -> str:
+    """Format a single evidence trail entry line (alternative signature).
+
+    Convenience wrapper around build_evidence_entry for callers that have
+    already computed the date string and prefer named arguments.
+    """
+    return build_evidence_entry(source_ref=source, action=summary, entry_date=date_str)
+
+
 def append_evidence_trail(
     page_path: Path,
     source_ref: str,
@@ -34,7 +43,7 @@ def append_evidence_trail(
     content = page_path.read_text(encoding="utf-8")
     entry = build_evidence_entry(source_ref, action, entry_date)
 
-    trail_match = re.search(r"^## Evidence Trail\n", content, re.MULTILINE)
+    trail_match = re.search(r"^## Evidence Trail\r?\n", content, re.MULTILINE)
     if trail_match:
         # Insert new entry right after the header
         insert_pos = trail_match.end()

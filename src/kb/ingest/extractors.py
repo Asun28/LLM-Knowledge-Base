@@ -1,5 +1,6 @@
 """Source-type-specific extraction logic (article, paper, video, etc.)."""
 
+import copy
 import functools
 import logging
 import re
@@ -60,16 +61,8 @@ KNOWN_LIST_FIELDS = frozenset(
 
 
 @functools.lru_cache(maxsize=16)
-def load_template(source_type: str) -> dict:
-    """Load extraction template YAML for a given source type.
-
-    Results are cached per-process via LRU cache. Template changes on disk
-    will not be reflected until the process is restarted (cache is not invalidated).
-
-    Raises:
-        ValueError: If source_type is not in the whitelist.
-        FileNotFoundError: If template file is missing.
-    """
+def _load_template_cached(source_type: str) -> dict:
+    """Internal LRU-cached template loader. Returns the raw dict — do not mutate."""
     if source_type not in VALID_SOURCE_TYPES:
         raise ValueError(
             f"Invalid source type: {source_type!r}. "
@@ -79,6 +72,22 @@ def load_template(source_type: str) -> dict:
     if not template_path.exists():
         raise FileNotFoundError(f"No template for source type: {source_type}")
     return yaml.safe_load(template_path.read_text(encoding="utf-8"))
+
+
+def load_template(source_type: str) -> dict:
+    """Load extraction template YAML for a given source type.
+
+    Returns a fresh deep copy each call so callers may freely mutate the result
+    without corrupting the internal LRU cache.
+
+    Results are cached per-process via LRU cache. Template changes on disk
+    will not be reflected until the process is restarted (cache is not invalidated).
+
+    Raises:
+        ValueError: If source_type is not in the whitelist.
+        FileNotFoundError: If template file is missing.
+    """
+    return copy.deepcopy(_load_template_cached(source_type))
 
 
 def _parse_field_spec(spec: str) -> tuple[str, str, bool]:
@@ -174,7 +183,7 @@ def clear_template_cache() -> None:
 
     Useful during long-running processes or interactive template development.
     """
-    load_template.cache_clear()
+    _load_template_cached.cache_clear()
     _build_schema_cached.cache_clear()
 
 

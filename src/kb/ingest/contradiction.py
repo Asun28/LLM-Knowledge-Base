@@ -39,6 +39,12 @@ def detect_contradictions(
     if not new_claims or not existing_pages:
         return []
 
+    if len(new_claims) > max_claims:
+        logger.debug(
+            "Checking first %d of %d claims for contradictions (truncated)",
+            max_claims,
+            len(new_claims),
+        )
     claims_to_check = new_claims[:max_claims]
     contradictions = []
 
@@ -101,7 +107,16 @@ def _find_overlapping_sentences(
 
 
 def _has_contradiction_signal(claim: str, existing_sentence: str) -> bool:
-    """Check if claim and existing sentence have contradictory signals."""
+    """Check if claim and existing sentence have contradictory signals.
+
+    Returns True when exactly one of the two texts contains a negation or
+    contradiction keyword (asymmetric negation heuristic).
+
+    Known limitation: when BOTH sides contain negation words (e.g., "X is not fast"
+    vs "X is not slow"), the symmetric check returns False and no contradiction is
+    flagged, even though they make different claims. Extending this would require
+    semantic parsing beyond the current keyword heuristic.
+    """
     # Both must share entities but one must contain a negation/contradiction word
     claim_has_signal = bool(_CONTRADICTION_SIGNALS.search(claim))
     existing_has_signal = bool(_CONTRADICTION_SIGNALS.search(existing_sentence))
