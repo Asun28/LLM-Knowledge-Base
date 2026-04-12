@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 4 complete (v0.10.0).** 1079 tests, 25 MCP tools, 18 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
+**Phase 4 complete (v0.10.0).** 1111 tests, 25 MCP tools, 18 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -128,7 +128,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-1079 tests across 49 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v0917_task01.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+1111 tests across 55 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v0917_task01.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 
@@ -252,7 +252,7 @@ Key usage:
 
 See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.10.0). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
 
-**Current:** Phase 4 complete (v0.10.0) — 1079 tests, 25 MCP tools, 18 modules. Phase 4 adds hybrid search with RRF fusion, 4-layer search dedup, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback, auto-contradiction detection on ingest, and multi-turn query rewriting. See CHANGELOG.md for full details.
+**Current:** Phase 4 complete (v0.10.0) — 1111 tests, 25 MCP tools, 18 modules. Phase 4 adds hybrid search with RRF fusion, 4-layer search dedup, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback, auto-contradiction detection on ingest, and multi-turn query rewriting. See CHANGELOG.md for full details.
 
 **Known issues:** See `BACKLOG.md` for active backlog items. Format guide is in the HTML comment at the top of that file. Severity levels: CRITICAL (blocks release), HIGH (silent wrong results / security), MEDIUM (quality gaps / missing coverage), LOW (style/naming). Items grouped by severity then by module area. Resolved items are deleted (fix recorded in CHANGELOG.md); resolved phases collapse to a one-liner under "Resolved Phases".
 
