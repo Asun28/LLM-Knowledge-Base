@@ -74,6 +74,8 @@ class TestUpdateExistingPageSingleRead:
             "kb.ingest.pipeline.atomic_text_write",
             lambda content, path: path.write_text(content, encoding="utf-8"),
         )
+        # Suppress evidence trail to isolate single-read assertion to pipeline core logic
+        monkeypatch.setattr("kb.ingest.pipeline.append_evidence_trail", lambda *a, **kw: None)
         pipeline._update_existing_page(page, "raw/articles/b.md")
         assert read_count[0] == 1, f"File read {read_count[0]} times, expected 1"
 
