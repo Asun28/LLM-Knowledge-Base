@@ -17,6 +17,7 @@ from kb.config import (
     RAW_DIR,
     SMALL_SOURCE_THRESHOLD,
     SOURCE_TYPE_DIRS,
+    WIKI_CONTRADICTIONS,
     WIKI_DIR,
     WIKI_INDEX,
     WIKI_SOURCES,
@@ -25,7 +26,7 @@ from kb.config import (
 from kb.ingest.contradiction import detect_contradictions
 from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
-from kb.utils.hashing import content_hash as compute_hash, hash_bytes
+from kb.utils.hashing import hash_bytes
 from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
@@ -35,7 +36,8 @@ from kb.utils.wiki_log import append_wiki_log
 logger = logging.getLogger(__name__)
 
 # Fix 2.3 (module-level): compiled once, reused in every _update_existing_page call.
-_SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:  - [^\n]*\n)*)", re.MULTILINE)
+# Uses [ \t]+ instead of hardcoded 2 spaces to support both 2-space and 4-space YAML indentation.
+_SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]+- [^\n]*\n)*)", re.MULTILINE)
 
 
 def _find_affected_pages(
@@ -294,18 +296,27 @@ def _update_existing_page(
         fm_text = fm_match.group(1)
         body_text = fm_match.group(2)
     else:
-        # Fix 2.9: warn when frontmatter regex fails to match
+        # Fix 2.9: warn and return early — falling back to full-file treatment risks
+        # corrupting body text that contains "updated: ..." patterns.
         logger.warning(
-            "Could not parse frontmatter block in %s; treating whole file as body", page_path
+            "Could not parse frontmatter block in %s; skipping update", page_path
         )
-        fm_text = content
-        body_text = ""
+        return
 
     # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
     source_match = _SOURCE_BLOCK_RE.search(fm_text)
     if source_match:
         block_end = source_match.end()
-        fm_text = fm_text[:block_end] + f'  - "{safe_ref}"\n' + fm_text[block_end:]
+        # Detect indentation from the first existing entry to preserve style (2- or 4-space).
+        block_lines = source_match.group(1).split("\n")
+        first_entry_line = block_lines[1] if len(block_lines) > 1 else ""
+        indent = (
+            len(first_entry_line) - len(first_entry_line.lstrip())
+            if first_entry_line.strip()
+            else 2
+        )
+        new_source_line = " " * indent + f'- "{safe_ref}"\n'
+        fm_text = fm_text[:block_end] + new_source_line + fm_text[block_end:]
     elif "source:" in fm_text:
         fm_text = fm_text.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
 
@@ -322,8 +333,8 @@ def _update_existing_page(
         # Use MULTILINE (not DOTALL) so `.` does not cross line boundaries;
         # match non-empty lines or blank lines until a new section or end-of-string.
         body_text = re.sub(
-            r"(## References\n(?:[^\n].*\n|\n)*?)(?=\n## |\Z)",
-            lambda m: m.group(1) + ref_line + "\n",
+            r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)",
+            lambda m: m.group(1).rstrip("\n") + "\n" + ref_line + "\n",
             body_text,
             count=1,
             flags=re.MULTILINE,
@@ -364,7 +375,8 @@ def _update_sources_mapping(
     """
     sources_file = (wiki_dir / "_sources.md") if wiki_dir is not None else WIKI_SOURCES
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
-    entry = f"- `{source_ref}` → {pages_str}\n"
+    escaped_ref = source_ref.replace("`", r"\`")
+    entry = f"- `{escaped_ref}` → {pages_str}\n"
     if not sources_file.exists():
         logger.warning("_sources.md not found — skipping source mapping for %s", source_ref)
         return
@@ -440,6 +452,8 @@ def _process_item_batch(
     (empty-name, empty-slug, collision), for both created and updated pages.
     Used by the caller to build index entries.
     """
+    if page_type not in _SUBDIR_MAP:
+        raise ValueError(f"Unknown page_type: {page_type!r}. Valid: {list(_SUBDIR_MAP)}")
     verb = "Mentioned" if page_type == "entity" else "Discussed"
     subdir = _SUBDIR_MAP[page_type]
     items: list = []
@@ -586,12 +600,12 @@ def ingest_source(
             summary_slug,
         )
     summary_path = effective_wiki_dir / "summaries" / f"{summary_slug}.md"
-    summary_content = _build_summary_content(extraction, source_type)
     if summary_path.exists():
         _update_existing_page(summary_path, source_ref, verb="Summarized")
         pages_updated.append(f"summaries/{summary_slug}")
         # Do NOT add to new_pages_with_titles — wikilinks for this page already exist
     else:
+        summary_content = _build_summary_content(extraction, source_type)
         _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
         pages_created.append(f"summaries/{summary_slug}")
         new_pages_with_titles.append((f"summaries/{summary_slug}", title))
@@ -638,23 +652,25 @@ def ingest_source(
 
     # 4. Update index files (single read/write)
     # Fix 2.7: use page IDs from created pages for slug consistency (avoids re-slugify divergence)
+    # Precompute slug→display-name dicts (O(n)) to avoid O(n²) linear scans below.
+    e_name_by_slug: dict[str, str] = {slugify(e): e for e in e_valid}
+    c_name_by_slug: dict[str, str] = {slugify(c): c for c in c_valid}
     index_entries: list[tuple[str, str, str]] = [("summary", summary_slug, title)]
     for pid in e_created:
         slug = pid.split("/", 1)[-1] if "/" in pid else pid
-        # Find matching name from e_valid by re-slugifying
-        name = next((e for e in e_valid if slugify(e) == slug), slug)
+        name = e_name_by_slug.get(slug, slug)
         index_entries.append(("entity", slug, name))
     for pid in e_updated:
         slug = pid.split("/", 1)[-1] if "/" in pid else pid
-        name = next((e for e in e_valid if slugify(e) == slug), slug)
+        name = e_name_by_slug.get(slug, slug)
         index_entries.append(("entity", slug, name))
     for pid in c_created:
         slug = pid.split("/", 1)[-1] if "/" in pid else pid
-        name = next((c for c in c_valid if slugify(c) == slug), slug)
+        name = c_name_by_slug.get(slug, slug)
         index_entries.append(("concept", slug, name))
     for pid in c_updated:
         slug = pid.split("/", 1)[-1] if "/" in pid else pid
-        name = next((c for c in c_valid if slugify(c) == slug), slug)
+        name = c_name_by_slug.get(slug, slug)
         index_entries.append(("concept", slug, name))
     _update_index_batch(index_entries, wiki_dir=effective_wiki_dir)
 
@@ -720,6 +736,26 @@ def ingest_source(
                         len(contradiction_warnings),
                         source_ref,
                     )
+                    # Persist contradictions to wiki/contradictions.md (append-only).
+                    try:
+                        header = (
+                            "# Contradictions\n\n"
+                            "Append-only log of conflicts detected during ingest.\n\n"
+                        )
+                        existing = (
+                            WIKI_CONTRADICTIONS.read_text(encoding="utf-8")
+                            if WIKI_CONTRADICTIONS.exists()
+                            else header
+                        )
+                        block = f"\n## {source_ref} — {date.today().isoformat()}\n"
+                        for w in contradiction_warnings:
+                            claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
+                            block += f"- {claim}\n"
+                        atomic_text_write(existing + block, WIKI_CONTRADICTIONS)
+                    except Exception as write_err:
+                        logger.warning(
+                            "Failed to write contradictions.md: %s", write_err
+                        )
             except Exception as e:
                 logger.debug("Contradiction detection failed (non-fatal): %s", e)
 
