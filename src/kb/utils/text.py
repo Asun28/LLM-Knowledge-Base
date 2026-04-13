@@ -106,6 +106,11 @@ _SLUGIFY_SYMBOL_MAP = {
     "c/c++": "c-cpp",
 }
 
+# Unicode bidirectional formatting marks (LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI).
+# Strip from any string we YAML-encode to defend against audit-log confusion
+# attacks (e.g. an LLM-supplied title rendering backward in terminals).
+_BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+
 
 def slugify(text: str) -> str:
     """Convert text to a URL-friendly slug.
@@ -135,6 +140,7 @@ def yaml_escape(value: str) -> str:
 
     Handles backslashes, double quotes, newlines, tabs, carriage returns, and null bytes.
     """
+    value = _BIDI_RE.sub("", value)
     if "\0" in value:
         logger.warning("Null byte removed from YAML value (possible data corruption)")
         value = value.replace("\0", "")
