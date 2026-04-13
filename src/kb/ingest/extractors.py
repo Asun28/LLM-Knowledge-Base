@@ -9,6 +9,7 @@ import yaml
 
 from kb.config import SOURCE_TYPE_DIRS, TEMPLATES_DIR
 from kb.utils.llm import call_llm_json
+from kb.utils.pages import load_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -198,15 +199,16 @@ def _build_schema_cached(source_type: str) -> dict:
     return build_extraction_schema(template)
 
 
-def build_extraction_prompt(content: str, template: dict) -> str:
+def build_extraction_prompt(content: str, template: dict, purpose: str | None = None) -> str:
     """Build the LLM prompt for extracting structured data from a raw source."""
     fields = template["extract"]
     field_descriptions = "\n".join(f"- {f}" for f in fields)
     source_name = template.get("name", "document")
     source_desc = template.get("description", "")
+    purpose_section = f"\nKB FOCUS (bias extraction toward these goals):\n{purpose}\n" if purpose else ""
 
     return f"""Extract structured information from the following source document.
-
+{purpose_section}
 Source type: {source_name} — {source_desc}
 
 Extract these fields as a JSON object:
@@ -239,7 +241,8 @@ def extract_from_source(content: str, source_type: str) -> dict:
         dict with extracted fields matching the template schema.
     """
     template = load_template(source_type)
-    prompt = build_extraction_prompt(content, template)
+    purpose = load_purpose()
+    prompt = build_extraction_prompt(content, template, purpose=purpose)
     schema = _build_schema_cached(source_type)
     system_msg = "You are a precise information extractor."
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import frontmatter
 import yaml
 
-from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.config import WIKI_DIR, WIKI_PURPOSE, WIKI_SUBDIR_TO_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +91,22 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                 logger.warning("Skipping page %s: %s", page_path, e)
                 continue
     return pages
+
+
+def load_purpose(wiki_dir: Path | None = None) -> str | None:
+    """Load the KB focus document (wiki/purpose.md) if it exists.
+
+    Returns the file content as a string, or None if the file does not exist.
+    Used to bias LLM extraction and query synthesis toward the KB's goals.
+
+    Args:
+        wiki_dir: Path to wiki directory. Defaults to WIKI_DIR from config.
+    """
+    purpose_path = (wiki_dir / "purpose.md") if wiki_dir else WIKI_PURPOSE
+    if not purpose_path.exists():
+        return None
+    try:
+        return purpose_path.read_text(encoding="utf-8").strip() or None
+    except OSError as e:
+        logger.warning("Could not read purpose.md: %s", e)
+        return None

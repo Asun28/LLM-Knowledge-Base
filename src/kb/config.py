@@ -16,6 +16,7 @@ WIKI_SOURCES = WIKI_DIR / "_sources.md"
 WIKI_CATEGORIES = WIKI_DIR / "_categories.md"
 WIKI_LOG = WIKI_DIR / "log.md"
 WIKI_CONTRADICTIONS = WIKI_DIR / "contradictions.md"
+WIKI_PURPOSE = WIKI_DIR / "purpose.md"
 
 # ── Wiki subdirectories ───────────────────────────────────────
 WIKI_ENTITIES = WIKI_DIR / "entities"

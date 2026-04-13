@@ -21,7 +21,7 @@ from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
 from kb.query.hybrid import hybrid_search
 from kb.utils.llm import call_llm
-from kb.utils.pages import load_all_pages
+from kb.utils.pages import load_all_pages, load_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -390,8 +390,11 @@ def query_wiki(
     context = ctx["context"] + raw_context
 
     # 3. Synthesize answer with LLM
-    prompt = f"""You are answering a question using a knowledge wiki as your source.
+    purpose = load_purpose(wiki_dir)
+    purpose_section = f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
 
+    prompt = f"""You are answering a question using a knowledge wiki as your source.
+{purpose_section}
 QUESTION: {effective_question[:2000].replace(chr(10), " ").replace(chr(13), " ")}
 
 WIKI CONTEXT:
