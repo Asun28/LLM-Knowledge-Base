@@ -20,6 +20,11 @@ openspec/
 # Wiki and raw sources (LLM-generated, local only)
 wiki/
 raw/
+# …but track the demo example so cloners see a worked reference
+!demo/wiki/
+!demo/wiki/**
+!demo/raw/
+!demo/raw/**
 
 # Environment
 .env
