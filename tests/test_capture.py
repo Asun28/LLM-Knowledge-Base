@@ -39,10 +39,13 @@ class TestYamlEscapeBidiMarks:
             result = yaml_escape(s)
             assert s in result or result == s, f"normal unicode {s!r} altered: {result!r}"
 
-    def test_bidi_strip_runs_before_existing_escape(self):
-        # Combine bidi mark + a control char that yaml_escape currently handles.
-        # Both should be removed/escaped without one breaking the other.
+    def test_bidi_and_control_both_stripped(self):
+        # Bidi range (U+202A-2069) and control range (\x01-\x1f) are disjoint,
+        # so order of stripping does not matter for output. This test verifies
+        # both classes are removed in a single yaml_escape call without
+        # interference, not the ordering itself.
         result = yaml_escape("a\u202eb\x01c")
         assert "\u202e" not in result
-        # \x01 handled by existing escape; just verify result is non-empty and has a/b/c
+        assert "\x01" not in result
+        # The visible chars survive
         assert "a" in result and "b" in result and "c" in result

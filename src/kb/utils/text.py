@@ -138,7 +138,9 @@ def slugify(text: str) -> str:
 def yaml_escape(value: str) -> str:
     """Escape a string for safe YAML double-quote style.
 
-    Handles backslashes, double quotes, newlines, tabs, carriage returns, and null bytes.
+    Strips Unicode bidi formatting marks (U+202A-202E, U+2066-2069) and C0/C1
+    control characters, then escapes backslashes, double quotes, newlines,
+    tabs, carriage returns, and null bytes.
     """
     value = _BIDI_RE.sub("", value)
     if "\0" in value:
