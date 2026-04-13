@@ -9,6 +9,8 @@ Pytest imports are added in subsequent tasks alongside the first tests that use 
 
 import pytest
 
+from kb.capture import _validate_input
+from kb.config import CAPTURE_MAX_BYTES
 from kb.utils.text import yaml_escape
 
 
@@ -49,3 +51,63 @@ class TestYamlEscapeBidiMarks:
         assert "\x01" not in result
         # The visible chars survive
         assert "a" in result and "b" in result and "c" in result
+
+
+class TestValidateInput:
+    """Spec §4 step 5, §7 Class A (input reject)."""
+
+    def test_empty_string_rejects(self):
+        normalized, err = _validate_input("")
+        assert normalized is None
+        assert err.startswith("Error: content is empty")
+
+    def test_whitespace_only_rejects(self):
+        normalized, err = _validate_input("   \n\t  \r\n")
+        assert normalized is None
+        assert err.startswith("Error: content is empty")
+
+    def test_at_boundary_passes(self):
+        # Exactly CAPTURE_MAX_BYTES of UTF-8 bytes (ASCII so 1 byte/char)
+        content = "a" * CAPTURE_MAX_BYTES
+        normalized, err = _validate_input(content)
+        assert err == ""
+        assert normalized == content
+
+    def test_one_byte_over_rejects(self):
+        content = "a" * (CAPTURE_MAX_BYTES + 1)
+        normalized, err = _validate_input(content)
+        assert normalized is None
+        assert "exceeds" in err
+        assert str(CAPTURE_MAX_BYTES + 1) in err  # actual size in message
+
+    def test_size_check_uses_utf8_bytes_not_chars(self):
+        # 4-byte UTF-8 char × N where N×4 > CAPTURE_MAX_BYTES but N < CAPTURE_MAX_BYTES
+        char = "𝕏"  # 4 bytes in UTF-8
+        n = (CAPTURE_MAX_BYTES // 4) + 1  # over the cap by bytes, well under by chars
+        content = char * n
+        normalized, err = _validate_input(content)
+        assert normalized is None
+        assert "exceeds" in err
+
+    def test_crlf_normalized_to_lf(self):
+        normalized, err = _validate_input("a\r\nb\r\nc")
+        assert err == ""
+        assert normalized == "a\nb\nc"
+
+    def test_size_check_runs_pre_normalize(self):
+        # 25001 CRLF pairs = 50002 raw bytes / 50001 post-LF bytes.
+        # Per spec §4 invariant 5, size check is on raw — must reject.
+        content = "ab\r\n" * 12500 + "ab\r\n"  # 50004 raw bytes
+        assert len(content.encode("utf-8")) > CAPTURE_MAX_BYTES
+        # Confirm post-normalize would be under cap
+        assert len(content.replace("\r\n", "\n").encode("utf-8")) <= CAPTURE_MAX_BYTES
+        normalized, err = _validate_input(content)
+        assert normalized is None
+        assert "exceeds" in err
+
+    def test_returns_normalized_form_for_downstream(self):
+        # Downstream secret scan / verbatim check operates on the LF-normalized form
+        normalized, err = _validate_input("hello\r\nworld")
+        assert err == ""
+        assert "\r\n" not in normalized
+        assert normalized == "hello\nworld"
