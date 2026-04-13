@@ -4,3 +4,4 @@ Test matrix coverage maps to spec §9 — Class A (input reject + secret scan + 
 Class B (LLM failure), Class C (quality filter), Class D (write errors), happy path
 (frontmatter, slug, MCP wrapper), round-trip integration.
 """
+import pytest
