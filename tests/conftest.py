@@ -8,7 +8,7 @@ import pytest
 from kb.config import PROJECT_ROOT
 
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
-RAW_SUBDIRS = ("articles", "papers", "repos", "videos")
+RAW_SUBDIRS = ("articles", "papers", "repos", "videos", "captures")
 
 
 @pytest.fixture
