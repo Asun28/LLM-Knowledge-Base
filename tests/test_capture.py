@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from kb.capture import _check_rate_limit, _rate_limit_window, _validate_input
+from kb.capture import _check_rate_limit, _rate_limit_window, _scan_for_secrets, _validate_input
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
 from kb.utils.text import yaml_escape
 
@@ -19,17 +19,20 @@ from kb.utils.text import yaml_escape
 class TestYamlEscapeBidiMarks:
     """Spec §8 — strip Unicode bidi override marks to defend audit-log confusion."""
 
-    @pytest.mark.parametrize("codepoint,name", [
-        ("\u202a", "LEFT-TO-RIGHT EMBEDDING"),
-        ("\u202b", "RIGHT-TO-LEFT EMBEDDING"),
-        ("\u202c", "POP DIRECTIONAL FORMATTING"),
-        ("\u202d", "LEFT-TO-RIGHT OVERRIDE"),
-        ("\u202e", "RIGHT-TO-LEFT OVERRIDE"),
-        ("\u2066", "LEFT-TO-RIGHT ISOLATE"),
-        ("\u2067", "RIGHT-TO-LEFT ISOLATE"),
-        ("\u2068", "FIRST STRONG ISOLATE"),
-        ("\u2069", "POP DIRECTIONAL ISOLATE"),
-    ])
+    @pytest.mark.parametrize(
+        "codepoint,name",
+        [
+            ("\u202a", "LEFT-TO-RIGHT EMBEDDING"),
+            ("\u202b", "RIGHT-TO-LEFT EMBEDDING"),
+            ("\u202c", "POP DIRECTIONAL FORMATTING"),
+            ("\u202d", "LEFT-TO-RIGHT OVERRIDE"),
+            ("\u202e", "RIGHT-TO-LEFT OVERRIDE"),
+            ("\u2066", "LEFT-TO-RIGHT ISOLATE"),
+            ("\u2067", "RIGHT-TO-LEFT ISOLATE"),
+            ("\u2068", "FIRST STRONG ISOLATE"),
+            ("\u2069", "POP DIRECTIONAL ISOLATE"),
+        ],
+    )
     def test_strips_bidi_codepoint(self, codepoint, name):
         result = yaml_escape(f"pay{codepoint}usalert")
         assert codepoint not in result, f"{name} ({codepoint!r}) should be stripped"
@@ -187,3 +190,83 @@ class TestCheckRateLimit:
         # Exactly CAPTURE_MAX_CALLS_PER_HOUR allowed; the rest rejected
         assert accepted == CAPTURE_MAX_CALLS_PER_HOUR, f"accepted={accepted}, total={total}"
         assert rejected == total - CAPTURE_MAX_CALLS_PER_HOUR
+
+
+class TestScanForSecretsPlain:
+    """Spec §8 expanded secret pattern list — one test per pattern label.
+    Each test confirms (a) the pattern matches a representative literal,
+    (b) the returned label is informative.
+    """
+
+    @pytest.mark.parametrize(
+        "content,expected_label_substr",
+        [
+            ("AKIAIOSFODNN7EXAMPLE my key", "AWS"),
+            ("ASIATESTSTSEXAMPLE12345 temp creds", "AWS"),
+            ("aws_secret_access_key=" + "A" * 40, "AWS"),
+            ("sk-proj-" + "x" * 32, "OpenAI"),
+            ("sk-" + "y" * 32, "OpenAI"),
+            ("sk-ant-" + "z" * 32, "Anthropic"),
+            ("ghp_" + "a" * 36, "GitHub"),
+            ("github_pat_" + "b" * 82, "GitHub"),
+            ("xoxb-12345-67890-abcdefXYZ123", "Slack"),
+            (
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0."
+                "signature",
+                "JWT",
+            ),
+            ("AIza" + "X" * 35, "Google"),
+            ("ya29.AHES6ZQ_long_token_string", "GCP OAuth"),
+            ('"type": "service_account"', "GCP service account"),
+            ("sk_live_" + "a" * 30, "Stripe"),
+            ("rk_live_" + "b" * 30, "Stripe"),
+            ("hf_" + "c" * 35, "HuggingFace"),
+            ("AC" + "0" * 32, "Twilio"),
+            ("SK" + "1" * 32, "Twilio"),
+            ("npm_" + "x" * 36, "npm"),
+            ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "HTTP Basic"),
+            ("API_KEY=secret_value_here", "env-var"),
+            ("PASSWORD=mypass123", "env-var"),
+            ("postgres://user:pass@host:5432/db", "DB connection"),
+            ("mysql://admin:secret@localhost/db", "DB connection"),
+            ("mongodb+srv://user:pass@cluster.example.net/", "DB connection"),
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----",
+                "Private key",
+            ),
+            (
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbnpz...\n"
+                "-----END OPENSSH PRIVATE KEY-----",
+                "Private key",
+            ),
+        ],
+    )
+    def test_secret_pattern_matches(self, content, expected_label_substr):
+        result = _scan_for_secrets(content)
+        assert result is not None, f"expected match for: {content[:40]!r}"
+        label, location = result
+        assert expected_label_substr.lower() in label.lower(), (
+            f"label {label!r} should contain {expected_label_substr!r}"
+        )
+
+    def test_benign_content_passes(self):
+        assert _scan_for_secrets("we decided to use atomic writes") is None
+        assert _scan_for_secrets("the model returned 42 items") is None
+        assert _scan_for_secrets("# Python comment about API design") is None
+
+    def test_returns_line_number_for_plain_match(self):
+        content = "line one\nline two\nAKIAIOSFODNN7EXAMPLE\nline four"
+        result = _scan_for_secrets(content)
+        assert result is not None
+        label, location = result
+        assert location == "line 3"
+
+    def test_first_pattern_match_short_circuits(self):
+        # Two patterns in same content — should return first
+        content = "AKIAIOSFODNN7EXAMPLE and sk-ant-" + "z" * 32
+        result = _scan_for_secrets(content)
+        assert result is not None
+        # Order in pattern list determines which wins; just verify deterministic
+        result2 = _scan_for_secrets(content)
+        assert result == result2
