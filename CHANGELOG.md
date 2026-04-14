@@ -22,7 +22,10 @@ Rules:
 ## [Unreleased]
 
 Post-release audit fixes for Phase 4 v0.10.0 — all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
-Plus Phase 4.1 sweep: 16 LOW/NIT backlog items applied directly (no test changes).
+Plus Phase 4.1 sweep: 16 LOW/NIT backlog items applied directly. One test expectation
+(`TestSymlinkGuard.test_symlink_outside_project_root_refuses_import`) was updated to match
+production (`RuntimeError` rather than `AssertionError`, following the assert → raise
+migration that shipped in the original kb_capture PR); no new tests added, no test semantics changed.
 
 ### Phase 4.1 — easy backlog sweep (2026-04-14)
 - `src/kb/capture.py` `_check_rate_limit` — `retry_after = max(1, ...)` so frozen-clock test fixtures can't yield ≤0 retry hints

@@ -319,9 +319,12 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
         base = kind
     if base not in existing:
         return base
-    # Collision loop: bounded in practice by CAPTURE_MAX_CALLS_PER_HOUR growth
-    # of `existing`. Integer suffixes guarantee termination since each candidate
-    # is distinct until a free slot is found.
+    # Collision loop: termination is guaranteed by the monotonic integer suffix
+    # (each `n` produces a distinct candidate slug). Runtime is O(|collision
+    # chain|) — proportional to how many `existing` entries already start with
+    # `base-`. `existing` comes from a full CAPTURES_DIR scan so its size is
+    # unbounded by this function; the practical bound is the rate limit and
+    # normal directory hygiene, not a hard loop cap.
     n = 2
     while True:
         suffix = f"-{n}"
