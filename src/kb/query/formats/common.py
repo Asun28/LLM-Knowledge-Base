@@ -62,11 +62,11 @@ def output_path_for(question: str, fmt: str) -> Path:
     """
     # KeyError for bad format — caller should validate upstream
     ext = _FORMAT_EXT[fmt]
-    # Re-read OUTPUTS_DIR via module attribute lookup so pytest's monkeypatch
-    # on `kb.query.formats.common.OUTPUTS_DIR` is honored on every call.
-    from kb.query.formats import common as _self
-
-    out_dir = _self.OUTPUTS_DIR
+    # Read the module-scope OUTPUTS_DIR directly. Global name resolution goes
+    # through the module's __dict__, so pytest's monkeypatch of
+    # `kb.query.formats.common.OUTPUTS_DIR` is honored on every call without
+    # a re-import (avoids pulling all adapter modules on the hot path).
+    out_dir = OUTPUTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S-%f")
     slug = safe_slug(question)

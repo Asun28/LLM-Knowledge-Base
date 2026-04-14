@@ -452,9 +452,14 @@ INSTRUCTIONS:
             # ValueError comes from our own validation — safe to surface verbatim
             logger.warning("Output format '%s' failed: %s", output_format, e)
             result_dict["output_error"] = str(e)
-        except OSError as e:
-            # OSError may embed absolute file paths — scrub before surfacing
-            logger.warning("Output format '%s' OSError: %s", output_format, e)
+        except Exception as e:  # noqa: BLE001
+            # Catch-all for adapter failures (OSError on disk, ImportError for
+            # optional deps like nbformat, nbformat.ValidationError, etc.) —
+            # the synthesized answer is still valid, so surface a scrubbed
+            # error message instead of letting the exception abort query_wiki.
+            logger.warning(
+                "Output format '%s' %s: %s", output_format, type(e).__name__, e
+            )
             result_dict["output_error"] = (
                 f"write failed ({type(e).__name__}); see server logs for details"
             )

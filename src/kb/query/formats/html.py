@@ -46,25 +46,21 @@ def _render_answer_body(answer: str) -> str:
 
 
 def _render_sources(citations: list[dict]) -> str:
-    """Build the <ul class='sources'> block from structured citations."""
+    """Build the sources block by delegating to the canonical renderer.
+
+    Uses `kb.query.citations.format_citations(mode="html")` — same escape /
+    dedup / link-scheme rules as the rest of the codebase. Wrapping only
+    handles the empty-citations case with a dedicated placeholder.
+    """
     if not citations:
         return '<p class="sources"><em>No sources cited.</em></p>'
 
-    seen: set[str] = set()
-    lines = ['<ul class="sources">']
-    for cite in citations:
-        path = cite.get("path", "")
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        escaped_path = _escape(path)
-        if cite.get("type") == "wiki":
-            href = f"./wiki/{escaped_path}.md"
-            lines.append(f'  <li><a href="{href}">{escaped_path}</a></li>')
-        else:
-            lines.append(f"  <li><code>{escaped_path}</code></li>")
-    lines.append("</ul>")
-    return "\n".join(lines)
+    from kb.query.citations import format_citations
+
+    rendered = format_citations(citations, mode="html")
+    if not rendered:
+        return '<p class="sources"><em>No sources cited.</em></p>'
+    return rendered
 
 
 def render_html(result: dict) -> str:
