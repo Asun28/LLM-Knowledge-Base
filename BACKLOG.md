@@ -1014,9 +1014,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### HIGH LEVERAGE — Ambient Capture & Session Integration
 
-- `mcp/` `kb_capture` MCP tool — accept up to 50KB of conversation or note text; scan-tier LLM extracts discrete knowledge items (decisions, discoveries, corrections, gotchas) and filters noise; writes each item to `raw/captures/<slug>.md` with `source: mcp-capture` frontmatter; returns filenames for subsequent `kb_ingest`. Fills the gap `kb_ingest_content` cannot handle (it expects already-structured content). Source: sage-wiki `wiki_capture`.
-  (effort: Medium — scan-tier extraction prompt + raw/captures/ directory convention + per-item slug writer)
-
 - `ingest/session.py` — auto-ingest Claude Code / Codex CLI / Cursor / Gemini CLI session JSONLs as raw sources. Distinct from `kb_capture` (user-triggered, any text) and deferred "conversation→KB promotion" (positive-rated query answers only): this is ambient, runs on every session. Source: Pratiyush/llm-wiki.
   (effort: Medium — JSONL parsers per agent + dedup against existing raw/conversations/)
 
@@ -1160,6 +1157,240 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - **Model collapse (Shumailov 2024, Nature)** — cite in "known limitations": LLM-written pages feeding next LLM ingest degrade across generations; our counter is evidence-trail provenance plus two-vault promotion gate.
 - **Enterprise ceiling (Epsilla)** — document explicit scope: personal-scale research KB, not multi-user enterprise; no RBAC, no compliance audit log, file-I/O limits at millions-of-docs scale.
 - **Vibe-thinking critique (HN)** — *"Deep writing means coming up with things through the process of producing"*; defend with mandatory human-review gates on promotion, not optional.
+
+---
+
+## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
+
+<!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
+     running Rounds 1 and 2 against feat/kb-capture. Primary scope: new kb.capture module + supporting changes.
+     Items grouped by severity, keyed by file. Round tag in parens (R1/R2). -->
+
+### R2 rating corrections (apply before acting on R1 items)
+
+- `capture.py` R1 CRITICAL — **FALSE POSITIVE**: `kb_capture` MCP tool exists at `kb/mcp/core.py:549` (committed, not staged). R1 grep missed it. RESOLVED: remove this item from the active backlog. (R2)
+
+- `capture.py:563-565` R1 HIGH — **ESCALATED TO CRITICAL**: see CRITICAL section below for the updated entry. (R2)
+
+- `capture.py:175-178` R1 LOW "normalised superset materialized unconditionally" — **FALSE POSITIVE**: `_normalize_for_scan` is only called when the plain-content sweep finds nothing (lines 175-184); the superset is lazy, not unconditional. Correct design. Remove from backlog. (R2)
+
+- `capture.py:537-538` R1 LOW `LLMError` uncaught in `capture_items` — **DOWNGRADE TO NIT / resolved**: `capture_items` docstring correctly documents "Raises: LLMError"; `kb_capture` MCP wrapper at `mcp/core.py:565` already catches `except Exception as e`. No change needed to `capture.py`. Remove from backlog. (R2)
+
+- `capture.py:307-308` R1 HIGH `os.close()` stranding — **DOWNGRADE TO LOW**: `os.close()` on a valid fd essentially never fails; EBADF is a programming error, EIO requires hardware fault on local disk. If it does fail, the self-healing retry loop in `_write_item_files` picks a new slug on the next `FileExistsError`. Downgrade from HIGH to LOW. (R2)
+
+- `capture.py:276-283` R1 MEDIUM `_build_slug` cap fix math error in the proposed remedy: R1 proposes `base = base[:77]` but `77 + len("-100") = 81 > 80`. Correct truncation is `base = base[:74]` (safe for n up to 99,999). The R1 finding severity (MEDIUM) is correct; the proposed fix has an off-by-one. (R2)
+
+### CRITICAL
+
+- `capture.py:563-565` module-level `assert` is the SOLE symlink guard and is silently disabled by `-O` — the `assert CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve())` line is the only barrier between a planted symlink and arbitrary-location file writes. `_path_within_captures` checks path against `CAPTURES_DIR` only; if `CAPTURES_DIR` itself is a symlink to an external path, both sides of `relative_to` resolve into the external tree and the check passes. Running `python -O -m kb.mcp_server` or setting `PYTHONOPTIMIZE=1` (common in production wheels and some CI runners) strips all `assert` statements — the guard is silently no-op. Escalated from R1 HIGH. **INTERACTION**: `TestSymlinkGuard.test_symlink_outside_project_root_refuses_import` (test_capture.py:531) uses `pytest.raises(AssertionError, match="SECURITY: CAPTURES_DIR")`; the fix raises `RuntimeError` instead — the test will `ERROR` rather than `PASS` on Linux CI unless updated in the same commit. On Windows the test is skipped (skipif decorator), so the breakage is invisible locally. (R1 → escalated R2)
+  (fix: replace `assert ...` with `if not CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()): raise RuntimeError(...)` — also wrap the two `.resolve()` calls in `try/except OSError as e: raise RuntimeError(...) from e` for mount-failure safety; update `test_capture.py:531` from `pytest.raises(AssertionError)` to `pytest.raises(RuntimeError)` in the SAME commit)
+
+### HIGH
+
+- `capture.py:243` `_PROMPT_TEMPLATE` prompt injection via fence-break — `{content}` is inserted between `--- INPUT ---` and `--- END INPUT ---` fences. Input containing the literal string `--- END INPUT ---` breaks out of the content fence; anything following it is treated as post-input free instructions by the model. The forced-tool-use JSON schema constrains output shape but not model instruction override (e.g., changed filter rules, fabricated `kind` values). (R1)
+  (fix: `content_safe = content.replace("--- END INPUT ---", "--- END INPUT (escaped) ---")`; pass `content_safe` to LLM, use original `content` for `_verify_body_is_verbatim`)
+
+- `capture.py:563-565` module-level `assert` as security gate — `assert CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve())` is silently disabled by Python `-O` / `-OO` optimization flags or `PYTHONOPTIMIZE=1`. Running `python -O -m kb.mcp_server` loads the module without the symlink check. (R1)
+  (fix: replace with explicit `if not CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()): raise RuntimeError(...)` — always evaluated regardless of optimization; update `TestSymlinkGuard` to catch `RuntimeError` not `AssertionError`)
+
+- `capture.py:307-308` `_exclusive_atomic_write` `os.close()` outside try — `fd = os.open(...)` succeeds but `os.close(fd)` raises (EBADF, EIO on descriptor exhaustion or I/O error) before the `try:` block begins; leaves the O_EXCL-created empty file permanently on disk as a poison reservation. Subsequent calls to the same slug raise `FileExistsError` with no recoverable path. (R1)
+  (fix: wrap `os.close(fd)` in its own `try/except OSError: path.unlink(missing_ok=True); raise` guard before the inner `try: atomic_text_write`)
+
+- `capture.py:311-312` `_exclusive_atomic_write` `unlink()` in `BaseException` handler swallows original exception — `path.unlink(missing_ok=True)` inside `except BaseException:` can itself raise `OSError` (EACCES, EPERM on Windows, AV-locked file). Python replaces the original `atomic_text_write` exception with the unlink failure; real cause (disk full, permission denied on write) is permanently lost. (R1)
+  (fix: `except BaseException as _orig: try: path.unlink(missing_ok=True); except OSError: pass; raise` — best-effort cleanup that cannot replace the original)
+
+- `capture.py:353-357` `_render_markdown` `yaml_escape()` + `yaml.dump()` double-escaping — `yaml_escape` was designed for f-string YAML templates; it escapes backslashes (`→ \\`), double-quotes (`→ \"`), newlines (`→ \n`) AS LITERAL CHARACTERS. Passing its output to `yaml.dump()` causes yaml to re-escape these literal sequences: `\\` → `\\\\`, `\"` → `\\\"`. Title `Use C:\path` round-trips as `Use C:\\\\path`. Tests currently pass because all test titles contain only alphanumeric chars. (R1)
+  (fix: split `yaml_escape` into `_sanitize_yaml_value` (bidi/control stripping only) and the existing f-string variant; call `_sanitize_yaml_value` in `_render_markdown` and let `yaml.dump` handle escaping)
+
+### MEDIUM
+
+- `capture.py:86-134` `_CAPTURE_SECRET_PATTERNS` false negative — env-var pattern `^(API_KEY|SECRET|PASSWORD|...)=` matches `SECRET=` but not `SECRET_KEY`, `DJANGO_SECRET_KEY`, `APP_SECRET`, `ACCESS_KEY`, `ENCRYPTION_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. A pasted `.env` block with `SECRET_KEY=django-insecure-xxx` writes a real secret to `raw/captures/`. (R1)
+  (fix: extend alternation to suffix-match: `r"(?im)^[\w]*?(API_KEY|SECRET[\w]*|PASSWORD[\w]*|TOKEN[\w]*|ACCESS_KEY|PRIVATE_KEY)\s*=\s*\S{8,}"` — `{8,}` on value avoids false positives on `TOKEN_EXPIRY=3600`)
+
+- `capture.py:104` GCP OAuth pattern too permissive — `ya29\.[0-9A-Za-z_-]+` matches `ya29.X` (7 chars total); common in version references (`ya29.Overview`), section numbers, API names. False positives permanently block legitimate captures with no hint that the detection is spurious. (R1)
+  (fix: require minimum 20-char suffix: `ya29\.[0-9A-Za-z_-]{20,}`)
+
+- `capture.py:292-294` `_path_within_captures` recomputes `CAPTURES_DIR.resolve()` on every call — `CAPTURES_DIR` is a module-level constant; its resolved path is invariant for the process lifetime. `Path.resolve()` issues stat+readlink syscalls (~0.07ms each); 40 calls per 20-item batch = ~3ms wasted per request. (R1)
+  (fix: add `_CAPTURES_DIR_RESOLVED: Path = CAPTURES_DIR.resolve()` immediately after the module-level security assertion; use it in `_path_within_captures`)
+
+- `capture.py:286-296` `_path_within_captures` catches only `ValueError` — `Path.resolve()` can raise `OSError` (PermissionError on inaccessible path component, ELOOP on symlink loop). Uncaught `OSError` propagates to the caller as an unhandled exception instead of a `False` return; in FastMCP this becomes an unformatted 500 rather than a graceful error string. (R1)
+  (fix: `except (ValueError, OSError): return False`)
+
+- `capture.py:146-161` `_normalize_for_scan` except clause too narrow — `except (ValueError, UnicodeDecodeError)` does not catch `TypeError`; a future refactor passing non-str to `unquote` would propagate uncaught, silently aborting the normalization pass with no log. (R1)
+  (fix: `except Exception: continue` with a comment "normaliser is best-effort; any decode failure silently skips that segment")
+
+- `capture.py:276-283` `_build_slug` 80-char cap not enforced on collision suffix — `base = base[:80]` caps the base but the collision result `f"{base}-{n}"` for `n=999` is 84 chars, for `n=1000` is 85. The spec §5 invariant is violated on collision; test `test_length_capped_at_80` never exercises the collision branch so this is currently undetected. (R1)
+  (fix: `base = base[:77]` to leave room for `-NNN` suffix; or re-cap the final candidate: `candidate = f"{base}-{n}"; return candidate[:80]` with collision-restart on truncated duplicate)
+
+- `capture.py:36-56` + `capture.py:40` `_check_rate_limit` per-process scope undocumented — docstring and `_check_rate_limit` body say "sliding 1-hour window" with no mention of per-process scope. MCP server and CLI (once added) each maintain independent deques, effectively doubling the allowed rate. Future developers adding a CLI wrapper will not realize the limit is not global. (R1)
+  (fix: add explicit docstring note: "Per-process only. Separate MCP server and CLI processes each enforce the limit independently. Use `.data/capture_rate.json` + `atomic_json_write` for a true system-wide limit if required.")
+
+- `capture.py:209-238` `_PROMPT_TEMPLATE` inline string violates template convention — all other LLM prompts in the project live as YAML files in `templates/` (10 files: article.yaml, paper.yaml, etc.) loaded via `load_template()`. The capture prompt is semantically equivalent (extraction fields + filter rules + output schema) but lives inline, cannot be edited without touching source, and cannot be versioned independently. (R1)
+  (fix: add `templates/capture.yaml` or `templates/capture_prompt.txt`; load at import time so it remains editable without code changes)
+
+- `config.py:40-53` + `CLAUDE.md` architectural contradiction — `CAPTURES_DIR = RAW_DIR / "captures"` places the capture write target inside `raw/`, which CLAUDE.md defines as "Immutable source documents. The LLM reads but **never modifies** files here." `raw/captures/` is the only LLM-written output directory inside `raw/`; other system output paths (`.data/`, `wiki/`) are correctly outside it. (R1)
+  (fix: either (a) move `CAPTURES_DIR` to `captures/` at project root (parallel to `raw/` and `wiki/`), or (b) carve out an explicit exception in CLAUDE.md and the config comment: "raw/captures/ is LLM-writable; all other raw/ subdirs are immutable")
+
+- `tests/test_capture.py:21` `CAPTURE_KINDS` implicit re-export — test imports `CAPTURE_KINDS` from `kb.capture` rather than its authoritative source `kb.config`. If `capture.py` is refactored to reference `CAPTURE_KINDS` via a different import form (e.g., `kb.config.CAPTURE_KINDS`), the test import breaks silently. (R1)
+  (fix: `from kb.config import CAPTURE_KINDS` in the test; or explicitly re-export: `from kb.config import CAPTURE_KINDS as CAPTURE_KINDS  # public re-export` in `capture.py`)
+
+- `capture.py:405-409,455-459` `_write_item_files` `os.scandir` without context manager — both scandir calls in `_write_item_files` iterate without a `with os.scandir(...) as it:` context manager. On Windows, the open directory handle can cause `PermissionError` in rapid test runs or concurrent calls where another operation tries to lock the directory. (R1)
+  (fix: `with os.scandir(CAPTURES_DIR) as it: existing = {e.name[:-3] for e in it if ...}`)
+
+- `capture.py:388-470` `_write_item_files` hardcoded `CAPTURES_DIR` — function uses the module-level `CAPTURES_DIR` constant with no `captures_dir: Path | None = None` parameter. Cannot be unit-tested without monkeypatching the module global; breaks the extension pattern used by `ingest_source(wiki_dir=None)`, `query_wiki(wiki_dir=None)`, etc. (R1)
+  (fix: add `captures_dir: Path | None = None` and use `caps = captures_dir or CAPTURES_DIR` throughout; pass from `capture_items`)
+
+### LOW
+
+- `capture.py:113-114` `Authorization: Bearer` not caught — HTTP Authorization pattern covers only `Basic`; opaque Bearer tokens (OAuth2, Azure AD, GCP, non-JWT session tokens) are not detected. JWT Bearer tokens ARE caught by the JWT pattern, but opaque/random/UUID bearer tokens escape all patterns. (R1)
+  (fix: `r"(?i)Authorization:\s*(Basic|Bearer)\s+[A-Za-z0-9+/=._-]{16,}"`)
+
+- `capture.py:118-123` env-var pattern misses `export` form and indented assignments — pattern anchors `^(API_KEY|...)=` catches `.env`-style but misses `export API_KEY=secret` (common in shell scripts), `  TOKEN=secret` (indented inside YAML blocks or function bodies). (R1)
+  (fix: `r"(?im)^(?:export\s+)?\s*(API_KEY|...)[\s]*=\s*\S+"` to cover both forms; or document deliberate `.env`-only scope in a comment)
+
+- `capture.py:98` Slack `xoxe-` prefix missing — pattern covers `xox[baprs]-` but not `xoxe-` (Slack SCIM and workspace-auth tokens). A real `xoxe-12345-67890-AbcDef` passes the scanner. (R1)
+  (fix: add `e` to the character class: `xox[baprs e]-` or `xox[baprs]-|xoxe-`)
+
+- `capture.py:137-161` `_normalize_for_scan` iteration bound implicit on `CAPTURE_MAX_BYTES` — decode attempt count is O(input_size / 17) ≈ 2,941 max at the 50KB cap; bound is load-bearing on `CAPTURE_MAX_BYTES` not being raised without reviewing this function. (R1)
+  (fix: add a comment documenting the implicit bound; assert `CAPTURE_MAX_BYTES <= 200_000` at module level)
+
+- `capture.py:193-198` `_CAPTURE_SCHEMA` `body` field has no `maxLength` — LLM can return the entire 50KB input as one item's body. Defeats the purpose of atomization; downstream `_verify_body_is_verbatim` accepts it; each capture file becomes a near-copy of the full input. (R1)
+  (fix: add `"maxLength": 2000` to the `body` schema field; matches "verbatim span" intent from the prompt)
+
+- `capture.py:240-243` `_extract_items_via_llm` no pre-flight context window guard — prompt inlines up to 50KB of content (≈12.7K tokens). If `CAPTURE_MAX_BYTES` is later raised above ~600KB the Haiku context window will be silently exceeded at the API layer with an opaque error. (R1)
+  (fix: `MAX_PROMPT_CHARS = 600_000; assert len(prompt) <= MAX_PROMPT_CHARS` or derive from a config constant)
+
+- `capture.py:322-325 (module-level)` import-time `resolve()` calls unguarded — `CAPTURES_DIR.resolve()` and `PROJECT_ROOT.resolve()` at module import time will raise `OSError` if either path is on a temporarily unavailable network drive or mount point, making `import kb.capture` (and MCP server startup) fail hard. (R1)
+  (fix: wrap in `try/except OSError as e: raise RuntimeError(f"SECURITY: Could not resolve paths: {e}") from e`)
+
+- `capture.py:537-538` `capture_items` — `_extract_items_via_llm(normalized)` raises `LLMError` on retry exhaustion (documented in docstring) but no `try/except` exists in `capture_items`. `LLMError` propagates to the MCP boundary, violating the project convention "MCP tools return 'Error: ...' strings, never raise exceptions to the MCP client." (R1)
+  (fix: `try: response = _extract_items_via_llm(normalized); except LLMError as e: return CaptureResult(items=[], ..., rejected_reason=f"Error: LLM extraction failed — {e}", ...)`)
+
+- `capture.py:288-298` `_path_within_captures` naming inconsistency — only predicate (bool-returning) function in the module; all others use verb-first names (`_check_*`, `_validate_*`, `_scan_*`, `_build_*`, `_verify_*`, `_extract_*`, `_render_*`, `_write_*`, `_resolve_*`). (R1)
+  (fix: rename to `_is_path_within_captures`; update two call sites in `_write_item_files`)
+
+- `capture.py:521` `capture_items` `assert normalized is not None` uses assertion for type narrowing — disabled by `-O`; at that point `_scan_for_secrets(None)` raises `TypeError` from pattern `.search(None)` with an unrelated error message. (R1)
+  (fix: `if normalized is None: raise CaptureError("_validate_input contract violated: returned None without error")`)
+
+- `tests/test_capture.py:343-351` `test_widely_split_secret_not_caught` tautological assertion — `assert result is None or result is not None` always passes; test provides zero regression value. (R1)
+  (fix: either delete and move the spec-§13 residual note to a code comment, or rename to `test_widely_split_secret_no_crash` and assert only `isinstance(result, (tuple, type(None)))`)
+
+- `capture.py:164-181` `_scan_for_secrets` encoded `location` lacks encoding type — `"via encoded form"` does not distinguish base64 vs URL-encoded secrets, making triage harder. (R1)
+  (fix: split `_normalize_for_scan` into annotated passes returning `(text, label)` tuples; emit `"via base64"` or `"via URL-encoding"` accordingly)
+
+- `capture.py:175-178` `_scan_for_secrets` normalised superset materialized unconditionally — on every clean (non-secret) input, `_normalize_for_scan` builds a ~1.76× input-size superset string (~88KB at cap). Cost ~14ms, acceptable against LLM latency, but undocumented; raising `CAPTURE_MAX_BYTES` multiplies this cost proportionally. (R1)
+  (fix: document in `_scan_for_secrets` docstring that encoded scan adds ~1.76× memory peak; note bound relative to `CAPTURE_MAX_BYTES`)
+
+### NIT
+
+- `capture.py:157-161` `except (ValueError, UnicodeDecodeError)` around `unquote()` unreachable — `urllib.parse.unquote()` uses `errors='replace'` internally and never raises `ValueError` or `UnicodeDecodeError`; the except is dead code. (R1)
+  (fix: remove the try/except; call `parts.append(unquote(m.group(0)))` directly)
+
+- `tests/test_capture.py:120-122` comment mismatch — says "25001 CRLF pairs = 50002 raw bytes" but actual expression is `'ab\r\n' * 12501 = 50004 bytes (12501 × 4)`; the test logic is correct but the comment describes different content. (R1)
+  (fix: update comment to match: `# 'ab\r\n' * 12501 = 50004 raw bytes, 37503 post-LF bytes`)
+
+- `capture.py:70` `_validate_input` — `content.encode('utf-8')` allocates a 50KB bytes object solely for `len()`; can be avoided for ASCII content. (R1)
+  (fix: `raw_bytes = len(content) if content.isascii() else len(content.encode('utf-8'))`)
+
+- `capture.py:53` `_check_rate_limit` `retry_after` underflow — `int(oldest + 3600 - now) + 1` returns 0 or negative when deque contains stale timestamps from test fixtures with frozen clocks; callers receive `(False, 0)` or `(False, -3)` meaning "rate limited, retry now/in the past". (R1)
+  (fix: `retry_after = max(1, int(oldest + 3600 - now) + 1)`)
+
+- `capture.py:247-265` `_verify_body_is_verbatim` — `body.strip()` used for containment check but original unstripped `item` returned in `kept`; downstream writer receives bodies with leading/trailing whitespace including newlines. (R1)
+  (fix: set `item["body"] = body_stripped` before appending to `kept`, or document that callers must strip)
+
+- `tests/conftest.py:149-159` `tmp_captures_dir` — patches both `kb.config.CAPTURES_DIR` and `kb.capture.CAPTURES_DIR` but does not re-verify the patched path satisfies the `is_relative_to(PROJECT_ROOT)` property. A future test passing an intentionally-escaping path would bypass the security assertion silently. (R1)
+  (fix: add `assert captures.resolve().is_relative_to(PROJECT_ROOT.resolve())` inside the fixture, or document the intentional bypass)
+
+- `capture.py:86-134` `_CAPTURE_SECRET_PATTERNS` `list[tuple]` — two-element tuples accessed as `label, pattern`; a `NamedTuple` or `dataclass` would make access self-documenting and make adding a third field (e.g., `severity`) a non-breaking change. (R1)
+  (fix: `class _SecretPattern(NamedTuple): label: str; pattern: re.Pattern[str]`)
+
+- `tests/conftest.py:11` `RAW_SUBDIRS` incomplete — lists only 5 subdirs (`articles`, `papers`, `repos`, `videos`, `captures`); missing `podcasts`, `books`, `datasets`, `conversations`, `assets`. Tests using `tmp_project` that exercise those subdirs find them absent with no documented explanation. (R1)
+  (fix: derive from `SOURCE_TYPE_DIRS` keys dynamically, or add a comment explaining why only 5 are scaffolded)
+
+### HIGH (R2 — new findings and R1 interactions)
+
+- `capture.py:240-243` + `tests/test_capture.py:531` assert→RuntimeError fix introduces a silent CI failure via broken test — the R1 CRITICAL fix (changing `assert` to `raise RuntimeError`) will cause `TestSymlinkGuard.test_symlink_outside_project_root_refuses_import` at line 531 to `ERROR` rather than `PASS` on Linux CI, because `pytest.raises(AssertionError)` does not catch `RuntimeError`. On Windows (where development runs) the test is unconditionally skipped via `@pytest.mark.skipif(sys.platform == "win32", ...)`, so the breakage is invisible locally. A CI run on Linux would report the test as `ERROR`; depending on CI configuration, `ERROR` might not block a merge. The assert→RuntimeError and test→RuntimeError changes are an atomic co-requirement. (R2)
+  (fix: change `pytest.raises(AssertionError, match="SECURITY: CAPTURES_DIR")` at test_capture.py:531 to `pytest.raises(RuntimeError, ...)` in the same commit as the assert→RuntimeError fix in capture.py)
+
+- `capture.py:428` `markdown` rendered once outside retry loop — `markdown = _render_markdown(...)` at line 428 is computed before the `for _attempt in range(10)` loop. When `FileExistsError` causes slug reassignment at line 460, the new `slug` is used for the filename (`path = CAPTURES_DIR / f"{slug}.md"`) but `markdown` still contains the Phase A `alongside` list and is never re-rendered. The written file's `captured_alongside` frontmatter is thus stale relative to the actual filename chosen for cross-process collision retries. Sibling files already written (items 0..i-1) that reference the old Phase A slug in their `captured_alongside` will have permanently dangling references since the old slug was never written. The docstring at line 397-399 acknowledges alongside staleness as a "v1 limitation" but understates the consequence: dangling sibling references in raw/ files are not recoverable without a rewrite pass. (R2)
+  (fix: move `_render_markdown(...)` call inside the retry loop so it re-renders on each slug-change attempt; OR defer all writes to a second pass after all slugs are finalized, eliminating the stale-alongside problem entirely)
+
+- `capture.py:241-243` `_PROMPT_TEMPLATE` fence-break R1 fix has secondary data-loss defect — R1 proposes escaping `--- END INPUT ---` in a sanitized `content_safe` to pass to LLM while using original `normalized` for `_verify_body_is_verbatim`. Second-order problem: the LLM is instructed to return "verbatim spans" from what it sees as the input; if input contained `--- END INPUT ---` and it was escaped to `--- END INPUT (escaped) ---`, the LLM may faithfully return `--- END INPUT (escaped) ---` in a body field. `_verify_body_is_verbatim` then checks against the unescaped `normalized` — the body fails the check and is silently dropped as "noise", permanently losing the legitimate item. The R1 fix as stated would cause silent data loss on any input legitimately containing that 18-character delimiter string. (R2)
+  (fix: replace static `--- END INPUT ---` delimiter with a per-call random UUID boundary injected into `_PROMPT_TEMPLATE` dynamically in `_extract_items_via_llm`; the UUID is guaranteed absent from any real input, eliminating both injection and data-loss risks simultaneously)
+
+### MEDIUM (R2 — new findings)
+
+- `mcp/core.py:583-591` `_format_capture_result` path reconstruction uses first-occurrence `parts.index("captures")` — finds the FIRST directory component named `"captures"` in the absolute path. If the project is located under a parent directory also named `"captures"` (e.g., `~/captures/llm-wiki-flywheel/raw/captures/slug.md`), `idx` points to the wrong component and `parts[idx-1:idx+2]` produces a path like `captures/llm-wiki-flywheel/raw` instead of `raw/captures/slug.md`. The display path in the MCP response would be silently wrong. (R2)
+  (fix: replace the parts-index logic with `str(item.path.relative_to(PROJECT_ROOT)).replace("\\", "/")` wrapped in `try/except ValueError: rel = item.path.name`)
+
+- `capture.py:419-421` `alongside_for` Phase B stale after Phase C slug retry — `alongside_for[i]` uses the Phase A `slugs` list, which captures pre-collision slug values. When Phase C reassigns a slug for item j (j < i or j > i), neither `alongside_for[i]` nor the already-written files' frontmatter for items before j are corrected. The `# Accepted v1 limitation` comment at line 397 is accurate but understates impact: all sibling files written before the collision permanently contain a dangling `captured_alongside` reference to a filename that was never written. This is data inconsistency in raw/, not a recoverable error, and is invisible to the user unless they inspect the files directly. (R2)
+  (fix: either (a) move all slug resolution and markdown rendering after Phase C completes (two-pass: resolve all slugs atomically, then write), or (b) add a post-write fixup pass that rewrites sibling files if any slug changed during retries)
+
+- `capture.py:481` `capture_items` public API missing `captures_dir=None` parameter — every other public write-path function in the project accepts an optional directory override (`ingest_source(..., wiki_dir=None)`, `query_wiki(..., wiki_dir=None)`, `load_all_pages(wiki_dir=None)`). `capture_items(content, provenance=None)` has no such parameter, forcing all tests to monkeypatch the module-level `CAPTURES_DIR` constant (as `tmp_captures_dir` fixture does at conftest.py:157-158). This pattern is fragile: it couples test isolation to the module-level binding and will break if `CAPTURES_DIR` is ever accessed via attribute reference within a function. Extends R1 MEDIUM `_write_item_files` finding to the public API level. (R2)
+  (fix: `capture_items(content, provenance=None, *, captures_dir: Path | None = None)` — thread through to `_write_item_files`; update `tmp_captures_dir` fixture to pass `captures_dir=` instead of monkeypatching module global)
+
+- `capture.py:353-357` + `tests/test_capture.py:620-703` yaml_escape double-escape fix needs a round-trip regression test — the R1 HIGH yaml_escape bug is real, but its fix (replacing `yaml_escape()` with a sanitize-only variant before `yaml.dump`) will not be regression-guarded unless a test verifies the round-trip with YAML-significant characters. All existing `TestRenderMarkdown` tests use alphanumeric-only titles (`"Pick atomic N-files"`, `"pay\u202eusalert"` after bidi stripping). No test passes a backslash, double-quote, or embedded newline in the title and asserts the `_fm.loads()` round-trip value equals the input. Without this test, a future accidental re-introduction of yaml_escape in `_render_markdown` would pass all tests silently. (R2)
+  (fix: add `test_title_with_backslash_round_trips` and `test_title_with_double_quote_round_trips` in TestRenderMarkdown; confirm `post.metadata["title"] == item["title"]` for `r"C:\path\to\file"` and `'"quoted"'`)
+
+### LOW (R2 — new findings and downgraded R1 items)
+
+- `capture.py:307-308` R1 HIGH `os.close()` stranding — **downgraded to LOW** (see R2 corrections section). Defensive fix still appropriate: wrap `os.close(fd)` in `try/except OSError: path.unlink(missing_ok=True); raise` before the `try: atomic_text_write` block. Low practical risk but matches the defensive idiom used in `kb.utils.io.py:29-32`. (R2)
+
+- `capture.py:455-459` `os.scandir` on every `FileExistsError` retry is O(N×E) — on each `FileExistsError` in Phase C, `_write_item_files` calls `os.scandir(CAPTURES_DIR)` to rebuild the `existing` set. With N=20 items and 10 retries each, this is up to 200 additional scandir calls. At E=10,000 existing captures, each scandir yields 10,000 `DirEntry` objects; the set comprehension copies 10,000 strings per re-scan. Total in the pathological case: ~2M string operations. Under normal (no-collision) operation this is a non-issue; under sustained cross-process race conditions it degrades linearly with both N and E. (R2)
+  (fix: instead of re-scanning on each retry, maintain the in-process `existing` set incrementally — on `FileExistsError`, add the conflicting slug directly to `existing` before calling `_build_slug` again; re-scan only when write-retries are exhausted for the item)
+
+- `capture.py:546` `captured_at` timestamp computed post-LLM — `captured_at = datetime.now(UTC)` at step 9 (line 546) runs after `_extract_items_via_llm` (step 7, line 538). For Haiku calls under load, the gap between submission and write can be 5-30 seconds. The timestamp in every written file reflects "when files were written", not "when the user submitted the content". Spec says "captured_at" without defining which moment; "when persisted" is defensible, but conversations timestamped 30 seconds after the captured moment can confuse temporal analysis. (R2)
+  (fix (optional): move `captured_at = datetime.now(UTC).strftime(...)` to line 501, immediately after `resolved_prov = _resolve_provenance(provenance)`, so both session-identity fields consistently represent submission time)
+
+### NIT (R2 — corrections and new findings)
+
+- `capture.py:311-312` R1 HIGH `unlink()` exception fix simplification — R1's proposed fix uses `except BaseException as _orig:` with `raise`, but `as _orig` is unnecessary: `raise` inside `except` always re-raises the active exception regardless. Simplify to `except BaseException: try: path.unlink(missing_ok=True); except OSError: pass; raise`. (R2)
+  (fix: drop `as _orig` variable in the proposed BaseException handler)
+
+- `capture.py:241-243` R1 MEDIUM `_PROMPT_TEMPLATE` inline vs templates/ — the proposed `templates/capture.yaml` location is wrong; existing `templates/*.yaml` files define JSON-Schema `extract:` fields for `build_extraction_schema()` — a structurally different purpose. A plain-text format-string prompt does not fit that directory. Better location: `templates/capture_prompt.txt` in a distinct `prompts/` subdirectory, or keep inline but extract to a named module-level constant with a comment. (R2)
+
+- `tests/test_capture.py:11-12` duplicate `import re` — line 11: `import re`; line 12: `import re as _test_re`. The alias is used only once at line 672 in `_test_re.search(...)`. Ruff F811 would flag this. (R2)
+  (fix: remove `import re as _test_re`; change line 672 to `re.search(...)`)
+
+### R3 rating corrections (apply before acting on R2 items)
+
+- `capture.py:428` R2 HIGH "markdown not re-rendered after Phase C slug retry" — **FIX PROPOSAL IS INEFFECTIVE**: `slug` is accepted as a parameter by `_render_markdown` (line 343) but is never referenced anywhere in the function body (lines 353-372) — it is a dead parameter. Moving `_render_markdown` inside the retry loop would regenerate bit-for-bit identical file content regardless of the new slug. The correct fix requires a two-pass write architecture (see R3 CRITICAL below). The R2 backlog entry's fix description must not be applied as-is. (R3)
+
+- `capture.py:157-161` R1 NIT "`unquote()` except clause unreachable" — **CONFIRMED WITH CLARIFICATION**: `urllib.parse.unquote()` uses `errors='replace'` by default and does not raise `ValueError` or `UnicodeDecodeError` on Python 3.12+. The except clause is dead code and can be removed. Confirm NIT severity. (R3)
+
+- `mcp/core.py:549` R1 CRITICAL "`kb_capture` MCP tool absent" — **FALSE POSITIVE** (previously noted in R2 corrections). Confirmed by reading `mcp/core.py:548-567`: `@mcp.tool() def kb_capture(content: str, provenance: str | None = None) -> str` is present and correctly catches `Exception`, formats the result, and handles partial-write state. Not a backlog item. (R3)
+
+### CRITICAL (R3)
+
+- `capture.py:341-372, 428-460` R2 HIGH "markdown not re-rendered" fix is a no-op — STRUCTURAL BUG REQUIRES TWO-PASS DESIGN: `slug` is a dead parameter in `_render_markdown` (never appears in the frontmatter dict or body). Moving the render call inside the retry loop is harmless but fixes nothing. The root alongside-staleness problem is that `alongside_for[i]` is a frozen list built from Phase A slugs and is never recomputed after a Phase C slug reassignment. Items 0..i-1 already written to disk retain `captured_alongside` entries pointing at item i's Phase A slug (which was never written). The only complete fix is a two-pass write: **Pass 1** — reserve all slugs via `O_EXCL` (10 retries each per slot) without writing content; **Pass 2** — with all N slugs finalized, compute `alongside_for` from the settled slug list, then write all content atomically. If this two-pass refactor is deferred, the R2 HIGH backlog entry's fix description ("move `_render_markdown` inside the retry loop") MUST NOT be applied — it changes nothing and would be merged as "resolved" while the actual defect remains intact. (R3)
+  (fix: implement two-pass `_write_item_files`: Phase 1 = `O_EXCL`-reserve all N slugs with retry; Phase 2 = compute `alongside_for` from finalized slugs, write all files; OR if deferring to v2, add `# TODO(v2): two-pass write required for correct alongside under concurrent races` and document explicitly in `CaptureResult` docstring)
+
+### HIGH (R3)
+
+- `capture.py:240-243` `_PROMPT_TEMPLATE` fence-break — current code not yet fixed: `--- END INPUT ---` static delimiter remains in production. Any user-controlled content containing that exact 18-character string breaks out of the input section and injects instructions. The verbatim-body check does NOT fully mitigate: a fence-break can manipulate `kind`, `confidence`, `filtered_out_count`, or `title` values without needing a verbatim body match. Fix proposed in R2 (UUID boundary) is still pending. (R3)
+  (fix: generate `boundary = _secrets.token_hex(16)` per call in `_extract_items_via_llm`; replace static `--- INPUT ---` / `--- END INPUT ---` delimiters with `f"<<<INPUT-{boundary}>>>"` / `f"<<<END-INPUT-{boundary}>>>"`; UUID is guaranteed absent from any real input)
+
+### MEDIUM (R3)
+
+- `capture.py:341-343` `_render_markdown` has dead `slug: str` parameter — `slug` is accepted but never referenced in the function body (lines 353-372); no frontmatter field or body text uses it. Removing it requires atomically updating the one call site in `_write_item_files` (line 430) and all 6 `_render_markdown(slug=...)` keyword-argument call sites in `TestRenderMarkdown` (lines 633, 651, 663, 680, 693, 698) — a missed update causes `TypeError: unexpected keyword argument 'slug'` at test runtime. (R3)
+  (fix: remove `slug: str` from signature; remove `slug="..."` from all 6 test call sites in the same commit)
+
+- `capture.py:388-470` `_write_item_files` `captures_dir` parameter must thread through all THREE CAPTURES_DIR references — R2 MEDIUM proposes adding `captures_dir: Path | None = None`. But CAPTURES_DIR appears at line 402 (`mkdir`), line 437 (path construction), AND lines 455-458 (`os.scandir` on retry). If the re-scan at lines 455-458 is not updated, a cross-process collision retry would scan the real `CAPTURES_DIR` while writing to the injected directory, producing incorrect slug collision data. All three must use `_captures_dir = captures_dir or CAPTURES_DIR`. (R3)
+  (fix: bind `_captures_dir = captures_dir or CAPTURES_DIR` at function entry (line 401); replace all three bare `CAPTURES_DIR` references inside the function; test by triggering a collision in the custom-directory scenario)
+
+### LOW (R3)
+
+- `capture.py:285-288` `_build_slug` collision suffix while-loop is unbounded — `while f"{base}-{n}" in existing: n += 1` has no upper bound on `n`. With a synthetic `existing` set containing a very long collision chain, the loop spins indefinitely. In practice this requires the `CAPTURES_DIR` to contain millions of files with the same base slug, which is impossible under normal rate-limited use. But a test accidentally constructing a large collision set could hang. (R3)
+  (fix: `while f"{base}-{n}" in existing and n <= len(existing) + 1: n += 1`)
+
+- `capture.py:401-408` `_write_item_files` scans directory even with empty items — `CAPTURES_DIR.mkdir` and `os.scandir` execute unconditionally before the items loop. With `items=[]` (e.g., all bodies failed verbatim check), two filesystem calls are wasted. (R3)
+  (fix: add `if not items: return [], None` as the first line of `_write_item_files`, before the `mkdir` call)
+
+### NIT (R3)
+
+- `capture.py:285` `_build_slug` suffix loop: add an `# O(N) collisions max under normal use; see CAPTURE_MAX_CALLS_PER_HOUR` comment — the loop is safe given the rate limit caps `existing` growth, but future readers deserve to know the bound is config-dependent. (R3)
+
+- `capture.py:419-421` `alongside_for` O(N²) loop: add `# O(N²) — safe at CAPTURE_MAX_ITEMS=20; revisit if limit raised above ~500` comment to make the scale constraint visible to future maintainers. (R3)
 
 ---
 

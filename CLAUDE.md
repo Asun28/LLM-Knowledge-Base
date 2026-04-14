@@ -10,7 +10,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 4 shipped (v0.10.0) + full audit resolved (HIGH + MEDIUM + LOW, unreleased).** 1171 tests, 25 MCP tools, 18 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
+**Phase 4 shipped (v0.10.0) + full audit resolved (HIGH + MEDIUM + LOW, unreleased). Phase 5 `kb_capture` shipped (unreleased).** 1309 tests, 26 MCP tools, 19 modules. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -20,6 +20,8 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 - `kb.lint.semantic` — fidelity, consistency, completeness context builders for LLM-powered evaluation
 - `.claude/agents/wiki-reviewer.md` — Actor-Critic reviewer agent definition
 - `kb.lint.verdicts` — persistent lint/review verdict storage (pass/fail/warning with audit trail)
+
+**Phase 5 modules:** `kb.capture` — conversation/notes atomization for `raw/captures/`.
 
 **Phase 3+ (200+ pages):** DSPy Teacher-Student optimization, RAGAS evaluation, Reweave. Research in `research/agent-architecture-research.md`.
 
@@ -128,7 +130,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-1171 tests across 55 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v0917_task01.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+1309 tests across 55 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v0917_task01.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 
@@ -227,6 +229,10 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 
 # arXiv paper (Python)
 # import arxiv; paper = next(arxiv.Client().results(arxiv.Search(id_list=["2401.12345"])))
+
+# Conversation capture (in-session bookmarks, scratch notes, chat transcripts)
+# Via MCP: call kb_capture from your client; writes raw/captures/*.md files
+# Then: kb_ingest raw/captures/<slug>.md --type capture for each
 ```
 
 ## MCP Servers
@@ -234,11 +240,12 @@ yt-dlp --write-auto-sub --skip-download URL -o raw/videos/video-name
 Configured in `.mcp.json` (git-ignored, local only): **kb**, git-mcp, context7, fetch, memory, filesystem, git, arxiv, sqlite. See `.mcp.json` for connection details.
 
 Key usage:
-- **kb** — The knowledge base MCP server (`kb.mcp_server`, 25 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
+- **kb** — The knowledge base MCP server (`kb.mcp_server`, 26 tools). Start with `kb mcp` or `python -m kb.mcp_server`. Claude Code is the default LLM — no API key needed.
   - `kb_query(question)` — returns wiki context with trust scores; Claude Code synthesizes the answer. Add `use_api=true` for Anthropic API synthesis.
   - `kb_ingest(path, extraction_json=...)` — creates wiki pages from Claude Code's extraction. Omit `extraction_json` to get the extraction prompt. Add `use_api=true` for API extraction. Output includes `affected_pages` (cascade review list) and `wikilinks_injected` (pages updated with retroactive links). Shows "Duplicate content detected" with hash if source was already ingested.
   - `kb_ingest_content(content, filename, type, extraction_json)` — one-shot: saves content to `raw/` and creates wiki pages in one call.
   - `kb_save_source(content, filename, overwrite=false)` — save content to `raw/` for later ingestion. Returns error if file already exists unless `overwrite=true`.
+  - `kb_capture(content, provenance=None)` — atomize up to 50KB of unstructured text into discrete `raw/captures/<slug>.md` items via scan-tier LLM. Returns file paths for subsequent `kb_ingest`. Secret-scanner rejects content with API keys, tokens, or private key blocks before any LLM call.
   - `kb_compile_scan()` — find changed sources, then `kb_ingest` each.
   - `kb_compile(incremental=true)` — run full compilation (requires ANTHROPIC_API_KEY for LLM extraction).
   - Browse: `kb_search`, `kb_read_page`, `kb_list_pages`, `kb_list_sources`.
@@ -252,7 +259,7 @@ Key usage:
 
 See `CHANGELOG.md` for the full phase history (v0.3.0 → v0.10.0). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed categories per version.
 
-**Current:** Phase 4 v0.10.0 shipped + full audit resolved (HIGH + MEDIUM + LOW, unreleased) — 1171 tests, 25 MCP tools, 18 modules. v0.10.0 features: hybrid search with RRF fusion, 4-layer search dedup, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit (2026-04-12) resolved all 23 HIGH + ~30 MEDIUM + ~30 LOW items in `CHANGELOG.md` `[Unreleased]`. See CHANGELOG.md for full details.
+**Current:** Phase 4 v0.10.0 shipped + full audit resolved (HIGH + MEDIUM + LOW, unreleased). Phase 5 `kb_capture` shipped (unreleased) — 1309 tests, 26 MCP tools, 19 modules. v0.10.0 features: hybrid search with RRF fusion, 4-layer search dedup, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit (2026-04-12) resolved all 23 HIGH + ~30 MEDIUM + ~30 LOW items in `CHANGELOG.md` `[Unreleased]`. See CHANGELOG.md for full details.
 
 **Known issues:** See `BACKLOG.md` for active backlog items (Phase 4 post-release audit fully resolved; Phase 5 items remain open). Format guide is in the HTML comment at the top of that file. Severity levels: CRITICAL (blocks release), HIGH (silent wrong results / security), MEDIUM (quality gaps / missing coverage), LOW (style/naming). Items grouped by severity then by module area. Resolved items are deleted (fix recorded in CHANGELOG.md); resolved phases collapse to a one-liner under "Resolved Phases".
 
