@@ -67,7 +67,9 @@ def test_mcp_kb_query_format_case_normalization(mocked_query_wiki):
 def test_mcp_kb_query_format_text_equals_no_format(mocked_query_wiki):
     """output_format='text' should behave like empty — no file output, no error."""
     mocked_query_wiki.return_value = {
-        "answer": "ok", "citations": [], "source_pages": [],
+        "answer": "ok",
+        "citations": [],
+        "source_pages": [],
     }
     result = kb_query("q", output_format="text", use_api=True)
     assert not result.startswith("Error:")

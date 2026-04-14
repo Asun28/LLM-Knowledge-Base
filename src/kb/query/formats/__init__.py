@@ -9,14 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kb.utils.io import atomic_text_write
-
 from kb.query.formats.chart import render_chart
 from kb.query.formats.common import output_path_for
 from kb.query.formats.html import render_html
 from kb.query.formats.jupyter import render_jupyter
 from kb.query.formats.markdown import render_markdown
 from kb.query.formats.marp import render_marp
+from kb.utils.io import atomic_text_write
 
 __all__ = ["VALID_FORMATS", "render_output"]
 
@@ -52,9 +51,7 @@ def render_output(fmt: str, result: dict) -> Path | None:
     """
     fmt_n = _normalize(fmt)
     if fmt_n not in VALID_FORMATS:
-        raise ValueError(
-            f"unknown format '{fmt}'; expected one of {sorted(VALID_FORMATS)}"
-        )
+        raise ValueError(f"unknown format '{fmt}'; expected one of {sorted(VALID_FORMATS)}")
     if fmt_n == "text":
         return None  # text is stdout-only; no file produced
 

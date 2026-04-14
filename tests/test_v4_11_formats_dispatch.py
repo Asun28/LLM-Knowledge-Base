@@ -19,9 +19,7 @@ def sample():
 
 
 def test_valid_formats_contents():
-    assert VALID_FORMATS == frozenset(
-        {"text", "markdown", "marp", "html", "chart", "jupyter"}
-    )
+    assert VALID_FORMATS == frozenset({"text", "markdown", "marp", "html", "chart", "jupyter"})
 
 
 def test_dispatch_markdown_writes_file(monkeypatch, tmp_path, sample):

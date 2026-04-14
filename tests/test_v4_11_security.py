@@ -42,6 +42,7 @@ def test_html_xss_payload_escaped(xss_payload):
 def test_markdown_xss_roundtrip(xss_payload):
     """Markdown stays verbatim but YAML frontmatter must remain parseable."""
     import yaml
+
     out = render_markdown(xss_payload)
     parts = out.split("---\n", 2)
     fm = yaml.safe_load(parts[1])
@@ -50,6 +51,7 @@ def test_markdown_xss_roundtrip(xss_payload):
 
 def test_marp_xss_in_frontmatter(xss_payload):
     import yaml
+
     out = render_marp(xss_payload)
     parts = out.split("---\n", 2)
     fm = yaml.safe_load(parts[1])
@@ -77,8 +79,11 @@ def test_chart_script_injection_safe():
 
 def test_jupyter_not_trusted():
     sample = {
-        "question": "q", "answer": "a", "citations": [],
-        "source_pages": [], "context_pages": [],
+        "question": "q",
+        "answer": "a",
+        "citations": [],
+        "source_pages": [],
+        "context_pages": [],
     }
     out = render_jupyter(sample)
     nb = json.loads(out)
@@ -112,8 +117,11 @@ def test_windows_reserved_name_question_safe(monkeypatch, tmp_path):
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
     for name in ("What is NUL?", "Tell me about CON.", "PRN details"):
         result = {
-            "question": name, "answer": "ok", "citations": [],
-            "source_pages": [], "context_pages": [],
+            "question": name,
+            "answer": "ok",
+            "citations": [],
+            "source_pages": [],
+            "context_pages": [],
         }
         path = render_output("markdown", result)
         assert path.exists()
@@ -124,8 +132,11 @@ def test_windows_reserved_bare_name_disambiguated(monkeypatch, tmp_path):
     """A question that slugifies to a bare reserved name gets _0 suffix."""
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
     result = {
-        "question": "NUL", "answer": "ok", "citations": [],
-        "source_pages": [], "context_pages": [],
+        "question": "NUL",
+        "answer": "ok",
+        "citations": [],
+        "source_pages": [],
+        "context_pages": [],
     }
     path = render_output("markdown", result)
     assert path.exists()
@@ -154,7 +165,8 @@ def test_oversize_answer_rejected(monkeypatch, tmp_path):
 def test_html_ampersand_escaped():
     """Ampersand in citation path escapes inside href and anchor text."""
     hostile = {
-        "question": "q", "answer": "a",
+        "question": "q",
+        "answer": "a",
         "citations": [{"type": "wiki", "path": "concepts/foo&bar", "context": "x"}],
         "source_pages": [],
         "context_pages": [],
@@ -167,6 +179,7 @@ def test_html_ampersand_escaped():
 def test_marp_fence_preservation_with_xss_inside():
     """A code fence containing HTML-looking payload must not be split."""
     from kb.query.formats.marp import _split_into_slides
+
     text = "Before.\n\n```\n<script>alert(1)</script>\n\npayload\n```\n\nAfter."
     slides = _split_into_slides(text, max_chars=50)
     # The fenced block stays intact on one slide

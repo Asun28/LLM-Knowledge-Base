@@ -114,6 +114,7 @@ def test_jupyter_code_cell_question_json_encoded():
 
 def test_jupyter_rejects_oversize():
     from kb.config import MAX_OUTPUT_CHARS
+
     oversize = {
         "question": "q",
         "answer": "x" * (MAX_OUTPUT_CHARS + 1),

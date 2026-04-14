@@ -1,10 +1,8 @@
 """Tests for wiki/purpose.md KB focus document feature."""
 
-import pytest
 
-from kb.utils.pages import load_purpose
 from kb.ingest.extractors import build_extraction_prompt
-
+from kb.utils.pages import load_purpose
 
 # ── load_purpose() ──────────────────────────────────────────────────────────
 

@@ -82,6 +82,7 @@ def test_marp_splits_on_plain_paragraphs():
 
 def test_marp_rejects_oversize():
     from kb.config import MAX_OUTPUT_CHARS
+
     oversize = {
         "question": "q",
         "answer": "x" * (MAX_OUTPUT_CHARS + 1),

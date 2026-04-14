@@ -78,8 +78,8 @@ def test_html_escapes_xss_in_citation_path():
 
 def test_html_relative_wiki_links(sample):
     out = render_html(sample)
-    assert './wiki/concepts/rag.md' in out
-    assert '<code>raw/articles/foo.md</code>' in out
+    assert "./wiki/concepts/rag.md" in out
+    assert "<code>raw/articles/foo.md</code>" in out
 
 
 def test_html_answer_line_breaks_preserved(sample):
@@ -97,6 +97,7 @@ def test_html_no_citations_handled(sample):
 
 def test_html_kb_version_dynamic(sample):
     import kb
+
     out = render_html(sample)
     assert f'content="{kb.__version__}"' in out
 
@@ -122,6 +123,7 @@ def test_html_escapes_ampersand_in_path():
 
 def test_html_rejects_oversize():
     from kb.config import MAX_OUTPUT_CHARS
+
     oversize = {
         "question": "q",
         "answer": "x" * (MAX_OUTPUT_CHARS + 1),

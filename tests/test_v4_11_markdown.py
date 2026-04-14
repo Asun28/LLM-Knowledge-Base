@@ -58,6 +58,7 @@ def test_markdown_no_citations(sample_result):
 
 def test_markdown_kb_version_from_module(sample_result):
     import kb
+
     out = render_markdown(sample_result)
     parts = out.split("---\n", 2)
     fm = yaml.safe_load(parts[1])
@@ -74,6 +75,7 @@ def test_markdown_handles_quotes_in_question(sample_result):
 
 def test_markdown_rejects_oversize():
     from kb.config import MAX_OUTPUT_CHARS
+
     oversize = {
         "question": "q",
         "answer": "x" * (MAX_OUTPUT_CHARS + 1),

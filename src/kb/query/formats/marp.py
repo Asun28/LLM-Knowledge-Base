@@ -92,9 +92,7 @@ def render_marp(result: dict) -> str:
     question = result.get("question", "").strip() or "(untitled)"
     answer = result.get("answer", "").strip() or "_No answer synthesized._"
     citations = result.get("citations", [])
-    sources_block = (
-        format_citations(citations, mode="marp") if citations else "_No sources cited._"
-    )
+    sources_block = format_citations(citations, mode="marp") if citations else "_No sources cited._"
 
     answer_slides = _split_into_slides(answer)
     answer_sections: list[str] = []

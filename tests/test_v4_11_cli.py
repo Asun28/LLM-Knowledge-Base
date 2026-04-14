@@ -76,5 +76,7 @@ def test_cli_query_surfaces_output_error(mocked_query_wiki):
     result = runner.invoke(cli, ["query", "q", "--format", "markdown"])
     # Stderr is merged into output by default for CliRunner
     # Check the result captured stderr too
-    combined = (result.output or "") + (result.stderr_bytes.decode() if hasattr(result, "stderr_bytes") else "")
+    combined = (result.output or "") + (
+        result.stderr_bytes.decode() if hasattr(result, "stderr_bytes") else ""
+    )
     assert "simulated failure" in combined or "simulated failure" in result.output

@@ -56,9 +56,7 @@ def test_query_wiki_no_format_default(wiki_with_pages, mock_llm, monkeypatch, tm
 
 def test_query_wiki_markdown_format_writes(wiki_with_pages, mock_llm, monkeypatch, tmp_path):
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
-    result = query_wiki(
-        "What is RAG?", wiki_dir=wiki_with_pages, output_format="markdown"
-    )
+    result = query_wiki("What is RAG?", wiki_dir=wiki_with_pages, output_format="markdown")
     assert "output_path" in result
     assert result["output_format"] == "markdown"
     path = Path(result["output_path"])
@@ -89,9 +87,7 @@ def test_query_wiki_existing_return_keys_preserved(wiki_with_pages, mock_llm):
 def test_query_wiki_no_results_no_output_write(tmp_wiki, mock_llm, monkeypatch, tmp_path):
     """No match → early return; no file written even with output_format set."""
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
-    result = query_wiki(
-        "nonsense xyzzy pagerank", wiki_dir=tmp_wiki, output_format="markdown"
-    )
+    result = query_wiki("nonsense xyzzy pagerank", wiki_dir=tmp_wiki, output_format="markdown")
     assert "answer" in result
     assert "output_path" not in result
 
@@ -99,9 +95,7 @@ def test_query_wiki_no_results_no_output_write(tmp_wiki, mock_llm, monkeypatch, 
 def test_query_wiki_invalid_format_surfaces_error(wiki_with_pages, mock_llm, monkeypatch, tmp_path):
     """Unknown format → output_error set, answer still present."""
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
-    result = query_wiki(
-        "What is RAG?", wiki_dir=wiki_with_pages, output_format="pdf"
-    )
+    result = query_wiki("What is RAG?", wiki_dir=wiki_with_pages, output_format="pdf")
     # Unknown format: result has output_error but no output_path
     assert "output_path" not in result
     assert "output_error" in result

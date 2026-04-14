@@ -8,18 +8,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kb import __version__ as KB_VERSION
-from kb.config import MAX_OUTPUT_CHARS, OUTPUTS_DIR
+from kb.config import MAX_OUTPUT_CHARS
+from kb.config import OUTPUTS_DIR as _CONFIG_OUTPUTS_DIR
 from kb.utils.text import slugify
 
-WINDOWS_RESERVED = frozenset({
-    "CON", "PRN", "AUX", "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-})
+# Bound as a module attribute so tests can monkeypatch
+# `kb.query.formats.common.OUTPUTS_DIR` to redirect output (see test fixtures).
+OUTPUTS_DIR = _CONFIG_OUTPUTS_DIR
+
+WINDOWS_RESERVED = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+)
 MAX_SLUG_LEN = 80
 MAX_COLLISION_RETRIES = 9
 
@@ -52,11 +62,13 @@ def output_path_for(question: str, fmt: str) -> Path:
     """
     # KeyError for bad format — caller should validate upstream
     ext = _FORMAT_EXT[fmt]
-    # Re-read OUTPUTS_DIR from the module so monkeypatching in tests works
+    # Re-read OUTPUTS_DIR via module attribute lookup so pytest's monkeypatch
+    # on `kb.query.formats.common.OUTPUTS_DIR` is honored on every call.
     from kb.query.formats import common as _self
+
     out_dir = _self.OUTPUTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S-%f")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S-%f")
     slug = safe_slug(question)
     base = f"{ts}-{slug}"
     for suffix in ("", *(f"-{i}" for i in range(2, MAX_COLLISION_RETRIES + 2))):
@@ -75,7 +87,7 @@ def build_provenance(result: dict) -> dict:
     return {
         "type": "query_output",
         "query": result.get("question", ""),
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+        "generated_at": datetime.now(UTC).isoformat(timespec="microseconds"),
         "kb_version": KB_VERSION,
         "source_pages": list(result.get("source_pages", [])),
         "citations": list(result.get("citations", [])),

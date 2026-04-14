@@ -84,8 +84,11 @@ def test_chart_injection_safe_from_page_id():
 def test_chart_empty_source_pages():
     """Zero pages produces a script that prints an error and exits cleanly."""
     empty = {
-        "question": "q", "answer": "a", "citations": [],
-        "source_pages": [], "context_pages": [],
+        "question": "q",
+        "answer": "a",
+        "citations": [],
+        "source_pages": [],
+        "context_pages": [],
     }
     script, data_json = render_chart(empty)
     ast.parse(script)
@@ -97,6 +100,7 @@ def test_chart_empty_source_pages():
 
 def test_chart_rejects_oversize():
     from kb.config import MAX_OUTPUT_CHARS
+
     oversize = {
         "question": "q",
         "answer": "x" * (MAX_OUTPUT_CHARS + 1),

@@ -15,8 +15,8 @@ from kb.query.formats.common import (
     validate_payload_size,
 )
 
-
 # ---- safe_slug ----
+
 
 def test_safe_slug_plain():
     assert safe_slug("What is RAG?") == "what-is-rag"
@@ -51,6 +51,7 @@ def test_safe_slug_windows_reserved_in_phrase_is_safe():
 
 
 # ---- output_path_for ----
+
 
 def test_output_path_for_creates_directory(monkeypatch, tmp_path):
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
@@ -93,6 +94,7 @@ def test_output_path_for_invalid_format(monkeypatch, tmp_path):
 
 # ---- build_provenance ----
 
+
 def test_build_provenance_minimal():
     result = {
         "question": "What is RAG?",
@@ -118,11 +120,13 @@ def test_build_provenance_preserves_original_question():
 def test_build_provenance_kb_version_dynamic():
     """kb_version must come from kb.__version__, not a hardcoded string."""
     import kb
+
     result = {"question": "q", "answer": "a", "citations": [], "source_pages": []}
     assert build_provenance(result)["kb_version"] == kb.__version__
 
 
 # ---- validate_payload_size ----
+
 
 def test_validate_payload_size_ok():
     validate_payload_size({"answer": "a" * 1000})  # no raise
