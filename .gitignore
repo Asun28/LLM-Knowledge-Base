@@ -25,6 +25,8 @@ raw/
 !demo/wiki/**
 !demo/raw/
 !demo/raw/**
+# Obsidian-local editor state inside demo is per-user, not worth tracking
+demo/.obsidian/
 
 # Environment
 .env

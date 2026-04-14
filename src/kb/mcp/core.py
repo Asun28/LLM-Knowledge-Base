@@ -6,6 +6,7 @@ import os
 from datetime import date
 from pathlib import Path
 
+from kb.capture import CaptureResult, capture_items
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
     MAX_QUESTION_LEN,
@@ -154,7 +155,7 @@ def kb_ingest(
     Args:
         source_path: Path to source file (absolute or relative to project root).
         source_type: One of: article, paper, repo, video, podcast, book, dataset,
-                     conversation. Auto-detected from path if empty.
+                     conversation, capture. Auto-detected from path if empty.
         extraction_json: JSON string with extracted fields. Required keys:
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
             Optional: author, core_argument, key_claims, abstract, evidence.
@@ -282,7 +283,7 @@ def kb_ingest_content(
         content: The full raw source text.
         filename: Filename slug (e.g., 'karpathy-llm-knowledge-bases').
         source_type: One of: article, paper, repo, video, podcast, book, dataset,
-                     conversation.
+                     conversation, capture.
         extraction_json: JSON string with extracted fields. Required keys:
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
         url: Optional source URL for metadata.
@@ -542,3 +543,61 @@ def kb_compile(incremental: bool = True) -> str:
         for err in result["errors"]:
             lines.append(f"  ! {err['source']}: {err['error']}")
     return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_capture(content: str, provenance: str | None = None) -> str:
+    """Extract discrete knowledge items (decisions, discoveries, corrections, gotchas)
+    from up to 50KB of unstructured text and write each to raw/captures/<slug>.md.
+
+    The scan-tier LLM atomizes the input; bodies are kept verbatim. Returns a list
+    of file paths. Run kb_ingest on each path to promote items to wiki/.
+
+    Args:
+        content: up to 50KB of UTF-8 text (chat logs, notes, transcripts).
+        provenance: optional grouping label. None → auto-generated session id.
+
+    Returns:
+        Plain-text summary of items written and noise filtered, or an Error: message.
+    """
+    try:
+        result = capture_items(content, provenance=provenance)
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+    return _format_capture_result(result)
+
+
+def _format_capture_result(result: CaptureResult) -> str:
+    """Format CaptureResult per spec §7 MCP response formats."""
+    n_items = len(result.items)
+
+    if n_items > 0:
+        head = (
+            f"Captured {n_items} item{'s' if n_items != 1 else ''}, "
+            f"filtered {result.filtered_out_count} as noise."
+        )
+        lines = [f"{head} Provenance: {result.provenance}", ""]
+        for item in result.items:
+            # capture_items always writes under CAPTURES_DIR; display the
+            # logical path directly rather than reconstructing via string
+            # search on path parts (which could mismatch on nested dirs
+            # whose own name happens to be 'captures').
+            rel = f"raw/captures/{item.path.name}"
+            lines.append(f"- {rel}  [{item.kind}]")
+        if result.rejected_reason:
+            lines.append("")
+            lines.append(result.rejected_reason)
+        else:
+            lines.append("")
+            lines.append("Next: run kb_ingest on each path to promote to wiki/.")
+        return "\n".join(lines)
+
+    # Zero items
+    if result.rejected_reason is not None:
+        return result.rejected_reason  # already starts with "Error: ..."
+    # Successful zero-items (LLM filtered everything as noise)
+    return (
+        f"Captured 0 items, filtered {result.filtered_out_count} as noise. "
+        f"Provenance: {result.provenance}\n"
+        f"(No items met the decision/discovery/correction/gotcha bar.)"
+    )

@@ -2,8 +2,8 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1177-brightgreen)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-25-blueviolet)](#claude-code-integration-mcp-server)
+[![Tests](https://img.shields.io/badge/tests-1322-brightgreen)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
 > **Compile, don't retrieve.** Drop a source in. Everything else is automatic — Claude extracts entities, builds interlinked wiki pages, injects wikilinks into existing pages, tracks trust scores, detects contradictions, and self-maintains. No vectors. No embeddings. No chunking. Just clean markdown you can browse in Obsidian.
@@ -48,7 +48,7 @@ Karpathy described a pattern where you manually ask an LLM to compile pages. Thi
 | No cross-linking | **Retroactive wikilink injection** — new topics auto-linked into existing pages |
 | No quality checks | **Self-healing** — lint catches problems, trust scoring flags bad pages, contradiction detection |
 | No gap awareness | **Evolve** — automatically identifies missing coverage and connection opportunities |
-| External LLM calls | **MCP-native** — 25 tools inside Claude Code, no API key needed |
+| External LLM calls | **MCP-native** — 26 tools inside Claude Code, no API key needed |
 | Text-only | **Obsidian** — open `wiki/` as a vault, visual knowledge graph for free |
 
 ## The 30-Second Demo
@@ -133,6 +133,7 @@ kb --version
 - **Retroactive wikilink injection** — when you ingest a new topic, existing pages that mention it get auto-linked
 - Cascade tracking — returns which existing pages might need review after the new ingest
 - Short-source tiering — small sources (<1000 chars) defer entity creation to prevent stubs
+- **Conversation capture** — `kb_capture` MCP tool atomizes chat / notes / session transcripts into typed knowledge items (decisions, discoveries, corrections, gotchas) with secret-scanner safety rails and a per-process rate limit
 
 ### Search & Query
 - **BM25 ranking** with title boosting and document length normalization
@@ -154,7 +155,7 @@ kb --version
 
 ### Claude Code Integration (MCP Server)
 
-25 tools that work natively in Claude Code. **No API key needed** — Claude Code is the default LLM.
+26 tools that work natively in Claude Code. **No API key needed** — Claude Code is the default LLM.
 
 ```json
 {
@@ -179,7 +180,7 @@ kb --version
 | See the graph | "Show me the knowledge graph" |
 
 <details>
-<summary><b>All 25 MCP tools</b></summary>
+<summary><b>All 26 MCP tools</b></summary>
 
 #### Core
 
@@ -189,6 +190,7 @@ kb --version
 | `kb_ingest` | Ingest a source file. Pass `extraction_json` with your extraction; omit it to get the prompt first. |
 | `kb_ingest_content` | One-shot: provide raw content + extraction JSON; saves to `raw/` and creates all wiki pages. |
 | `kb_save_source` | Save content to `raw/` without ingesting. Errors if file exists unless `overwrite=true`. |
+| `kb_capture` | Atomize up to 50KB of chat/notes/transcripts into typed `raw/captures/*.md` items via scan-tier LLM. Secret-scanner rejects API keys/tokens before any LLM call. |
 | `kb_compile_scan` | List new/changed sources that need `kb_ingest`. |
 
 #### Browse & Health
@@ -271,7 +273,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 1177 tests across 55 files
+  tests/                   # 1322 tests across 92 files
 ```
 
 </details>

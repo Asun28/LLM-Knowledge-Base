@@ -310,3 +310,107 @@ def test_kb_compile_scan_reports_changed_sources(tmp_path, monkeypatch):
     assert "Changed sources" in result
     assert "updated-paper.md" in result
     assert "1 source(s) to process" in result
+
+
+# ── kb_capture wrapper ───────────────────────────────────────────
+
+
+class TestKbCaptureWrapper:
+    """Spec §7 MCP response formats."""
+
+    def test_happy_path_format(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
+        from kb.mcp.core import kb_capture
+
+        content = "We decided to use atomic writes. " * 5
+        mock_scan_llm(
+            {
+                "items": [
+                    {
+                        "title": "Decided X",
+                        "kind": "decision",
+                        "body": "We decided to use atomic writes.",
+                        "one_line_summary": "atomic writes win",
+                        "confidence": "stated",
+                    },
+                    {
+                        "title": "Saw Y",
+                        "kind": "discovery",
+                        "body": "We decided to use atomic writes.",
+                        "one_line_summary": "discovery",
+                        "confidence": "stated",
+                    },
+                ],
+                "filtered_out_count": 3,
+            }
+        )
+        result = kb_capture(content)
+        assert isinstance(result, str)
+        assert "Captured 2" in result
+        assert "filtered 3" in result or "filtered 4" in result  # allow for body-verbatim drops
+        assert "raw/captures/" in result
+        assert "Next: run kb_ingest" in result
+
+    def test_zero_items_format(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
+        from kb.mcp.core import kb_capture
+
+        mock_scan_llm({"items": [], "filtered_out_count": 12})
+        result = kb_capture("any content here")
+        assert "Captured 0" in result
+        assert "filtered 12" in result
+
+    def test_secret_reject_format(self, tmp_captures_dir, reset_rate_limit):
+        from kb.mcp.core import kb_capture
+
+        result = kb_capture("AKIAIOSFODNN7EXAMPLE here")
+        assert result.startswith("Error:")
+        assert "secret" in result.lower()
+
+    def test_empty_content_format(self, tmp_captures_dir, reset_rate_limit):
+        from kb.mcp.core import kb_capture
+
+        result = kb_capture("")
+        assert result.startswith("Error:")
+        assert "empty" in result.lower()
+
+    def test_partial_write_format(
+        self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
+    ):
+        from kb.mcp.core import kb_capture
+
+        content = "we decided this and that and the other"
+        mock_scan_llm(
+            {
+                "items": [
+                    {
+                        "title": "a",
+                        "kind": "decision",
+                        "body": "we decided this",
+                        "one_line_summary": "s",
+                        "confidence": "stated",
+                    },
+                    {
+                        "title": "b",
+                        "kind": "decision",
+                        "body": "and that",
+                        "one_line_summary": "s",
+                        "confidence": "stated",
+                    },
+                ],
+                "filtered_out_count": 0,
+            }
+        )
+        from kb.capture import _exclusive_atomic_write as orig_write
+
+        call_count = [0]
+
+        def fail_second(path, c):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise OSError(28, "No space left on device")
+            return orig_write(path, c)
+
+        monkeypatch.setattr("kb.capture._exclusive_atomic_write", fail_second)
+        result = kb_capture(content)
+        assert "Captured 1" in result
+        assert "Error:" in result
+        assert "No space left" in result

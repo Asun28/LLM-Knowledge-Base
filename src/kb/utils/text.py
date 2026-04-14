@@ -106,6 +106,11 @@ _SLUGIFY_SYMBOL_MAP = {
     "c/c++": "c-cpp",
 }
 
+# Unicode bidirectional formatting marks (LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI).
+# Strip from any string we YAML-encode to defend against audit-log confusion
+# attacks (e.g. an LLM-supplied title rendering backward in terminals).
+_BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+
 
 def slugify(text: str) -> str:
     """Convert text to a URL-friendly slug.
@@ -130,15 +135,31 @@ def slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
-def yaml_escape(value: str) -> str:
-    """Escape a string for safe YAML double-quote style.
+def yaml_sanitize(value: str) -> str:
+    """Strip bidi marks and control characters WITHOUT escaping.
 
-    Handles backslashes, double quotes, newlines, tabs, carriage returns, and null bytes.
+    Use when the sanitized string will be handed to a YAML serializer
+    (yaml.dump) that already performs escaping — passing yaml_escape()
+    output to yaml.dump double-escapes backslashes/quotes/newlines.
     """
+    value = _BIDI_RE.sub("", value)
     if "\0" in value:
         logger.warning("Null byte removed from YAML value (possible data corruption)")
         value = value.replace("\0", "")
-    value = re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]", "", value)
+    return re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]", "", value)
+
+
+def yaml_escape(value: str) -> str:
+    """Escape a string for safe YAML double-quote style.
+
+    Strips Unicode bidi formatting marks (U+202A-202E, U+2066-2069) and C0/C1
+    control characters, then escapes backslashes, double quotes, newlines,
+    tabs, carriage returns, and null bytes.
+
+    Delegates the stripping phase to yaml_sanitize so both helpers stay in
+    sync if the stripped set ever expands (e.g. new bidi range added).
+    """
+    value = yaml_sanitize(value)
     return (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')

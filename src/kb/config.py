@@ -36,6 +36,9 @@ RAW_DATASETS = RAW_DIR / "datasets"
 RAW_CONVERSATIONS = RAW_DIR / "conversations"
 RAW_ASSETS = RAW_DIR / "assets"
 
+# ── Raw subdirectories (contd.) ──────────────────────────────
+CAPTURES_DIR = RAW_DIR / "captures"
+
 # ── Source type → subdirectory mapping ────────────────────────
 SOURCE_TYPE_DIRS: dict[str, Path] = {
     "article": RAW_ARTICLES,
@@ -46,7 +49,14 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
     "book": RAW_BOOKS,
     "dataset": RAW_DATASETS,
     "conversation": RAW_CONVERSATIONS,
+    "capture": CAPTURES_DIR,
 }
+
+# ── Capture configuration (Phase 5 — kb_capture MCP tool) ───────
+CAPTURE_MAX_BYTES = 50_000              # hard input size cap (UTF-8 bytes)
+CAPTURE_MAX_ITEMS = 20                  # cap items extracted per scan-tier call
+CAPTURE_KINDS = ("decision", "discovery", "correction", "gotcha")
+CAPTURE_MAX_CALLS_PER_HOUR = 60         # per-process rate limit (sliding 1h window)
 
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
