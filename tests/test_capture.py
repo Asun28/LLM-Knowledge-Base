@@ -8,7 +8,9 @@ Pytest imports are added in subsequent tasks alongside the first tests that use 
 """
 
 import base64
+import sys
 import threading
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest
@@ -20,12 +22,13 @@ from kb.capture import (
     _check_rate_limit,
     _extract_items_via_llm,
     _normalize_for_scan,
+    _path_within_captures,
     _rate_limit_window,
     _scan_for_secrets,
     _validate_input,
     _verify_body_is_verbatim,
 )
-from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
+from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR, CAPTURES_DIR
 from kb.utils.text import yaml_escape
 
 
@@ -483,3 +486,47 @@ class TestBuildSlug:
         # "CON" alone would be a Windows reserved device name; with kind prefix it's safe
         slug = _build_slug("decision", "CON", set())
         assert slug == "decision-con"
+
+
+class TestPathWithinCaptures:
+    """Spec §5 path-traversal gate + §8 symlink guard prep."""
+
+    def test_simple_path_inside_passes(self):
+        p = CAPTURES_DIR / "decision-foo.md"
+        assert _path_within_captures(p) is True
+
+    def test_parent_traversal_rejected(self):
+        p = CAPTURES_DIR / ".." / "secret.md"
+        assert _path_within_captures(p) is False
+
+    def test_absolute_path_outside_rejected(self):
+        p = Path("/tmp/evil.md") if Path("/tmp").exists() else Path("C:/Windows/Temp/evil.md")
+        assert _path_within_captures(p) is False
+
+    def test_nested_inside_passes(self):
+        p = CAPTURES_DIR / "subdir" / "file.md"
+        # subdir doesn't need to exist for this check
+        assert _path_within_captures(p) is True
+
+
+class TestSymlinkGuard:
+    """Spec §5, §8 — module refuses to load if CAPTURES_DIR escapes PROJECT_ROOT."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlink creation requires admin on Windows"
+    )
+    def test_symlink_outside_project_root_refuses_import(self, tmp_path, monkeypatch):
+        import importlib
+
+        external_dir = tmp_path / "external"
+        external_dir.mkdir()
+        symlink_dir = tmp_path / "captures_symlink"
+        symlink_dir.symlink_to(external_dir, target_is_directory=True)
+        monkeypatch.setattr("kb.config.CAPTURES_DIR", symlink_dir)
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path / "project_root")
+        if "kb.capture" in sys.modules:
+            del sys.modules["kb.capture"]
+        with pytest.raises(AssertionError, match="SECURITY: CAPTURES_DIR"):
+            importlib.import_module("kb.capture")
+        monkeypatch.undo()
+        importlib.import_module("kb.capture")

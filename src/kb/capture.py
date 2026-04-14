@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from urllib.parse import unquote
 
 from kb.config import (
@@ -19,6 +20,8 @@ from kb.config import (
     CAPTURE_MAX_BYTES,
     CAPTURE_MAX_CALLS_PER_HOUR,
     CAPTURE_MAX_ITEMS,
+    CAPTURES_DIR,
+    PROJECT_ROOT,
 )
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify
@@ -276,3 +279,28 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
     while f"{base}-{n}" in existing:
         n += 1
     return f"{base}-{n}"
+
+
+def _path_within_captures(path: Path) -> bool:
+    """Belt-and-suspenders: refuse any resolved path outside CAPTURES_DIR.
+
+    Relies on CAPTURES_DIR itself being inside PROJECT_ROOT — enforced by the
+    module-import-time assertion at the end of this module.
+    """
+    try:
+        path.resolve().relative_to(CAPTURES_DIR.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+# === Module-import-time symlink guard (spec §5, §8) ===
+# If raw/captures/ is a symlink escaping PROJECT_ROOT, refuse to load the
+# module at all rather than fail open in _path_within_captures at runtime.
+# A symlinked CAPTURES_DIR planted via some other primitive would resolve
+# to the symlink target on BOTH sides of the relative_to() call, silently
+# passing the path-within check. This assertion closes that gap.
+assert CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()), (
+    f"SECURITY: CAPTURES_DIR resolves outside PROJECT_ROOT — refusing to load. "
+    f"CAPTURES_DIR={CAPTURES_DIR.resolve()}, PROJECT_ROOT={PROJECT_ROOT.resolve()}"
+)
