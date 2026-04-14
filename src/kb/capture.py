@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
+import yaml
+
 from kb.config import (
     CAPTURE_KINDS,
     CAPTURE_MAX_BYTES,
@@ -28,7 +30,7 @@ from kb.config import (
 )
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
-from kb.utils.text import slugify
+from kb.utils.text import slugify, yaml_escape
 
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
@@ -333,6 +335,40 @@ def _resolve_provenance(provenance: str | None) -> str:
     if not slugged:
         return f"capture-{iso}-{_secrets.token_hex(2)}"
     return f"{slugged}-{iso}"
+
+
+def _render_markdown(
+    item: dict,
+    slug: str,
+    captured_alongside: list[str],
+    provenance: str,
+    captured_at: str,
+) -> str:
+    """Render one capture item to the markdown form (spec §5).
+
+    Field order is preserved for predictable diffs (sort_keys=False).
+    yaml_escape applied to user-content fields strips bidi marks (Task 2).
+    """
+    fm = {
+        "title": yaml_escape(item["title"]),
+        "kind": item["kind"],
+        "confidence": item["confidence"],
+        "one_line_summary": yaml_escape(item["one_line_summary"]),
+        "captured_at": captured_at,
+        "captured_from": provenance,
+        "captured_alongside": list(captured_alongside),
+        "source": "mcp-capture",
+    }
+    fm_yaml = yaml.dump(
+        fm,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    )
+    body = item["body"]
+    if not body.endswith("\n"):
+        body = body + "\n"
+    return f"---\n{fm_yaml}---\n\n{body}"
 
 
 # === Module-import-time symlink guard (spec §5, §8) ===

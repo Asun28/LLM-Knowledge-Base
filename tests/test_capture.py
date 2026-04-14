@@ -9,11 +9,13 @@ Pytest imports are added in subsequent tasks alongside the first tests that use 
 
 import base64
 import re
+import re as _test_re
 import sys
 import threading
 from pathlib import Path
 from urllib.parse import quote
 
+import frontmatter as _fm
 import pytest
 
 from kb.capture import (
@@ -26,6 +28,7 @@ from kb.capture import (
     _normalize_for_scan,
     _path_within_captures,
     _rate_limit_window,
+    _render_markdown,
     _resolve_provenance,
     _scan_for_secrets,
     _validate_input,
@@ -616,3 +619,89 @@ class TestResolveProvenance:
         prov = _resolve_provenance("決定セッション")
         # Accept either auto or some slugged form; primary assertion is non-empty
         assert prov
+
+
+class TestRenderMarkdown:
+    """Spec §5 markdown layout."""
+
+    def _sample_item(self):
+        return {
+            "title": "Pick atomic N-files",
+            "kind": "decision",
+            "body": "We chose N-files for atomicity.",
+            "one_line_summary": "N-files preserve raw immutability via metadata, not wrappers.",
+            "confidence": "stated",
+        }
+
+    def test_all_fields_present(self):
+        md = _render_markdown(
+            item=self._sample_item(),
+            slug="decision-pick-atomic-n-files",
+            captured_alongside=["discovery-foo", "gotcha-bar"],
+            provenance="claude-code-2026-04-13T17-45-00Z",
+            captured_at="2026-04-13T17:45:23Z",
+        )
+        post = _fm.loads(md)
+        assert post.metadata["title"] == "Pick atomic N-files"
+        assert post.metadata["kind"] == "decision"
+        assert post.metadata["confidence"] == "stated"
+        assert "N-files" in post.metadata["one_line_summary"]
+        assert post.metadata["captured_from"] == "claude-code-2026-04-13T17-45-00Z"
+        assert post.metadata["captured_alongside"] == ["discovery-foo", "gotcha-bar"]
+        assert post.metadata["source"] == "mcp-capture"
+        assert post.content.strip() == "We chose N-files for atomicity."
+
+    def test_empty_alongside_renders_empty_list(self):
+        md = _render_markdown(
+            item=self._sample_item(),
+            slug="decision-foo",
+            captured_alongside=[],
+            provenance="capture-x",
+            captured_at="2026-04-13T17:45:23Z",
+        )
+        post = _fm.loads(md)
+        assert post.metadata["captured_alongside"] == []
+
+    def test_z_suffix_preserved_in_raw_yaml(self):
+        md = _render_markdown(
+            item=self._sample_item(),
+            slug="decision-foo",
+            captured_alongside=[],
+            provenance="capture-x",
+            captured_at="2026-04-13T17:45:23Z",
+        )
+        # Must end with literal Z (not +00:00). Test via raw markdown regex since
+        # python-frontmatter may parse ISO strings into datetime objects.
+        # YAML quotes the string, so the pattern is: captured_at: '..Z' or captured_at: ...Z
+        assert _test_re.search(
+            r"^captured_at:\s*['\"]?[^\s'\"]*Z['\"]?\s*$", md, _test_re.MULTILINE
+        ), f"expected Z-suffix in raw markdown, got: {md!r}"
+
+    def test_body_with_embedded_dashes_survives(self):
+        item = self._sample_item()
+        item["body"] = "first part\n---\nsecond part with --- triple dashes"
+        md = _render_markdown(
+            item=item,
+            slug="x",
+            captured_alongside=[],
+            provenance="p",
+            captured_at="2026-04-13T00:00:00Z",
+        )
+        post = _fm.loads(md)
+        # python-frontmatter only consumes first --- block; embedded --- in body survives
+        assert "second part with --- triple dashes" in post.content
+
+    def test_bidi_marks_stripped_from_title(self):
+        item = self._sample_item()
+        item["title"] = "pay\u202eusalert"  # RLO embedded
+        md = _render_markdown(
+            item=item,
+            slug="x",
+            captured_alongside=[],
+            provenance="p",
+            captured_at="2026-04-13T00:00:00Z",
+        )
+        post = _fm.loads(md)
+        assert "\u202e" not in post.metadata["title"]
+        assert "pay" in post.metadata["title"]
+        assert "usalert" in post.metadata["title"]
