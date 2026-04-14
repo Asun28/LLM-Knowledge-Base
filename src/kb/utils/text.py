@@ -111,7 +111,9 @@ _SLUGIFY_SYMBOL_MAP = {
 # attacks (e.g. an LLM-supplied title rendering backward in terminals).
 _BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 
-# C0/C1 control characters (except \t \n \r \b \a which YAML handles).
+# C0/C1 control characters except \t (\x09), \n (\x0a), and \r (\x0d), which
+# YAML handles natively. \x00 is stripped separately with a warning because a
+# null byte is more likely a data-corruption signal than whitespace.
 # Hoisted to module scope so yaml_sanitize does not recompile on every call.
 _CTRL_CHAR_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]")
 

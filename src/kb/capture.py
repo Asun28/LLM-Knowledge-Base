@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 
 import base64
 import binascii
+import logging
 import os
 import re
 import secrets as _secrets
@@ -32,6 +33,8 @@ from kb.config import (
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
+
+logger = logging.getLogger(__name__)
 
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
@@ -338,8 +341,14 @@ def _path_within_captures(path: Path) -> bool:
     try:
         path.resolve().relative_to(CAPTURES_DIR.resolve())
         return True
-    except (ValueError, OSError):
-        # OSError covers ELOOP on symlink cycles, EACCES on unreadable parents
+    except ValueError:
+        return False
+    except OSError as e:
+        # ELOOP on symlink cycles, EACCES on unreadable parents, etc.
+        # Log so operators can diagnose filesystem/permission issues rather
+        # than confusing them with the generic "slug escapes CAPTURES_DIR"
+        # message the caller surfaces. Still fails closed per MCP convention.
+        logger.warning("Path resolve failed for %s during capture guard: %s", path, e)
         return False
 
 
