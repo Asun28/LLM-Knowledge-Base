@@ -295,12 +295,22 @@ class TestScanForSecretsEncoded:
         assert location == "via encoded form"
 
     def test_url_encoded_value_passes_through_normalize(self):
-        # The normalizer should URL-decode runs of percent-encoded triplets.
-        # Primary assertion: _normalize_for_scan includes the decoded form.
-        raw = "key&value=secret"
-        encoded = quote(raw, safe="")
+        # Spec §8: 3+ adjacent percent-encoded triplets trigger URL-decoding.
+        # "&=?" → "%26%3D%3F" (3 adjacent triplets) exceeds the threshold.
+        raw = "AB&=?CD"
+        encoded = quote(raw, safe="")  # "AB%26%3D%3FCD"
         normalized = _normalize_for_scan(encoded)
-        assert raw in normalized
+        # The decoded "&=?" run should appear in the normalized superset.
+        assert "&=?" in normalized
+
+    def test_url_encoded_scattered_triplets_not_decoded(self):
+        # Spec §8 threshold: 2 non-adjacent triplets should NOT trigger decode.
+        # "key&value=secret" has %26 and %3D but they're not adjacent.
+        raw = "key&value=secret"
+        encoded = quote(raw, safe="")  # "key%26value%3Dsecret"
+        normalized = _normalize_for_scan(encoded)
+        # The decoded run should NOT appear because triplets aren't adjacent (3+).
+        assert "key&value=secret" not in normalized
 
     def test_legitimate_base64_image_header_does_not_false_positive(self):
         # PNG file header in base64 — should NOT match any secret pattern

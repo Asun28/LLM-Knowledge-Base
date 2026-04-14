@@ -138,12 +138,14 @@ def _normalize_for_scan(content: str) -> str:
             parts.append(text)
         except (ValueError, binascii.Error, UnicodeDecodeError):
             continue
-    # URL-encoded: if content has 2+ percent-encoded triplets, unquote it.
-    if len(re.findall(r"%[0-9A-Fa-f]{2}", content)) >= 2:
+    # URL-encoded runs: 3+ adjacent percent-encoded triplets.
+    # Only decode the matched run (not the whole content) — keeps the normalized
+    # view tight and avoids false positives on content with scattered %XX chars.
+    for m in re.finditer(r"(?:%[0-9A-Fa-f]{2}){3,}", content):
         try:
-            parts.append(unquote(content))
+            parts.append(unquote(m.group(0)))
         except (ValueError, UnicodeDecodeError):
-            pass
+            continue
     return "\n".join(parts)
 
 
