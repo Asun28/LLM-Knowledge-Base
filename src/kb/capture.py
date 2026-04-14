@@ -21,6 +21,7 @@ from kb.config import (
     CAPTURE_MAX_ITEMS,
 )
 from kb.utils.llm import call_llm_json
+from kb.utils.text import slugify
 
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
@@ -257,3 +258,21 @@ def _verify_body_is_verbatim(items: list[dict], content: str) -> tuple[list[dict
             continue
         kept.append(item)
     return kept, dropped
+
+
+def _build_slug(kind: str, title: str, existing: set[str]) -> str:
+    """Spec §5: kind prefix + slugify + 80-char cap + numeric collision suffix.
+
+    Falls back to bare kind if slugify produces empty string (e.g. all-unicode title
+    stripped by re.ASCII flag in kb.utils.text.slugify).
+    """
+    base = slugify(f"{kind}-{title}")
+    base = base[:80]
+    if not base:
+        base = kind
+    if base not in existing:
+        return base
+    n = 2
+    while f"{base}-{n}" in existing:
+        n += 1
+    return f"{base}-{n}"

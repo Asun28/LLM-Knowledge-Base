@@ -16,6 +16,7 @@ import pytest
 from kb.capture import (
     _CAPTURE_SCHEMA,
     CAPTURE_KINDS,
+    _build_slug,
     _check_rate_limit,
     _extract_items_via_llm,
     _normalize_for_scan,
@@ -433,3 +434,52 @@ class TestExtractAndVerify:
         kept, dropped = _verify_body_is_verbatim([], "any content")
         assert kept == []
         assert dropped == 0
+
+
+class TestBuildSlug:
+    """Spec §5 slug algorithm."""
+
+    def test_kind_prefix_present(self):
+        slug = _build_slug("decision", "Pick atomic files", set())
+        assert slug.startswith("decision-")
+        assert "pick-atomic-files" in slug
+
+    def test_length_capped_at_80(self):
+        long_title = "a" * 200
+        slug = _build_slug("decision", long_title, set())
+        assert len(slug) <= 80
+
+    def test_no_collision_returns_base(self):
+        slug = _build_slug("decision", "foo", set())
+        assert slug == "decision-foo"
+
+    def test_collision_appends_2(self):
+        existing = {"decision-foo"}
+        slug = _build_slug("decision", "foo", existing)
+        assert slug == "decision-foo-2"
+
+    def test_multiple_collisions_increment(self):
+        existing = {"decision-foo", "decision-foo-2", "decision-foo-3"}
+        slug = _build_slug("decision", "foo", existing)
+        assert slug == "decision-foo-4"
+
+    def test_all_unicode_title_falls_back_to_kind(self):
+        # CJK title — slugify with re.ASCII strips it all
+        slug = _build_slug("decision", "決定事項", set())
+        # slugify returns "decision" (trailing hyphen stripped); no collision → return
+        assert slug == "decision"
+
+    def test_unicode_fallback_collides_with_existing_bare_kind(self):
+        existing = {"decision"}
+        slug = _build_slug("decision", "決定事項", existing)
+        assert slug == "decision-2"
+
+    def test_mixed_unicode_ascii(self):
+        slug = _build_slug("discovery", "OpenAI 决策", set())
+        assert slug.startswith("discovery-")
+        assert "openai" in slug.lower()
+
+    def test_kind_prefix_immunizes_windows_reserved(self):
+        # "CON" alone would be a Windows reserved device name; with kind prefix it's safe
+        slug = _build_slug("decision", "CON", set())
+        assert slug == "decision-con"
