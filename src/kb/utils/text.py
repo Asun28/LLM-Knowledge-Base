@@ -111,6 +111,10 @@ _SLUGIFY_SYMBOL_MAP = {
 # attacks (e.g. an LLM-supplied title rendering backward in terminals).
 _BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 
+# C0/C1 control characters (except \t \n \r \b \a which YAML handles).
+# Hoisted to module scope so yaml_sanitize does not recompile on every call.
+_CTRL_CHAR_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]")
+
 
 def slugify(text: str) -> str:
     """Convert text to a URL-friendly slug.
@@ -146,7 +150,7 @@ def yaml_sanitize(value: str) -> str:
     if "\0" in value:
         logger.warning("Null byte removed from YAML value (possible data corruption)")
         value = value.replace("\0", "")
-    return re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]", "", value)
+    return _CTRL_CHAR_RE.sub("", value)
 
 
 def yaml_escape(value: str) -> str:

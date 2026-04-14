@@ -23,6 +23,9 @@ def tokenize(text: str) -> list[str]:
     """Tokenize text into lowercase words for BM25 indexing.
 
     Extracts alphanumeric tokens of length >= 2, filters stopwords.
+    Applies the STOPWORDS filter (see kb.utils.text.STOPWORDS) — tokens
+    like 'what', 'is', 'the' are dropped, so a query like 'what is rag'
+    reduces to ['rag'] before scoring.
     Keeps hyphens within words (e.g., 'fine-tuning' stays as one token).
 
     Note: Version strings like 'v0.9.13' fragment across dots — the dot

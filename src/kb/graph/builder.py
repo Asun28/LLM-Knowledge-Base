@@ -31,7 +31,7 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     node attribute retains original filesystem case and must be used for all file I/O.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md").lower()
+    return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
 def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:

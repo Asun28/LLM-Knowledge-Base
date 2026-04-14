@@ -55,7 +55,8 @@ def _check_rate_limit() -> tuple[bool, int]:
             _rate_limit_window.popleft()
         if len(_rate_limit_window) >= CAPTURE_MAX_CALLS_PER_HOUR:
             oldest = _rate_limit_window[0]
-            retry_after = int(oldest + 3600 - now) + 1
+            # max(1, ...) avoids ≤0 retry_after under frozen-clock test fixtures
+            retry_after = max(1, int(oldest + 3600 - now) + 1)
             return False, retry_after
         _rate_limit_window.append(now)
         return True, 0
@@ -72,7 +73,8 @@ def _validate_input(content: str) -> tuple[str | None, str]:
         (normalized, "") on success
         (None, error_msg) on rejection
     """
-    raw_bytes = len(content.encode("utf-8"))
+    # ASCII fast-path avoids a full encode() allocation for the common case
+    raw_bytes = len(content) if content.isascii() else len(content.encode("utf-8"))
     if raw_bytes > CAPTURE_MAX_BYTES:
         return None, (
             f"Error: content exceeds {CAPTURE_MAX_BYTES} bytes (got {raw_bytes}). "
@@ -115,7 +117,7 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
     ),
     ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
-    ("GCP OAuth access token", re.compile(r"ya29\.[0-9A-Za-z_-]+")),
+    ("GCP OAuth access token", re.compile(r"ya29\.[0-9A-Za-z_-]{20,}")),
     ("GCP service account JSON", re.compile(r'"type"\s*:\s*"service_account"')),
     ("Stripe live key", re.compile(r"sk_live_[0-9a-zA-Z]{24,}")),
     ("Stripe live restricted key", re.compile(r"rk_live_[0-9a-zA-Z]{24,}")),
@@ -168,11 +170,9 @@ def _normalize_for_scan(content: str) -> str:
     # URL-encoded runs: 3+ adjacent percent-encoded triplets.
     # Only decode the matched run (not the whole content) — keeps the normalized
     # view tight and avoids false positives on content with scattered %XX chars.
+    # urllib.parse.unquote uses errors='replace' internally and never raises.
     for m in re.finditer(r"(?:%[0-9A-Fa-f]{2}){3,}", content):
-        try:
-            parts.append(unquote(m.group(0)))
-        except (ValueError, UnicodeDecodeError):
-            continue
+        parts.append(unquote(m.group(0)))
     return "\n".join(parts)
 
 
@@ -316,6 +316,9 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
         base = kind
     if base not in existing:
         return base
+    # Collision loop: bounded in practice by CAPTURE_MAX_CALLS_PER_HOUR growth
+    # of `existing`. Integer suffixes guarantee termination since each candidate
+    # is distinct until a free slot is found.
     n = 2
     while True:
         suffix = f"-{n}"
@@ -335,7 +338,8 @@ def _path_within_captures(path: Path) -> bool:
     try:
         path.resolve().relative_to(CAPTURES_DIR.resolve())
         return True
-    except ValueError:
+    except (ValueError, OSError):
+        # OSError covers ELOOP on symlink cycles, EACCES on unreadable parents
         return False
 
 
@@ -438,6 +442,10 @@ def _write_item_files(
     limitation: captured_alongside refs resolved in Phase B may become stale if
     a cross-process race forces a slug change in Phase C.
     """
+    # Early return: no items means no mkdir/scandir work required
+    if not items:
+        return [], None
+
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
     # Initial scan — use context manager to release Windows dir handle promptly
@@ -455,7 +463,9 @@ def _write_item_files(
         existing.add(slug)
         slugs.append(slug)
 
-    # Phase B — compute captured_alongside per item (excludes self)
+    # Phase B — compute captured_alongside per item (excludes self).
+    # O(N²) — safe at CAPTURE_MAX_ITEMS=20; revisit if the per-call item cap
+    # is raised above ~500.
     alongside_for: list[list[str]] = [
         [s for j, s in enumerate(slugs) if j != i] for i in range(len(items))
     ]
@@ -615,8 +625,19 @@ def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
 # passing the path-within check. This assertion closes that gap.
 # Explicit runtime check (not `assert`) so the guard fires under `python -O`
 # which strips asserts. Security checks must never be optimizable away.
-if not CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()):
+# Wrap .resolve() calls in try/except OSError so mount failures (offline
+# network drive, unreadable parent) surface as RuntimeError instead of
+# crashing module import with an opaque OSError traceback.
+try:
+    _captures_resolved = CAPTURES_DIR.resolve()
+    _project_resolved = PROJECT_ROOT.resolve()
+except OSError as e:
+    raise RuntimeError(
+        f"SECURITY: Could not resolve CAPTURES_DIR or PROJECT_ROOT (mount failure?): {e}"
+    ) from e
+
+if not _captures_resolved.is_relative_to(_project_resolved):
     raise RuntimeError(
         f"SECURITY: CAPTURES_DIR resolves outside PROJECT_ROOT — refusing to load. "
-        f"CAPTURES_DIR={CAPTURES_DIR.resolve()}, PROJECT_ROOT={PROJECT_ROOT.resolve()}"
+        f"CAPTURES_DIR={_captures_resolved}, PROJECT_ROOT={_project_resolved}"
     )

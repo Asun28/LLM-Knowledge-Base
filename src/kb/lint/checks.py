@@ -135,7 +135,10 @@ def fix_dead_links(
     return fixes
 
 
-_INDEX_FILES = ("index.md", "_sources.md", "_categories.md", "log.md")
+# _categories.md was designed but never written by the system — dropped to
+# avoid a dead lookup on every lint invocation. Re-add if/when the categories
+# index is actually materialized by the compile pipeline.
+_INDEX_FILES = ("index.md", "_sources.md", "log.md")
 
 
 def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) -> list[dict]:
