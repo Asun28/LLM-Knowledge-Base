@@ -14,11 +14,15 @@ from urllib.parse import quote
 import pytest
 
 from kb.capture import (
+    _CAPTURE_SCHEMA,
+    CAPTURE_KINDS,
     _check_rate_limit,
+    _extract_items_via_llm,
     _normalize_for_scan,
     _rate_limit_window,
     _scan_for_secrets,
     _validate_input,
+    _verify_body_is_verbatim,
 )
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
 from kb.utils.text import yaml_escape
@@ -340,3 +344,92 @@ class TestScanForSecretsEncoded:
         # Documentation test — design accepts this gap per spec §13.
         # Don't assert None or not-None; just verify no crash.
         assert result is None or result is not None  # tautology — crash test only
+
+
+class TestExtractAndVerify:
+    """Spec §4 step 7-8, §7 Class C."""
+
+    def test_extract_calls_scan_tier(self, mock_scan_llm):
+        canned = {"items": [], "filtered_out_count": 0}
+        mock_scan_llm(canned)
+        result = _extract_items_via_llm("any content")
+        assert result == canned
+
+    def test_extract_passes_schema(self, mock_scan_llm):
+        # mock_scan_llm asserts schema is passed and well-formed
+        canned = {"items": [], "filtered_out_count": 5}
+        mock_scan_llm(canned)
+        _extract_items_via_llm("hello")  # would assert-fail in mock if schema missing
+
+    def test_schema_enforces_kind_enum(self):
+        item_schema = _CAPTURE_SCHEMA["properties"]["items"]["items"]
+        kind_enum = item_schema["properties"]["kind"]["enum"]
+        assert set(kind_enum) == set(CAPTURE_KINDS)
+
+    def test_schema_caps_max_items(self):
+        from kb.config import CAPTURE_MAX_ITEMS
+
+        assert _CAPTURE_SCHEMA["properties"]["items"]["maxItems"] == CAPTURE_MAX_ITEMS
+
+    def test_schema_required_fields(self):
+        item_schema = _CAPTURE_SCHEMA["properties"]["items"]["items"]
+        required = set(item_schema["required"])
+        assert required == {"title", "kind", "body", "one_line_summary", "confidence"}
+
+    def test_verify_drops_reworded_body(self):
+        content = "the original input mentioned X and then Y"
+        items = [
+            {
+                "title": "t1",
+                "kind": "decision",
+                "body": "X and then Y",
+                "one_line_summary": "s",
+                "confidence": "stated",
+            },
+            {
+                "title": "t2",
+                "kind": "discovery",
+                "body": "completely different prose",
+                "one_line_summary": "s",
+                "confidence": "stated",
+            },
+        ]
+        kept, dropped = _verify_body_is_verbatim(items, content)
+        assert len(kept) == 1
+        assert kept[0]["title"] == "t1"
+        assert dropped == 1
+
+    def test_verify_drops_whitespace_only_body(self):
+        content = "any content here"
+        items = [
+            {
+                "title": "ws",
+                "kind": "decision",
+                "body": "    ",
+                "one_line_summary": "s",
+                "confidence": "stated",
+            },
+        ]
+        kept, dropped = _verify_body_is_verbatim(items, content)
+        assert kept == []
+        assert dropped == 1
+
+    def test_verify_strip_tolerance(self):
+        content = "the cat sat on the mat"
+        items = [
+            {
+                "title": "t",
+                "kind": "decision",
+                "body": "  the cat sat  ",
+                "one_line_summary": "s",
+                "confidence": "stated",
+            },
+        ]
+        kept, dropped = _verify_body_is_verbatim(items, content)
+        assert len(kept) == 1
+        assert dropped == 0
+
+    def test_verify_empty_input_drops_all(self):
+        kept, dropped = _verify_body_is_verbatim([], "any content")
+        assert kept == []
+        assert dropped == 0

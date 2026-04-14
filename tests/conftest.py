@@ -108,3 +108,38 @@ def create_raw_source(tmp_path: Path):
         return source_path
 
     return _create
+
+
+_REQUIRED = object()  # sentinel — explicit "must be passed"
+
+
+@pytest.fixture
+def mock_scan_llm(monkeypatch):
+    """Install a canned JSON response for call_llm_json inside kb.capture.
+
+    Mock signature mirrors the REAL call_llm_json signature
+    (src/kb/utils/llm.py): tier and schema are keyword-only, schema is required.
+    The sentinel + assertions catch the bug where capture.py forgets to pass
+    schema=_CAPTURE_SCHEMA.
+    """
+
+    def _install(
+        response: dict,
+        expected_schema_keys: tuple[str, ...] = ("items", "filtered_out_count"),
+    ):
+        def fake_call(prompt, *, tier="write", schema=_REQUIRED, system="", **_kw):
+            assert tier == "scan", f"kb_capture must use scan tier, got {tier!r}"
+            msg = "kb_capture must pass schema= to call_llm_json"
+            assert schema is not _REQUIRED, msg
+            assert isinstance(schema, dict), f"schema must be dict, got {type(schema)}"
+            for key in expected_schema_keys:
+                prop = schema.get("properties", {})
+                assert key in prop, f"schema missing property {key!r}"
+            required = set(schema.get("required", []))
+            missing = required - set(response)
+            assert not missing, f"mock response missing required schema keys: {missing}"
+            return response
+
+        monkeypatch.setattr("kb.capture.call_llm_json", fake_call)
+
+    return _install

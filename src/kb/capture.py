@@ -14,7 +14,13 @@ import time
 from collections import deque
 from urllib.parse import unquote
 
-from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
+from kb.config import (
+    CAPTURE_KINDS,
+    CAPTURE_MAX_BYTES,
+    CAPTURE_MAX_CALLS_PER_HOUR,
+    CAPTURE_MAX_ITEMS,
+)
+from kb.utils.llm import call_llm_json
 
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
@@ -167,3 +173,87 @@ def _scan_for_secrets(content: str) -> tuple[str, str] | None:
             return label, "via encoded form"
 
     return None
+
+
+# === Scan-tier LLM contract (spec §4) ===
+_CAPTURE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "maxItems": CAPTURE_MAX_ITEMS,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "maxLength": 100},
+                    "kind": {"enum": list(CAPTURE_KINDS)},
+                    "body": {"type": "string", "minLength": 1},
+                    "one_line_summary": {"type": "string", "maxLength": 200},
+                    "confidence": {"enum": ["stated", "inferred", "speculative"]},
+                },
+                "required": ["title", "kind", "body", "one_line_summary", "confidence"],
+            },
+        },
+        "filtered_out_count": {"type": "integer", "minimum": 0},
+    },
+    "required": ["items", "filtered_out_count"],
+}
+
+
+_PROMPT_TEMPLATE = """You are atomizing messy text into discrete knowledge items.
+
+Input: up to 50KB of conversation logs, scratch notes, or chat transcripts.
+Output: JSON matching the schema — a list of items, each with:
+  - title (max 100 chars, imperative phrase)
+  - kind: one of "decision" | "discovery" | "correction" | "gotcha"
+  - body (verbatim span from the input — DO NOT reword, summarize, or rewrite)
+  - one_line_summary (max 200 chars, your words, for frontmatter display)
+  - confidence: "stated" | "inferred" | "speculative"
+
+Keep an item only if it is:
+  - a specific decision (something the user or team settled on)
+  - a specific discovery (a new fact learned from evidence)
+  - a correction (something previously believed that turned out wrong)
+  - a gotcha (a pitfall or non-obvious constraint worth remembering)
+
+Filter as noise:
+  - pleasantries, apologies, meta-talk about the chat itself
+  - half-finished thoughts or unresolved questions (unless the question IS the gotcha)
+  - duplicates of items already in your list
+  - off-topic tangents
+  - retried / corrected-in-place content (keep only the final form)
+
+Cap the output at {max_items} items. Also report `filtered_out_count`: the number
+of candidate items you rejected as noise.
+
+--- INPUT ---
+{content}
+--- END INPUT ---
+"""
+
+
+def _extract_items_via_llm(content: str) -> dict:
+    """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion."""
+    prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=content)
+    return call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
+
+
+def _verify_body_is_verbatim(items: list[dict], content: str) -> tuple[list[dict], int]:
+    """Drop items whose body is whitespace-only or not a verbatim substring of content.
+
+    Spec §4 step 8 + invariant 2. Defends raw/ immutability against LLM rewording
+    AND traps the schema gap where minLength:1 permits "   " bodies (which would
+    write 0-byte content files).
+    """
+    kept: list[dict] = []
+    dropped = 0
+    for item in items:
+        body_stripped = item["body"].strip()
+        if not body_stripped:
+            dropped += 1
+            continue
+        if body_stripped not in content:
+            dropped += 1
+            continue
+        kept.append(item)
+    return kept, dropped
