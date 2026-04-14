@@ -102,7 +102,7 @@ def render_html(result: dict) -> str:
     <section class="answer">
 {answer_block}
     </section>
-    <section>
+    <section class="sources">
       <h2>Sources</h2>
 {sources_block}
     </section>

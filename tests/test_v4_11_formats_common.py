@@ -86,6 +86,31 @@ def test_output_path_for_unique_paths(monkeypatch, tmp_path):
     assert p1 != p2
 
 
+def test_output_path_for_atomic_reservation(monkeypatch, tmp_path):
+    """output_path_for must reserve the path atomically (O_CREAT|O_EXCL) so
+    the file exists immediately after the call — closes the TOCTOU window that
+    a plain exists() check would leave open for concurrent writers."""
+    monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
+    path = output_path_for("atomic-test", "markdown")
+    # Reservation creates a zero-byte placeholder that the adapter overwrites
+    # via atomic_text_write's temp+rename.
+    assert path.exists()
+    assert path.stat().st_size == 0
+
+
+def test_output_path_for_skips_reserved(monkeypatch, tmp_path):
+    """Two back-to-back calls must return two distinct reserved paths — the
+    second call sees the first's placeholder and either gets a new microsecond
+    timestamp or falls back to the -2..-9 suffix chain. Neither path may
+    clobber the other."""
+    monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
+    p1 = output_path_for("atomic-test", "markdown")
+    p2 = output_path_for("atomic-test", "markdown")
+    assert p1 != p2
+    assert p1.exists()
+    assert p2.exists()
+
+
 def test_output_path_for_invalid_format(monkeypatch, tmp_path):
     monkeypatch.setattr("kb.query.formats.common.OUTPUTS_DIR", tmp_path / "outputs")
     with pytest.raises(KeyError):

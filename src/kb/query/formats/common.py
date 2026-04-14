@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,11 +55,17 @@ def safe_slug(text: str) -> str:
 
 
 def output_path_for(question: str, fmt: str) -> Path:
-    """Return a collision-safe path under OUTPUTS_DIR for this question+format.
+    """Return a collision-safe reserved path under OUTPUTS_DIR for this question+format.
 
     Path scheme: outputs/{YYYY-MM-DD-HHMMSS-ffffff}-{slug}.{ext}
-    If the first candidate exists (microsecond collision under heavy concurrency),
-    suffixes -2..-9 are tried. Raises OSError if all retries exhausted.
+    Uses atomic `O_CREAT|O_EXCL` reservation to close the TOCTOU window between
+    an `exists()` check and the adapter's subsequent atomic write — under
+    concurrent queries or two processes targeting the same OUTPUTS_DIR, the
+    reservation guarantees the caller owns the filename exclusively. The
+    adapter's later `atomic_text_write(...)` uses `Path.replace()` which
+    overwrites this zero-byte placeholder, which is safe because no other
+    process can win the race to this filename. Suffixes -2..-9 are tried on
+    conflict. Raises OSError if all retries exhausted.
     """
     # KeyError for bad format — caller should validate upstream
     ext = _FORMAT_EXT[fmt]
@@ -73,8 +80,16 @@ def output_path_for(question: str, fmt: str) -> Path:
     base = f"{ts}-{slug}"
     for suffix in ("", *(f"-{i}" for i in range(2, MAX_COLLISION_RETRIES + 2))):
         candidate = out_dir / f"{base}{suffix}.{ext}"
-        if not candidate.exists():
-            return candidate
+        try:
+            # Atomic reserve: O_CREAT|O_EXCL fails if candidate already exists,
+            # closing the TOCTOU race that a plain `exists()` check would leave
+            # open. The zero-byte placeholder will be overwritten by the
+            # adapter's atomic_text_write (temp + rename).
+            fd = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            continue
+        os.close(fd)
+        return candidate
     raise OSError(f"Collision retries exhausted for {base}.{ext}")
 
 
