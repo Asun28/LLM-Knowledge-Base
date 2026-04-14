@@ -400,7 +400,9 @@ def query_wiki(
 
     # 3. Synthesize answer with LLM
     purpose = load_purpose(wiki_dir)
-    purpose_section = f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
+    purpose_section = (
+        f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
+    )
 
     prompt = f"""You are answering a question using a knowledge wiki as your source.
 {purpose_section}
