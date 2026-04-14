@@ -83,18 +83,34 @@ def compile(incremental: bool):
 
 @cli.command()
 @click.argument("question")
-def query(question: str):
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "markdown", "marp", "html", "chart", "jupyter"]),
+    default="text",
+    help="Output format. 'text' prints to stdout; others write to outputs/.",
+)
+def query(question: str, output_format: str):
     """Query the knowledge base."""
     from kb.query.citations import format_citations
     from kb.query.engine import query_wiki
 
     click.echo(f"Querying: {question}\n")
     try:
-        result = query_wiki(question)
+        fmt_kwarg = None if output_format == "text" else output_format
+        result = query_wiki(question, output_format=fmt_kwarg)
         click.echo(result["answer"])
-        if result["citations"]:
+        if result.get("citations"):
             click.echo(format_citations(result["citations"]))
-        click.echo(f"\n[Searched {len(result['source_pages'])} pages]")
+        click.echo(f"\n[Searched {len(result.get('source_pages', []))} pages]")
+        if result.get("output_path"):
+            click.echo(
+                f"\nOutput: {result['output_path']} ({result['output_format']})"
+            )
+        if result.get("output_error"):
+            click.echo(
+                f"\n[warn] Output format failed: {result['output_error']}", err=True
+            )
     except Exception as e:
         click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)

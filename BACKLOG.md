@@ -914,10 +914,10 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
      Ranking axes: (1) Karpathy-verbatim fidelity, (2) unsolved-gap coverage, (3) effort vs leverage. -->
 
 **Tier 1 — Karpathy-verbatim behaviors the project can't yet reproduce:**
-1. `kb_query --format={text|marp|html|chart|jupyter}` output adapters — reproduces Karpathy's *"render markdown files, slide shows (Marp format), matplotlib images"*. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-2. `kb_lint --augment` — gap-fill via fetch MCP. Reproduces *"impute missing data (with web searchers)"*. Distinct from deferred `kb_evolve mode=research` (proactive) — this is reactive to lint findings. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-3. `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen — makes the wiki retrievable by other agents; renderers over existing frontmatter/graph. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-4. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — Karpathy: *"schema is kept up to date in AGENTS.md"*; enables Codex / Cursor / Gemini CLI / Droid portability without forking schema per tool. Cross-ref: LOW LEVERAGE — Operational.
+<!-- Tier 1 #1 (`kb_query --format=…` output adapters) SHIPPED in Phase 4.11 (2026-04-14). -->
+1. `kb_lint --augment` — gap-fill via fetch MCP. Reproduces *"impute missing data (with web searchers)"*. Distinct from deferred `kb_evolve mode=research` (proactive) — this is reactive to lint findings. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
+2. `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen — makes the wiki retrievable by other agents; renderers over existing frontmatter/graph. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
+3. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — Karpathy: *"schema is kept up to date in AGENTS.md"*; enables Codex / Cursor / Gemini CLI / Droid portability without forking schema per tool. Cross-ref: LOW LEVERAGE — Operational.
 
 **Tier 2 — Epistemic integrity (unsolved-gap closers every community voice flagged):**
 5. `belief_state: confirmed|uncertain|contradicted|stale|retracted` frontmatter — cross-source aggregate orthogonal to per-source `confidence`. Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
@@ -929,7 +929,7 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 9. `.llmwikiignore` + pre-ingest secret/PII scanner — missing safety rail given every ingest currently sends full content to the API. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
 10. `SessionStart` hook + `raw/` file watcher + `_raw/` staging directory — ship as a three-item bundle that eliminates the "remember to ingest" step. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
 
-**Recommended first target:** #1 (`kb_query --format=...`). Reasons: highest Karpathy fidelity, largest user-visible payoff, contained blast radius inside `kb.query` (no schema migration), snapshot-testable per adapter. Every subsequent item (gap-fill reports, coverage warnings, search results) benefits from having richer output surfaces to render into.
+**Recommended next target:** #1 (`kb_lint --augment`). Reasons: with output adapters shipped (Phase 4.11), the next-highest Karpathy-fidelity item is the reactive gap-filler — lint detects a coverage gap, `fetch` MCP pulls missing context, `kb_ingest` auto-re-ingests. Contained blast radius in `kb.lint` + fetch-adapter wiring.
 
 **Already in flight (excluded from ranking):** `kb_capture` MCP tool (spec landed 2026-04-13 in `docs/superpowers/specs/2026-04-13-kb-capture-design.md`), `wiki/purpose.md` KB focus document (shipped 2026-04-13, commit `d505dca`).
 
@@ -974,8 +974,7 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### HIGH LEVERAGE — Output-Format Polymorphism
 
-- `query/formats/` `kb_query --format={text|marp|html|chart|jupyter}` — adapters file output under `wiki/outputs/` with provenance linking back to query + contributing pages. Directly addresses Karpathy's tweet: *"render markdown files, slide shows (Marp format), matplotlib images"*. Source: Karpathy tweet + Fabian Williams + JupyterBook reply.
-  (effort: Medium — one adapter per format; matplotlib adapter emits a Python script first, optional server-side render)
+<!-- `query/formats/` `kb_query --format=…` adapters SHIPPED in Phase 4.11 (2026-04-14). -->
 
 - `compile/publish.py` `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` — auto-generate AI-agent-consumable outputs alongside markdown during compile: each page gets `.txt`/`.json` siblings; wiki root gets `/llms.txt`, `/graph.jsonld`, `/sitemap.xml`. Makes the wiki itself a retrievable source for other agents. Source: Pratiyush/llm-wiki.
   (effort: Low — renderers over existing frontmatter + graph)

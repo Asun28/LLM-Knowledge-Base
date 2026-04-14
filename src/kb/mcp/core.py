@@ -48,6 +48,7 @@ def kb_query(
     max_results: int = 10,
     use_api: bool = False,
     conversation_context: str = "",
+    output_format: str = "",
 ) -> str:
     """Query the knowledge base.
 
@@ -58,11 +59,17 @@ def kb_query(
     With use_api=true: calls the Anthropic API to synthesize the answer
     (requires ANTHROPIC_API_KEY).
 
+    With output_format set (requires use_api=true): renders the synthesized
+    answer to a file under outputs/ in one of: markdown, marp, html, chart,
+    jupyter. Returns "Output written to: <path>" appended to the normal reply.
+
     Args:
         question: Natural language question.
         max_results: Maximum pages to search (default 10).
         use_api: If true, call the Anthropic API for synthesis. Default false.
         conversation_context: Recent conversation history for follow-up query rewriting.
+        output_format: One of markdown|marp|html|chart|jupyter to produce a file,
+                       or empty/text for stdout-only response. Requires use_api=true.
     """
     if not question or not question.strip():
         return "Error: Question cannot be empty."
@@ -70,6 +77,22 @@ def kb_query(
         return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
     if conversation_context and len(conversation_context) > MAX_QUESTION_LEN * 4:
         return f"Error: conversation_context too long (max {MAX_QUESTION_LEN * 4} chars)."
+
+    # Validate output_format at MCP boundary (normalize case/whitespace)
+    fmt_n = (output_format or "").strip().lower()
+    if fmt_n and fmt_n != "text":
+        from kb.query.formats import VALID_FORMATS
+        if fmt_n not in VALID_FORMATS:
+            return (
+                f"Error: unknown output_format '{output_format}'. "
+                f"Valid: {sorted(VALID_FORMATS)}"
+            )
+        if not use_api:
+            return (
+                "Error: output_format requires use_api=true "
+                "(default Claude Code mode returns raw context, "
+                "not a synthesized answer)."
+            )
 
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
@@ -81,11 +104,21 @@ def kb_query(
                 question,
                 max_results=max_results,
                 conversation_context=conversation_context or None,
+                output_format=fmt_n or None,
             )
             parts = [result["answer"]]
             if result.get("citations"):
                 parts.append("\n" + format_citations(result["citations"]))
             parts.append(f"\n[Searched {len(result.get('source_pages', []))} pages]")
+            if result.get("output_path"):
+                parts.append(
+                    f"\nOutput written to: {result['output_path']} "
+                    f"({result['output_format']})"
+                )
+            if result.get("output_error"):
+                parts.append(
+                    f"\n[warn] Output format failed: {result['output_error']}"
+                )
             return "\n".join(parts)
         except Exception as e:
             logger.exception("Error in kb_query API mode for: %s", question)

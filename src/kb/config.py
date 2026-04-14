@@ -39,6 +39,10 @@ RAW_ASSETS = RAW_DIR / "assets"
 # ── Raw subdirectories (contd.) ──────────────────────────────
 CAPTURES_DIR = RAW_DIR / "captures"
 
+# ── Query output adapters (Phase 4.11) ───────────────────────
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+MAX_OUTPUT_CHARS = 500_000
+
 # ── Source type → subdirectory mapping ────────────────────────
 SOURCE_TYPE_DIRS: dict[str, Path] = {
     "article": RAW_ARTICLES,

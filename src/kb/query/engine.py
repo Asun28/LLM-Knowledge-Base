@@ -329,6 +329,8 @@ def query_wiki(
     wiki_dir: Path | None = None,
     max_results: int = 10,
     conversation_context: str | None = None,
+    *,
+    output_format: str | None = None,
 ) -> dict:
     """Query the knowledge base and synthesize an answer.
 
@@ -337,6 +339,9 @@ def query_wiki(
         wiki_dir: Path to wiki directory (uses config default if None).
         max_results: Maximum number of pages to retrieve for context.
         conversation_context: Recent conversation history for follow-up query rewriting.
+        output_format: If set and non-text, render the result to a file under
+            OUTPUTS_DIR. One of: 'text', 'markdown', 'marp', 'html', 'chart',
+            'jupyter'. Keyword-only to preserve existing callers.
 
     Returns:
         dict with keys:
@@ -346,6 +351,10 @@ def query_wiki(
                 'path' (str), 'context' (str surrounding text).
             source_pages: list of page IDs retrieved by BM25 search.
             context_pages: list of page IDs actually included in LLM context.
+            output_path: str (only when output_format is set, non-text, and
+                answer synthesized).
+            output_format: str (only when output_path is present).
+            output_error: str (only when the adapter failed — answer still usable).
     """
     # Rewrite follow-up queries into standalone queries
     effective_question = question
@@ -391,7 +400,9 @@ def query_wiki(
 
     # 3. Synthesize answer with LLM
     purpose = load_purpose(wiki_dir)
-    purpose_section = f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
+    purpose_section = (
+        f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
+    )
 
     prompt = f"""You are answering a question using a knowledge wiki as your source.
 {purpose_section}
@@ -421,10 +432,36 @@ INSTRUCTIONS:
     # 4. Extract citations from the answer
     citations = extract_citations(answer)
 
-    return {
+    result_dict = {
         "question": question,
         "answer": answer,
         "citations": citations,
         "source_pages": [p["id"] for p in matching_pages],
         "context_pages": ctx["context_pages"],
     }
+
+    # 5. Optional output adapter (Phase 4.11)
+    if output_format and output_format.strip().lower() != "text":
+        from kb.query.formats import render_output
+        try:
+            path = render_output(output_format, result_dict)
+            if path is not None:
+                result_dict["output_path"] = str(path)
+                result_dict["output_format"] = output_format.strip().lower()
+        except ValueError as e:
+            # ValueError comes from our own validation — safe to surface verbatim
+            logger.warning("Output format '%s' failed: %s", output_format, e)
+            result_dict["output_error"] = str(e)
+        except Exception as e:  # noqa: BLE001
+            # Catch-all for adapter failures (OSError on disk, ImportError for
+            # optional deps like nbformat, nbformat.ValidationError, etc.) —
+            # the synthesized answer is still valid, so surface a scrubbed
+            # error message instead of letting the exception abort query_wiki.
+            logger.warning(
+                "Output format '%s' %s: %s", output_format, type(e).__name__, e
+            )
+            result_dict["output_error"] = (
+                f"write failed ({type(e).__name__}); see server logs for details"
+            )
+
+    return result_dict

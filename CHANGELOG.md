@@ -27,6 +27,35 @@ Plus Phase 4.1 sweep: 16 LOW/NIT backlog items applied directly. One test expect
 production (`RuntimeError` rather than `AssertionError`, following the assert → raise
 migration that shipped in the original kb_capture PR); no new tests added, no test semantics changed.
 
+Plus Phase 4.11: `kb_query --format={markdown|marp|html|chart|jupyter}` output adapters.
+
+### Phase 4.11 — kb_query output adapters (2026-04-14)
+
+Implements Karpathy Tier 1 #1 from BACKLOG.md: *"render markdown files, slide shows (Marp format), matplotlib images"*. Synthesized query answers can now leave the session as a slide deck, a web page, a plot script, or an executable notebook.
+
+- `src/kb/query/formats/` — new package with 5 output adapters dispatched via `render_output(fmt, result)`: markdown (YAML frontmatter + citations), marp (`marp: true` deck with code-fence-aware slide splitter that never shatters fenced code blocks), html (self-contained HTML5 with inline CSS + per-field `html.escape(quote=True)`), chart (static matplotlib Python script + JSON data sidecar — zero runtime matplotlib dep, no in-process image generation), jupyter (nbformat v4 with explicit Python 3 kernelspec; `metadata.trusted` never set to avoid auto-exec).
+- `src/kb/query/formats/common.py` — shared helpers: `safe_slug` (empty-fallback `untitled`, Windows-reserved-name disambig, 80-char cap), `output_path_for` (microsecond timestamp + collision retry `-2..-9`), `build_provenance` (dynamic `kb_version` from `kb.__version__`), `validate_payload_size` (pre-render `MAX_OUTPUT_CHARS=500_000` guard).
+- `src/kb/query/citations.py` `format_citations(citations, mode="markdown")` — new `mode` kwarg; adds `"html"` (`<ul>` with `<a>` anchors + html.escape) and `"marp"` modes. Default preserves all existing call sites.
+- `src/kb/query/engine.py` `query_wiki(..., *, output_format=None)` — new keyword-only parameter (zero breakage to existing callers). When set and non-text, dispatches to `render_output` and adds `output_path` + `output_format` keys to the return dict. `output_error` on failure (answer still usable).
+- `src/kb/cli.py` `kb query --format {text|markdown|marp|html|chart|jupyter}` — Click Choice flag; echoes `Output: <path> (<format>)` on non-text.
+- `src/kb/mcp/core.py` `kb_query(..., output_format="")` — new MCP parameter. Validated via `VALID_FORMATS` enum with `.lower().strip()` normalization at the tool boundary. **Requires `use_api=true`** — Claude-Code-mode returns raw context, not a synthesized answer; adapters have nothing to render.
+- `src/kb/config.py` — new constants `OUTPUTS_DIR = PROJECT_ROOT / "outputs"` (OUTSIDE `wiki/` to prevent search-index poisoning) and `MAX_OUTPUT_CHARS = 500_000`.
+- `.gitignore` — `outputs/` added.
+- `requirements.txt` — `nbformat>=5.0,<6.0` added.
+
+**Security gates (all covered by tests in `tests/test_v4_11_security.py`):**
+- No caller-supplied `output_path` override day-one — removes path-traversal attack surface entirely.
+- `outputs/` lives outside `wiki/`; `load_all_pages` never surfaces output files.
+- HTML adapter escapes every interpolated field individually (question, answer, page titles, citation paths, context); citation anchors built from structured list — never regex over already-escaped text.
+- Chart adapter is a static Python script template; question + page IDs serialized via `json.dumps()` into sidecar JSON — zero user-data interpolation into the script source. Matplotlib only mentioned in the emitted script, never imported by kb.
+- Jupyter adapter never sets `metadata.trusted` — notebooks do NOT auto-execute on open. Question in code cell serialized via `json.dumps()`.
+- Marp slide splitter is a fence-aware state machine — triple-backtick regions stay intact.
+- `MAX_OUTPUT_CHARS=500_000` enforced on raw answer pre-render.
+- Slug: empty question → `untitled`; Windows reserved filenames (`CON`/`PRN`/`NUL`/`COM[1-9]`/`LPT[1-9]`) disambiguated with `_0` suffix.
+- OSError messages from output writes no longer surface absolute tempfile paths to MCP callers.
+
+Test deltas: +112 tests across 8 new `tests/test_v4_11_*.py` files (total 1434 passing, up from 1322 baseline).
+
 ### Phase 4.1 — easy backlog sweep (2026-04-14)
 - `src/kb/capture.py` `_check_rate_limit` — `retry_after = max(1, ...)` so frozen-clock test fixtures can't yield ≤0 retry hints
 - `src/kb/capture.py` `_validate_input` — ASCII fast-path skips full UTF-8 encode() for the common case

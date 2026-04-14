@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from kb.query.citations import extract_citations, format_citations
 from kb.query.engine import query_wiki, search_pages
 
@@ -74,6 +76,44 @@ def test_format_citations_deduplicates():
 def test_format_citations_empty():
     """format_citations returns empty string for no citations."""
     assert format_citations([]) == ""
+
+
+def test_format_citations_html_mode():
+    """HTML mode returns <ul> with escaped <a> anchors."""
+    citations = [
+        {"type": "wiki", "path": "concepts/rag", "context": "..."},
+        {"type": "raw", "path": "raw/articles/foo.md", "context": "..."},
+    ]
+    result = format_citations(citations, mode="html")
+    assert "<ul" in result
+    assert '<a href="./wiki/concepts/rag.md">concepts/rag</a>' in result
+    assert "<code>raw/articles/foo.md</code>" in result
+
+
+def test_format_citations_marp_mode():
+    """Marp mode matches markdown rendering (kept distinct for future divergence)."""
+    citations = [
+        {"type": "wiki", "path": "concepts/rag", "context": "..."},
+        {"type": "raw", "path": "raw/a.md", "context": "..."},
+    ]
+    out = format_citations(citations, mode="marp")
+    assert "[[concepts/rag]]" in out
+    assert "`raw/a.md`" in out
+
+
+def test_format_citations_default_mode_unchanged():
+    """Default mode must match previous behavior exactly — no call-site breakage."""
+    citations = [{"type": "wiki", "path": "concepts/rag", "context": "x"}]
+    legacy = format_citations(citations)
+    explicit = format_citations(citations, mode="markdown")
+    assert legacy == explicit
+    assert "[[concepts/rag]]" in legacy
+
+
+def test_format_citations_invalid_mode():
+    """Unknown mode raises ValueError."""
+    with pytest.raises(ValueError, match="mode"):
+        format_citations([], mode="latex")
 
 
 # ── Search tests ───────────────────────────────────────────────

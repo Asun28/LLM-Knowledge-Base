@@ -28,6 +28,9 @@ raw/
 # Obsidian-local editor state inside demo is per-user, not worth tracking
 demo/.obsidian/
 
+# Query output adapters — ephemeral artifacts, never committed (Phase 4.11)
+outputs/
+
 # Environment
 .env
 .env.*
