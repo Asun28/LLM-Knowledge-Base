@@ -6,10 +6,13 @@ MCP tool wrapper: see kb.mcp.core.kb_capture.
 Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 """
 
+import base64
+import binascii
 import re
 import threading
 import time
 from collections import deque
+from urllib.parse import unquote
 
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
 
@@ -119,15 +122,46 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def _scan_for_secrets(content: str) -> tuple[str, str] | None:
-    """Sweep content for secret patterns. Returns (label, location) on first match, else None.
+def _normalize_for_scan(content: str) -> str:
+    """Build a normalized view: append b64-decoded ASCII candidates and URL-decoded runs.
 
-    location is "line N" for plain-text matches; "via encoded form" for matches found
-    only after normalization (Task 6).
+    The original content is kept; this function returns a SUPERSET that's only used for
+    secret-pattern matching. The decoded fragments give the regex sweep a chance to
+    catch trivially-encoded secrets without losing the original content.
+    """
+    parts: list[str] = [content]
+    # Base64 candidates: at least 16 chars of [A-Za-z0-9+/=].
+    for m in re.finditer(r"[A-Za-z0-9+/=]{16,}", content):
+        try:
+            decoded = base64.b64decode(m.group(0), validate=True)
+            text = decoded.decode("ascii")
+            parts.append(text)
+        except (ValueError, binascii.Error, UnicodeDecodeError):
+            continue
+    # URL-encoded: if content has 2+ percent-encoded triplets, unquote it.
+    if len(re.findall(r"%[0-9A-Fa-f]{2}", content)) >= 2:
+        try:
+            parts.append(unquote(content))
+        except (ValueError, UnicodeDecodeError):
+            pass
+    return "\n".join(parts)
+
+
+def _scan_for_secrets(content: str) -> tuple[str, str] | None:
+    """Sweep content + normalized view for secret patterns.
+
+    Returns (label, location) on first match, else None.
+    location is "line N" for plain matches, "via encoded form" for normalization matches.
     """
     for label, pattern in _CAPTURE_SECRET_PATTERNS:
         m = pattern.search(content)
         if m:
             line_no = content[: m.start()].count("\n") + 1
             return label, f"line {line_no}"
+
+    normalized = _normalize_for_scan(content)
+    for label, pattern in _CAPTURE_SECRET_PATTERNS:
+        if pattern.search(normalized):
+            return label, "via encoded form"
+
     return None

@@ -7,11 +7,19 @@ Class B (LLM failure), Class C (quality filter), Class D (write errors), happy p
 Pytest imports are added in subsequent tasks alongside the first tests that use them.
 """
 
+import base64
 import threading
+from urllib.parse import quote
 
 import pytest
 
-from kb.capture import _check_rate_limit, _rate_limit_window, _scan_for_secrets, _validate_input
+from kb.capture import (
+    _check_rate_limit,
+    _normalize_for_scan,
+    _rate_limit_window,
+    _scan_for_secrets,
+    _validate_input,
+)
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
 from kb.utils.text import yaml_escape
 
@@ -270,3 +278,55 @@ class TestScanForSecretsPlain:
         # Order in pattern list determines which wins; just verify deterministic
         result2 = _scan_for_secrets(content)
         assert result == result2
+
+
+class TestScanForSecretsEncoded:
+    """Spec §8 encoded-secret normalization pass."""
+
+    def test_base64_wrapped_aws_key_rejects(self):
+        # Wrap an AWS key in base64
+        raw = "AKIAIOSFODNN7EXAMPLE"
+        encoded = base64.b64encode(raw.encode()).decode()
+        # encoded form is QUtJQUlPU0ZPRE5ON0VYQU1QTEU=
+        result = _scan_for_secrets(f"opaque blob: {encoded}")
+        assert result is not None, "b64-wrapped AWS key should be detected via normalization"
+        label, location = result
+        assert "AWS" in label
+        assert location == "via encoded form"
+
+    def test_url_encoded_value_passes_through_normalize(self):
+        # The normalizer should URL-decode runs of percent-encoded triplets.
+        # Primary assertion: _normalize_for_scan includes the decoded form.
+        raw = "key&value=secret"
+        encoded = quote(raw, safe="")
+        normalized = _normalize_for_scan(encoded)
+        assert raw in normalized
+
+    def test_legitimate_base64_image_header_does_not_false_positive(self):
+        # PNG file header in base64 — should NOT match any secret pattern
+        png_header_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100).decode()
+        result = _scan_for_secrets(f"image data: {png_header_b64}")
+        assert result is None, f"PNG header b64 falsely matched: {result}"
+
+    def test_normalize_includes_b64_decoded_text(self):
+        # _normalize_for_scan returns a string that includes decoded ASCII forms
+        raw = "hello world foo bar baz"
+        encoded = base64.b64encode(raw.encode()).decode()
+        normalized = _normalize_for_scan(encoded)
+        assert raw in normalized
+
+    def test_normalize_skips_non_b64_blobs(self):
+        # Non-base64 content should not crash the normalizer
+        normalized = _normalize_for_scan("just some plain text $$$ @@@ ###")
+        assert isinstance(normalized, str)
+        assert "plain text" in normalized
+
+    def test_widely_split_secret_not_caught(self):
+        """Spec §13 documented residual: ≥4 whitespace chars between key parts bypass.
+        This test documents the residual; no assertion on rejection (may or may not match
+        depending on which pattern's fragment happens to be contiguous)."""
+        content = "sk-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
+        result = _scan_for_secrets(content)
+        # Documentation test — design accepts this gap per spec §13.
+        # Don't assert None or not-None; just verify no crash.
+        assert result is None or result is not None  # tautology — crash test only
