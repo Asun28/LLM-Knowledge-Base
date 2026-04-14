@@ -1003,3 +1003,42 @@ class TestCaptureItems:
         assert result.rejected_reason is not None
         assert "No space left" in result.rejected_reason
         assert len(result.items) == 1  # first write succeeded
+
+
+class TestCaptureTemplate:
+    """Spec §6 — template uses field names recognised by existing pipeline."""
+
+    def test_template_loads(self):
+        from kb.ingest.extractors import load_template
+        tpl = load_template("capture")
+        assert tpl is not None
+        assert tpl.get("name") == "capture"
+
+    def test_template_fields_match_pipeline_recognition(self):
+        from kb.ingest.extractors import load_template
+        tpl = load_template("capture")
+        extract_fields = tpl.get("extract", [])
+        # Fields may be strings or "name (type): description" form. Extract the names.
+        names = [f.split()[0] if isinstance(f, str) else f for f in extract_fields]
+        # Strip "(...)" from annotations if present
+        names = [n.split("(")[0].rstrip() for n in names]
+        assert "core_argument" in names  # → "## Overview"
+        assert "key_claims" in names      # → "## Key Claims"
+        assert "entities_mentioned" in names
+        assert "concepts_mentioned" in names
+
+    def test_list_fields_are_recognised(self):
+        from kb.ingest.extractors import KNOWN_LIST_FIELDS
+        # entities_mentioned and concepts_mentioned must be in KNOWN_LIST_FIELDS
+        # so _build_summary_content treats them as bulleted lists
+        assert "entities_mentioned" in KNOWN_LIST_FIELDS, \
+            f"entities_mentioned missing from KNOWN_LIST_FIELDS: {KNOWN_LIST_FIELDS}"
+        assert "concepts_mentioned" in KNOWN_LIST_FIELDS, \
+            f"concepts_mentioned missing from KNOWN_LIST_FIELDS: {KNOWN_LIST_FIELDS}"
+
+    def test_build_extraction_schema_accepts_capture_template(self):
+        from kb.ingest.extractors import build_extraction_schema, load_template
+        tpl = load_template("capture")
+        schema = build_extraction_schema(tpl)
+        assert isinstance(schema, dict)
+        assert "properties" in schema or "type" in schema

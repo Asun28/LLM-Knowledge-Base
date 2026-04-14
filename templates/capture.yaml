@@ -1,0 +1,15 @@
+# Extraction template: Atomic knowledge item from chat, notes, or unstructured text
+name: capture
+description: Discrete knowledge items captured from chat logs, personal notes, or conversational text
+
+extract:
+  - title
+  - core_argument       # Main insight or claim captured
+  - key_claims          # List of specific assertions made
+  - entities_mentioned  # People, orgs, tools referenced
+  - concepts_mentioned  # Ideas, methods, frameworks referenced
+
+wiki_outputs:
+  - summary: "summaries/{slug}.md"
+  - entities: "entities/{entity_name}.md"    # Update existing or create
+  - concepts: "concepts/{concept_name}.md"   # Update existing or create
