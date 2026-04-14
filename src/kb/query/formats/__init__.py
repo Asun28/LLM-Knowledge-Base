@@ -61,9 +61,12 @@ def render_output(fmt: str, result: dict) -> Path | None:
 
     if fmt_n == "chart":
         script, data_json = adapter(result)
-        atomic_text_write(script, path)
+        # Write JSON sidecar FIRST so a crash between the two writes leaves
+        # no dangling .py script referencing a missing .json (the script
+        # errors out cleanly on re-run; safer than a .py without data).
         json_sidecar = path.with_suffix(".json")
         atomic_text_write(data_json, json_sidecar)
+        atomic_text_write(script, path)
     else:
         payload = adapter(result)
         atomic_text_write(payload, path)

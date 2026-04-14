@@ -446,8 +446,15 @@ INSTRUCTIONS:
             if path is not None:
                 result_dict["output_path"] = str(path)
                 result_dict["output_format"] = output_format.strip().lower()
-        except (ValueError, OSError) as e:
+        except ValueError as e:
+            # ValueError comes from our own validation — safe to surface verbatim
             logger.warning("Output format '%s' failed: %s", output_format, e)
             result_dict["output_error"] = str(e)
+        except OSError as e:
+            # OSError may embed absolute file paths — scrub before surfacing
+            logger.warning("Output format '%s' OSError: %s", output_format, e)
+            result_dict["output_error"] = (
+                f"write failed ({type(e).__name__}); see server logs for details"
+            )
 
     return result_dict
