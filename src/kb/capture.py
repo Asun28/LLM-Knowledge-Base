@@ -613,7 +613,10 @@ def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
 # A symlinked CAPTURES_DIR planted via some other primitive would resolve
 # to the symlink target on BOTH sides of the relative_to() call, silently
 # passing the path-within check. This assertion closes that gap.
-assert CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()), (
-    f"SECURITY: CAPTURES_DIR resolves outside PROJECT_ROOT — refusing to load. "
-    f"CAPTURES_DIR={CAPTURES_DIR.resolve()}, PROJECT_ROOT={PROJECT_ROOT.resolve()}"
-)
+# Explicit runtime check (not `assert`) so the guard fires under `python -O`
+# which strips asserts. Security checks must never be optimizable away.
+if not CAPTURES_DIR.resolve().is_relative_to(PROJECT_ROOT.resolve()):
+    raise RuntimeError(
+        f"SECURITY: CAPTURES_DIR resolves outside PROJECT_ROOT — refusing to load. "
+        f"CAPTURES_DIR={CAPTURES_DIR.resolve()}, PROJECT_ROOT={PROJECT_ROOT.resolve()}"
+    )
