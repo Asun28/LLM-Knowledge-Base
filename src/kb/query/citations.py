@@ -1,8 +1,11 @@
 """Citation and provenance tracking for query answers."""
 
+import html as _html
 import re
 
 _CITATION_PATTERN = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]")
+
+_VALID_FORMAT_MODES = frozenset({"markdown", "html", "marp"})
 
 
 def extract_citations(text: str) -> list[dict]:
@@ -36,17 +39,51 @@ def extract_citations(text: str) -> list[dict]:
     return citations
 
 
-def format_citations(citations: list[dict]) -> str:
-    """Format citations as a markdown sources section."""
+def format_citations(citations: list[dict], mode: str = "markdown") -> str:
+    """Format citations as a sources section in the requested mode.
+
+    Modes:
+        "markdown" (default): legacy behavior — `[[wikilinks]]` + `` `raw/paths` ``.
+        "html":     `<ul>` list of `<a href="./wiki/path.md">path</a>` + `<code>raw/path</code>`.
+        "marp":     same rendering as markdown (kept as distinct mode so future
+                    Marp-specific link syntax can diverge).
+
+    Raises:
+        ValueError: unknown mode.
+    """
+    if mode not in _VALID_FORMAT_MODES:
+        raise ValueError(
+            f"format_citations: unknown mode '{mode}'; "
+            f"expected one of {sorted(_VALID_FORMAT_MODES)}"
+        )
     if not citations:
         return ""
-    lines = ["\n---\n**Sources:**\n"]
-    seen = set()
+
+    seen: set[str] = set()
+    deduped: list[dict] = []
     for cite in citations:
         path = cite["path"]
         if path in seen:
             continue
         seen.add(path)
+        deduped.append(cite)
+
+    if mode == "html":
+        lines = ['<ul class="sources">']
+        for cite in deduped:
+            escaped_path = _html.escape(cite["path"], quote=True)
+            if cite["type"] == "wiki":
+                href = f"./wiki/{escaped_path}.md"
+                lines.append(f'  <li><a href="{href}">{escaped_path}</a></li>')
+            else:
+                lines.append(f"  <li><code>{escaped_path}</code></li>")
+        lines.append("</ul>")
+        return "\n".join(lines)
+
+    # markdown + marp share the current legacy rendering
+    lines = ["\n---\n**Sources:**\n"]
+    for cite in deduped:
+        path = cite["path"]
         if cite["type"] == "wiki":
             lines.append(f"- [[{path}]]")
         else:
