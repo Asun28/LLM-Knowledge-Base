@@ -155,12 +155,11 @@ def yaml_escape(value: str) -> str:
     Strips Unicode bidi formatting marks (U+202A-202E, U+2066-2069) and C0/C1
     control characters, then escapes backslashes, double quotes, newlines,
     tabs, carriage returns, and null bytes.
+
+    Delegates the stripping phase to yaml_sanitize so both helpers stay in
+    sync if the stripped set ever expands (e.g. new bidi range added).
     """
-    value = _BIDI_RE.sub("", value)
-    if "\0" in value:
-        logger.warning("Null byte removed from YAML value (possible data corruption)")
-        value = value.replace("\0", "")
-    value = re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]", "", value)
+    value = yaml_sanitize(value)
     return (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')
