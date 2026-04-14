@@ -2,7 +2,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1322-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-1434-brightgreen)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
@@ -273,7 +273,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 1322 tests across 92 files
+  tests/                   # 1434 tests across 101 files
 ```
 
 </details>
@@ -298,6 +298,7 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 ## Roadmap
 
 - **Phase 4 (v0.10.0 shipped 2026-04-12):** Hybrid search with RRF fusion, 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit (unreleased) resolved all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
+- **Phase 4.11 (unreleased, 2026-04-14):** `kb_query --format={markdown|marp|html|chart|jupyter}` output adapters — synthesized answers saved as Markdown docs, Marp slide decks, self-contained HTML pages, matplotlib Python scripts (+ JSON data sidecar), or executable Jupyter notebooks. Files land at `outputs/{ts}-{slug}.{ext}` (gitignored) with provenance frontmatter. Addresses Karpathy Tier 1 #1.
 - **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification, URL-aware `kb_ingest` with 5-state adapter model, page status lifecycle (seed→developing→mature→evergreen), inline quality callout markers, autonomous research loop in evolve, conversation capture `kb_capture` MCP tool, chunk-level BM25 sub-page indexing, typed semantic relations on graph edges, interactive graph HTML viewer (vis.js), semantic edge inference (LLM-inferred implicit relationships), living overview page, actionable gap-fill source suggestions, two-phase compile pipeline, multi-hop retrieval, conversation→KB promotion, temporal claim tracking, BM25 + LLM reranking
 - **Phase 6 (future):** DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling
 
