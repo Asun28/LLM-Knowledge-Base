@@ -21,6 +21,7 @@ import pytest
 from kb.capture import (
     _CAPTURE_SCHEMA,
     CAPTURE_KINDS,
+    CaptureItem,
     _build_slug,
     _check_rate_limit,
     _exclusive_atomic_write,
@@ -33,6 +34,7 @@ from kb.capture import (
     _scan_for_secrets,
     _validate_input,
     _verify_body_is_verbatim,
+    _write_item_files,
 )
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR, CAPTURES_DIR
 from kb.utils.text import yaml_escape
@@ -705,3 +707,141 @@ class TestRenderMarkdown:
         assert "\u202e" not in post.metadata["title"]
         assert "pay" in post.metadata["title"]
         assert "usalert" in post.metadata["title"]
+
+
+class TestWriteItemFiles:
+    """Spec §4 step 9, §7 Class D write errors."""
+
+    @staticmethod
+    def _make_item(kind: str, title: str, body: str = "body content"):
+        return {
+            "title": title,
+            "kind": kind,
+            "body": body,
+            "one_line_summary": "summary",
+            "confidence": "stated",
+        }
+
+    def test_creates_dir_if_missing(self, tmp_captures_dir):
+        import shutil
+        shutil.rmtree(tmp_captures_dir)
+        items = [self._make_item("decision", "foo")]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is None
+        assert tmp_captures_dir.exists()
+        assert len(written) == 1
+
+    def test_single_item_writes_one_file(self, tmp_captures_dir):
+        items = [self._make_item("decision", "foo")]
+        written, err = _write_item_files(items, "prov", "2026-04-13T00:00:00Z")
+        assert err is None
+        assert len(written) == 1
+        assert isinstance(written[0], CaptureItem)
+        assert written[0].kind == "decision"
+        assert written[0].path.exists()
+
+    def test_multiple_items_each_get_file(self, tmp_captures_dir):
+        items = [
+            self._make_item("decision", "alpha"),
+            self._make_item("discovery", "beta"),
+            self._make_item("gotcha", "gamma"),
+        ]
+        written, err = _write_item_files(items, "prov", "2026-04-13T00:00:00Z")
+        assert err is None
+        assert len(written) == 3
+        kinds = {ci.kind for ci in written}
+        assert kinds == {"decision", "discovery", "gotcha"}
+        for ci in written:
+            assert ci.path.exists()
+
+    def test_captured_alongside_excludes_self(self, tmp_captures_dir):
+        items = [
+            self._make_item("decision", "a"),
+            self._make_item("discovery", "b"),
+            self._make_item("gotcha", "c"),
+        ]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is None
+        import frontmatter as _fm
+        for ci in written:
+            post = _fm.load(ci.path)
+            sibling_slugs = post.metadata["captured_alongside"]
+            assert ci.slug not in sibling_slugs
+            # Each file's siblings = all other slugs
+            assert len(sibling_slugs) == 2
+
+    def test_captured_alongside_empty_for_single_item(self, tmp_captures_dir):
+        items = [self._make_item("decision", "alone")]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        import frontmatter as _fm
+        post = _fm.load(written[0].path)
+        assert post.metadata["captured_alongside"] == []
+
+    def test_in_process_collision_appends_suffix(self, tmp_captures_dir):
+        items = [
+            self._make_item("decision", "samename"),
+            self._make_item("decision", "samename"),
+        ]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is None
+        slugs = [ci.slug for ci in written]
+        assert slugs[0] == "decision-samename"
+        assert slugs[1] == "decision-samename-2"
+
+    def test_pre_existing_file_collision(self, tmp_captures_dir):
+        (tmp_captures_dir / "decision-foo.md").write_text("preexisting", encoding="utf-8")
+        items = [self._make_item("decision", "foo")]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is None
+        assert written[0].slug == "decision-foo-2"
+
+    def test_disk_error_partial_success_fail_fast(self, tmp_captures_dir, monkeypatch):
+        items = [
+            self._make_item("decision", "alpha"),
+            self._make_item("discovery", "beta"),
+            self._make_item("gotcha", "gamma"),
+        ]
+        call_count = [0]
+        from kb.capture import _exclusive_atomic_write as original
+
+        def maybe_fail(path, content):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise OSError(28, "No space left on device")
+            return original(path, content)
+
+        monkeypatch.setattr("kb.capture._exclusive_atomic_write", maybe_fail)
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is not None
+        assert "No space left" in err
+        assert len(written) == 1  # only first succeeded
+
+    def test_cross_process_race_retry_succeeds(self, tmp_captures_dir, monkeypatch):
+        # Simulate a FileExistsError on first attempt, success on retry
+        from kb.capture import _exclusive_atomic_write as original
+        attempts = [0]
+
+        def race_then_succeed(path, content):
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise FileExistsError(f"simulated race: {path}")
+            return original(path, content)
+
+        monkeypatch.setattr("kb.capture._exclusive_atomic_write", race_then_succeed)
+        items = [self._make_item("discovery", "racy")]
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is None
+        assert len(written) == 1
+        assert attempts[0] >= 2  # at least one retry
+
+    def test_slug_retry_exhausted_errors(self, tmp_captures_dir, monkeypatch):
+        items = [self._make_item("decision", "x")]
+
+        def always_collide(path, content):
+            raise FileExistsError("forever colliding")
+
+        monkeypatch.setattr("kb.capture._exclusive_atomic_write", always_collide)
+        written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
+        assert err is not None
+        assert "retry exhausted" in err.lower() or "forever colliding" in err.lower()
+        assert written == []

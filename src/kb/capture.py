@@ -14,6 +14,7 @@ import secrets as _secrets
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -369,6 +370,104 @@ def _render_markdown(
     if not body.endswith("\n"):
         body = body + "\n"
     return f"---\n{fm_yaml}---\n\n{body}"
+
+
+@dataclass(frozen=True)
+class CaptureItem:
+    slug: str
+    path: Path
+    title: str
+    kind: str
+    body_chars: int
+
+
+class CaptureError(Exception):
+    """Raised by capture helpers on unrecoverable internal errors."""
+
+
+def _write_item_files(
+    items: list[dict],
+    provenance: str,
+    captured_at: str,
+) -> tuple[list[CaptureItem], str | None]:
+    """Resolve slugs, compute captured_alongside, write each file atomically.
+
+    Spec §4 step 9 + §7 Class D.
+
+    Returns (written_items, error_msg). On partial failure, error_msg is set and
+    `written` contains only the items written before the failure. Accepted v1
+    limitation: captured_alongside refs resolved in Phase B may become stale if
+    a cross-process race forces a slug change in Phase C.
+    """
+    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Initial scan
+    existing = {
+        entry.name[:-3]
+        for entry in os.scandir(CAPTURES_DIR)
+        if entry.is_file() and entry.name.endswith(".md")
+    }
+
+    # Phase A — resolve all slugs in-process
+    slugs: list[str] = []
+    for item in items:
+        slug = _build_slug(item["kind"], item["title"], existing)
+        existing.add(slug)
+        slugs.append(slug)
+
+    # Phase B — compute captured_alongside per item (excludes self)
+    alongside_for: list[list[str]] = [
+        [s for j, s in enumerate(slugs) if j != i] for i in range(len(items))
+    ]
+
+    # Phase C — write each file with cross-process race retry
+    written: list[CaptureItem] = []
+    for i, item in enumerate(items):
+        slug = slugs[i]
+        alongside = alongside_for[i]
+        markdown = _render_markdown(
+            item=item,
+            slug=slug,
+            captured_alongside=alongside,
+            provenance=provenance,
+            captured_at=captured_at,
+        )
+        success = False
+        for _attempt in range(10):
+            path = CAPTURES_DIR / f"{slug}.md"
+            if not _path_within_captures(path):
+                return written, f"Error: slug escapes CAPTURES_DIR: {slug!r}"
+            try:
+                _exclusive_atomic_write(path, markdown)
+                written.append(
+                    CaptureItem(
+                        slug=slug,
+                        path=path,
+                        title=item["title"],
+                        kind=item["kind"],
+                        body_chars=len(item["body"]),
+                    )
+                )
+                success = True
+                break
+            except FileExistsError:
+                # Cross-process race — re-scan and re-resolve
+                existing = {
+                    entry.name[:-3]
+                    for entry in os.scandir(CAPTURES_DIR)
+                    if entry.is_file() and entry.name.endswith(".md")
+                }
+                slug = _build_slug(item["kind"], item["title"], existing)
+            except OSError as e:
+                return (
+                    written,
+                    f"Error: failed to write {slug}: {e}. "
+                    f"{len(written)} of {len(items)} items written.",
+                )
+        if not success:
+            return written, f"Error: slug retry exhausted for {item['title']!r}"
+
+    return written, None
 
 
 # === Module-import-time symlink guard (spec §5, §8) ===
