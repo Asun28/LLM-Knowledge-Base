@@ -31,7 +31,7 @@ from kb.config import (
 )
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
-from kb.utils.text import slugify, yaml_escape
+from kb.utils.text import slugify, yaml_sanitize
 
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
@@ -100,7 +100,11 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("OpenAI key (legacy)", re.compile(r"sk-[a-zA-Z0-9]{20,}")),
     ("GitHub PAT (long form)", re.compile(r"github_pat_[a-zA-Z0-9_]{82}")),
     ("GitHub PAT", re.compile(r"ghp_[a-zA-Z0-9]{36}")),
-    ("Slack token", re.compile(r"xox[baprs]-[0-9]+-[0-9]+-[0-9a-zA-Z]+")),
+    ("Slack token", re.compile(r"xox[baprse]-[0-9a-zA-Z-]{10,}")),
+    (
+        "Bearer token",
+        re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    ),
     (
         "JWT",
         re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
@@ -121,8 +125,9 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "env-var assignment",
         re.compile(
-            r"(?im)^(API_KEY|SECRET|PASSWORD|PASSWD|TOKEN|"
-            r"DATABASE_URL|DB_PASS|PRIVATE_KEY)\s*=\s*\S+"
+            r"(?im)^\s*(API_KEY|SECRET_KEY|SECRET|PASSWORD|PASSWD|TOKEN|"
+            r"AUTH_TOKEN|ACCESS_TOKEN|DATABASE_URL|DB_PASS|PRIVATE_KEY)"
+            r"\s*=\s*\S+"
         ),
     ),
     (
@@ -243,9 +248,24 @@ of candidate items you rejected as noise.
 """
 
 
+def _escape_prompt_fences(content: str) -> str:
+    """Neutralize fence markers embedded in user content to prevent prompt injection.
+
+    Rewrites the literal fence strings so an attacker cannot close the INPUT block
+    early and inject instructions into post-input free text. Verbatim verification
+    (_verify_body_is_verbatim) still uses the ORIGINAL normalized content, so an
+    LLM that echoes the attacker's unescaped fence back as a body span will fail
+    the check and be dropped.
+    """
+    return content.replace("--- END INPUT ---", "--- END INPUT (escaped) ---").replace(
+        "--- INPUT ---", "--- INPUT (escaped) ---"
+    )
+
+
 def _extract_items_via_llm(content: str) -> dict:
     """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion."""
-    prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=content)
+    safe_content = _escape_prompt_fences(content)
+    prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=safe_content)
     return call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
 
 
@@ -276,16 +296,19 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
     Falls back to bare kind if slugify produces empty string (e.g. all-unicode title
     stripped by re.ASCII flag in kb.utils.text.slugify).
     """
-    base = slugify(f"{kind}-{title}")
-    base = base[:80]
+    base = slugify(f"{kind}-{title}")[:80]
     if not base:
         base = kind
     if base not in existing:
         return base
     n = 2
-    while f"{base}-{n}" in existing:
+    while True:
+        suffix = f"-{n}"
+        trimmed = base[: 80 - len(suffix)].rstrip("-") or kind[: 80 - len(suffix)]
+        candidate = f"{trimmed}{suffix}"
+        if candidate not in existing:
+            return candidate
         n += 1
-    return f"{base}-{n}"
 
 
 def _path_within_captures(path: Path) -> bool:
@@ -348,13 +371,14 @@ def _render_markdown(
     """Render one capture item to the markdown form (spec §5).
 
     Field order is preserved for predictable diffs (sort_keys=False).
-    yaml_escape applied to user-content fields strips bidi marks (Task 2).
+    yaml_sanitize strips bidi marks + control chars; yaml.dump then handles
+    escaping. (Using yaml_escape here would double-escape backslashes/quotes.)
     """
     fm = {
-        "title": yaml_escape(item["title"]),
+        "title": yaml_sanitize(item["title"]),
         "kind": item["kind"],
         "confidence": item["confidence"],
-        "one_line_summary": yaml_escape(item["one_line_summary"]),
+        "one_line_summary": yaml_sanitize(item["one_line_summary"]),
         "captured_at": captured_at,
         "captured_from": provenance,
         "captured_alongside": list(captured_alongside),

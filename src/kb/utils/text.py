@@ -135,6 +135,20 @@ def slugify(text: str) -> str:
     return re.sub(r"-+", "-", text).strip("-")
 
 
+def yaml_sanitize(value: str) -> str:
+    """Strip bidi marks and control characters WITHOUT escaping.
+
+    Use when the sanitized string will be handed to a YAML serializer
+    (yaml.dump) that already performs escaping — passing yaml_escape()
+    output to yaml.dump double-escapes backslashes/quotes/newlines.
+    """
+    value = _BIDI_RE.sub("", value)
+    if "\0" in value:
+        logger.warning("Null byte removed from YAML value (possible data corruption)")
+        value = value.replace("\0", "")
+    return re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f\x85]", "", value)
+
+
 def yaml_escape(value: str) -> str:
     """Escape a string for safe YAML double-quote style.
 
