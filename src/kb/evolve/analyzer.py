@@ -182,6 +182,10 @@ def suggest_new_pages(wiki_dir: Path | None = None, pages: list | None = None) -
         source_id = page_id(page_path, wiki_dir)
         for link in links:
             target = link  # Already normalized by extract_wikilinks()
+            # Skip empty targets (e.g. "[[   ]]" artifact from LLM extraction) —
+            # they would produce a ghost "Create  — referenced by…" suggestion.
+            if not target:
+                continue
             if target not in existing_ids:
                 if target not in suggestions:
                     suggestions[target] = {"target": target, "referenced_by": []}

@@ -532,7 +532,7 @@ class TestSymlinkGuard:
         monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path / "project_root")
         if "kb.capture" in sys.modules:
             del sys.modules["kb.capture"]
-        with pytest.raises(AssertionError, match="SECURITY: CAPTURES_DIR"):
+        with pytest.raises(RuntimeError, match="SECURITY: CAPTURES_DIR"):
             importlib.import_module("kb.capture")
         monkeypatch.undo()
         importlib.import_module("kb.capture")

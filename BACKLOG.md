@@ -520,8 +520,8 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `graph/builder.py` + `utils/pages.py` `scan_wiki_pages` (~16-24, 60-64) — iterates only `WIKI_SUBDIRS`, excluding root-level `index.md` / `_sources.md` / `log.md`. But `graph_stats["nodes"]` is surfaced in `kb_stats` as "wiki size," and `check_dead_links` uses the same list — so `[[index]]` is flagged as a dead link even though `wiki/index.md` exists. Inconsistent with `extract_wikilinks` which returns `[[index]]`. (R2)
   (fix: decide once — include root files as a synthetic `root/` subdir, or filter `extract_wikilinks` targets to exclude index names; document the choice)
 
-- `ingest/pipeline.py` index-file write order + dead `_categories.md` (~653-700 + `config.py:16`) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. `WIKI_CATEGORIES` is configured and appears in `lint/checks.py:138` `_INDEX_FILES`, but no production code writes `_categories.md` — lint expects an invariant ingest doesn't enforce. A crash between `_sources.md` and manifest writes can also duplicate entries on re-ingest. (R2)
-  (fix: implement `_categories.md` maintenance or remove it from `_INDEX_FILES` + config; introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
+- `ingest/pipeline.py` index-file write order (~653-700) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. A crash between `_sources.md` and manifest writes can duplicate entries on re-ingest. Separately, `WIKI_CATEGORIES` in `config.py:16` is orphaned (no writer, no reader — the `_INDEX_FILES` reference was removed in Phase 4.1). (R2)
+  (fix: implement `_categories.md` maintenance or delete `WIKI_CATEGORIES` from config; introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
 
 - `ingest/pipeline.py` observability — one `ingest_source` emits to `wiki/log.md` (step 7) + Python `logger.warning` (frontmatter parse failures, manifest failures, contradiction warnings, wikilink-injection failures, 8+ sites) + `wiki/contradictions.md` + N evidence-trail appends. No correlation ID connects them. `wiki/log.md` records intent ("3 created, 2 updated"), not outcome. Debugging a flaky ingest requires correlating stderr against `wiki/log.md` against `contradictions.md` by timestamp window. (R2)
   (fix: generate `request_id = uuid7()` at top of `ingest_source` and thread through every emitter; add structured `.data/ingest_log.jsonl` with full result dict per call, sharing the id with `wiki/log.md`)
@@ -804,9 +804,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `graph/export.py` `export_mermaid` (~48-71) — backward-compat `isinstance(graph, Path)` shim with no `DeprecationWarning` and no removal target. Comment acknowledges the temporary intent but there's no scheduled cleanup. (R1)
   (fix: emit `DeprecationWarning`; set removal in v0.12.0; or just delete — only two exports in `kb.graph`)
 
-- `utils/text.py` `yaml_escape` (~141) — control-char regex recompiled on every call; called in tight loops during rendering / compile. (R1)
-  (fix: hoist `_CTRL_CHAR_RE = re.compile(...)` to module scope; same pattern as existing `WIKILINK_PATTERN`)
-
 - `utils/hashing.py` `content_hash` (~9-16) — binary-mode hash is not newline-normalized; a Windows clone with `core.autocrlf=true` hashes every source differently from Linux/macOS, forcing a full re-ingest of the corpus on first compile (real $$$ at 5k sources). (R1)
   (fix: normalize `b"\r\n"` and `b"\r"` → `b"\n"` before hashing; add `* text=auto eol=lf` for `raw/` in `.gitattributes`)
 
@@ -855,14 +852,8 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `query/dedup.py:62` `_dedup_by_text_similarity` threshold applied to all page types uniformly — 0.85 Jaccard over bodies compares summaries (dense prose, high overlap with entity pages quoting them) against entity pages (sparse, list-heavy); summaries get pruned against their own source entities. `max_type_ratio` layer is the stated countermeasure but runs AFTER similarity dedup; summaries can all be gone before diversity enforcement. (R4)
   (fix: skip layer-2 similarity when `r.get("type") != k.get("type")`; or lower threshold to 0.92 for cross-type pairs; document the asymmetric ordering)
 
-- `query/bm25.py:22-38` `tokenize` has no docstring warning about the stopword-list surface — any test that passes `"what is rag"` gets `["rag"]` because `what`/`is` are stopwords. Canonical `tests/test_v0915_task04.py` does not document which 2-char tokens are keepable post-stopword. STOPWORDS in `kb.utils.text` is source of truth but tokenize's docstring only mentions the hyphen handling. (R4)
-  (fix: add `"Applies STOPWORDS filter (see kb.utils.text.STOPWORDS)."` to the tokenize docstring)
-
 - `lint/trends.py:14-26` `_parse_timestamp` comment claims forward-compat for Python ≤3.10 — project pins `python_requires>=3.12` per `pyproject.toml:3`, so the ValueError fallback is unreachable. The try/except is vestigial and confuses readers into thinking date-only strings are a supported first-class format. (R4)
   (fix: drop the try/except; inline-comment `_parse_timestamp` as "accepts full ISO-8601 only"; or if date-only is a real input, add a regression test asserting it)
-
-- `lint/checks.py:138` `_INDEX_FILES` tuple includes `"_categories.md"` — R2 already flagged that production code never writes this file; `check_orphan_pages` augmentation at 154 opens and skips it on every lint (no-op since `idx_path.exists()` returns False). Dead lookup per lint invocation. (R4)
-  (fix: drop `"_categories.md"` from the tuple until the file is actually maintained; tracked under R2 "implement or remove")
 
 - `lint/verdicts.py:13-15` + `config.py:78,159,165` — `VALID_SEVERITIES`, `VALID_VERDICT_TYPES`, and `MAX_NOTES_LEN` at module scope but `MAX_VERDICTS` and `VERDICTS_PATH` are imported from `kb.config`. Split is inconsistent: `MAX_NOTES_LEN` lives in config 165 AND re-declared in verdicts.py:15 (R3 already flagged); `VALID_VERDICT_TYPES` was consolidated out of `mcp/quality.py` but the `verdicts.py` copy remains the only writable source. (R4)
   (fix: `VALID_SEVERITIES` + `VALID_VERDICT_TYPES` into `kb.config`; `verdicts.py` re-exports via `from kb.config import ...` for backcompat; single source of truth)
@@ -885,12 +876,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `review/refiner.py:137` `append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)` — `revision_notes` passed through `safe_msg.replace("\n|\r\t", " ")` in `wiki_log.py` collapses newlines to spaces. At the library boundary `revision_notes` is unbounded, so a multi-megabyte note becomes a single line in `wiki/log.md` (distinct from R1 "revision_notes unbounded at MCP" — MCP wrapper also imposes no revision_notes cap, only a content cap). Every `cat wiki/log.md` OOMs the terminal. (R4)
   (fix: cap `revision_notes` at `MAX_NOTES_LEN` inside `refine_page` before `append_wiki_log`; or truncate in `safe_msg`)
 
-- `graph/builder.py:27-34` `page_id()` `str(page_path.relative_to(wiki_dir)).replace("\\", "/")` — works on Windows but on Linux the `\\` replace is a no-op (good); on macOS/Linux with backslash-containing filenames (legal on ext4), the replace creates a bogus `/`-separated ID that then mismatches on-disk path. Low severity (backslashes in wiki-page filenames virtually never emitted by ingest), but reverse-path reconstruction in consumers like `semantic.build_consistency_context` would hit `FileNotFoundError`. (R4)
-  (fix: use `page_path.relative_to(wiki_dir).as_posix()` — canonical Path-to-URL-ish serialization; same effect on Windows, safer on POSIX)
-
-- `evolve/analyzer.py:200` `suggest_new_pages` empty-target injection — `extract_wikilinks` can return `""` from a `[[   ]]` (whitespace-only) wikilink; `target = link` passes `target not in existing_ids` and populates `suggestions[""]`, yielding `{"target": "", "referenced_by": [...], "suggestion": "Create  — referenced by..."}`. Surfaces in `kb_evolve` as a ghost "Create " line. (R4)
-  (fix: skip empty targets — `if not target: continue` — or tighten `extract_wikilinks` to reject empty after strip)
-
 - `graph/export.py:122` `title = node.split("/")[-1]` fallback when `_sanitize_label` returns empty — if a page title is all special characters (`"?!@#"`), sanitization strips everything; fallback uses the bare slug. Then `_safe_node_id` replaces `-` with `_` in the display text (not just the id). Label shows `foo_bar` when filename is `foo-bar.md`. Cosmetic but mismatches wiki filename in diagram viewers users compare against. (R4)
   (fix: fallback title to `node.split("/")[-1]` unchanged (no `_`/`-` replacement) since label isn't used as a Mermaid identifier)
 
@@ -911,9 +896,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 - `cli.py:54,80,99,122,136,148` exit codes inconsistent — `compile` exits 1 on per-source errors via `ctx.exit(1)`, all others via `raise SystemExit(1)`; `lint` exits 1 only on `summary["error"] > 0` (warnings ok); `query` always exits 0 unless an exception bubbles (so an empty answer returns 0). For CI integration ("did this lint pass?") the contracts diverge. (R4)
   (fix: document exit-code contract per command in `--help` epilog or top-level docstring; standardize on `SystemExit`; consider exit code 2 for "warnings present")
-
-- `utils/hashing.py:9` `content_hash` returns 32-hex-char prefix of SHA-256 (128 bits) — adequate for ~10^18 collisions, but birthday bound is ~2^64. Phase 4 evidence trail and contradiction detection treat this as a unique source identifier; if Phase 5 chunk indexing extends hashing to per-chunk IDs (50-200 chunks × 5k pages = 1M+ hashes), birthday bound shrinks. Truncation depth undocumented. (R4)
-  (fix: docstring should state "128-bit prefix; collision-safe up to ~10^9 hashes; do not use as security-relevant identifier")
 
 ---
 
@@ -1045,6 +1027,11 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 - Deferred "graph topology gap analysis" — expose as card types: "Isolated (degree ≤ 1)", "Bridge (connects ≥ 3 clusters)", "Sparse community (cohesion < 0.15)" — each with one-click trigger that dispatches `kb_evolve --research` on the specific gap. Source: nashsu.
   (effort: N/A — card-type taxonomy for existing deferred item)
+
+### LOW LEVERAGE — Testing Infrastructure
+
+- `tests/test_e2e_demo_pipeline.py` hermetic end-to-end pipeline test — single test driving `ingest_source` → `query_wiki` → `run_all_checks` over the committed `demo/raw/karpathy-x-post.md` and `demo/raw/karpathy-llm-wiki-gist.md` sources with the synthesis LLM stubbed. Catches cross-module integration regressions (ingest ↔ compile manifest ↔ query engine ↔ lint runner) that single-module unit tests miss. Uses `ingest_source(..., extraction=dict)` to skip LLM extraction entirely; only monkeypatches the synthesis `call_llm` at `kb.query.engine.call_llm`, plus the module-level constants `RAW_DIR`/`PROJECT_ROOT`/`WIKI_CONTRADICTIONS`/`HASH_MANIFEST` at both `kb.config.X` and each consuming module. Deferred in favor of the active Phase 4.5 bug-fix backlog. Design spec content was drafted in-session but not committed; rewrite from this bullet when picked up. Source: Layer 1 of the three-layer e2e strategy (Layer 2 = MCP contract test via `fastmcp.Client` in-process; Layer 3 = gated `@pytest.mark.live` smoke test against real Anthropic API).
+  (effort: Low — ~100-line single test file, no new fixtures or dependencies; `tmp_project` in `tests/conftest.py` is sufficient. Asserts page IDs in `pages_created`/`pages_updated`, frontmatter source-list merge on shared entities, `wikilinks_injected` on second ingest, `[source: …]` citation round-trip, and `lint_report["summary"]["error"] == 0`. Run cadence: every CI, hermetic, ~1s.)
 
 ### LOW LEVERAGE — Operational
 
@@ -1207,14 +1194,8 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `capture.py:86-134` `_CAPTURE_SECRET_PATTERNS` false negative — env-var pattern `^(API_KEY|SECRET|PASSWORD|...)=` matches `SECRET=` but not `SECRET_KEY`, `DJANGO_SECRET_KEY`, `APP_SECRET`, `ACCESS_KEY`, `ENCRYPTION_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. A pasted `.env` block with `SECRET_KEY=django-insecure-xxx` writes a real secret to `raw/captures/`. (R1)
   (fix: extend alternation to suffix-match: `r"(?im)^[\w]*?(API_KEY|SECRET[\w]*|PASSWORD[\w]*|TOKEN[\w]*|ACCESS_KEY|PRIVATE_KEY)\s*=\s*\S{8,}"` — `{8,}` on value avoids false positives on `TOKEN_EXPIRY=3600`)
 
-- `capture.py:104` GCP OAuth pattern too permissive — `ya29\.[0-9A-Za-z_-]+` matches `ya29.X` (7 chars total); common in version references (`ya29.Overview`), section numbers, API names. False positives permanently block legitimate captures with no hint that the detection is spurious. (R1)
-  (fix: require minimum 20-char suffix: `ya29\.[0-9A-Za-z_-]{20,}`)
-
 - `capture.py:292-294` `_path_within_captures` recomputes `CAPTURES_DIR.resolve()` on every call — `CAPTURES_DIR` is a module-level constant; its resolved path is invariant for the process lifetime. `Path.resolve()` issues stat+readlink syscalls (~0.07ms each); 40 calls per 20-item batch = ~3ms wasted per request. (R1)
   (fix: add `_CAPTURES_DIR_RESOLVED: Path = CAPTURES_DIR.resolve()` immediately after the module-level security assertion; use it in `_path_within_captures`)
-
-- `capture.py:286-296` `_path_within_captures` catches only `ValueError` — `Path.resolve()` can raise `OSError` (PermissionError on inaccessible path component, ELOOP on symlink loop). Uncaught `OSError` propagates to the caller as an unhandled exception instead of a `False` return; in FastMCP this becomes an unformatted 500 rather than a graceful error string. (R1)
-  (fix: `except (ValueError, OSError): return False`)
 
 - `capture.py:146-161` `_normalize_for_scan` except clause too narrow — `except (ValueError, UnicodeDecodeError)` does not catch `TypeError`; a future refactor passing non-str to `unquote` would propagate uncaught, silently aborting the normalization pass with no log. (R1)
   (fix: `except Exception: continue` with a comment "normaliser is best-effort; any decode failure silently skips that segment")
@@ -1248,9 +1229,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `capture.py:118-123` env-var pattern misses `export` form and indented assignments — pattern anchors `^(API_KEY|...)=` catches `.env`-style but misses `export API_KEY=secret` (common in shell scripts), `  TOKEN=secret` (indented inside YAML blocks or function bodies). (R1)
   (fix: `r"(?im)^(?:export\s+)?\s*(API_KEY|...)[\s]*=\s*\S+"` to cover both forms; or document deliberate `.env`-only scope in a comment)
 
-- `capture.py:98` Slack `xoxe-` prefix missing — pattern covers `xox[baprs]-` but not `xoxe-` (Slack SCIM and workspace-auth tokens). A real `xoxe-12345-67890-AbcDef` passes the scanner. (R1)
-  (fix: add `e` to the character class: `xox[baprs e]-` or `xox[baprs]-|xoxe-`)
-
 - `capture.py:137-161` `_normalize_for_scan` iteration bound implicit on `CAPTURE_MAX_BYTES` — decode attempt count is O(input_size / 17) ≈ 2,941 max at the 50KB cap; bound is load-bearing on `CAPTURE_MAX_BYTES` not being raised without reviewing this function. (R1)
   (fix: add a comment documenting the implicit bound; assert `CAPTURE_MAX_BYTES <= 200_000` at module level)
 
@@ -1259,9 +1237,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 - `capture.py:240-243` `_extract_items_via_llm` no pre-flight context window guard — prompt inlines up to 50KB of content (≈12.7K tokens). If `CAPTURE_MAX_BYTES` is later raised above ~600KB the Haiku context window will be silently exceeded at the API layer with an opaque error. (R1)
   (fix: `MAX_PROMPT_CHARS = 600_000; assert len(prompt) <= MAX_PROMPT_CHARS` or derive from a config constant)
-
-- `capture.py:322-325 (module-level)` import-time `resolve()` calls unguarded — `CAPTURES_DIR.resolve()` and `PROJECT_ROOT.resolve()` at module import time will raise `OSError` if either path is on a temporarily unavailable network drive or mount point, making `import kb.capture` (and MCP server startup) fail hard. (R1)
-  (fix: wrap in `try/except OSError as e: raise RuntimeError(f"SECURITY: Could not resolve paths: {e}") from e`)
 
 - `capture.py:537-538` `capture_items` — `_extract_items_via_llm(normalized)` raises `LLMError` on retry exhaustion (documented in docstring) but no `try/except` exists in `capture_items`. `LLMError` propagates to the MCP boundary, violating the project convention "MCP tools return 'Error: ...' strings, never raise exceptions to the MCP client." (R1)
   (fix: `try: response = _extract_items_via_llm(normalized); except LLMError as e: return CaptureResult(items=[], ..., rejected_reason=f"Error: LLM extraction failed — {e}", ...)`)
@@ -1283,17 +1258,8 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### NIT
 
-- `capture.py:157-161` `except (ValueError, UnicodeDecodeError)` around `unquote()` unreachable — `urllib.parse.unquote()` uses `errors='replace'` internally and never raises `ValueError` or `UnicodeDecodeError`; the except is dead code. (R1)
-  (fix: remove the try/except; call `parts.append(unquote(m.group(0)))` directly)
-
 - `tests/test_capture.py:120-122` comment mismatch — says "25001 CRLF pairs = 50002 raw bytes" but actual expression is `'ab\r\n' * 12501 = 50004 bytes (12501 × 4)`; the test logic is correct but the comment describes different content. (R1)
   (fix: update comment to match: `# 'ab\r\n' * 12501 = 50004 raw bytes, 37503 post-LF bytes`)
-
-- `capture.py:70` `_validate_input` — `content.encode('utf-8')` allocates a 50KB bytes object solely for `len()`; can be avoided for ASCII content. (R1)
-  (fix: `raw_bytes = len(content) if content.isascii() else len(content.encode('utf-8'))`)
-
-- `capture.py:53` `_check_rate_limit` `retry_after` underflow — `int(oldest + 3600 - now) + 1` returns 0 or negative when deque contains stale timestamps from test fixtures with frozen clocks; callers receive `(False, 0)` or `(False, -3)` meaning "rate limited, retry now/in the past". (R1)
-  (fix: `retry_after = max(1, int(oldest + 3600 - now) + 1)`)
 
 - `capture.py:247-265` `_verify_body_is_verbatim` — `body.strip()` used for containment check but original unstripped `item` returned in `kept`; downstream writer receives bodies with leading/trailing whitespace including newlines. (R1)
   (fix: set `item["body"] = body_stripped` before appending to `kept`, or document that callers must strip)
@@ -1383,14 +1349,7 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `capture.py:285-288` `_build_slug` collision suffix while-loop is unbounded — `while f"{base}-{n}" in existing: n += 1` has no upper bound on `n`. With a synthetic `existing` set containing a very long collision chain, the loop spins indefinitely. In practice this requires the `CAPTURES_DIR` to contain millions of files with the same base slug, which is impossible under normal rate-limited use. But a test accidentally constructing a large collision set could hang. (R3)
   (fix: `while f"{base}-{n}" in existing and n <= len(existing) + 1: n += 1`)
 
-- `capture.py:401-408` `_write_item_files` scans directory even with empty items — `CAPTURES_DIR.mkdir` and `os.scandir` execute unconditionally before the items loop. With `items=[]` (e.g., all bodies failed verbatim check), two filesystem calls are wasted. (R3)
-  (fix: add `if not items: return [], None` as the first line of `_write_item_files`, before the `mkdir` call)
-
 ### NIT (R3)
-
-- `capture.py:285` `_build_slug` suffix loop: add an `# O(N) collisions max under normal use; see CAPTURE_MAX_CALLS_PER_HOUR` comment — the loop is safe given the rate limit caps `existing` growth, but future readers deserve to know the bound is config-dependent. (R3)
-
-- `capture.py:419-421` `alongside_for` O(N²) loop: add `# O(N²) — safe at CAPTURE_MAX_ITEMS=20; revisit if limit raised above ~500` comment to make the scale constraint visible to future maintainers. (R3)
 
 ---
 
