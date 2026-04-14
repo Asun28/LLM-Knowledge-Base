@@ -22,6 +22,7 @@ from kb.capture import (
     _CAPTURE_SCHEMA,
     CAPTURE_KINDS,
     CaptureItem,
+    CaptureResult,
     _build_slug,
     _check_rate_limit,
     _exclusive_atomic_write,
@@ -35,8 +36,10 @@ from kb.capture import (
     _validate_input,
     _verify_body_is_verbatim,
     _write_item_files,
+    capture_items,
 )
 from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR, CAPTURES_DIR
+from kb.utils.llm import LLMError
 from kb.utils.text import yaml_escape
 
 
@@ -845,3 +848,158 @@ class TestWriteItemFiles:
         assert err is not None
         assert "retry exhausted" in err.lower() or "forever colliding" in err.lower()
         assert written == []
+
+
+class TestCaptureItems:
+    """End-to-end public API. Spec §4 happy path + Class A/B/C/D rejections."""
+
+    def _good_response(self, content):
+        # Build a response with ONE item whose body is a verbatim slice of content
+        return {
+            "items": [
+                {
+                    "title": "Test decision",
+                    "kind": "decision",
+                    "body": content[:50],  # verbatim slice
+                    "one_line_summary": "summary",
+                    "confidence": "stated",
+                }
+            ],
+            "filtered_out_count": 2,
+        }
+
+    def test_happy_path_writes_files(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
+        content = "We decided to use atomic writes. We discovered a race." * 5
+        mock_scan_llm(self._good_response(content))
+        result = capture_items(content, provenance="testsess")
+        assert isinstance(result, CaptureResult)
+        assert result.rejected_reason is None
+        assert len(result.items) == 1
+        assert result.filtered_out_count == 2  # LLM-reported, no body-verbatim drops
+        assert result.provenance.startswith("testsess-")
+        assert result.items[0].path.exists()
+
+    def test_provenance_resolved_for_all_paths_including_reject(
+        self, tmp_captures_dir, reset_rate_limit
+    ):
+        # Hard reject (empty content) — provenance still set
+        result = capture_items("", provenance="my-session")
+        assert result.rejected_reason is not None
+        assert result.provenance.startswith("my-session-"), \
+            f"provenance not resolved on reject: {result.provenance!r}"
+        assert result.items == []
+        assert result.filtered_out_count == 0
+
+    def test_empty_content_class_a_reject(self, tmp_captures_dir, reset_rate_limit):
+        result = capture_items("")
+        assert result.rejected_reason is not None
+        assert "empty" in result.rejected_reason.lower()
+        assert result.items == []
+
+    def test_oversize_content_class_a_reject(self, tmp_captures_dir, reset_rate_limit):
+        from kb.config import CAPTURE_MAX_BYTES
+        big = "x" * (CAPTURE_MAX_BYTES + 100)
+        result = capture_items(big)
+        assert "exceeds" in result.rejected_reason
+
+    def test_secret_class_a_reject(self, tmp_captures_dir, reset_rate_limit):
+        # AKIA pattern — should reject before LLM call (no mock installed)
+        result = capture_items("note: AKIAIOSFODNN7EXAMPLE my key", provenance="x")
+        assert result.rejected_reason is not None
+        assert "secret" in result.rejected_reason.lower()
+        assert result.items == []
+
+    def test_rate_limit_class_a_reject(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
+        from kb.config import CAPTURE_MAX_CALLS_PER_HOUR
+        canned = self._good_response("we decided X" * 5)
+        mock_scan_llm(canned)
+        # Burn the rate limit
+        for _ in range(CAPTURE_MAX_CALLS_PER_HOUR):
+            r = capture_items("we decided X" * 5)
+            assert r.rejected_reason is None or "rate" not in r.rejected_reason.lower()
+        # Next one should reject
+        result = capture_items("we decided X" * 5)
+        assert result.rejected_reason is not None
+        assert "rate limit" in result.rejected_reason.lower()
+        assert result.provenance  # still set
+
+    def test_llm_error_propagates_class_b(self, tmp_captures_dir, reset_rate_limit, monkeypatch):
+        def raise_llm(*a, **kw):
+            raise LLMError("API down")
+        monkeypatch.setattr("kb.capture.call_llm_json", raise_llm)
+        with pytest.raises(LLMError):
+            capture_items("real content here")
+
+    def test_zero_items_returned_class_c_success(
+        self, tmp_captures_dir, mock_scan_llm, reset_rate_limit
+    ):
+        mock_scan_llm({"items": [], "filtered_out_count": 8})
+        result = capture_items("real content here")
+        assert result.rejected_reason is None
+        assert result.items == []
+        assert result.filtered_out_count == 8
+
+    def test_body_verbatim_drops_count_in_filtered(
+        self, tmp_captures_dir, mock_scan_llm, reset_rate_limit
+    ):
+        content = "the original input had this prose"
+        mock_scan_llm({
+            "items": [
+                {
+                    "title": "good",
+                    "kind": "decision",
+                    "body": "the original input",  # in content
+                    "one_line_summary": "s",
+                    "confidence": "stated",
+                },
+                {
+                    "title": "reworded",
+                    "kind": "discovery",
+                    "body": "totally different",  # NOT in content
+                    "one_line_summary": "s",
+                    "confidence": "stated",
+                },
+            ],
+            "filtered_out_count": 5,
+        })
+        result = capture_items(content)
+        assert len(result.items) == 1
+        assert result.filtered_out_count == 6  # 5 LLM + 1 body-drop
+
+    def test_partial_write_class_d(
+        self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
+    ):
+        content = "we decided this and that and the other"
+        mock_scan_llm({
+            "items": [
+                {
+                    "title": "a",
+                    "kind": "decision",
+                    "body": "we decided this",
+                    "one_line_summary": "s",
+                    "confidence": "stated",
+                },
+                {
+                    "title": "b",
+                    "kind": "decision",
+                    "body": "and that",
+                    "one_line_summary": "s",
+                    "confidence": "stated",
+                },
+            ],
+            "filtered_out_count": 0,
+        })
+        from kb.capture import _exclusive_atomic_write as orig_write
+        call_count = [0]
+
+        def fail_second(path, c):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise OSError(28, "No space left on device")
+            return orig_write(path, c)
+
+        monkeypatch.setattr("kb.capture._exclusive_atomic_write", fail_second)
+        result = capture_items(content)
+        assert result.rejected_reason is not None
+        assert "No space left" in result.rejected_reason
+        assert len(result.items) == 1  # first write succeeded

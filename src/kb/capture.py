@@ -470,6 +470,90 @@ def _write_item_files(
     return written, None
 
 
+@dataclass(frozen=True)
+class CaptureResult:
+    items: list[CaptureItem]
+    filtered_out_count: int
+    rejected_reason: str | None
+    provenance: str
+
+
+def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
+    """Atomize messy text into discrete raw/captures/<slug>.md files.
+
+    Public API. See spec §3-§4 for the data flow.
+
+    Args:
+        content: up to CAPTURE_MAX_BYTES (50KB) of UTF-8 text. Hard reject above.
+        provenance: optional grouping label. None / "" → auto-generated.
+
+    Returns:
+        CaptureResult with `provenance` always populated. On hard reject, `items=[]`
+        and `rejected_reason` is set. On success, `items` lists each written file.
+        On partial write failure, `items` contains the successfully written items
+        and `rejected_reason` describes the failure.
+
+    Raises:
+        LLMError if the scan-tier API exhausts retries.
+    """
+    # Step 3: resolve provenance FIRST so all return paths carry it
+    resolved_prov = _resolve_provenance(provenance)
+
+    # Step 4: rate limit
+    allowed, retry_after = _check_rate_limit()
+    if not allowed:
+        return CaptureResult(
+            items=[],
+            filtered_out_count=0,
+            rejected_reason=(
+                f"Error: rate limit ({CAPTURE_MAX_CALLS_PER_HOUR} calls/hour) "
+                f"exceeded. Try again in {retry_after} seconds."
+            ),
+            provenance=resolved_prov,
+        )
+
+    # Step 5: validate input (size pre-normalize + empty + CRLF normalize)
+    normalized, err = _validate_input(content)
+    if err:
+        return CaptureResult(
+            items=[], filtered_out_count=0, rejected_reason=err, provenance=resolved_prov
+        )
+    assert normalized is not None  # type narrowing
+
+    # Step 6: secret scan (on normalized form per invariant 5)
+    secret = _scan_for_secrets(normalized)
+    if secret is not None:
+        label, location = secret
+        return CaptureResult(
+            items=[],
+            filtered_out_count=0,
+            rejected_reason=(
+                f"Error: secret pattern detected at {location} ({label}). "
+                f"No items written. Redact and retry."
+            ),
+            provenance=resolved_prov,
+        )
+
+    # Step 7: scan-tier extraction (raises LLMError on failure)
+    response = _extract_items_via_llm(normalized)
+    raw_items = response["items"]
+    llm_filtered = response["filtered_out_count"]
+
+    # Step 8: body verbatim verify
+    kept, body_dropped = _verify_body_is_verbatim(raw_items, normalized)
+
+    # Step 9: write files
+    captured_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    written, write_error = _write_item_files(kept, resolved_prov, captured_at)
+
+    return CaptureResult(
+        items=written,
+        filtered_out_count=llm_filtered + body_dropped,
+        rejected_reason=write_error,  # None on full success, str on partial-failure
+        provenance=resolved_prov,
+    )
+
+
 # === Module-import-time symlink guard (spec §5, §8) ===
 # If raw/captures/ is a symlink escaping PROJECT_ROOT, refuse to load the
 # module at all rather than fail open in _path_within_captures at runtime.
