@@ -29,7 +29,6 @@ from kb.capture import (
     _extract_items_via_llm,
     _normalize_for_scan,
     _path_within_captures,
-    _rate_limit_window,
     _render_markdown,
     _resolve_provenance,
     _scan_for_secrets,
@@ -143,14 +142,6 @@ class TestValidateInput:
         assert err == ""
         assert "\r\n" not in normalized
         assert normalized == "hello\nworld"
-
-
-@pytest.fixture(autouse=False)
-def reset_rate_limit():
-    """Clear the module-level deque before each rate-limit test."""
-    _rate_limit_window.clear()
-    yield
-    _rate_limit_window.clear()
 
 
 class TestCheckRateLimit:

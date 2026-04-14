@@ -157,3 +157,17 @@ def tmp_captures_dir(tmp_project, monkeypatch):
     monkeypatch.setattr("kb.config.CAPTURES_DIR", captures)
     monkeypatch.setattr("kb.capture.CAPTURES_DIR", captures)
     return captures
+
+
+@pytest.fixture(autouse=False)
+def reset_rate_limit():
+    """Clear the module-level rate-limit deque before and after each test.
+
+    Shared across test_capture.py and test_mcp_core.py (any test needing a
+    clean rate-limit state for kb.capture).
+    """
+    from kb.capture import _rate_limit_window
+
+    _rate_limit_window.clear()
+    yield
+    _rate_limit_window.clear()
