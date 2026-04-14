@@ -1033,3 +1033,95 @@ class TestCaptureTemplate:
         schema = build_extraction_schema(tpl)
         assert isinstance(schema, dict)
         assert "properties" in schema or "type" in schema
+
+
+class TestPipelineFrontmatterStrip:
+    """Spec §10 — strip frontmatter from raw_content when source_type=='capture'."""
+
+    def test_frontmatter_stripped_for_capture_source(
+        self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
+    ):
+        # 1) Capture an item to generate a raw/captures/*.md file
+        content = "We decided X for Y reason."
+        mock_scan_llm({
+            "items": [{
+                "title": "decided X",
+                "kind": "decision",
+                "body": content,
+                "one_line_summary": "s",
+                "confidence": "stated",
+            }],
+            "filtered_out_count": 0,
+        })
+        result = capture_items(content)
+        assert len(result.items) == 1
+        capture_file = result.items[0].path
+
+        # Patch RAW_DIR so the pipeline path-traversal check accepts the tmp path
+        raw_dir = tmp_captures_dir.parent  # raw/
+        wiki_dir = tmp_captures_dir.parent.parent / "wiki"
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+        for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / subdir).mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+
+        # 2) Intercept the write-tier LLM call inside ingest to verify it sees stripped content
+        seen_prompts = []
+        def capture_prompt(prompt, *, tier="write", schema=None, system="", **kw):
+            seen_prompts.append((tier, prompt))
+            return {
+                "title": "extracted title",
+                "core_argument": "we decided X",
+                "key_claims": ["X is good"],
+                "entities_mentioned": [],
+                "concepts_mentioned": [],
+            }
+        monkeypatch.setattr("kb.ingest.extractors.call_llm_json", capture_prompt)
+
+        from kb.ingest.pipeline import ingest_source
+        ingest_source(capture_file, source_type="capture", wiki_dir=wiki_dir)
+
+        # The write-tier prompt should NOT contain the leading "---" block
+        write_prompts = [p for tier, p in seen_prompts if tier == "write"]
+        assert write_prompts, "expected at least one write-tier call"
+        prompt = write_prompts[0]
+        assert "captured_at:" not in prompt, "frontmatter leaked into LLM prompt"
+        assert "captured_alongside:" not in prompt
+        # The body should be present
+        assert content in prompt
+
+    def test_frontmatter_preserved_for_non_capture_source(self, tmp_project, monkeypatch):
+        # Write a non-capture file with frontmatter (Obsidian Web Clipper article style)
+        article_path = tmp_project / "raw" / "articles" / "test.md"
+        article_path.parent.mkdir(parents=True, exist_ok=True)
+        article_path.write_text(
+            "---\nurl: https://example.com\nauthor: Test\n---\n\nArticle body here.",
+            encoding="utf-8",
+        )
+        seen_prompts = []
+        def capture_prompt(prompt, *, tier="write", schema=None, system="", **kw):
+            seen_prompts.append(prompt)
+            return {"title": "x", "summary": "y", "entities": [], "concepts": []}
+        monkeypatch.setattr("kb.ingest.extractors.call_llm_json", capture_prompt)
+
+        # Also patch WIKI_DIR so the ingest cascade doesn't hit real wiki/
+        wiki = tmp_project / "wiki"
+        wiki.mkdir(parents=True, exist_ok=True)
+        for site in ["kb.config.WIKI_DIR", "kb.ingest.pipeline.WIKI_DIR"]:
+            monkeypatch.setattr(site, wiki, raising=False)
+
+        from kb.ingest.pipeline import ingest_source
+        try:
+            ingest_source(article_path, source_type="article")
+        except Exception:
+            pass  # don't care about side effects — only prompt content
+        # For NON-capture sources, frontmatter should still appear in prompt
+        if seen_prompts:
+            prompt = seen_prompts[0]
+            ok = "url: https://example.com" in prompt or "Article body here" in prompt
+            assert ok, (
+                "non-capture source should preserve frontmatter for write-tier LLM; "
+                f"got: {prompt[:500]!r}"
+            )

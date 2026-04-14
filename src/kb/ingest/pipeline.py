@@ -559,6 +559,15 @@ def ingest_source(
         )
     source_hash = hash_bytes(raw_bytes)
 
+    # Spec §10 — strip leading YAML frontmatter for capture sources only.
+    # Universal stripping would regress sources like Obsidian Web Clipper whose
+    # frontmatter (url, author, abstract, tags) carries metadata the write-tier
+    # LLM legitimately extracts from.
+    if source_type == "capture" and raw_content.startswith("---\n"):
+        end = raw_content.find("\n---\n", 4)
+        if end != -1:
+            raw_content = raw_content[end + 5 :].lstrip("\n")
+
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)
 
