@@ -288,7 +288,13 @@ def _verify_body_is_verbatim(items: list[dict], content: str) -> tuple[list[dict
     kept: list[dict] = []
     dropped = 0
     for item in items:
-        body_stripped = item["body"].strip()
+        body = item.get("body")
+        # Defensive: if the schema layer ever regresses and lets a non-string
+        # body through, drop THAT item rather than crashing the whole batch.
+        if not isinstance(body, str):
+            dropped += 1
+            continue
+        body_stripped = body.strip()
         if not body_stripped:
             dropped += 1
             continue
@@ -434,12 +440,13 @@ def _write_item_files(
     """
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initial scan
-    existing = {
-        entry.name[:-3]
-        for entry in os.scandir(CAPTURES_DIR)
-        if entry.is_file() and entry.name.endswith(".md")
-    }
+    # Initial scan — use context manager to release Windows dir handle promptly
+    with os.scandir(CAPTURES_DIR) as it:
+        existing = {
+            entry.name[:-3]
+            for entry in it
+            if entry.is_file() and entry.name.endswith(".md")
+        }
 
     # Phase A — resolve all slugs in-process
     slugs: list[str] = []
@@ -484,12 +491,13 @@ def _write_item_files(
                 success = True
                 break
             except FileExistsError:
-                # Cross-process race — re-scan and re-resolve
-                existing = {
-                    entry.name[:-3]
-                    for entry in os.scandir(CAPTURES_DIR)
-                    if entry.is_file() and entry.name.endswith(".md")
-                }
+                # Cross-process race — re-scan and re-resolve (context-managed)
+                with os.scandir(CAPTURES_DIR) as it:
+                    existing = {
+                        entry.name[:-3]
+                        for entry in it
+                        if entry.is_file() and entry.name.endswith(".md")
+                    }
                 slug = _build_slug(item["kind"], item["title"], existing)
             except OSError as e:
                 return (
@@ -532,28 +540,26 @@ def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
     # Step 3: resolve provenance FIRST so all return paths carry it
     resolved_prov = _resolve_provenance(provenance)
 
-    # Step 4: rate limit
-    allowed, retry_after = _check_rate_limit()
-    if not allowed:
-        return CaptureResult(
-            items=[],
-            filtered_out_count=0,
-            rejected_reason=(
-                f"Error: rate limit ({CAPTURE_MAX_CALLS_PER_HOUR} calls/hour) "
-                f"exceeded. Try again in {retry_after} seconds."
-            ),
-            provenance=resolved_prov,
-        )
-
     # Step 5: validate input (size pre-normalize + empty + CRLF normalize)
+    # Runs BEFORE the rate-limit check — these checks cost zero LLM tokens, so
+    # rejecting on them shouldn't burn the caller's hourly budget (prevents
+    # accidental self-DoS when spamming oversize/empty payloads).
     normalized, err = _validate_input(content)
     if err:
         return CaptureResult(
             items=[], filtered_out_count=0, rejected_reason=err, provenance=resolved_prov
         )
-    assert normalized is not None  # type narrowing
+    # _validate_input's contract: err == "" implies normalized is str, not None.
+    # Explicit runtime check (not `assert`) so the narrowing survives `python -O`.
+    if normalized is None:
+        return CaptureResult(
+            items=[],
+            filtered_out_count=0,
+            rejected_reason="Error: internal validation inconsistency.",
+            provenance=resolved_prov,
+        )
 
-    # Step 6: secret scan (on normalized form per invariant 5)
+    # Step 6: secret scan (on normalized form per invariant 5) — also pre-budget.
     secret = _scan_for_secrets(normalized)
     if secret is not None:
         label, location = secret
@@ -563,6 +569,20 @@ def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
             rejected_reason=(
                 f"Error: secret pattern detected at {location} ({label}). "
                 f"No items written. Redact and retry."
+            ),
+            provenance=resolved_prov,
+        )
+
+    # Step 4 (moved): rate limit — checked AFTER cheap rejects so they don't
+    # consume the hourly LLM budget.
+    allowed, retry_after = _check_rate_limit()
+    if not allowed:
+        return CaptureResult(
+            items=[],
+            filtered_out_count=0,
+            rejected_reason=(
+                f"Error: rate limit ({CAPTURE_MAX_CALLS_PER_HOUR} calls/hour) "
+                f"exceeded. Try again in {retry_after} seconds."
             ),
             provenance=resolved_prov,
         )

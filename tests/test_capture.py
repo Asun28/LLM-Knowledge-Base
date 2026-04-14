@@ -342,14 +342,18 @@ class TestScanForSecretsEncoded:
         assert "plain text" in normalized
 
     def test_widely_split_secret_not_caught(self):
-        """Spec §13 documented residual: ≥4 whitespace chars between key parts bypass.
-        This test documents the residual; no assertion on rejection (may or may not match
-        depending on which pattern's fragment happens to be contiguous)."""
+        """Spec §13 documented residual: ≥4 whitespace chars between key parts
+        (here, 4 newlines) break the contiguous-char-class regex so no pattern
+        matches. This test pins the accepted bypass so any future scanner
+        tightening fails loudly and forces a spec §13 update rather than a
+        silent behavior change.
+        """
         content = "sk-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
         result = _scan_for_secrets(content)
-        # Documentation test — design accepts this gap per spec §13.
-        # Don't assert None or not-None; just verify no crash.
-        assert result is None or result is not None  # tautology — crash test only
+        assert result is None, (
+            f"Unexpected match — the §13 residual may have been closed. "
+            f"If that's intentional, update spec §13 and this test. Got: {result}"
+        )
 
 
 class TestExtractAndVerify:
@@ -1126,6 +1130,58 @@ class TestPipelineFrontmatterStrip:
                 f"got: {prompt[:500]!r}"
             )
 
+    def test_crlf_frontmatter_stripped_for_capture_source(self, tmp_project, monkeypatch):
+        """Capture files written on Windows may use CRLF delimiters — strip must
+        handle both. Guards against regression where the LF-only branch let
+        CRLF frontmatter leak into the write-tier LLM prompt.
+        """
+        captures = tmp_project / "raw" / "captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        capture_file = captures / "decision-crlf.md"
+        # Write file with CRLF line endings throughout frontmatter + body
+        capture_file.write_bytes(
+            b"---\r\n"
+            b"title: CRLF decision\r\n"
+            b"kind: decision\r\n"
+            b"captured_at: 2026-04-14T00:00:00Z\r\n"
+            b"---\r\n"
+            b"\r\n"
+            b"We decided CRLF support matters.\r\n"
+        )
+
+        raw_dir = tmp_project / "raw"
+        wiki_dir = tmp_project / "wiki"
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+        for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / subdir).mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+
+        seen_prompts = []
+        def capture_prompt(prompt, *, tier="write", schema=None, system="", **kw):
+            seen_prompts.append((tier, prompt))
+            return {
+                "title": "extracted",
+                "core_argument": "x",
+                "key_claims": [],
+                "entities_mentioned": [],
+                "concepts_mentioned": [],
+            }
+        monkeypatch.setattr("kb.ingest.extractors.call_llm_json", capture_prompt)
+
+        from kb.ingest.pipeline import ingest_source
+        ingest_source(capture_file, source_type="capture", wiki_dir=wiki_dir)
+
+        prompt = next((p for t, p in seen_prompts if t == "write"), None)
+        assert prompt is not None, "expected at least one write-tier call"
+        assert "title: CRLF decision" not in prompt, (
+            "CRLF frontmatter leaked into LLM prompt — strip must handle both "
+            "LF and CRLF delimiters"
+        )
+        assert "captured_at:" not in prompt
+        assert "We decided CRLF support matters." in prompt
+
 
 class TestRoundTripIntegration:
     """Spec §9 round-trip — capture → ingest → wiki summary rendered with content."""
@@ -1281,3 +1337,33 @@ class TestAdversarialAuditFixes:
         """Round-2: realistic Bearer tokens still detected after tightening."""
         result = _scan_for_secrets("Authorization: Bearer eyJhbGci.OiJIUzI1NiJ9.abc123def456")
         assert result is not None
+
+    def test_rate_limit_not_consumed_by_cheap_rejects(self, tmp_captures_dir, reset_rate_limit):
+        """Round-3 I2: oversize/empty/secret rejects must NOT consume hourly budget."""
+        from kb.capture import _rate_limit_window
+        # Empty content: hard reject via _validate_input
+        r1 = capture_items("   ", provenance="test")
+        assert r1.rejected_reason is not None and "empty" in r1.rejected_reason.lower()
+        # Secret content: hard reject via _scan_for_secrets
+        r2 = capture_items("AKIAIOSFODNN7EXAMPLE\n", provenance="test")
+        assert r2.rejected_reason is not None and "secret" in r2.rejected_reason.lower()
+        # Budget must still be at 0 — neither cheap reject counted
+        assert len(_rate_limit_window) == 0, (
+            f"cheap rejects consumed rate budget: {len(_rate_limit_window)} entries"
+        )
+
+    def test_verify_body_drops_non_string_body_gracefully(self):
+        """Round-3 I1: malformed body type drops one item, doesn't crash batch."""
+        items = [
+            {"body": "good verbatim span", "title": "t1", "kind": "discovery",
+             "one_line_summary": "s", "confidence": "stated"},
+            {"body": None, "title": "t2", "kind": "discovery",
+             "one_line_summary": "s", "confidence": "stated"},
+            {"body": 12345, "title": "t3", "kind": "discovery",
+             "one_line_summary": "s", "confidence": "stated"},
+        ]
+        content = "good verbatim span is here"
+        kept, dropped = _verify_body_is_verbatim(items, content)
+        assert len(kept) == 1
+        assert dropped == 2
+        assert kept[0]["title"] == "t1"
