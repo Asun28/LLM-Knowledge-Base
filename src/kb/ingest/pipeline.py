@@ -562,11 +562,18 @@ def ingest_source(
     # Spec §10 — strip leading YAML frontmatter for capture sources only.
     # Universal stripping would regress sources like Obsidian Web Clipper whose
     # frontmatter (url, author, abstract, tags) carries metadata the write-tier
-    # LLM legitimately extracts from.
-    if source_type == "capture" and raw_content.startswith("---\n"):
-        end = raw_content.find("\n---\n", 4)
-        if end != -1:
-            raw_content = raw_content[end + 5 :].lstrip("\n")
+    # LLM legitimately extracts from. Handles both LF and CRLF delimiters —
+    # capture files written on Windows may use CRLF.
+    if source_type == "capture":
+        for prefix, closer, closer_len in (
+            ("---\n", "\n---\n", 5),
+            ("---\r\n", "\r\n---\r\n", 7),
+        ):
+            if raw_content.startswith(prefix):
+                end = raw_content.find(closer, len(prefix))
+                if end != -1:
+                    raw_content = raw_content[end + closer_len :].lstrip("\r\n")
+                break
 
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)

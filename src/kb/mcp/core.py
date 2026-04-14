@@ -578,17 +578,11 @@ def _format_capture_result(result: CaptureResult) -> str:
         )
         lines = [f"{head} Provenance: {result.provenance}", ""]
         for item in result.items:
-            # Render as project-relative path; item.path is absolute.
-            # Find the raw/ segment and build the relative display.
-            try:
-                parts = item.path.parts
-                if "captures" in parts:
-                    idx = parts.index("captures")
-                    rel = "/".join(parts[idx - 1 : idx + 2])  # raw/captures/<slug>.md
-                else:
-                    rel = item.path.name
-            except (ValueError, IndexError):
-                rel = item.path.name
+            # capture_items always writes under CAPTURES_DIR; display the
+            # logical path directly rather than reconstructing via string
+            # search on path parts (which could mismatch on nested dirs
+            # whose own name happens to be 'captures').
+            rel = f"raw/captures/{item.path.name}"
             lines.append(f"- {rel}  [{item.kind}]")
         if result.rejected_reason:
             lines.append("")
