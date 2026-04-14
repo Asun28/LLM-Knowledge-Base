@@ -103,7 +103,12 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("Slack token", re.compile(r"xox[baprse]-[0-9a-zA-Z-]{10,}")),
     (
         "Bearer token",
-        re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+        # Require 20+ chars AND at least one digit/dot/underscore/slash/plus/eq
+        # in the payload, so benign prose like "bearer responsibility-for-all"
+        # (pure word chars + hyphens) doesn't trip the scanner.
+        re.compile(
+            r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"
+        ),
     ),
     (
         "JWT",
@@ -248,18 +253,22 @@ of candidate items you rejected as noise.
 """
 
 
+_FENCE_END_RE = re.compile(r"-{2,}\s*END\s+INPUT\s*-{2,}", re.IGNORECASE)
+_FENCE_START_RE = re.compile(r"(?<!END\s)-{2,}\s*INPUT\s*-{2,}", re.IGNORECASE)
+
+
 def _escape_prompt_fences(content: str) -> str:
     """Neutralize fence markers embedded in user content to prevent prompt injection.
 
-    Rewrites the literal fence strings so an attacker cannot close the INPUT block
-    early and inject instructions into post-input free text. Verbatim verification
-    (_verify_body_is_verbatim) still uses the ORIGINAL normalized content, so an
-    LLM that echoes the attacker's unescaped fence back as a body span will fail
-    the check and be dropped.
+    Regex-based so whitespace variations ('---  END INPUT ---'), case variations
+    ('--- end input ---'), and dash-count variations ('----- END INPUT -----')
+    are all rewritten. Verbatim verification (_verify_body_is_verbatim) still
+    uses the ORIGINAL normalized content, so an LLM echoing an unescaped fence
+    back as a body span fails the check and is dropped.
     """
-    return content.replace("--- END INPUT ---", "--- END INPUT (escaped) ---").replace(
-        "--- INPUT ---", "--- INPUT (escaped) ---"
-    )
+    content = _FENCE_END_RE.sub("--- END INPUT (escaped) ---", content)
+    content = _FENCE_START_RE.sub("--- INPUT (escaped) ---", content)
+    return content
 
 
 def _extract_items_via_llm(content: str) -> dict:
