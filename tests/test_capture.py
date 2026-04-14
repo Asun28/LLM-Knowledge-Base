@@ -7,10 +7,12 @@ Class B (LLM failure), Class C (quality filter), Class D (write errors), happy p
 Pytest imports are added in subsequent tasks alongside the first tests that use them.
 """
 
+import threading
+
 import pytest
 
-from kb.capture import _validate_input
-from kb.config import CAPTURE_MAX_BYTES
+from kb.capture import _check_rate_limit, _rate_limit_window, _validate_input
+from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
 from kb.utils.text import yaml_escape
 
 
@@ -111,3 +113,77 @@ class TestValidateInput:
         assert err == ""
         assert "\r\n" not in normalized
         assert normalized == "hello\nworld"
+
+
+@pytest.fixture(autouse=False)
+def reset_rate_limit():
+    """Clear the module-level deque before each rate-limit test."""
+    _rate_limit_window.clear()
+    yield
+    _rate_limit_window.clear()
+
+
+class TestCheckRateLimit:
+    """Spec §4 step 4, §8 thread-safe rate limit."""
+
+    def test_first_call_allowed(self, reset_rate_limit):
+        allowed, retry_after = _check_rate_limit()
+        assert allowed is True
+        assert retry_after == 0
+
+    def test_under_cap_allowed(self, reset_rate_limit):
+        for _ in range(CAPTURE_MAX_CALLS_PER_HOUR):
+            allowed, _ = _check_rate_limit()
+            assert allowed is True
+
+    def test_over_cap_rejected_with_retry_after(self, reset_rate_limit):
+        for _ in range(CAPTURE_MAX_CALLS_PER_HOUR):
+            _check_rate_limit()
+        allowed, retry_after = _check_rate_limit()
+        assert allowed is False
+        assert retry_after > 0
+        # Retry should be within an hour
+        assert retry_after <= 3600
+
+    def test_window_slides_old_entries_purged(self, reset_rate_limit, monkeypatch):
+        # Fake the clock — populate window with stale timestamps then advance time
+        fake_now = [1000.0]
+        monkeypatch.setattr("kb.capture.time.time", lambda: fake_now[0])
+        # Fill to cap at fake_now=1000
+        for _ in range(CAPTURE_MAX_CALLS_PER_HOUR):
+            _check_rate_limit()
+        # Verify next call rejects
+        allowed, _ = _check_rate_limit()
+        assert allowed is False
+        # Advance clock past 3600s — old entries should be purged
+        fake_now[0] = 1000.0 + 3601
+        allowed, _ = _check_rate_limit()
+        assert allowed is True, "purged entries should free capacity"
+
+    def test_thread_safe_under_concurrent_load(self, reset_rate_limit):
+        """Spec §8: 2-thread test at the 59→60 boundary.
+        Without threading.Lock, both threads can pass len(deque)<60 then both append → 2 over cap.
+        With the lock, exactly 1 of the (cap+1) total attempts is rejected.
+        """
+        results: list[tuple[bool, int]] = []
+        results_lock = threading.Lock()
+        n_per_thread = (CAPTURE_MAX_CALLS_PER_HOUR + 1) // 2 + 1
+
+        def worker():
+            for _ in range(n_per_thread):
+                r = _check_rate_limit()
+                with results_lock:
+                    results.append(r)
+
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        rejected = sum(1 for allowed, _ in results if not allowed)
+        total = len(results)
+        accepted = total - rejected
+        # Exactly CAPTURE_MAX_CALLS_PER_HOUR allowed; the rest rejected
+        assert accepted == CAPTURE_MAX_CALLS_PER_HOUR, f"accepted={accepted}, total={total}"
+        assert rejected == total - CAPTURE_MAX_CALLS_PER_HOUR

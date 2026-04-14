@@ -5,7 +5,38 @@ MCP tool wrapper: see kb.mcp.core.kb_capture.
 
 Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 """
-from kb.config import CAPTURE_MAX_BYTES
+import threading
+import time
+from collections import deque
+
+from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR
+
+# === Rate limit (spec §4 step 4, §8) ===
+# Per-process token-bucket sliding window. threading.Lock makes the
+# check-then-act (len(deque) ≥ LIMIT, then append now) atomic under
+# concurrent FastMCP tool calls. Project precedent: kb.utils.llm:26,
+# kb.review.refiner:13.
+_rate_limit_lock = threading.Lock()
+_rate_limit_window: deque[float] = deque()
+
+
+def _check_rate_limit() -> tuple[bool, int]:
+    """Returns (allowed, retry_after_seconds).
+
+    Sliding 1-hour window of timestamps. Trims expired entries on each call.
+    On overflow, returns (False, seconds-until-oldest-expires).
+    """
+    with _rate_limit_lock:
+        now = time.time()
+        cutoff = now - 3600
+        while _rate_limit_window and _rate_limit_window[0] < cutoff:
+            _rate_limit_window.popleft()
+        if len(_rate_limit_window) >= CAPTURE_MAX_CALLS_PER_HOUR:
+            oldest = _rate_limit_window[0]
+            retry_after = int(oldest + 3600 - now) + 1
+            return False, retry_after
+        _rate_limit_window.append(now)
+        return True, 0
 
 
 def _validate_input(content: str) -> tuple[str | None, str]:
