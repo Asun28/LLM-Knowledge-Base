@@ -8,6 +8,7 @@ Pytest imports are added in subsequent tasks alongside the first tests that use 
 """
 
 import base64
+import re
 import sys
 import threading
 from pathlib import Path
@@ -25,6 +26,7 @@ from kb.capture import (
     _normalize_for_scan,
     _path_within_captures,
     _rate_limit_window,
+    _resolve_provenance,
     _scan_for_secrets,
     _validate_input,
     _verify_body_is_verbatim,
@@ -572,3 +574,45 @@ class TestExclusiveAtomicWrite:
         with pytest.raises(KeyboardInterrupt):
             _exclusive_atomic_write(path, "ignored")
         assert not path.exists(), "must clean up on BaseException too"
+
+
+class TestResolveProvenance:
+    """Spec §4 step 3 — resolved FIRST so result.provenance is always set."""
+
+    _AUTO_PROV_RE = re.compile(r"^capture-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[0-9a-f]{4}$")
+
+    def test_none_generates_auto(self):
+        prov = _resolve_provenance(None)
+        assert self._AUTO_PROV_RE.match(prov), f"unexpected format: {prov!r}"
+
+    def test_empty_string_treated_as_none(self):
+        prov = _resolve_provenance("")
+        assert self._AUTO_PROV_RE.match(prov), f"unexpected format: {prov!r}"
+
+    def test_user_label_slugified_and_timestamped(self):
+        prov = _resolve_provenance("Meeting w/ Eng 4-13")
+        assert prov.startswith("meeting-w-eng-4-13-")
+        # timestamp suffix
+        assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$", prov)
+
+    def test_label_truncated_at_80(self):
+        long_label = "x" * 200
+        prov = _resolve_provenance(long_label)
+        m = re.search(r"-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)$", prov)
+        assert m, f"prov did not end with ISO timestamp: {prov!r}"
+        label_only = prov[: m.start()]
+        assert len(label_only) <= 80
+
+    def test_label_slugifies_to_empty_falls_back_to_auto(self):
+        prov = _resolve_provenance("!!!")
+        assert self._AUTO_PROV_RE.match(prov), f"expected auto-generated, got: {prov!r}"
+
+    def test_returns_filesystem_safe_no_colons(self):
+        prov = _resolve_provenance(None)
+        assert ":" not in prov
+
+    def test_unicode_label_falls_back_cleanly(self):
+        # CJK label slugifies to empty under re.ASCII
+        prov = _resolve_provenance("決定セッション")
+        # Accept either auto or some slugged form; primary assertion is non-empty
+        assert prov

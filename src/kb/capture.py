@@ -10,9 +10,11 @@ import base64
 import binascii
 import os
 import re
+import secrets as _secrets
 import threading
 import time
 from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -311,6 +313,26 @@ def _exclusive_atomic_write(path: Path, content: str) -> None:
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+
+
+def _resolve_provenance(provenance: str | None) -> str:
+    """Resolve user-supplied provenance to a final string. Always returns non-empty.
+
+    Spec §4 step 3 — runs FIRST so CaptureResult.provenance is populated in every
+    return path (including hard rejects).
+
+    - None / "" / slugifies-to-empty → "capture-<ISO>-<4hex>"
+    - Else → "<slugify(label)[:80]>-<ISO>"
+
+    ISO format uses '-' instead of ':' for filesystem safety on Windows.
+    """
+    iso = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    if not provenance or not provenance.strip():
+        return f"capture-{iso}-{_secrets.token_hex(2)}"
+    slugged = slugify(provenance)[:80]
+    if not slugged:
+        return f"capture-{iso}-{_secrets.token_hex(2)}"
+    return f"{slugged}-{iso}"
 
 
 # === Module-import-time symlink guard (spec §5, §8) ===
