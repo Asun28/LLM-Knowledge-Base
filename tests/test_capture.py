@@ -20,6 +20,7 @@ from kb.capture import (
     CAPTURE_KINDS,
     _build_slug,
     _check_rate_limit,
+    _exclusive_atomic_write,
     _extract_items_via_llm,
     _normalize_for_scan,
     _path_within_captures,
@@ -530,3 +531,44 @@ class TestSymlinkGuard:
             importlib.import_module("kb.capture")
         monkeypatch.undo()
         importlib.import_module("kb.capture")
+
+
+class TestExclusiveAtomicWrite:
+    """Spec §3 atomic write helper."""
+
+    def test_writes_new_file(self, tmp_captures_dir):
+        path = tmp_captures_dir / "test.md"
+        _exclusive_atomic_write(path, "hello world\n")
+        assert path.exists()
+        assert path.read_text(encoding="utf-8") == "hello world\n"
+
+    def test_raises_file_exists_on_collision(self, tmp_captures_dir):
+        path = tmp_captures_dir / "test.md"
+        path.write_text("existing", encoding="utf-8")
+        with pytest.raises(FileExistsError):
+            _exclusive_atomic_write(path, "would replace")
+        # Original content preserved
+        assert path.read_text(encoding="utf-8") == "existing"
+
+    def test_cleans_up_reservation_on_inner_write_failure(self, tmp_captures_dir, monkeypatch):
+        path = tmp_captures_dir / "test.md"
+
+        def boom(content, p):
+            raise OSError("simulated disk full")
+
+        monkeypatch.setattr("kb.capture.atomic_text_write", boom)
+        with pytest.raises(OSError, match="disk full"):
+            _exclusive_atomic_write(path, "ignored")
+        # No 0-byte poison file left behind
+        assert not path.exists(), "reservation file must be cleaned up on failure"
+
+    def test_cleans_up_on_keyboard_interrupt(self, tmp_captures_dir, monkeypatch):
+        path = tmp_captures_dir / "test.md"
+
+        def interrupted(content, p):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("kb.capture.atomic_text_write", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            _exclusive_atomic_write(path, "ignored")
+        assert not path.exists(), "must clean up on BaseException too"

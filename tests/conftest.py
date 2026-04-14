@@ -143,3 +143,17 @@ def mock_scan_llm(monkeypatch):
         monkeypatch.setattr("kb.capture.call_llm_json", fake_call)
 
     return _install
+
+
+@pytest.fixture
+def tmp_captures_dir(tmp_project, monkeypatch):
+    """Isolated raw/captures/ with kb.config.CAPTURES_DIR repointed.
+
+    Double monkey-patch defends against import-time vs runtime binding
+    (capture.py does `from kb.config import CAPTURES_DIR`).
+    """
+    captures = tmp_project / "raw" / "captures"
+    captures.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("kb.config.CAPTURES_DIR", captures)
+    monkeypatch.setattr("kb.capture.CAPTURES_DIR", captures)
+    return captures

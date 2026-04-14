@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 
 import base64
 import binascii
+import os
 import re
 import threading
 import time
@@ -23,6 +24,7 @@ from kb.config import (
     CAPTURES_DIR,
     PROJECT_ROOT,
 )
+from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify
 
@@ -292,6 +294,23 @@ def _path_within_captures(path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _exclusive_atomic_write(path: Path, content: str) -> None:
+    """Atomic create-or-fail. Raises FileExistsError if path already exists.
+
+    Combines O_EXCL (race-safe slug reservation) with temp-file-then-rename
+    (no half-written file on crash). Cleans up its empty reservation on any
+    failure of the inner atomic_text_write, including BaseException
+    (KeyboardInterrupt, SystemExit).
+    """
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    os.close(fd)
+    try:
+        atomic_text_write(content, path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 # === Module-import-time symlink guard (spec §5, §8) ===
