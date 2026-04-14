@@ -10,7 +10,7 @@ def content_hash(path: Path | str) -> str:
     """Compute first 32 hex chars (128-bit prefix of SHA-256) of a file's contents.
 
     The 128-bit prefix has a birthday bound of ~2^64 ≈ 1.8e19; collision
-    probability is ~n²/2^129 for n inputs (≈ 10^-22 at n=10^4, ≈ 10^-3 at
+    probability is ~n²/2^129 for n inputs (≈ 10^-31 at n=10^4, ≈ 10^-3 at
     n=10^18). Intended as a content identifier for change detection and
     deduplication — NOT a security-relevant identifier. Do not use for
     authentication, signatures, or anywhere collision resistance against
