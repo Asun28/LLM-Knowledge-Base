@@ -1125,3 +1125,75 @@ class TestPipelineFrontmatterStrip:
                 "non-capture source should preserve frontmatter for write-tier LLM; "
                 f"got: {prompt[:500]!r}"
             )
+
+
+class TestRoundTripIntegration:
+    """Spec §9 round-trip — capture → ingest → wiki summary rendered with content."""
+
+    def test_capture_then_ingest_renders_wiki_summary(
+        self,
+        patch_all_kb_dir_bindings,
+        mock_scan_llm,
+        reset_rate_limit,
+    ):
+        from kb.ingest.pipeline import ingest_source
+
+        tmp_project = patch_all_kb_dir_bindings
+        wiki_dir = tmp_project / "wiki"
+
+        # 1) Capture two items
+        content = (
+            "We picked atomic N-files for kb_capture. "
+            "We discovered raw/captures/ collides on Windows MAX_PATH for long titles."
+        )
+        mock_scan_llm({
+            "items": [
+                {
+                    "title": "atomic n-files chosen",
+                    "kind": "decision",
+                    "body": "We picked atomic N-files for kb_capture.",
+                    "one_line_summary": "atomic decision",
+                    "confidence": "stated",
+                },
+                {
+                    "title": "windows path collision",
+                    "kind": "discovery",
+                    "body": "raw/captures/ collides on Windows MAX_PATH for long titles.",
+                    "one_line_summary": "windows path",
+                    "confidence": "stated",
+                },
+            ],
+            "filtered_out_count": 0,
+        })
+        cap_result = capture_items(content, provenance="round-trip-test")
+        assert cap_result.rejected_reason is None
+        assert len(cap_result.items) == 2
+
+        # 2) Ingest each capture file using the extraction= bypass (no LLM)
+        for ci in cap_result.items:
+            extraction = {
+                "title": ci.title,
+                "core_argument": (
+                    "We picked atomic N-files." if ci.kind == "decision"
+                    else "Windows MAX_PATH affects long-title slugs."
+                ),
+                "key_claims": ["claim A", "claim B"],
+                "entities_mentioned": ["kb_capture", "Windows"],
+                "concepts_mentioned": ["atomization", "MAX_PATH"],
+            }
+            ingest_source(ci.path, source_type="capture", extraction=extraction)
+
+        # 3) Verify wiki summary pages exist with non-empty content sections
+        summaries_dir = wiki_dir / "summaries"
+        assert summaries_dir.exists(), f"summaries dir missing: {summaries_dir}"
+        summary_files = list(summaries_dir.glob("*.md"))
+        assert len(summary_files) >= 1, "expected at least one summary page"
+
+        for sf in summary_files:
+            text = sf.read_text(encoding="utf-8")
+            # Content-based assertions (not just existence): confirm the template
+            # renders actual body content, not an empty shell.
+            assert "## Overview" in text, f"missing ## Overview in {sf.name}: {text[:200]}"
+            assert "## Key Claims" in text, f"missing ## Key Claims in {sf.name}"
+            assert "claim A" in text or "claim B" in text, \
+                f"key_claims not rendered in {sf.name}: {text[:300]}"
