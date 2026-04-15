@@ -65,8 +65,13 @@ class SafeBackend(SyncBackend):
     1. Resolving the host once to all addresses.
     2. Rejecting if ANY address in the RR-set is private/loopback/link-local
        /reserved/multicast.
-    3. Deferring the actual connect to the parent SyncBackend (preserving
-       the original hostname for SNI / Host: header).
+    3. Connecting directly to the validated IP (no second DNS lookup) to close
+       the TOCTOU window an attacker with TTL=0 DNS could exploit by returning
+       a public IP at check time and a private IP at connect time.
+
+    TLS SNI / cert verification still uses the original hostname because
+    httpcore wraps the returned TCP stream with TLS at a higher layer using
+    the URL's hostname, not the raw connect address.
 
     Used in place of the default SyncBackend by SafeTransport.
     """
@@ -79,6 +84,9 @@ class SafeBackend(SyncBackend):
         local_address: str | None = None,
         socket_options: list | None = None,
     ) -> httpcore.NetworkStream:
+        # Resolve once and validate every IP in the RR-set. If ANY resolved
+        # address is private/reserved we refuse the whole host — we cannot
+        # predict which address the stack would pick at connect time.
         try:
             infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except socket.gaierror as e:
@@ -101,18 +109,37 @@ class SafeBackend(SyncBackend):
                     f"Blocked private/reserved address {ip} for host {host}"
                 )
 
-        # Defer the actual connect to the parent class. The parent SyncBackend
-        # re-resolves at OS connect, but EVERY resolution of this host has
-        # already passed our private-IP check above. The window for rebinding
-        # is the time between our getaddrinfo and the parent's connect - narrow
-        # enough to require a sub-second TTL attack which most resolvers reject.
-        return super().connect_tcp(
-            host=host,
-            port=port,
-            timeout=timeout,
-            local_address=local_address,
-            socket_options=socket_options,
-        )
+        if not infos:
+            raise httpcore.ConnectError(f"DNS resolution returned no addresses for {host}")
+
+        # Pick the first validated address and connect directly to the IP.
+        # This bypasses OS-level re-resolution so a DNS-rebinding attacker
+        # cannot swap in a private IP between check and connect.
+        family, socktype, proto, _, sockaddr = infos[0]
+        ip_str = sockaddr[0]
+
+        source_address = None if local_address is None else (local_address, 0)
+        try:
+            sock = socket.create_connection(
+                (ip_str, port),
+                timeout if timeout is not None else 5.0,
+                source_address=source_address,
+            )
+        except OSError as e:
+            raise httpcore.ConnectError(
+                f"Failed to connect to {host} ({ip_str}:{port}): {e}"
+            ) from e
+
+        if socket_options:
+            for option in socket_options:
+                sock.setsockopt(*option)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        # Local import: httpcore's internal module layout shifts between
+        # versions, and we only need this on the success path.
+        from httpcore._backends.sync import SyncStream
+
+        return SyncStream(sock)
 
 
 class SafeTransport(httpx.HTTPTransport):

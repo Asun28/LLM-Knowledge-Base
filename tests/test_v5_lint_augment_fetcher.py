@@ -85,6 +85,67 @@ def test_safe_backend_dns_failure_raises_connect_error():
             backend.connect_tcp("nonexistent.invalid", 80, timeout=1.0)
 
 
+def test_safe_backend_connects_by_ip_closes_dns_rebind_window():
+    """Connect with the already-validated IP, not the hostname.
+
+    Regression guard for the DNS rebinding TOCTOU: attacker DNS with TTL=0
+    can return 8.8.8.8 on the pre-flight getaddrinfo (passes the private-IP
+    check) and then 127.0.0.1 on the OS connect's second resolution. If
+    SafeBackend deferred to a hostname-based connect, the kernel would
+    re-resolve and use the private IP. Instead we bind directly to the
+    validated address so no second resolution happens.
+    """
+    from kb.lint.fetcher import SafeBackend
+
+    backend = SafeBackend()
+    # First call: pre-flight resolution returns a PUBLIC IP.
+    # Second call (if any): returns a PRIVATE IP — would be exploited.
+    public_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
+    private_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]
+    getaddrinfo_calls: list[tuple] = []
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        getaddrinfo_calls.append((host, port))
+        # Return public on first call, private on any later calls
+        return public_infos if len(getaddrinfo_calls) == 1 else private_infos
+
+    class _FakeSocket:
+        def setsockopt(self, *_a, **_kw):
+            return None
+
+        def close(self):
+            return None
+
+    created_with: list[tuple] = []
+
+    def fake_create_connection(address, *args, **kwargs):
+        created_with.append(address)
+        return _FakeSocket()
+
+    # Also stub SyncStream so we don't touch the real one (its ctor asserts socket)
+    class _FakeStream:
+        def __init__(self, sock):
+            self.sock = sock
+
+    with (
+        patch("socket.getaddrinfo", side_effect=fake_getaddrinfo),
+        patch("socket.create_connection", side_effect=fake_create_connection),
+        patch("httpcore._backends.sync.SyncStream", _FakeStream),
+    ):
+        backend.connect_tcp("rebind.example.com", 80, timeout=1.0)
+
+    # The socket must be opened against the IP STRING, not the hostname.
+    # If we re-resolved at OS connect, the kernel's second getaddrinfo would
+    # have returned the private IP.
+    assert len(created_with) == 1
+    address = created_with[0]
+    assert address[0] == "8.8.8.8", (
+        f"expected connect-by-IP '8.8.8.8', got {address[0]!r}"
+    )
+    # Exactly one resolution — no second lookup the attacker could flip.
+    assert len(getaddrinfo_calls) == 1
+
+
 def test_fetch_result_dataclass_shape():
     from kb.lint.fetcher import FetchResult
     r = FetchResult(
