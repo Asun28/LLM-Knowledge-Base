@@ -39,6 +39,23 @@ except ImportError:  # pragma: no cover - tld is a runtime dep
 logger = logging.getLogger(__name__)
 
 
+# ── httpx private-API version guard ────────────────────────────────
+#
+# SafeTransport replaces the network backend on HTTPTransport._pool, a
+# private attribute whose layout is not covered by httpx's public
+# stability contract. We pin ourselves to the httpx 0.28.x line so an
+# unpinned upgrade does not silently compromise the DNS-rebind defense.
+_HTTPX_SUPPORTED_PREFIX = "0.28."
+_installed_httpx_version = getattr(httpx, "__version__", "")
+if not _installed_httpx_version.startswith(_HTTPX_SUPPORTED_PREFIX):
+    raise RuntimeError(
+        f"kb.lint.fetcher.SafeTransport relies on httpx {_HTTPX_SUPPORTED_PREFIX}x "
+        f"private layout (HTTPTransport._pool._network_backend); installed "
+        f"version is {_installed_httpx_version!r}. Update SafeTransport to the "
+        f"new layout or pin httpx in requirements.txt."
+    )
+
+
 @dataclass
 class FetchResult:
     """Shape returned by AugmentFetcher.fetch().
@@ -153,7 +170,18 @@ class SafeTransport(httpx.HTTPTransport):
     def __init__(self, *, verify: bool = True, **kwargs):
         super().__init__(verify=verify, **kwargs)
         # httpx 0.28 stores the pool at self._pool; replace its network_backend.
-        self._pool._network_backend = SafeBackend()
+        # Wrap in try/except so a future layout change surfaces as a clear
+        # RuntimeError instead of a silent AttributeError that would bypass the
+        # DNS-rebind defense.
+        try:
+            self._pool._network_backend = SafeBackend()
+        except AttributeError as e:
+            raise RuntimeError(
+                "SafeTransport could not install SafeBackend on httpx "
+                "HTTPTransport; private attribute layout changed "
+                "(httpx _pool._network_backend missing). Update SafeTransport "
+                "for the current httpx version."
+            ) from e
 
 
 def build_client(version: str) -> httpx.Client:

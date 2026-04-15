@@ -36,6 +36,20 @@ def _auto_mock_robots(request):
     yield
 
 
+def test_safe_transport_version_guard_accepts_current_httpx():
+    """With the pinned httpx 0.28.x line the import does not raise, and
+    the SafeBackend installs on HTTPTransport._pool._network_backend."""
+    import httpx
+
+    from kb.lint.fetcher import SafeBackend, SafeTransport
+
+    assert httpx.__version__.startswith("0.28."), (
+        f"test env drifted off httpx 0.28.x: {httpx.__version__}"
+    )
+    t = SafeTransport()
+    assert isinstance(t._pool._network_backend, SafeBackend)
+
+
 def test_safe_backend_blocks_loopback():
     from kb.lint.fetcher import SafeBackend
     backend = SafeBackend()
