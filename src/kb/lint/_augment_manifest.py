@@ -97,23 +97,41 @@ class Manifest:
     # ---- mutators ----
 
     def advance(self, page_id: str, state: str, payload: dict[str, Any] | None = None) -> None:
+        """Transition a gap to a new state under file lock.
+
+        Re-reads the manifest inside the lock so a concurrent process
+        resuming the same run cannot clobber each other's transitions.
+        The in-memory self.data is refreshed to match.
+        """
         ts = _now_iso()
-        for gap in self.data["gaps"]:
-            if gap["page_id"] == page_id:
-                gap["state"] = state
-                transition: dict[str, Any] = {"state": state, "ts": ts}
-                if payload is not None:
-                    transition["payload"] = payload
-                gap["transitions"].append(transition)
-                with file_lock(self.path):
-                    atomic_json_write(self.data, self.path)
-                return
+        with file_lock(self.path):
+            try:
+                latest = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                # If the on-disk file is unreadable, fall back to our in-memory
+                # snapshot — preserves the previous non-concurrent behavior.
+                latest = self.data
+            for gap in latest["gaps"]:
+                if gap["page_id"] == page_id:
+                    gap["state"] = state
+                    transition: dict[str, Any] = {"state": state, "ts": ts}
+                    if payload is not None:
+                        transition["payload"] = payload
+                    gap["transitions"].append(transition)
+                    atomic_json_write(latest, self.path)
+                    self.data = latest
+                    return
         raise KeyError(f"Gap not found in manifest: {page_id}")
 
     def close(self) -> None:
-        self.data["ended_at"] = _now_iso()
         with file_lock(self.path):
-            atomic_json_write(self.data, self.path)
+            try:
+                latest = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                latest = self.data
+            latest["ended_at"] = _now_iso()
+            atomic_json_write(latest, self.path)
+            self.data = latest
         self._append_runs_index()
 
     def _append_runs_index(self) -> None:

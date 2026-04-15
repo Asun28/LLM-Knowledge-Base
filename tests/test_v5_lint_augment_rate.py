@@ -1,4 +1,5 @@
 """Cross-process rate limiter for kb_lint --augment fetches."""
+import json
 from datetime import UTC, datetime, timedelta
 
 
@@ -55,10 +56,41 @@ def test_state_persists_across_instances(tmp_path, monkeypatch):
 
 
 def test_old_entries_outside_window_dropped(tmp_path, monkeypatch):
-    rl = _make_limiter(tmp_path, monkeypatch)
-    # Simulate an entry older than 1 hour
+    # Seed the rate-limit file directly with a stale entry, then let acquire()
+    # purge it inside its locked read-check-write critical section.
+    rate_path = tmp_path / "augment_rate.json"
+    monkeypatch.setattr("kb.lint._augment_rate.RATE_PATH", rate_path)
     old_ts = (datetime.now(UTC) - timedelta(hours=2)).timestamp()
-    rl._state["per_host"]["en.wikipedia.org"] = {"hour_window": [old_ts]}
-    rl._save()
+    rate_path.write_text(json.dumps({
+        "schema": 1,
+        "global": {"hour_window": []},
+        "per_host": {"en.wikipedia.org": {"hour_window": [old_ts]}},
+    }))
+    from kb.lint._augment_rate import RateLimiter
+    rl = RateLimiter()
     allowed, _ = rl.acquire("en.wikipedia.org")
     assert allowed is True
+
+
+def test_concurrent_acquire_at_boundary_rejects_second_caller(tmp_path, monkeypatch):
+    """Two RateLimiter instances racing at the cap boundary — second must lose.
+
+    Regression guard for TOCTOU: before the fix both instances could read
+    state at count=cap-1, both pass the check, both write — permanently
+    exceeding the cap. With the read-check-write held under file_lock the
+    second caller re-reads the winner's write and is rejected.
+    """
+    monkeypatch.setattr("kb.config.AUGMENT_FETCH_MAX_CALLS_PER_HOST_PER_HOUR", 1)
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_path / "augment_rate.json"
+    )
+    from kb.lint._augment_rate import RateLimiter
+    rl_a = RateLimiter()
+    rl_b = RateLimiter()  # independent instance, no shared in-memory state
+
+    allowed_a, _ = rl_a.acquire("en.wikipedia.org")
+    allowed_b, retry_b = rl_b.acquire("en.wikipedia.org")
+
+    assert allowed_a is True
+    assert allowed_b is False, "second acquire must re-read A's write and reject"
+    assert retry_b > 0
