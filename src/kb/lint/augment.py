@@ -359,7 +359,7 @@ def _save_raw_file(
         "",
         content,
     ]
-    target.write_text("\n".join(fm_lines), encoding="utf-8")
+    atomic_text_write("\n".join(fm_lines), target)
     return target
 
 
@@ -686,9 +686,7 @@ def run_augment(
                 )
                 if "[!gap]" not in post.content:
                     post.content = gap_callout + post.content
-                    stub_path.write_text(
-                        frontmatter.dumps(post), encoding="utf-8"
-                    )
+                    atomic_text_write(frontmatter.dumps(post), stub_path)
 
             if manifest is not None:
                 manifest.advance(
