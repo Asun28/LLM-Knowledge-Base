@@ -33,6 +33,9 @@ select = ["E", "F", "I", "W", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-p no:faker -p no:langsmith_plugin"
+markers = [
+    "skip_default_robots: opt out of the augment fetcher autouse robots.txt mock",
+]
 
 [build-system]
 requires = ["setuptools>=75.0"]

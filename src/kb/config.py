@@ -189,6 +189,39 @@ WIKI_SUBDIR_TO_TYPE: dict[str, str] = {
     "synthesis": "synthesis",
 }
 
+# Autogen wiki page prefixes — pages under these subdirs are auto-generated entry points,
+# not stubs to enrich. Used by lint orphan/isolated/stub checks and kb_lint --augment eligibility.
+AUTOGEN_PREFIXES: tuple[str, ...] = ("summaries/", "comparisons/", "synthesis/")
+
+# === Augment (kb_lint --augment) ===
+# Reactive gap-fill: lint detects a stub → fetch web content → ingest as raw source.
+# See docs/superpowers/specs/2026-04-15-kb-lint-augment-design.md.
+
+AUGMENT_FETCH_MAX_BYTES = 5_000_000
+AUGMENT_FETCH_CONNECT_TIMEOUT = 5.0
+AUGMENT_FETCH_READ_TIMEOUT = 30.0
+AUGMENT_FETCH_MAX_REDIRECTS = 10
+AUGMENT_FETCH_MAX_CALLS_PER_RUN = 10  # hard ceiling; runtime max_gaps must be ≤ this
+AUGMENT_FETCH_MAX_CALLS_PER_HOUR = 60  # global cross-process
+AUGMENT_FETCH_MAX_CALLS_PER_HOST_PER_HOUR = 3
+AUGMENT_COOLDOWN_HOURS = 24
+AUGMENT_RELEVANCE_THRESHOLD = 0.5
+AUGMENT_WIKIPEDIA_FUZZY_THRESHOLD = 0.7
+
+AUGMENT_ALLOWED_DOMAINS: tuple[str, ...] = tuple(
+    d.strip()
+    for d in os.getenv("AUGMENT_ALLOWED_DOMAINS", "en.wikipedia.org,arxiv.org").split(",")
+    if d.strip()
+)
+AUGMENT_CONTENT_TYPES: tuple[str, ...] = (
+    "text/html",
+    "text/markdown",
+    "text/plain",
+    "application/pdf",
+    "application/json",
+    "application/xml",
+)
+
 # ── Verdict trend analysis ────────────────────────────────────
 # Threshold for classifying weekly trend direction as significant.
 # Used by kb.lint.trends to determine "improving", "stable", or "declining".

@@ -117,22 +117,89 @@ def query(question: str, output_format: str):
 
 
 @cli.command()
-@click.option("--fix/--no-fix", default=False, help="Auto-fix issues (default: report only)")
-def lint(fix: bool):
-    """Run health checks on the wiki."""
+@click.option("--fix", is_flag=True, help="Auto-fix broken wikilinks (replace with plain text).")
+@click.option(
+    "--augment",
+    is_flag=True,
+    help="Reactive gap-fill: propose URLs for stub pages.",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    help="With --augment: fetch URLs + save to raw/. Requires --augment.",
+)
+@click.option(
+    "--auto-ingest",
+    is_flag=True,
+    help="With --execute: also pre-extract + ingest. Requires --execute.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="With --augment: preview without writing anything.",
+)
+@click.option(
+    "--max-gaps",
+    type=int,
+    default=5,
+    help="Max stub gaps to attempt (≤10).",
+)
+@click.option(
+    "--wiki-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override wiki directory.",
+)
+def lint(
+    fix: bool,
+    augment: bool,
+    execute: bool,
+    auto_ingest: bool,
+    dry_run: bool,
+    max_gaps: int,
+    wiki_dir: Path | None,
+):
+    """Run lint checks on the wiki. Add --augment for reactive gap-fill."""
+    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
     from kb.lint.runner import format_report, run_all_checks
+
+    # Flag dependency validation
+    if execute and not augment:
+        raise click.UsageError("--execute requires --augment")
+    if auto_ingest and not execute:
+        raise click.UsageError("--auto-ingest requires --execute (and --augment)")
+    if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
+        raise click.UsageError(
+            f"--max-gaps={max_gaps} exceeds hard ceiling "
+            f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
+        )
 
     click.echo("Running lint checks...")
     try:
-        report = run_all_checks(fix=fix)
+        report = run_all_checks(wiki_dir=wiki_dir, fix=fix)
         click.echo(format_report(report))
         if report.get("fixes_applied"):
             click.echo(f"\nAuto-fixed {len(report['fixes_applied'])} issue(s):")
             for f in report["fixes_applied"]:
                 click.echo(f"  Fixed: {f['message']}")
+
+        if augment:
+            from kb.lint.augment import run_augment
+
+            mode = "auto_ingest" if auto_ingest else ("execute" if execute else "propose")
+            augment_result = run_augment(
+                wiki_dir=wiki_dir,
+                mode=mode,
+                max_gaps=max_gaps,
+                dry_run=dry_run,
+            )
+            click.echo("\n" + augment_result["summary"])
+
         if report["summary"].get("error", 0) > 0:
             raise SystemExit(1)
     except SystemExit:
+        raise
+    except click.UsageError:
         raise
     except Exception as e:
         click.echo(f"Error: {_truncate(str(e))}", err=True)

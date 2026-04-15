@@ -29,6 +29,40 @@ migration that shipped in the original kb_capture PR); no new tests added, no te
 
 Plus Phase 4.11: `kb_query --format={markdown|marp|html|chart|jupyter}` output adapters.
 
+Plus Phase 5.0: `kb_lint --augment` reactive gap-fill (modules `kb.lint.fetcher` / `kb.lint.augment` / `kb.lint._augment_manifest` / `kb.lint._augment_rate`; CLI + MCP flags; three-gate propose → execute → auto-ingest). Plus three bundled fixes: `kb_lint` MCP signature drift (CLAUDE.md:245 `--fix` claim), `kb_lint` MCP `wiki_dir` plumbing, `_AUTOGEN_PREFIXES` consolidation, and npm / Postgres DSN secret patterns.
+
+### Phase 5.0 — kb_lint --augment reactive gap-fill (2026-04-15)
+
+Implements Karpathy Tier 1 #2 from BACKLOG.md: *"impute missing data (with web searchers)"*. When lint flags a stub page, the augment orchestrator proposes authoritative URLs (Wikipedia, arxiv), fetches them with a DNS-rebind-safe transport, pre-extracts at scan tier, and ingests as `confidence: speculative` — with a three-gate execution model that preserves the "human curates sources" contract.
+
+#### Added
+
+- **`kb lint --augment`** — reactive gap-fill via in-process HTTP fetch. Three execution gates (`propose` default → `--execute` → `--auto-ingest`) honor the "human curates sources" contract. New modules:
+  - `src/kb/lint/fetcher.py` — DNS-rebind-safe transport via custom `httpcore.NetworkBackend`, scheme / domain / content-type allowlists, 5 MB stream cap, secret scan, trafilatura extraction, robots.txt via `SafeTransport`, `httpx.TooManyRedirects` handling.
+  - `src/kb/lint/augment.py` — orchestrator with eligibility gates G1-G7 (placeholder titles, inbound links from non-summary pages, non-speculative confidence, per-page `augment: false` opt-out, autogen-prefix skip, 24 h cooldown, autogen prefix), LLM URL proposer with `abstain` action + allowlist filter, Wikipedia fallback for entity/concept stubs, scan-tier relevance gate (≥0.5), post-ingest quality verdict + `[!gap]` callout on regression.
+  - `src/kb/lint/_augment_manifest.py` — atomic JSON state machine for run progression (propose → fetched → extracted → ingested → verdict → done).
+  - `src/kb/lint/_augment_rate.py` — file-locked sliding-window rate limiter: 10/run + 60/hour + 3/host/hour. Cross-process safe via `kb.utils.io.file_lock`.
+  - Augmented raw files carry `augment: true` + `augment_for: <stub_id>` + `augment_run_id` frontmatter. Resulting wiki pages get `confidence: speculative` + `[!augmented]` callout. On quality regression the page also gets a `[!gap]` callout flagging it for manual review.
+  - CLI: `kb lint --augment [--execute] [--auto-ingest] [--dry-run] [--max-gaps N] [--wiki-dir PATH]`. Flag dependency validation: `--execute` requires `--augment`; `--auto-ingest` requires `--execute`; `--max-gaps` bounded by `AUGMENT_FETCH_MAX_CALLS_PER_RUN=10`.
+  - MCP: `kb_lint(fix=False, augment=False, dry_run=False, execute=False, auto_ingest=False, max_gaps=5, wiki_dir=None)`. Preserves existing zero-arg behavior — all new kwargs default safe.
+  - Spec: `docs/superpowers/specs/2026-04-15-kb-lint-augment-design.md`. Plan: `docs/superpowers/plans/2026-04-15-kb-lint-augment.md`.
+- `tests/test_v5_lint_augment_fetcher.py` — DNS rebind + scheme allowlist + content-type reject + 5 MB streaming cap + robots.txt + redirect-loop handling
+- `tests/test_v5_lint_augment_manifest.py` — atomic state progression + terminal `done` + resume-from-partial
+- `tests/test_v5_lint_augment_rate.py` — per-run / per-hour / per-host caps + sliding-window + lock safety
+- `tests/test_v5_lint_augment_orchestrator.py` — eligibility gates G1-G7 + proposer abstain + Wikipedia fallback + relevance gate + propose / execute / auto-ingest modes + post-ingest quality verdict
+- `tests/test_v5_kb_lint_signature.py` — MCP tool accepts all new kwargs + default-call unchanged + `--augment` appends `## Augment Summary` section
+- `tests/test_v5_lint_augment_cli.py` — `--augment` / `--dry-run` + max-gaps validation + `--execute` requires `--augment` + `--auto-ingest` requires `--execute`
+- `tests/test_v5_augment_config.py` — config constants sanity checks
+- `tests/test_v5_autogen_prefixes.py` — `AUTOGEN_PREFIXES` consolidation regression guard
+- `tests/test_v5_verdict_augment_type.py` — `VALID_VERDICT_TYPES` now includes `"augment"`
+
+#### Fixed
+
+- **`kb_lint` MCP signature drift** (CLAUDE.md:245) — tool now accepts `fix`, `augment`, `dry_run`, `execute`, `auto_ingest`, `max_gaps`, `wiki_dir` kwargs. Previously the MCP tool was zero-arg (`def kb_lint() -> str:`) while CLAUDE.md claimed `--fix` support. Agents following the docstring would hit FastMCP's unknown-kwarg error or silently get no fix behavior. The new signature routes `fix` through to `run_all_checks(fix=fix)` and gates `augment=True` through to `kb.lint.augment.run_augment(...)`.
+- **`kb_lint` MCP `wiki_dir` plumbing** — tool can now be called with `wiki_dir=...` for hermetic test isolation. Previously the MCP tool read the `WIKI_DIR` global only, so tests had to either skip or mutate `kb.config` globally. Note: `kb_detect_drift`, `kb_evolve`, `kb_stats`, `kb_graph_viz`, `kb_compile_scan`, `kb_verdict_trends` still need the same plumbing (tracked in BACKLOG.md).
+- **`_AUTOGEN_PREFIXES` consolidation** — `kb.config.AUTOGEN_PREFIXES = ("summaries/", "comparisons/", "synthesis/")` centralizes the autogen-page-type list. `check_stub_pages` now skips `comparisons/` and `synthesis/` consistently with `check_orphan_pages` (was summaries-only at `checks.py:446`). A fresh two-entity comparison page is no longer flagged as "stub — consider enriching" when its purpose is to be concise.
+- **`_CAPTURE_SECRET_PATTERNS` extended** — PostgreSQL DSN passwords (`postgresql://user:pass@host`) and npm registry `_authToken` patterns now caught by the secret scanner in `kb_capture` before any LLM call.
+
 ### Phase 4.11 — kb_query output adapters (2026-04-14)
 
 Implements Karpathy Tier 1 #1 from BACKLOG.md: *"render markdown files, slide shows (Marp format), matplotlib images"*. Synthesized query answers can now leave the session as a slide deck, a web page, a plot script, or an executable notebook.

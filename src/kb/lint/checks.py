@@ -11,6 +11,7 @@ import yaml
 
 from kb.compile.linker import _mask_code_blocks, _unmask_code_blocks, resolve_wikilinks
 from kb.config import (
+    AUTOGEN_PREFIXES,
     RAW_DIR,
     SOURCE_TYPE_DIRS,
     STALENESS_MAX_DAYS,
@@ -179,7 +180,7 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     # Orphans: have outgoing links but no incoming links
     for orphan in stats["no_inbound"]:
         # Summaries, comparisons, and synthesis are natural entry points, don't flag them
-        if orphan.startswith(("summaries/", "comparisons/", "synthesis/")):
+        if orphan.startswith(AUTOGEN_PREFIXES):
             continue
         issues.append(
             {
@@ -193,7 +194,7 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     # Isolated: no links at all (neither in nor out)
     for isolated in stats["isolated"]:
         # Summaries, comparisons, and synthesis are natural entry points, don't flag them
-        if isolated.startswith(("summaries/", "comparisons/", "synthesis/")):
+        if isolated.startswith(AUTOGEN_PREFIXES):
             continue
         issues.append(
             {
@@ -442,8 +443,8 @@ def check_stub_pages(
 
     for page_path in pages:
         pid = page_id(page_path, wiki_dir)
-        # Skip summaries — they're auto-generated entry points
-        if pid.startswith("summaries/"):
+        # Skip autogen pages — they're natural entry points, not stubs to enrich
+        if pid.startswith(AUTOGEN_PREFIXES):
             continue
         try:
             post = frontmatter.load(str(page_path))

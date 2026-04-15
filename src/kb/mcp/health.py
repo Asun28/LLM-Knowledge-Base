@@ -1,6 +1,7 @@
 """Health MCP tools — lint, evolve."""
 
 import logging
+from pathlib import Path
 
 from kb.graph.export import export_mermaid
 from kb.mcp.app import mcp
@@ -9,16 +10,52 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-def kb_lint() -> str:
-    """Run health checks on the wiki. Reports dead links, orphans, staleness, etc."""
+def kb_lint(
+    fix: bool = False,
+    augment: bool = False,
+    dry_run: bool = False,
+    execute: bool = False,
+    auto_ingest: bool = False,
+    max_gaps: int = 5,
+    wiki_dir: str | None = None,
+) -> str:
+    """Run health checks on the wiki. Reports dead links, orphans, staleness, etc.
+
+    Args:
+        fix: If True, auto-fix dead wikilinks (replace with plain text).
+        augment: If True, also run reactive gap-fill (kb_lint --augment).
+        dry_run: With augment, preview without writing proposals/raw/wiki.
+        execute: With augment, fetch + save raw files (no ingest). Requires augment=True.
+        auto_ingest: With augment+execute, also pre-extract + ingest. Requires execute=True.
+        max_gaps: Max stub gaps to attempt per augment run (default 5; hard ceiling 10).
+        wiki_dir: Override wiki directory (default: kb.config.WIKI_DIR).
+
+    Returns:
+        Formatted lint report. When augment=True, appends ## Augment Summary section.
+    """
+    # Three-gate dependency validation — parity with CLI (cli.py:167-175).
+    # MCP tools return "Error: ..." strings instead of raising to the client.
+    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+
+    if execute and not augment:
+        return "Error: --execute requires --augment"
+    if auto_ingest and not execute:
+        return "Error: --auto-ingest requires --execute (and --augment)"
+    if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
+        return (
+            f"Error: max_gaps={max_gaps} exceeds hard ceiling "
+            f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
+        )
+
     try:
         from kb.lint.runner import format_report, run_all_checks
 
-        report = run_all_checks()
+        wiki_path = Path(wiki_dir) if wiki_dir else None
+        report = run_all_checks(wiki_dir=wiki_path, fix=fix)
         result = format_report(report)
     except Exception as e:
         logger.error("Error running lint checks: %s", e)
-        return f"Error: Lint checks failed — {e}"
+        return f"Error: kb_lint failed: {type(e).__name__}: {e}"
 
     # Append feedback-flagged pages (fail-safe)
     try:
@@ -34,6 +71,22 @@ def kb_lint() -> str:
                 result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
     except Exception as e:
         logger.warning("Failed to load feedback data for lint: %s", e)
+
+    if augment:
+        try:
+            from kb.lint.augment import run_augment
+
+            mode = "auto_ingest" if auto_ingest else ("execute" if execute else "propose")
+            augment_result = run_augment(
+                wiki_dir=wiki_path,
+                mode=mode,
+                max_gaps=max_gaps,
+                dry_run=dry_run,
+            )
+            result += "\n\n" + augment_result["summary"]
+        except Exception as e:
+            logger.error("Error running augment: %s", e)
+            return f"Error: kb_lint failed: {type(e).__name__}: {e}"
 
     return result
 

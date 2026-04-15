@@ -151,6 +151,14 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "Private key block",
         re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"),
     ),
+    (
+        "PostgreSQL DSN with password",
+        re.compile(r"(?i)postgresql://[^:\s]+:[^@\s]{6,}@"),
+    ),
+    (
+        "npm registry _authToken",
+        re.compile(r"(?i)//[a-z0-9._-]+/?:_authToken=[A-Za-z0-9+/=_-]{20,}"),
+    ),
 ]
 
 
