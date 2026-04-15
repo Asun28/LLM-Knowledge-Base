@@ -64,6 +64,27 @@ def test_safe_backend_blocks_private_ranges():
                 backend.connect_tcp("internal.example.com", 80, timeout=1.0)
 
 
+def test_safe_backend_blocks_unspecified_ipv4():
+    """0.0.0.0 is unspecified (not covered by is_private/is_loopback/is_reserved
+    on all Python versions). Must still be rejected."""
+    from kb.lint.fetcher import SafeBackend
+    backend = SafeBackend()
+    fake_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("0.0.0.0", 80))]
+    with patch("socket.getaddrinfo", return_value=fake_infos):
+        with pytest.raises(httpcore.ConnectError, match="private/reserved"):
+            backend.connect_tcp("any.example.com", 80, timeout=1.0)
+
+
+def test_safe_backend_blocks_unspecified_ipv6():
+    """:: is unspecified IPv6. Must still be rejected."""
+    from kb.lint.fetcher import SafeBackend
+    backend = SafeBackend()
+    fake_infos = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::", 80, 0, 0))]
+    with patch("socket.getaddrinfo", return_value=fake_infos):
+        with pytest.raises(httpcore.ConnectError, match="private/reserved"):
+            backend.connect_tcp("any6.example.com", 80, timeout=1.0)
+
+
 def test_safe_backend_rejects_when_any_resolved_ip_is_private():
     """DNS-rebinding defense: even one private IP in the RR-set is enough to reject."""
     from kb.lint.fetcher import SafeBackend

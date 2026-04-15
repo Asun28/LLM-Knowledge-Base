@@ -104,6 +104,7 @@ class SafeBackend(SyncBackend):
                 or ip.is_link_local
                 or ip.is_reserved
                 or ip.is_multicast
+                or ip.is_unspecified
             ):
                 raise httpcore.ConnectError(
                     f"Blocked private/reserved address {ip} for host {host}"
