@@ -311,6 +311,58 @@ def _format_proposals_md(proposals: list[dict[str, Any]], run_id: str) -> str:
     return "\n".join(lines)
 
 
+def _save_raw_file(
+    *,
+    raw_dir: Path,
+    stub_id: str,
+    title: str,
+    url: str,
+    run_id: str,
+    content: str,
+    proposer: str,
+) -> Path:
+    """Save fetched content to raw/articles/<slug>-<run_id[:8]>[-<n>].md.
+
+    Collision-fallback: if the base name already exists, append ``-2``, ``-3``,
+    etc. Embeds augment provenance in frontmatter and prepends an
+    ``[!untrusted_source]`` callout so downstream readers see the provenance.
+    """
+    from kb.utils.hashing import hash_bytes
+    from kb.utils.text import slugify
+
+    article_dir = raw_dir / "articles"
+    article_dir.mkdir(parents=True, exist_ok=True)
+    slug = slugify(title) or stub_id.split("/")[-1]
+    base_name = f"{slug}-{run_id[:8]}.md"
+    target = article_dir / base_name
+    counter = 2
+    while target.exists():
+        target = article_dir / f"{slug}-{run_id[:8]}-{counter}.md"
+        counter += 1
+
+    sha = hash_bytes(content.encode("utf-8"))
+    fm_lines = [
+        "---",
+        f"title: {title!r}",
+        "source_type: article",
+        f"fetched_from: {url}",
+        f"fetched_at: {datetime.now(UTC).isoformat(timespec='seconds')}",
+        "augment: true",
+        f"augment_for: {stub_id}",
+        f"augment_run_id: {run_id}",
+        f"augment_proposer: {proposer}",
+        f"sha256: '{sha}'",
+        "---",
+        "",
+        "> [!untrusted_source]",
+        f"> Auto-fetched from {url} during `kb lint --augment`. Not human-reviewed.",
+        "",
+        content,
+    ]
+    target.write_text("\n".join(fm_lines), encoding="utf-8")
+    return target
+
+
 def run_augment(
     *,
     wiki_dir: Path | None = None,
@@ -327,7 +379,16 @@ def run_augment(
     relevance gate + save raw + manifest advance. Phase C (auto_ingest):
     pre-extract + ingest_source + augmented-page marker + quality verdict.
     """
-    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+    from urllib.parse import urlparse
+
+    import kb
+    from kb.config import (
+        AUGMENT_FETCH_MAX_CALLS_PER_RUN,
+        AUGMENT_RELEVANCE_THRESHOLD,
+    )
+    from kb.lint._augment_manifest import Manifest
+    from kb.lint._augment_rate import RateLimiter
+    from kb.lint.fetcher import AugmentFetcher
 
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
@@ -343,8 +404,13 @@ def run_augment(
 
     run_id = str(uuid.uuid4())
     proposals: list[dict[str, Any]] = []
+    fetches: list[dict[str, Any]] | None = None
+    ingests: list[dict[str, Any]] | None = None
+    verdicts: list[dict[str, Any]] | None = None
+    manifest_path: str | None = None
+    manifest: Manifest | None = None
 
-    # Phase A: propose
+    # Phase A: propose (always runs)
     for stub in eligible:
         prop = _propose_urls(stub=stub, purpose_text=purpose_text)
         entry: dict[str, Any] = {
@@ -352,7 +418,6 @@ def run_augment(
             "title": stub["title"],
             **prop,
         }
-        # Wikipedia fallback if proposer abstained AND stub is entity/concept
         if prop["action"] == "abstain":
             wiki_url = _wikipedia_fallback(page_id=stub["page_id"], title=stub["title"])
             if wiki_url is not None:
@@ -365,14 +430,167 @@ def run_augment(
                 }
         proposals.append(entry)
 
+    # Phase B: execute (mode in {execute, auto_ingest})
+    if mode in ("execute", "auto_ingest") and proposals:
+        if dry_run:
+            fetches = [
+                {"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals
+            ]
+        else:
+            manifest = Manifest.start(
+                run_id=run_id,
+                mode=mode,
+                max_gaps=max_gaps,
+                stubs=[
+                    {"page_id": p["stub_id"], "title": p["title"]} for p in proposals
+                ],
+            )
+            manifest_path = str(manifest.path)
+            limiter = RateLimiter()
+            fetches = []
+            with AugmentFetcher(
+                allowed_domains=AUGMENT_ALLOWED_DOMAINS,
+                version=kb.__version__,
+            ) as fetcher:
+                for prop in proposals:
+                    stub_id = prop["stub_id"]
+                    if prop["action"] != "propose":
+                        manifest.advance(
+                            stub_id, "abstained", payload={"reason": prop.get("reason")}
+                        )
+                        fetches.append(
+                            {
+                                "stub_id": stub_id,
+                                "status": "abstained",
+                                "reason": prop.get("reason"),
+                            }
+                        )
+                        continue
+
+                    fetched_ok = False
+                    for url in prop["urls"]:
+                        host = urlparse(url).netloc
+                        allowed, retry = limiter.acquire(host)
+                        if not allowed:
+                            manifest.advance(
+                                stub_id,
+                                "failed",
+                                payload={"reason": f"rate limited (retry {retry}s)"},
+                            )
+                            fetches.append(
+                                {
+                                    "stub_id": stub_id,
+                                    "status": "rate_limited",
+                                    "url": url,
+                                    "retry": retry,
+                                }
+                            )
+                            break
+                        manifest.advance(stub_id, "proposed", payload={"url": url})
+                        result = fetcher.fetch(url)
+                        if result.status != "ok":
+                            fetches.append(
+                                {
+                                    "stub_id": stub_id,
+                                    "status": "failed",
+                                    "url": url,
+                                    "reason": result.reason,
+                                }
+                            )
+                            continue
+                        manifest.advance(
+                            stub_id,
+                            "fetched",
+                            payload={"url": url, "bytes": result.bytes},
+                        )
+
+                        # Relevance gate
+                        score = _relevance_score(
+                            stub_title=prop["title"],
+                            extracted_text=result.extracted_markdown or "",
+                        )
+                        if score < AUGMENT_RELEVANCE_THRESHOLD:
+                            manifest.advance(
+                                stub_id,
+                                "failed",
+                                payload={
+                                    "reason": (
+                                        f"relevance {score:.2f} < "
+                                        f"{AUGMENT_RELEVANCE_THRESHOLD}"
+                                    )
+                                },
+                            )
+                            fetches.append(
+                                {
+                                    "stub_id": stub_id,
+                                    "status": "skipped",
+                                    "url": url,
+                                    "reason": f"relevance {score:.2f} < threshold",
+                                }
+                            )
+                            continue
+
+                        # Save raw
+                        raw_path = _save_raw_file(
+                            raw_dir=raw_dir,
+                            stub_id=stub_id,
+                            title=prop["title"],
+                            url=result.url,
+                            run_id=run_id,
+                            content=result.extracted_markdown or "",
+                            proposer=(
+                                "wikipedia-fallback"
+                                if "wikipedia fallback" in prop.get("rationale", "")
+                                else "llm-scan"
+                            ),
+                        )
+                        manifest.advance(
+                            stub_id, "saved", payload={"raw_path": str(raw_path)}
+                        )
+                        fetches.append(
+                            {
+                                "stub_id": stub_id,
+                                "status": "saved",
+                                "url": url,
+                                "raw_path": str(raw_path),
+                                "relevance": score,
+                            }
+                        )
+                        fetched_ok = True
+                        break
+
+                    if not fetched_ok and not any(
+                        f["stub_id"] == stub_id for f in fetches
+                    ):
+                        manifest.advance(
+                            stub_id, "failed", payload={"reason": "all URLs failed"}
+                        )
+
+            if mode == "execute":
+                # Mark saved gaps as terminal "done" (no ingest in execute mode)
+                for f in fetches:
+                    if f["status"] == "saved":
+                        manifest.advance(f["stub_id"], "done")
+                manifest.close()
+
+    # Phase C: auto-ingest happens in Task 15 (extends this body further)
+
     summary_lines = [f"## Augment Summary (run {run_id[:8]}, mode={mode})"]
     summary_lines.append(f"- Stubs examined: {len(eligible)}")
     summary_lines.append(
         f"- Proposals: {sum(1 for p in proposals if p['action'] == 'propose')}"
     )
-    summary_lines.append(
-        f"- Abstained: {sum(1 for p in proposals if p['action'] == 'abstain')}"
-    )
+    if fetches is not None:
+        saved = sum(1 for f in fetches if f["status"] == "saved")
+        skipped = sum(1 for f in fetches if f["status"] == "skipped")
+        failed = sum(
+            1
+            for f in fetches
+            if f["status"] not in {"saved", "skipped", "dry_run_skipped"}
+        )
+        summary_lines.append(f"- Saved: {saved}, Skipped: {skipped}, Failed: {failed}")
+    if manifest_path:
+        summary_lines.append(f"- Manifest: {manifest_path}")
 
     if mode == "propose" and not dry_run and proposals:
         proposals_path = wiki_dir / "_augment_proposals.md"
@@ -385,9 +603,9 @@ def run_augment(
         "gaps_examined": len(eligible),
         "gaps_eligible": len(eligible),
         "proposals": proposals,
-        "fetches": None,
-        "ingests": None,
-        "verdicts": None,
-        "manifest_path": None,
+        "fetches": fetches,
+        "ingests": ingests,
+        "verdicts": verdicts,
+        "manifest_path": manifest_path,
         "summary": "\n".join(summary_lines),
     }

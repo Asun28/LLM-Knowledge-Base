@@ -340,3 +340,211 @@ def test_propose_mode_dry_run_does_not_write_proposals(tmp_project, create_wiki_
             dry_run=True,
         )
     assert not (wiki_dir / "_augment_proposals.md").exists()
+
+
+# ── Task 14: execute mode tests ──────────────────────────────────
+
+
+def test_execute_mode_writes_raw_file_no_ingest(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+    _seed_stub(
+        create_wiki_page, wiki_dir, "concepts/mixture-of-experts", title="Mixture of Experts"
+    )
+    create_wiki_page(
+        page_id="entities/transformer",
+        title="Transformer",
+        content="See [[concepts/mixture-of-experts]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/Mixture_of_experts",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article><h1>Mixture of experts</h1><p>"
+            b"MoE is a neural architecture that uses a gating network to route "
+            b"inputs to one of several expert subnetworks. This enables conditional "
+            b"computation and allows the model to scale parameters without "
+            b"proportionally increasing per-input compute.</p></article></body></html>"
+        ),
+    )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/Mixture_of_experts"],
+        "rationale": "wp",
+    }
+    fake_relevance = {"score": 0.9}
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        side_effect=[fake_propose, fake_relevance],
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+        )
+
+    raw_files = list((raw_dir / "articles").glob("mixture-of-experts*.md"))
+    assert len(raw_files) == 1
+    body = raw_files[0].read_text()
+    assert "augment: true" in body
+    assert "augment_for: concepts/mixture-of-experts" in body
+    assert "fetched_from: https://en.wikipedia.org/wiki/Mixture_of_experts" in body
+    # No wiki page should have been created/updated
+    assert result["ingests"] is None or result["ingests"] == []
+
+
+def test_execute_mode_relevance_below_threshold_skips(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/dropout", title="Dropout")
+    create_wiki_page(
+        page_id="entities/regularization",
+        title="Regularization",
+        content="See [[concepts/dropout]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    # The fetched page is the 2018 film, NOT the ML concept
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/Dropout",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article><h1>Dropout (2018 film)</h1><p>"
+            b"The film stars Naomi Watts and is based on a true story "
+            b"about a young startup founder chasing a medical-device dream."
+            b"</p></article></body></html>"
+        ),
+    )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/Dropout"],
+        "rationale": "wp",
+    }
+    fake_relevance = {"score": 0.1}  # below 0.5 threshold
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        side_effect=[fake_propose, fake_relevance],
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+        )
+
+    raw_files = list((raw_dir / "articles").glob("dropout*.md"))
+    assert len(raw_files) == 0  # no save on relevance fail
+    assert result["fetches"][0]["status"] == "skipped"
+    assert "relevance" in result["fetches"][0]["reason"].lower()
+
+
+def test_execute_mode_writes_manifest(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/X",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article>"
+            b"X is a concept in machine learning. " + b"Real content. " * 30
+            + b"</article></body></html>"
+        ),
+    )
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        side_effect=[
+            {
+                "action": "propose",
+                "urls": ["https://en.wikipedia.org/wiki/X"],
+                "rationale": "wp",
+            },
+            {"score": 0.9},
+        ],
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+        )
+
+    assert result["manifest_path"] is not None
+    manifest_files = list((tmp_project / ".data").glob("augment-run-*.json"))
+    assert len(manifest_files) == 1
+
+
+def test_execute_mode_dry_run_does_not_fetch(tmp_project, create_wiki_page, monkeypatch):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value={
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/X"],
+            "rationale": "wp",
+        },
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=tmp_project / "raw",
+            mode="execute",
+            max_gaps=5,
+            dry_run=True,
+        )
+    # In dry-run, no httpx_mock responses should have been requested
+    assert result["fetches"] is None or all(
+        f["status"] == "dry_run_skipped" for f in result["fetches"]
+    )
