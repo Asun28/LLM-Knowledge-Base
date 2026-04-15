@@ -471,7 +471,12 @@ def run_augment(
 
                     fetched_ok = False
                     for url in prop["urls"]:
-                        host = urlparse(url).netloc
+                        # Normalize to bare hostname (lowercase, no port, no
+                        # userinfo). netloc would treat example.com and
+                        # example.com:443 as separate buckets, weakening the
+                        # per-host cap.
+                        parsed_url = urlparse(url)
+                        host = (parsed_url.hostname or "").lower()
                         allowed, retry = limiter.acquire(host)
                         if not allowed:
                             manifest.advance(

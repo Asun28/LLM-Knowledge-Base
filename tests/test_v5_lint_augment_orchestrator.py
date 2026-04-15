@@ -857,3 +857,124 @@ def test_g6_cooldown_writeback_skipped_on_dry_run(tmp_project, create_wiki_page)
     assert "last_augment_attempted" not in post.metadata, (
         "dry-run must not write cooldown stamp"
     )
+
+
+# ── Fix C: rate-limit bucketing normalization ───────────────────────
+
+
+def test_rate_limit_bucket_uses_normalized_hostname_not_netloc(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    """URLs differing only in port (or case) must share one rate bucket.
+
+    Regression guard: the bucketing used urlparse(url).netloc, which treated
+    example.com and example.com:443 as different hosts and let a run bypass
+    the per-host hourly cap via port tricks.
+    """
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+    # Capture the hostnames passed to RateLimiter.acquire to prove normalization.
+    acquired_hosts: list[str] = []
+
+    class _FakeLimiter:
+        def acquire(self, host):
+            acquired_hosts.append(host)
+            # Deny so we don't need to stand up a full fetch mock for both
+            return False, 60
+
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RateLimiter", lambda: _FakeLimiter()
+    )
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+
+    # Proposer returns TWO URLs on the same host, one with a default port
+    fake_propose = {
+        "action": "propose",
+        "urls": [
+            "https://en.wikipedia.org/a",
+            "https://en.wikipedia.org:443/b",  # same host, explicit default port
+        ],
+        "rationale": "port tricks",
+    }
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value=fake_propose,
+    ):
+        run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+        )
+
+    # Only the first URL reaches acquire() (the loop breaks on rate-limit),
+    # but the captured host MUST be the bare hostname (no port).
+    assert acquired_hosts, "acquire() should have been called at least once"
+    assert acquired_hosts[0] == "en.wikipedia.org", (
+        f"expected bare hostname bucket, got {acquired_hosts[0]!r}"
+    )
+    # All buckets visited must be port-free and lowercase
+    for h in acquired_hosts:
+        assert ":" not in h, f"bucket {h!r} contains port"
+        assert h == h.lower(), f"bucket {h!r} not lowercased"
+
+
+def test_rate_limit_bucket_lowercases_hostname(
+    tmp_project, create_wiki_page, monkeypatch
+):
+    """Uppercase hostnames must map to the same bucket as their lowercase form."""
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+    acquired: list[str] = []
+
+    class _FakeLimiter:
+        def acquire(self, host):
+            acquired.append(host)
+            return False, 60
+
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RateLimiter", lambda: _FakeLimiter()
+    )
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value={
+            "action": "propose",
+            "urls": ["https://EN.Wikipedia.ORG/page"],
+            "rationale": "mixed case",
+        },
+    ):
+        run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+        )
+
+    assert acquired == ["en.wikipedia.org"], (
+        f"expected lowercased bucket, got {acquired!r}"
+    )
