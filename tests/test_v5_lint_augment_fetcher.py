@@ -132,6 +132,34 @@ def test_fetch_rejects_non_allowlisted_domain():
     assert "domain" in r.reason.lower()
 
 
+@pytest.mark.skip_default_robots
+def test_fetch_accepts_subdomain_allowlist_entry(httpx_mock):
+    """Subdomain-aware allowlist: 'en.wikipedia.org' matches a Wikipedia URL.
+
+    Prevents regression of the fetcher/orchestrator mismatch where the orchestrator
+    approved `https://en.wikipedia.org/...` (subdomain match against the allowlist)
+    but the fetcher rejected it because get_fld() returns 'wikipedia.org' (eTLD+1).
+    """
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/X",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article>"
+            b"This is a reasonably long Wikipedia article about X so that "
+            b"trafilatura keeps it as the main body and returns markdown."
+            b"</article></body></html>"
+        ),
+    )
+    f = _build_fetcher(allowed=("en.wikipedia.org",))
+    r = f.fetch("https://en.wikipedia.org/wiki/X")
+    assert r.status == "ok", f"expected ok, got {r.status}: {r.reason}"
+
+
 def test_fetch_rejects_oversize_via_content_length(httpx_mock):
     from kb.config import AUGMENT_FETCH_MAX_BYTES
     httpx_mock.add_response(

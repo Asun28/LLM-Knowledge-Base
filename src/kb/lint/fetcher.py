@@ -169,6 +169,41 @@ def _registered_domain(url: str) -> str | None:
         return None
 
 
+def _url_is_allowed(url: str, allowed_domains: tuple[str, ...]) -> bool:
+    """Return True if URL's host matches ``allowed_domains``.
+
+    Match rule: either the registered domain (eTLD+1) OR the full netloc must
+    equal an allowlist entry, OR the netloc must be a subdomain of an allowlist
+    entry (e.g., ``en.wikipedia.org`` in the allowlist allows
+    ``xx.en.wikipedia.org``). This lets the allowlist use narrow entries like
+    ``en.wikipedia.org`` without requiring eTLD+1 matching, and still accepts
+    ``arxiv.org`` directly.
+
+    Shared between the fetcher's allowlist gate and the orchestrator's URL
+    proposer filter so both make the same decision for a given URL.
+    """
+    try:
+        netloc = urlparse(url).netloc.lower()
+    except (ValueError, AttributeError):
+        return False
+    if not netloc:
+        return False
+    # Strip userinfo/port
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[1]
+    if ":" in netloc:
+        netloc = netloc.rsplit(":", 1)[0]
+    rd = _registered_domain(url)
+    rd_lower = rd.lower() if rd else None
+    for d in allowed_domains:
+        dl = d.lower()
+        if netloc == dl or netloc.endswith("." + dl):
+            return True
+        if rd_lower and rd_lower == dl:
+            return True
+    return False
+
+
 def _strip_code_for_scan(text: str) -> str:
     """Strip fenced code blocks + inline code spans for secret scanning purposes only.
 
@@ -263,16 +298,15 @@ class AugmentFetcher:
                 url=url,
             )
 
-        # 2. Domain allow-list (initial URL)
-        rd = _registered_domain(url)
-        if rd is None or rd.lower() not in self.allowed_domains:
+        # 2. Domain allow-list (initial URL) — subdomain-aware (see _url_is_allowed)
+        if not _url_is_allowed(url, self.allowed_domains):
             return FetchResult(
                 status="blocked",
                 content=None,
                 extracted_markdown=None,
                 content_type="",
                 bytes=0,
-                reason=f"domain not in allowlist: {rd}",
+                reason=f"domain not in allowlist: {_registered_domain(url)}",
                 url=url,
             )
 
@@ -294,16 +328,19 @@ class AugmentFetcher:
                 response.raise_for_status()
 
                 # 4. Final URL allow-list (catches redirects to off-allow domains)
-                final_rd = _registered_domain(str(response.url))
-                if final_rd is None or final_rd.lower() not in self.allowed_domains:
+                final_url_str = str(response.url)
+                if not _url_is_allowed(final_url_str, self.allowed_domains):
                     return FetchResult(
                         status="blocked",
                         content=None,
                         extracted_markdown=None,
                         content_type="",
                         bytes=0,
-                        reason=f"redirect target domain not in allowlist: {final_rd}",
-                        url=str(response.url),
+                        reason=(
+                            "redirect target domain not in allowlist: "
+                            f"{_registered_domain(final_url_str)}"
+                        ),
+                        url=final_url_str,
                     )
 
                 # 5. Content-type allow-list

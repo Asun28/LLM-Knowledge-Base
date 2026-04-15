@@ -13,7 +13,6 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 import frontmatter
 
@@ -25,7 +24,7 @@ from kb.config import (
 )
 from kb.graph.builder import build_graph
 from kb.lint.checks import check_stub_pages
-from kb.lint.fetcher import _registered_domain
+from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.llm import call_llm_json
 
 logger = logging.getLogger(__name__)
@@ -201,7 +200,7 @@ def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
     raw_urls = response.get("urls") or []
     filtered: list[str] = []
     for u in raw_urls:
-        if _url_is_allowed(u):
+        if _url_is_allowed(u, AUGMENT_ALLOWED_DOMAINS):
             filtered.append(u)
         else:
             rd = _registered_domain(u)
@@ -215,37 +214,6 @@ def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
         "urls": filtered,
         "rationale": response.get("rationale", ""),
     }
-
-
-def _url_is_allowed(url: str) -> bool:
-    """Return True if URL's host matches AUGMENT_ALLOWED_DOMAINS.
-
-    Match rule: either the registered domain (eTLD+1) OR the full netloc must
-    equal an allowlist entry, OR the netloc must be a subdomain of an allowlist
-    entry (e.g., "en.wikipedia.org" allows "xx.en.wikipedia.org"). This lets
-    the allowlist use narrow entries like "en.wikipedia.org" without requiring
-    eTLD+1 matching, and still accepts "arxiv.org" directly.
-    """
-    try:
-        netloc = urlparse(url).netloc.lower()
-    except (ValueError, AttributeError):
-        return False
-    if not netloc:
-        return False
-    # Strip userinfo/port
-    if "@" in netloc:
-        netloc = netloc.rsplit("@", 1)[1]
-    if ":" in netloc:
-        netloc = netloc.rsplit(":", 1)[0]
-    rd = _registered_domain(url)
-    rd_lower = rd.lower() if rd else None
-    for d in AUGMENT_ALLOWED_DOMAINS:
-        dl = d.lower()
-        if netloc == dl or netloc.endswith("." + dl):
-            return True
-        if rd_lower and rd_lower == dl:
-            return True
-    return False
 
 
 # ── Wikipedia fallback + relevance score (Task 12) ───────────────
