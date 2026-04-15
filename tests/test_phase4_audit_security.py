@@ -1,8 +1,10 @@
 """Tests for HIGH-severity MCP security fixes — Phase 4 audit."""
+
 from unittest.mock import patch
 
 from kb.config import MAX_INGEST_CONTENT_CHARS
 from kb.mcp.app import _validate_page_id
+from kb.review.refiner import refine_page
 
 
 def test_validate_page_id_rejects_null_byte():
@@ -24,6 +26,7 @@ def test_validate_page_id_still_rejects_traversal():
 
 def test_kb_refine_page_rejects_oversized_content(tmp_path):
     from kb.mcp.quality import kb_refine_page
+
     page_path = tmp_path / "concepts" / "test-page.md"
     page_path.parent.mkdir(parents=True)
     page_path.write_text("---\ntitle: Test\ntype: concept\nconfidence: stated\n---\nBody\n")
@@ -34,19 +37,32 @@ def test_kb_refine_page_rejects_oversized_content(tmp_path):
     assert "large" in result.lower() or str(MAX_INGEST_CONTENT_CHARS) in result
 
 
-def test_kb_refine_page_accepts_valid_content(tmp_path):
-    from kb.mcp.quality import kb_refine_page
-    page_path = tmp_path / "concepts" / "test-page.md"
-    page_path.parent.mkdir(parents=True)
-    page_path.write_text("---\ntitle: Test\ntype: concept\nconfidence: stated\n---\nBody\n")
-    with patch("kb.mcp.app.WIKI_DIR", tmp_path), patch("kb.mcp.quality.WIKI_DIR", tmp_path):
-        result = kb_refine_page("concepts/test-page", "Valid short content.")
-    # Must not return an oversized error
-    assert "too large" not in result.lower()
+def test_kb_refine_page_accepts_valid_content(tmp_wiki, create_wiki_page):
+    """Regression: Phase 4.5 CRITICAL item 3 (verify body actually written)."""
+    page_id = "concepts/test-item-3"
+    create_wiki_page(
+        page_id=page_id,
+        title="Test",
+        content="Original body.\n",
+        wiki_dir=tmp_wiki,
+    )
+    new_body = "Updated body with more detail.\n\nSecond paragraph.\n"
+    result = refine_page(
+        page_id=page_id,
+        updated_content=new_body,
+        revision_notes="tighten",
+        wiki_dir=tmp_wiki,
+    )
+    assert isinstance(result, dict)
+    assert result.get("updated") is True, f"refine_page did not report success: {result}"
+    page_text = (tmp_wiki / f"{page_id}.md").read_text(encoding="utf-8")
+    assert "Updated body with more detail." in page_text
+    assert "Second paragraph." in page_text
 
 
 def test_kb_create_page_rejects_oversized_content(tmp_path):
     from kb.mcp.quality import kb_create_page
+
     with patch("kb.mcp.app.WIKI_DIR", tmp_path), patch("kb.mcp.quality.WIKI_DIR", tmp_path):
         oversized = "x" * (MAX_INGEST_CONTENT_CHARS + 1)
         result = kb_create_page("concepts/test-new", "Title", oversized)

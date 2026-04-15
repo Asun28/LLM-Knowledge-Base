@@ -9,26 +9,6 @@ class TestDetectContradictions:
         result = detect_contradictions(new_claims, existing_pages=[])
         assert result == []
 
-    def test_returns_contradiction_dict(self):
-        new_claims = ["GPT-4 was released in 2025."]
-        existing = [
-            {
-                "id": "entities/gpt-4",
-                "content": "GPT-4 was released in March 2023.",
-                "title": "GPT-4",
-            }
-        ]
-        result = detect_contradictions(new_claims, existing_pages=existing)
-        # Without LLM, this uses keyword overlap heuristic
-        # We don't assert specific contradictions since heuristic-only detection
-        # is intentionally conservative — just verify the structure
-        assert isinstance(result, list)
-        for item in result:
-            assert "new_claim" in item
-            assert "existing_page" in item
-            assert "existing_text" in item
-            assert "reason" in item
-
     def test_no_false_positives_on_unrelated(self):
         new_claims = ["Python is a programming language."]
         existing = [
@@ -46,3 +26,31 @@ class TestDetectContradictions:
         result = detect_contradictions(claims, existing_pages=[], max_claims=5)
         # Should not error even with many claims
         assert isinstance(result, list)
+
+
+def test_returns_empty_list_when_no_contradiction(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (empty-path explicitly tested, no silent loop-skip)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    result = detect_contradictions(new_claims=["unrelated topic"], existing_pages=[])
+    assert result == []
+
+
+def test_returns_contradiction_dict_when_heuristic_fires(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (fired path: verify dict shape)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    existing_pages = [
+        {
+            "id": "concepts/latency",
+            "content": "Network latency is always high in mobile networks.",
+        }
+    ]
+    result = detect_contradictions(
+        new_claims=["Network latency is never high in mobile networks."],
+        existing_pages=existing_pages,
+    )
+    assert len(result) >= 1, "heuristic should catch 'always' vs 'never'"
+    item = result[0]
+    for key in ("new_claim", "existing_page", "existing_text", "reason"):
+        assert key in item

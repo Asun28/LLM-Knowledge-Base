@@ -120,6 +120,9 @@ def test_ingest_source(mock_extract, tmp_path):
     source = articles_dir / "test-article.md"
     source.write_text("# Test Article\n\nThis is a test article about testing and RAG.")
 
+    # Create contradictions file so the patch target exists
+    (wiki_dir / "contradictions.md").touch()
+
     # Patch config paths to use temp directory
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
@@ -128,6 +131,8 @@ def test_ingest_source(mock_extract, tmp_path):
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
         patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        # fix item 1: sandbox WIKI_CONTRADICTIONS so prod file is not mutated
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         result = ingest_source(source, source_type="article")
 
@@ -157,3 +162,64 @@ def test_ingest_source(mock_extract, tmp_path):
     # Verify sources mapping was updated
     sources_content = (wiki_dir / "_sources.md").read_text(encoding="utf-8")
     assert "test-article" in sources_content
+
+
+@patch("kb.ingest.pipeline.extract_from_source")
+def test_ingest_source_does_not_mutate_prod_contradictions(mock_extract, tmp_path):
+    """Regression: Phase 4.5 CRITICAL item 1 (WIKI_CONTRADICTIONS not patched to tmp wiki)."""
+    from kb.config import WIKI_CONTRADICTIONS as prod_contradictions
+
+    mock_extract.return_value = {
+        "title": "Conflict Article",
+        "author": "Test Author",
+        "core_argument": "Testing is important.",
+        "key_claims": ["The sky is never blue.", "Water is always cold."],
+        "entities_mentioned": ["Author"],
+        "concepts_mentioned": [],
+    }
+
+    raw_dir = tmp_path / "raw"
+    articles_dir = raw_dir / "articles"
+    articles_dir.mkdir(parents=True)
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True)
+
+    (wiki_dir / "index.md").write_text(
+        "---\ntitle: Wiki Index\nupdated: 2026-04-06\n---\n\n# Knowledge Base Index\n\n"
+        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
+        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
+        "## Synthesis\n\n*No pages yet.*\n"
+    )
+    (wiki_dir / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nupdated: 2026-04-06\n---\n\n# Source Mapping\n"
+    )
+    (wiki_dir / "log.md").write_text(
+        "---\ntitle: Activity Log\nupdated: 2026-04-06\n---\n\n# Activity Log\n"
+    )
+    tmp_contradictions = wiki_dir / "contradictions.md"
+    tmp_contradictions.touch()
+
+    source = articles_dir / "conflict-article.md"
+    source.write_text("# Conflict Article\n\nThis article has conflicting claims.")
+
+    prod_mtime_before = (
+        prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
+    )
+
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", tmp_contradictions),  # fix item 1
+    ):
+        ingest_source(source, source_type="article")
+
+    # Production contradictions.md must NOT have been touched
+    prod_mtime_after = prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
+    assert prod_mtime_before == prod_mtime_after, (
+        "Production wiki/contradictions.md was mutated by test — WIKI_CONTRADICTIONS not sandboxed"
+    )
