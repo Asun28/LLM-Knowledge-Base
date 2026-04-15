@@ -311,6 +311,109 @@ def _format_proposals_md(proposals: list[dict[str, Any]], run_id: str) -> str:
     return "\n".join(lines)
 
 
+# Regex for parsing _format_proposals_md output back into proposal dicts.
+# Used by run_augment(mode="execute"|"auto_ingest") to consume reviewed
+# proposals from wiki/_augment_proposals.md — round-trip must be reliable.
+_PROPOSAL_HEADER_RE = re.compile(r"^##\s+\d+\.\s+(?P<stub_id>.+?)\s*$")
+_PROPOSAL_TITLE_RE = re.compile(r"^-\s+\*\*Title:\*\*\s+(?P<title>.+?)\s*$")
+_PROPOSAL_ACTION_RE = re.compile(r"^-\s+\*\*Action:\*\*\s+(?P<action>.+?)\s*$")
+_PROPOSAL_URL_ITEM_RE = re.compile(r"^\s{2}-\s+(?P<url>\S+)\s*$")
+_PROPOSAL_RATIONALE_RE = re.compile(r"^-\s+\*\*Rationale:\*\*\s*(?P<rationale>.*?)\s*$")
+_PROPOSAL_REASON_RE = re.compile(r"^-\s+\*\*Reason:\*\*\s*(?P<reason>.*?)\s*$")
+
+
+def _parse_proposals_md(proposals_path: Path) -> list[dict[str, Any]] | None:
+    """Inverse of _format_proposals_md: parse markdown back into proposal dicts.
+
+    Returns a list of proposal dicts with the same shape run_augment produces
+    (keys: stub_id, title, action, urls?, rationale?, reason?), or None if
+    the file is missing or unparseable.
+
+    Tolerant to whitespace / trailing newlines but rejects clearly malformed
+    sections (e.g., a ``## N. stub_id`` header missing a Title/Action pair).
+    """
+    if not proposals_path.exists():
+        return None
+    try:
+        text = proposals_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not read proposals file %s: %s", proposals_path, e)
+        return None
+
+    proposals: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m_hdr = _PROPOSAL_HEADER_RE.match(lines[i])
+        if not m_hdr:
+            i += 1
+            continue
+        stub_id = m_hdr.group("stub_id").strip()
+        entry: dict[str, Any] = {"stub_id": stub_id}
+        i += 1
+        in_urls_block = False
+        while i < len(lines):
+            line = lines[i]
+            # Next section header ends current block
+            if _PROPOSAL_HEADER_RE.match(line):
+                break
+            m_title = _PROPOSAL_TITLE_RE.match(line)
+            if m_title:
+                entry["title"] = m_title.group("title").strip()
+                in_urls_block = False
+                i += 1
+                continue
+            m_action = _PROPOSAL_ACTION_RE.match(line)
+            if m_action:
+                entry["action"] = m_action.group("action").strip()
+                in_urls_block = False
+                i += 1
+                continue
+            if line.strip() == "- **URLs:**":
+                entry.setdefault("urls", [])
+                in_urls_block = True
+                i += 1
+                continue
+            if in_urls_block:
+                m_url = _PROPOSAL_URL_ITEM_RE.match(line)
+                if m_url:
+                    entry["urls"].append(m_url.group("url").strip())
+                    i += 1
+                    continue
+                # Blank line or unrelated — exit urls block
+                in_urls_block = False
+            m_rat = _PROPOSAL_RATIONALE_RE.match(line)
+            if m_rat:
+                entry["rationale"] = m_rat.group("rationale").strip()
+                i += 1
+                continue
+            m_reason = _PROPOSAL_REASON_RE.match(line)
+            if m_reason:
+                entry["reason"] = m_reason.group("reason").strip()
+                i += 1
+                continue
+            i += 1
+
+        # Validate minimum shape; if unparseable, skip this block
+        if "title" in entry and "action" in entry:
+            if entry["action"] == "propose" and not entry.get("urls"):
+                # A propose entry without URLs is malformed
+                logger.warning(
+                    "Skipping proposal for %s: action=propose but no URLs parsed",
+                    stub_id,
+                )
+                continue
+            proposals.append(entry)
+        else:
+            logger.warning(
+                "Skipping malformed proposal block for stub_id=%s (missing "
+                "title or action)",
+                stub_id,
+            )
+
+    return proposals if proposals else None
+
+
 def _save_raw_file(
     *,
     raw_dir: Path,
@@ -373,10 +476,23 @@ def run_augment(
 ) -> dict[str, Any]:
     """Three-gate augment orchestrator. See module docstring.
 
-    Phase A (always): eligibility → propose URLs (with Wikipedia fallback for
-    abstained entity/concept stubs). Phase B (execute/auto_ingest): fetch +
-    relevance gate + save raw + manifest advance. Phase C (auto_ingest):
-    pre-extract + ingest_source + augmented-page marker + quality verdict.
+    Gate contract:
+      - mode="propose" (gate 1): run eligibility + LLM proposer (with
+        Wikipedia fallback for abstained entity/concept stubs), write
+        ``wiki/_augment_proposals.md`` for human review. The proposals file
+        is overwritten on each propose run.
+      - mode="execute" (gate 2): READ the proposals file (no re-proposing!),
+        fetch URLs + relevance gate + save raw files, then rename the
+        proposals file to ``_augment_proposals.md.consumed-<run_id[:8]>`` for
+        audit. Errors if no proposals file is present — human must run
+        gate 1 first.
+      - mode="auto_ingest" (gate 3): same consumption of proposals file as
+        gate 2, plus pre-extract + ingest_source + augmented-page marker +
+        post-ingest quality verdict.
+
+    The read-the-proposals-file contract (not re-proposing) is load-bearing:
+    it forces every side-effect-having run to go through a human-reviewable
+    artifact first, honoring CLAUDE.md's "Human curates sources" principle.
 
     Note: Manifest.resume() is implemented but not yet wired through the
     CLI/MCP surface. Crash-resume support is tracked in BACKLOG Phase 5.
@@ -401,9 +517,6 @@ def run_augment(
             f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
         )
 
-    eligible = _collect_eligible_stubs(wiki_dir=wiki_dir)[:max_gaps]
-    purpose_text = _load_purpose_text(wiki_dir)
-
     run_id = str(uuid.uuid4())
     proposals: list[dict[str, Any]] = []
     fetches: list[dict[str, Any]] | None = None
@@ -411,26 +524,62 @@ def run_augment(
     verdicts: list[dict[str, Any]] | None = None
     manifest_path: str | None = None
     manifest: Manifest | None = None
+    proposals_path = wiki_dir / "_augment_proposals.md"
 
-    # Phase A: propose (always runs)
-    for stub in eligible:
-        prop = _propose_urls(stub=stub, purpose_text=purpose_text)
-        entry: dict[str, Any] = {
-            "stub_id": stub["page_id"],
-            "title": stub["title"],
-            **prop,
-        }
-        if prop["action"] == "abstain":
-            wiki_url = _wikipedia_fallback(page_id=stub["page_id"], title=stub["title"])
-            if wiki_url is not None:
-                entry = {
-                    "stub_id": stub["page_id"],
-                    "title": stub["title"],
-                    "action": "propose",
-                    "urls": [wiki_url],
-                    "rationale": f"wikipedia fallback (proposer abstained: {prop.get('reason')})",
-                }
-        proposals.append(entry)
+    # Gate 2/3: execute / auto_ingest MUST consume a prior human-reviewed
+    # proposals file. We refuse to re-propose silently, because that bypasses
+    # the review checkpoint the three-gate contract exists for.
+    if mode in ("execute", "auto_ingest"):
+        parsed_proposals = _parse_proposals_md(proposals_path)
+        if parsed_proposals is None:
+            early_summary = (
+                f"## Augment Summary (run {run_id[:8]}, mode={mode})\n"
+                f"- No proposals file found at `{proposals_path}`.\n"
+                "- Run `kb lint --augment` first to generate proposals "
+                "(gate 1), review them, then re-run with --execute."
+            )
+            return {
+                "run_id": run_id,
+                "mode": mode,
+                "gaps_examined": 0,
+                "gaps_eligible": 0,
+                "proposals": [],
+                "fetches": None,
+                "ingests": None,
+                "verdicts": None,
+                "manifest_path": None,
+                "summary": early_summary,
+            }
+        proposals = parsed_proposals[:max_gaps]
+        # In execute/auto_ingest we do NOT re-run eligibility or call the
+        # LLM proposer — the reviewed file is the source of truth. We still
+        # want the G6 cooldown writeback to cover the stubs we touched.
+        eligible = [
+            {"page_id": p["stub_id"], "title": p.get("title", "")} for p in proposals
+        ]
+    else:
+        # Gate 1: propose. Full eligibility pass + LLM proposer.
+        eligible = _collect_eligible_stubs(wiki_dir=wiki_dir)[:max_gaps]
+        purpose_text = _load_purpose_text(wiki_dir)
+
+        for stub in eligible:
+            prop = _propose_urls(stub=stub, purpose_text=purpose_text)
+            entry: dict[str, Any] = {
+                "stub_id": stub["page_id"],
+                "title": stub["title"],
+                **prop,
+            }
+            if prop["action"] == "abstain":
+                wiki_url = _wikipedia_fallback(page_id=stub["page_id"], title=stub["title"])
+                if wiki_url is not None:
+                    entry = {
+                        "stub_id": stub["page_id"],
+                        "title": stub["title"],
+                        "action": "propose",
+                        "urls": [wiki_url],
+                        "rationale": f"wikipedia fallback (proposer abstained: {prop.get('reason')})",
+                    }
+            proposals.append(entry)
 
     # Phase B: execute (mode in {execute, auto_ingest})
     if mode in ("execute", "auto_ingest") and proposals:
@@ -737,9 +886,30 @@ def run_augment(
         summary_lines.append(f"- Manifest: {manifest_path}")
 
     if mode == "propose" and not dry_run and proposals:
-        proposals_path = wiki_dir / "_augment_proposals.md"
+        # Propose always overwrites the file — each gate 1 run is a fresh
+        # opportunity to review. A stale consumed-file from a prior execute
+        # run does not block this.
         atomic_text_write(_format_proposals_md(proposals, run_id), proposals_path)
         summary_lines.append(f"- Proposals file: {proposals_path}")
+
+    if mode in ("execute", "auto_ingest") and not dry_run and proposals_path.exists():
+        # Mark the consumed proposals file with the run_id so the same
+        # proposals cannot be silently re-consumed by a subsequent execute
+        # invocation without a fresh gate-1 review. Rename (not delete) for
+        # audit trail.
+        consumed_path = proposals_path.with_name(
+            f"{proposals_path.name}.consumed-{run_id[:8]}"
+        )
+        try:
+            proposals_path.rename(consumed_path)
+            summary_lines.append(f"- Proposals consumed: {consumed_path}")
+        except OSError as e:
+            logger.warning(
+                "Failed to rename consumed proposals file %s -> %s: %s",
+                proposals_path,
+                consumed_path,
+                e,
+            )
 
     return {
         "run_id": run_id,

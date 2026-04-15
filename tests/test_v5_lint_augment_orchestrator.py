@@ -3,6 +3,24 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 
+def _seed_proposals(wiki_dir, raw_dir, fake_propose_response):
+    """Run gate 1 (propose mode) to seed wiki/_augment_proposals.md.
+
+    Used by execute / auto_ingest tests to satisfy the gate contract —
+    execute/auto_ingest now REQUIRE a prior propose run. Returns the propose
+    run's result dict.
+    """
+    from kb.lint.augment import run_augment
+
+    with patch("kb.lint.augment.call_llm_json", return_value=fake_propose_response):
+        return run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=raw_dir,
+            mode="propose",
+            max_gaps=5,
+        )
+
+
 def _seed_stub(create_wiki_page, wiki_dir, page_id, **frontmatter_extras):
     """Helper: create a stub page (body <100 chars) with the given frontmatter."""
     fm = {
@@ -387,10 +405,13 @@ def test_execute_mode_writes_raw_file_no_ingest(
         "urls": ["https://en.wikipedia.org/wiki/Mixture_of_experts"],
         "rationale": "wp",
     }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
     fake_relevance = {"score": 0.9}
     with patch(
         "kb.lint.augment.call_llm_json",
-        side_effect=[fake_propose, fake_relevance],
+        return_value=fake_relevance,
     ):
         result = run_augment(
             wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
@@ -446,10 +467,13 @@ def test_execute_mode_relevance_below_threshold_skips(
         "urls": ["https://en.wikipedia.org/wiki/Dropout"],
         "rationale": "wp",
     }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
     fake_relevance = {"score": 0.1}  # below 0.5 threshold
     with patch(
         "kb.lint.augment.call_llm_json",
-        side_effect=[fake_propose, fake_relevance],
+        return_value=fake_relevance,
     ):
         result = run_augment(
             wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
@@ -494,16 +518,17 @@ def test_execute_mode_writes_manifest(
             + b"</article></body></html>"
         ),
     )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/X"],
+        "rationale": "wp",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
     with patch(
         "kb.lint.augment.call_llm_json",
-        side_effect=[
-            {
-                "action": "propose",
-                "urls": ["https://en.wikipedia.org/wiki/X"],
-                "rationale": "wp",
-            },
-            {"score": 0.9},
-        ],
+        return_value={"score": 0.9},
     ):
         result = run_augment(
             wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
@@ -529,21 +554,21 @@ def test_execute_mode_dry_run_does_not_fetch(tmp_project, create_wiki_page, monk
         wiki_dir=wiki_dir,
         page_type="entity",
     )
-    with patch(
-        "kb.lint.augment.call_llm_json",
-        return_value={
-            "action": "propose",
-            "urls": ["https://en.wikipedia.org/wiki/X"],
-            "rationale": "wp",
-        },
-    ):
-        result = run_augment(
-            wiki_dir=wiki_dir,
-            raw_dir=tmp_project / "raw",
-            mode="execute",
-            max_gaps=5,
-            dry_run=True,
-        )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/X"],
+        "rationale": "wp",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, tmp_project / "raw", fake_propose)
+
+    result = run_augment(
+        wiki_dir=wiki_dir,
+        raw_dir=tmp_project / "raw",
+        mode="execute",
+        max_gaps=5,
+        dry_run=True,
+    )
     # In dry-run, no httpx_mock responses should have been requested
     assert result["fetches"] is None or all(
         f["status"] == "dry_run_skipped" for f in result["fetches"]
@@ -616,14 +641,17 @@ def test_auto_ingest_creates_wiki_page_with_speculative_confidence(
         "entities_mentioned": [],
         "concepts_mentioned": ["moe"],
     }
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/MoE"],
+        "rationale": "wp",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
     with patch(
         "kb.lint.augment.call_llm_json",
         side_effect=[
-            {
-                "action": "propose",
-                "urls": ["https://en.wikipedia.org/wiki/MoE"],
-                "rationale": "wp",
-            },
             {"score": 0.95},  # relevance
             fake_extraction,  # pre-extract for ingest
         ],
@@ -675,14 +703,17 @@ def test_auto_ingest_missing_api_key_raises_clear_error(
             + b"</article></body></html>"
         ),
     )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/X"],
+        "rationale": "wp",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
     with patch(
         "kb.lint.augment.call_llm_json",
         side_effect=[
-            {
-                "action": "propose",
-                "urls": ["https://en.wikipedia.org/wiki/X"],
-                "rationale": "wp",
-            },
             {"score": 0.9},
             # When ingest extraction is attempted, simulate ANTHROPIC_API_KEY missing
             RuntimeError("ANTHROPIC_API_KEY not set"),
@@ -712,21 +743,21 @@ def test_auto_ingest_dry_run_skips_ingest(tmp_project, create_wiki_page, monkeyp
         wiki_dir=wiki_dir,
         page_type="entity",
     )
-    with patch(
-        "kb.lint.augment.call_llm_json",
-        return_value={
-            "action": "propose",
-            "urls": ["https://en.wikipedia.org/wiki/X"],
-            "rationale": "wp",
-        },
-    ):
-        result = run_augment(
-            wiki_dir=wiki_dir,
-            raw_dir=raw_dir,
-            mode="auto_ingest",
-            max_gaps=5,
-            dry_run=True,
-        )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/X"],
+        "rationale": "wp",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
+    result = run_augment(
+        wiki_dir=wiki_dir,
+        raw_dir=raw_dir,
+        mode="auto_ingest",
+        max_gaps=5,
+        dry_run=True,
+    )
     assert result["ingests"] is None or all(
         i["status"] == "dry_run_skipped" for i in result["ingests"]
     )
@@ -911,13 +942,12 @@ def test_rate_limit_bucket_uses_normalized_hostname_not_netloc(
         ],
         "rationale": "port tricks",
     }
-    with patch(
-        "kb.lint.augment.call_llm_json",
-        return_value=fake_propose,
-    ):
-        run_augment(
-            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
-        )
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
+    run_augment(
+        wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+    )
 
     # Only the first URL reaches acquire() (the loop breaks on rate-limit),
     # but the captured host MUST be the bare hostname (no port).
@@ -963,17 +993,17 @@ def test_rate_limit_bucket_lowercases_hostname(
         wiki_dir=wiki_dir,
         page_type="entity",
     )
-    with patch(
-        "kb.lint.augment.call_llm_json",
-        return_value={
-            "action": "propose",
-            "urls": ["https://EN.Wikipedia.ORG/page"],
-            "rationale": "mixed case",
-        },
-    ):
-        run_augment(
-            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
-        )
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://EN.Wikipedia.ORG/page"],
+        "rationale": "mixed case",
+    }
+    # Seed proposals file first (gate 1)
+    _seed_proposals(wiki_dir, raw_dir, fake_propose)
+
+    run_augment(
+        wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5
+    )
 
     assert acquired == ["en.wikipedia.org"], (
         f"expected lowercased bucket, got {acquired!r}"
