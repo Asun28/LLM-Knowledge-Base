@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -20,11 +21,13 @@ from kb.config import (
     AUGMENT_ALLOWED_DOMAINS,
     AUGMENT_COOLDOWN_HOURS,
     AUTOGEN_PREFIXES,
+    RAW_DIR,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
 from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
+from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
 
 logger = logging.getLogger(__name__)
@@ -268,3 +271,123 @@ def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
         return float(score)
     except (TypeError, ValueError):
         return 0.0
+
+
+# ── Task 13: propose-mode orchestrator ────────────────────────────
+
+
+def _load_purpose_text(wiki_dir: Path) -> str:
+    """Load wiki/purpose.md (first 5000 chars) or empty string on any error."""
+    purpose_path = wiki_dir / "purpose.md"
+    if not purpose_path.exists():
+        return ""
+    try:
+        return purpose_path.read_text(encoding="utf-8")[:5000]
+    except OSError:
+        return ""
+
+
+def _format_proposals_md(proposals: list[dict[str, Any]], run_id: str) -> str:
+    """Render the proposals list as markdown for wiki/_augment_proposals.md."""
+    lines = [
+        f"# Augment Proposals - run `{run_id[:8]}`",
+        f"Generated: {datetime.now(UTC).isoformat(timespec='seconds')}",
+        "",
+        "Review each proposal below; run `kb lint --augment --execute` to fetch + save to `raw/`.",
+        "",
+    ]
+    for i, p in enumerate(proposals, 1):
+        lines.append(f"## {i}. {p['stub_id']}")
+        lines.append(f"- **Title:** {p['title']}")
+        lines.append(f"- **Action:** {p['action']}")
+        if p["action"] == "propose":
+            lines.append("- **URLs:**")
+            for u in p["urls"]:
+                lines.append(f"  - {u}")
+            lines.append(f"- **Rationale:** {p.get('rationale', '')}")
+        else:
+            lines.append(f"- **Reason:** {p.get('reason', '')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def run_augment(
+    *,
+    wiki_dir: Path | None = None,
+    raw_dir: Path | None = None,
+    mode: Mode = "propose",
+    max_gaps: int = 5,
+    dry_run: bool = False,
+    resume: str | None = None,
+) -> dict[str, Any]:
+    """Three-gate augment orchestrator. See module docstring.
+
+    Phase A (always): eligibility → propose URLs (with Wikipedia fallback for
+    abstained entity/concept stubs). Phase B (execute/auto_ingest): fetch +
+    relevance gate + save raw + manifest advance. Phase C (auto_ingest):
+    pre-extract + ingest_source + augmented-page marker + quality verdict.
+    """
+    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+
+    wiki_dir = wiki_dir or WIKI_DIR
+    raw_dir = raw_dir or RAW_DIR
+
+    if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
+        raise ValueError(
+            f"max_gaps={max_gaps} exceeds "
+            f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
+        )
+
+    eligible = _collect_eligible_stubs(wiki_dir=wiki_dir)[:max_gaps]
+    purpose_text = _load_purpose_text(wiki_dir)
+
+    run_id = str(uuid.uuid4())
+    proposals: list[dict[str, Any]] = []
+
+    # Phase A: propose
+    for stub in eligible:
+        prop = _propose_urls(stub=stub, purpose_text=purpose_text)
+        entry: dict[str, Any] = {
+            "stub_id": stub["page_id"],
+            "title": stub["title"],
+            **prop,
+        }
+        # Wikipedia fallback if proposer abstained AND stub is entity/concept
+        if prop["action"] == "abstain":
+            wiki_url = _wikipedia_fallback(page_id=stub["page_id"], title=stub["title"])
+            if wiki_url is not None:
+                entry = {
+                    "stub_id": stub["page_id"],
+                    "title": stub["title"],
+                    "action": "propose",
+                    "urls": [wiki_url],
+                    "rationale": f"wikipedia fallback (proposer abstained: {prop.get('reason')})",
+                }
+        proposals.append(entry)
+
+    summary_lines = [f"## Augment Summary (run {run_id[:8]}, mode={mode})"]
+    summary_lines.append(f"- Stubs examined: {len(eligible)}")
+    summary_lines.append(
+        f"- Proposals: {sum(1 for p in proposals if p['action'] == 'propose')}"
+    )
+    summary_lines.append(
+        f"- Abstained: {sum(1 for p in proposals if p['action'] == 'abstain')}"
+    )
+
+    if mode == "propose" and not dry_run and proposals:
+        proposals_path = wiki_dir / "_augment_proposals.md"
+        atomic_text_write(_format_proposals_md(proposals, run_id), proposals_path)
+        summary_lines.append(f"- Proposals file: {proposals_path}")
+
+    return {
+        "run_id": run_id,
+        "mode": mode,
+        "gaps_examined": len(eligible),
+        "gaps_eligible": len(eligible),
+        "proposals": proposals,
+        "fetches": None,
+        "ingests": None,
+        "verdicts": None,
+        "manifest_path": None,
+        "summary": "\n".join(summary_lines),
+    }

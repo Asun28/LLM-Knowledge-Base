@@ -262,3 +262,81 @@ def test_relevance_score_invalid_response_returns_zero():
     with patch("kb.lint.augment.call_llm_json", return_value={"unexpected": "shape"}):
         score = _relevance_score(stub_title="X", extracted_text="...")
     assert score == 0.0
+
+
+# ── Task 13: propose mode tests ──────────────────────────────────
+
+
+def test_propose_mode_writes_proposals_file_no_network(tmp_project, create_wiki_page):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    _seed_stub(
+        create_wiki_page, wiki_dir, "concepts/mixture-of-experts", title="Mixture of Experts"
+    )
+    # Linker so G2 passes
+    create_wiki_page(
+        page_id="entities/transformer",
+        title="Transformer",
+        content="See [[concepts/mixture-of-experts]] for the routing layer. " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+
+    fake_propose = {
+        "action": "propose",
+        "urls": ["https://en.wikipedia.org/wiki/Mixture_of_experts"],
+        "rationale": "wikipedia",
+    }
+    with patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=tmp_project / "raw", mode="propose", max_gaps=5
+        )
+
+    proposals_path = wiki_dir / "_augment_proposals.md"
+    assert proposals_path.exists()
+    content = proposals_path.read_text()
+    assert "concepts/mixture-of-experts" in content
+    assert "Mixture_of_experts" in content
+    assert result["mode"] == "propose"
+    assert len(result["proposals"]) == 1
+
+
+def test_propose_mode_max_gaps_caps(tmp_project, create_wiki_page):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    for i in range(8):
+        _seed_stub(create_wiki_page, wiki_dir, f"concepts/topic-{i}", title=f"Topic {i}")
+        create_wiki_page(
+            page_id=f"entities/linker-{i}",
+            title=f"Linker {i}",
+            content=f"See [[concepts/topic-{i}]] in this body. " * 5,
+            wiki_dir=wiki_dir,
+            page_type="entity",
+        )
+    with patch("kb.lint.augment.call_llm_json", return_value={"action": "abstain", "reason": "x"}):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=tmp_project / "raw", mode="propose", max_gaps=3
+        )
+    assert len(result["proposals"]) == 3
+
+
+def test_propose_mode_dry_run_does_not_write_proposals(tmp_project, create_wiki_page):
+    from kb.lint.augment import run_augment
+    wiki_dir = tmp_project / "wiki"
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="Reference [[concepts/x]] here. " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    with patch("kb.lint.augment.call_llm_json", return_value={"action": "abstain", "reason": "x"}):
+        run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=tmp_project / "raw",
+            mode="propose",
+            max_gaps=5,
+            dry_run=True,
+        )
+    assert not (wiki_dir / "_augment_proposals.md").exists()
