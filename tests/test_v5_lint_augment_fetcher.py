@@ -7,6 +7,36 @@ import httpx
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _auto_mock_robots(request):
+    """Pre-register a permissive robots.txt for every httpx_mock test.
+
+    AugmentFetcher.fetch hits `/robots.txt` first when respect_robots=True,
+    so tests that only care about downstream behavior (allowlists, size cap,
+    content-type, secret scan) need a default robots response or they fail
+    teardown with 'request not expected'. Tests that explicitly exercise
+    robots.txt register their own mock BEFORE this fixture runs (via
+    @pytest.mark.skip_default_robots), so this fixture is skipped there.
+    """
+    if "httpx_mock" not in request.fixturenames:
+        yield
+        return
+    if request.node.get_closest_marker("skip_default_robots"):
+        yield
+        return
+    mock = request.getfixturevalue("httpx_mock")
+    # Permissive robots for the host 'example.com' (used by most tests)
+    # with is_optional=True so tests that don't hit it don't fail teardown.
+    mock.add_response(
+        url="https://example.com/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+        is_optional=True,
+        is_reusable=True,
+    )
+    yield
+
+
 def test_safe_backend_blocks_loopback():
     from kb.lint.fetcher import SafeBackend
     backend = SafeBackend()
@@ -259,3 +289,57 @@ def test_secret_scan_rejects_npm_authtoken(httpx_mock):
     f = _build_fetcher()
     r = f.fetch("https://example.com/npm")
     assert r.status == "blocked"
+
+
+@pytest.mark.skip_default_robots
+def test_robots_allow_proceeds(httpx_mock):
+    httpx_mock.add_response(
+        url="https://example.com/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://example.com/page",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article>Hello. This article is long enough "
+            b"for trafilatura to treat it as body content and extract "
+            b"it cleanly for the markdown output.</article></body></html>"
+        ),
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/page", respect_robots=True)
+    assert r.status == "ok"
+
+
+@pytest.mark.skip_default_robots
+def test_robots_disallow_blocks_when_respected(httpx_mock):
+    httpx_mock.add_response(
+        url="https://example.com/robots.txt",
+        content=b"User-agent: *\nDisallow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/page", respect_robots=True)
+    assert r.status == "blocked"
+    assert "robots" in r.reason.lower()
+
+
+@pytest.mark.skip_default_robots
+def test_robots_unavailable_does_not_block(httpx_mock):
+    httpx_mock.add_response(
+        url="https://example.com/robots.txt",
+        status_code=404,
+    )
+    httpx_mock.add_response(
+        url="https://example.com/page",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article>Hi there. This is a reasonably long "
+            b"article about something that trafilatura will treat as "
+            b"the main body of the page.</article></body></html>"
+        ),
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/page", respect_robots=True)
+    assert r.status == "ok"

@@ -24,6 +24,7 @@ import socket
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
+from urllib.robotparser import RobotFileParser
 
 import httpcore
 import httpx
@@ -208,12 +209,40 @@ class AugmentFetcher:
         self.allowed_content_types = AUGMENT_CONTENT_TYPES
         self.max_bytes = AUGMENT_FETCH_MAX_BYTES
         self._client = build_client(version)
+        self._robots_cache: dict[str, RobotFileParser | None] = {}
+        self._ua = (
+            f"LLM-WikiFlywheel/{version} "
+            "(+https://github.com/Asun28/llm-wiki-flywheel)"
+        )
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         self._client.close()
+
+    def _check_robots(self, url: str) -> bool:
+        """Return True if URL is allowed (or robots.txt unavailable)."""
+        parsed = urlparse(url)
+        host_key = f"{parsed.scheme}://{parsed.netloc}"
+        if host_key in self._robots_cache:
+            rp = self._robots_cache[host_key]
+            if rp is None:
+                return True
+            return rp.can_fetch(self._ua, url)
+
+        robots_url = f"{host_key}/robots.txt"
+        # Fetch via our own client (SafeTransport) - pass respect_robots=False
+        # to break recursion. Using RobotFileParser.read() would bypass our
+        # transport via urllib.request and open an SSRF hole.
+        result = self.fetch(robots_url, respect_robots=False)
+        if result.status != "ok" or not result.content:
+            self._robots_cache[host_key] = None
+            return True
+        rp = RobotFileParser()
+        rp.parse(result.content.splitlines())
+        self._robots_cache[host_key] = rp
+        return rp.can_fetch(self._ua, url)
 
     def fetch(self, url: str, *, respect_robots: bool = True) -> FetchResult:
         # 1. Scheme allow-list
@@ -239,6 +268,18 @@ class AugmentFetcher:
                 content_type="",
                 bytes=0,
                 reason=f"domain not in allowlist: {rd}",
+                url=url,
+            )
+
+        # 2.5. robots.txt check (advisory: caller may opt out via respect_robots=False)
+        if respect_robots and not self._check_robots(url):
+            return FetchResult(
+                status="blocked",
+                content=None,
+                extracted_markdown=None,
+                content_type="",
+                bytes=0,
+                reason=f"blocked by robots.txt for {url}",
                 url=url,
             )
 
