@@ -1,0 +1,120 @@
+"""Augment orchestrator: eligibility gates G1-G7."""
+from datetime import UTC, datetime, timedelta
+
+
+def _seed_stub(create_wiki_page, wiki_dir, page_id, **frontmatter_extras):
+    """Helper: create a stub page (body <100 chars) with the given frontmatter."""
+    fm = {
+        "title": frontmatter_extras.pop("title", page_id.split("/")[-1].replace("-", " ").title()),
+        "confidence": frontmatter_extras.pop("confidence", "stated"),
+    }
+    fm.update(frontmatter_extras)
+    create_wiki_page(
+        page_id=page_id,
+        title=fm["title"],
+        content="Brief.",  # <100 chars to trigger stub
+        wiki_dir=wiki_dir,
+        page_type=page_id.split("/")[0].rstrip("s") if page_id.split("/")[0].endswith("s") else "entity",
+        confidence=fm["confidence"],
+        **{k: v for k, v in fm.items() if k not in {"title", "confidence"}},
+    )
+
+
+def test_g1_rejects_placeholder_titles(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    _seed_stub(create_wiki_page, tmp_wiki, "entities/entity-29", title="entity-29")
+    eligible = _collect_eligible_stubs(wiki_dir=tmp_wiki)
+    assert "entities/entity-29" not in {s["page_id"] for s in eligible}
+
+
+def test_g3_rejects_speculative_confidence(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    _seed_stub(create_wiki_page, tmp_wiki, "concepts/x", title="X", confidence="speculative")
+    eligible = _collect_eligible_stubs(wiki_dir=tmp_wiki)
+    assert "concepts/x" not in {s["page_id"] for s in eligible}
+
+
+def test_g4_rejects_augment_false_optout(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    # The factory needs to support arbitrary frontmatter keys
+    page_path = tmp_wiki / "concepts" / "noaugment.md"
+    page_path.parent.mkdir(exist_ok=True, parents=True)
+    page_path.write_text(
+        "---\ntitle: NoAugment\nconfidence: stated\nsource:\n  - raw/articles/x.md\n"
+        "augment: false\n---\n\nBrief.",
+        encoding="utf-8",
+    )
+    eligible = _collect_eligible_stubs(wiki_dir=tmp_wiki)
+    assert "concepts/noaugment" not in {s["page_id"] for s in eligible}
+
+
+def test_g6_rejects_within_cooldown(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    page_path = tmp_wiki / "concepts" / "recently-tried.md"
+    page_path.parent.mkdir(exist_ok=True, parents=True)
+    recent = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    page_path.write_text(
+        f"---\ntitle: Recent\nconfidence: stated\nsource:\n  - raw/articles/x.md\n"
+        f"last_augment_attempted: '{recent}'\n---\n\nBrief.",
+        encoding="utf-8",
+    )
+    eligible = _collect_eligible_stubs(wiki_dir=tmp_wiki)
+    assert "concepts/recently-tried" not in {s["page_id"] for s in eligible}
+
+
+def test_g6_allows_after_cooldown(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    page_path = tmp_wiki / "concepts" / "old-attempt.md"
+    page_path.parent.mkdir(exist_ok=True, parents=True)
+    old = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
+    page_path.write_text(
+        f"---\ntitle: Old Attempt\nconfidence: stated\nsource:\n  - raw/articles/x.md\n"
+        f"last_augment_attempted: '{old}'\n---\n\nBrief.",
+        encoding="utf-8",
+    )
+    # Also need an inbound link from a non-summary page (G2)
+    other = tmp_wiki / "concepts" / "other.md"
+    other.write_text(
+        "---\ntitle: Other\nconfidence: stated\nsource:\n  - raw/articles/x.md\n---\n\n"
+        "See [[concepts/old-attempt]] for context.",
+        encoding="utf-8",
+    )
+    eligible = _collect_eligible_stubs(wiki_dir=tmp_wiki)
+    assert "concepts/old-attempt" in {s["page_id"] for s in eligible}
+
+
+def test_g7_skips_autogen_prefixes(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    _seed_stub(create_wiki_page, tmp_wiki, "comparisons/x-vs-y", title="X vs Y")
+    _seed_stub(create_wiki_page, tmp_wiki, "synthesis/foo", title="Foo synthesis")
+    eligible_ids = {s["page_id"] for s in _collect_eligible_stubs(wiki_dir=tmp_wiki)}
+    assert "comparisons/x-vs-y" not in eligible_ids
+    assert "synthesis/foo" not in eligible_ids
+
+
+def test_g2_requires_inbound_link_from_non_summary(tmp_wiki, create_wiki_page):
+    from kb.lint.augment import _collect_eligible_stubs
+    # Stub with NO inbound links → not eligible
+    _seed_stub(create_wiki_page, tmp_wiki, "entities/orphaned", title="Orphaned Entity")
+    # Stub with inbound link from a summary → still NOT eligible (summary doesn't count)
+    _seed_stub(create_wiki_page, tmp_wiki, "entities/summary-only", title="Summary Only")
+    create_wiki_page(
+        page_id="summaries/foo",
+        title="Foo",
+        content="See [[entities/summary-only]] for context.",
+        wiki_dir=tmp_wiki,
+        page_type="summary",
+    )
+    # Stub with inbound link from a real entity → eligible
+    _seed_stub(create_wiki_page, tmp_wiki, "entities/real-link", title="Real Link Target")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="Cross-reference to [[entities/real-link]] in this body. " * 5,  # >100 chars
+        wiki_dir=tmp_wiki,
+        page_type="entity",
+    )
+    eligible_ids = {s["page_id"] for s in _collect_eligible_stubs(wiki_dir=tmp_wiki)}
+    assert "entities/orphaned" not in eligible_ids
+    assert "entities/summary-only" not in eligible_ids
+    assert "entities/real-link" in eligible_ids
