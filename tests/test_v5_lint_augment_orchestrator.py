@@ -10,12 +10,14 @@ def _seed_stub(create_wiki_page, wiki_dir, page_id, **frontmatter_extras):
         "confidence": frontmatter_extras.pop("confidence", "stated"),
     }
     fm.update(frontmatter_extras)
+    prefix = page_id.split("/")[0]
+    page_type = prefix.rstrip("s") if prefix.endswith("s") else "entity"
     create_wiki_page(
         page_id=page_id,
         title=fm["title"],
         content="Brief.",  # <100 chars to trigger stub
         wiki_dir=wiki_dir,
-        page_type=page_id.split("/")[0].rstrip("s") if page_id.split("/")[0].endswith("s") else "entity",
+        page_type=page_type,
         confidence=fm["confidence"],
         **{k: v for k, v in fm.items() if k not in {"title", "confidence"}},
     )

@@ -140,7 +140,7 @@ KB purpose / scope (reject URLs outside this scope; abstain if topic is out of s
 Return JSON with EXACTLY this shape:
   {{"action": "propose", "urls": [up to 3 URLs from allowed domains], "rationale": "1-line"}}
   OR
-  {{"action": "abstain", "reason": "no authoritative source in allowlist | out of scope | ambiguous title"}}
+  {{"action": "abstain", "reason": "no authoritative source | out of scope | ambiguous title"}}
 
 Constraints:
 - Each URL must be a complete absolute URL (https://...).
