@@ -780,9 +780,10 @@ def test_g6_cooldown_writeback_after_propose_attempt(tmp_project, create_wiki_pa
     Without this writeback the G6 cooldown gate was inoperative — the same
     stub would be retried every run, bypassing AUGMENT_COOLDOWN_HOURS.
     """
-    import frontmatter as _fm
     from datetime import UTC as _UTC
     from datetime import datetime as _dt
+
+    import frontmatter as _fm
 
     from kb.lint.augment import run_augment
 
