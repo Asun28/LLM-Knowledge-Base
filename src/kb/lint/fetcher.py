@@ -384,15 +384,30 @@ class AugmentFetcher:
                         url=str(response.url),
                     )
 
-                # 6. Size cap (header)
-                clen = response.headers.get("content-length")
-                if clen and int(clen) > self.max_bytes:
+                # 6. Size cap (header). Tolerate malformed content-length:
+                # an RFC-violating server might send a non-integer value; fall
+                # back to unknown (None) and rely on the streaming cap below.
+                clen_raw = response.headers.get("content-length")
+                clen: int | None
+                if clen_raw:
+                    try:
+                        clen = int(clen_raw)
+                    except (TypeError, ValueError):
+                        logger.debug(
+                            "Ignoring malformed content-length header %r for %s",
+                            clen_raw,
+                            response.url,
+                        )
+                        clen = None
+                else:
+                    clen = None
+                if clen is not None and clen > self.max_bytes:
                     return FetchResult(
                         status="blocked",
                         content=None,
                         extracted_markdown=None,
                         content_type=ctype,
-                        bytes=int(clen),
+                        bytes=clen,
                         reason=f"content-length {clen} exceeds cap {self.max_bytes}",
                         url=str(response.url),
                     )

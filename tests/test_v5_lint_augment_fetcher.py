@@ -258,6 +258,30 @@ def test_fetch_rejects_oversize_via_content_length(httpx_mock):
     assert "content-length" in r.reason.lower() or "size" in r.reason.lower()
 
 
+def test_fetch_tolerates_malformed_content_length(httpx_mock):
+    """Non-integer content-length must not crash; stream cap still enforced."""
+    body = (
+        b"<html><body><article>"
+        b"This article has a malformed content-length header but the body "
+        b"itself is well under the streaming cap. The fetch must succeed "
+        b"and we fall back to the byte-counting stream gate."
+        b"</article></body></html>"
+    )
+    httpx_mock.add_response(
+        url="https://example.com/bad-clen",
+        headers={
+            "content-length": "not-a-number",
+            "content-type": "text/html",
+        },
+        content=body,
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/bad-clen")
+    # Must not crash with ValueError; streaming cap honored via actual bytes
+    assert r.status == "ok", f"expected ok, got {r.status}: {r.reason}"
+    assert r.bytes == len(body)
+
+
 def test_fetch_rejects_disallowed_content_type(httpx_mock):
     httpx_mock.add_response(
         url="https://example.com/x.exe",
