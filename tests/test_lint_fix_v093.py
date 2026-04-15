@@ -137,7 +137,7 @@ def test_lint_cli_fix_flag():
     with patch("kb.lint.runner.run_all_checks", return_value=mock_report) as mock_rac:
         # The command exits with code 1 because there's an error in the report
         result = runner.invoke(cli, ["lint", "--fix"])
-        mock_rac.assert_called_once_with(fix=True)
+        mock_rac.assert_called_once_with(wiki_dir=None, fix=True)
 
     assert "Auto-fixed 1 issue(s)" in result.output
     assert "Fixed: Fixed broken wikilink" in result.output
