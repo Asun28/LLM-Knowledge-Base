@@ -292,3 +292,71 @@ def test_ingest_binary_file_preserves_unicode_decode_cause(tmp_path):
             assert isinstance(e.__cause__, UnicodeDecodeError), (
                 f"UnicodeDecodeError cause lost; __cause__ = {e.__cause__!r}"
             )
+
+
+def test_ingest_skips_pure_punctuation_entities(tmp_path):
+    """Regression: Phase 4.5 CRITICAL B1 — item 11 slugify untitled-<hash> fallback must NOT
+    create ghost pages or inject untitled-<hash> wikilinks for nonsense-punctuation entity names.
+    """
+    from kb.ingest import pipeline
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+    source = raw_dir / "articles" / "punct-entity.md"
+    source.write_text("# Test\nBody content.", encoding="utf-8")
+
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    (wiki_dir / "contradictions.md").touch()
+    (wiki_dir / "index.md").write_text(
+        "---\ntitle: Wiki Index\nupdated: 2026-04-06\n---\n\n# Knowledge Base Index\n\n"
+        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
+        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
+        "## Synthesis\n\n*No pages yet.*\n"
+    )
+    (wiki_dir / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nupdated: 2026-04-06\n---\n\n# Source Mapping\n"
+    )
+
+    extraction = {
+        "title": "Test Source",
+        "summary": "Test summary.",
+        "entities_mentioned": ["!!!", "...", "RealEntity"],
+        "concepts_mentioned": [],
+    }
+
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
+    ):
+        result = pipeline.ingest_source(
+            source_path=source, wiki_dir=wiki_dir, extraction=extraction
+        )
+
+    # Real entity SHOULD get a page
+    real_entity_page = wiki_dir / "entities" / "realentity.md"
+    assert real_entity_page.exists(), (
+        f"Real entity page missing; pages_created={result.get('pages_created', [])}"
+    )
+
+    # Nonsense-punctuation entities must NOT create untitled-<hash> pages
+    entities_dir = wiki_dir / "entities"
+    untitled_pages = list(entities_dir.glob("untitled-*.md"))
+    assert not untitled_pages, (
+        f"Pure-punctuation entities created untitled-<hash> pages: {untitled_pages}"
+    )
+
+    # Summary content must NOT contain untitled-<hash> wikilinks
+    summary_path = wiki_dir / "summaries" / "test-source.md"
+    assert summary_path.exists(), "Summary page was not created"
+    summary_content = summary_path.read_text(encoding="utf-8")
+    assert "untitled-" not in summary_content, (
+        f"Summary injected untitled-<hash> wikilink:\n{summary_content}"
+    )

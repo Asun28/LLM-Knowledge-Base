@@ -206,7 +206,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for e in entities:
             slug = slugify(e)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            if slug:
+            # B1: also skip untitled-<hash> sentinel — nonsense-punctuation names
+            if slug and not slug.startswith("untitled-"):
                 safe_name = e.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[entities/{slug}|{safe_name}]]")
         lines.append("")
@@ -218,7 +219,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for c in concepts:
             slug = slugify(c)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            if slug:
+            # B1: also skip untitled-<hash> sentinel — nonsense-punctuation names
+            if slug and not slug.startswith("untitled-"):
                 safe_name = c.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[concepts/{slug}|{safe_name}]]")
         lines.append("")
@@ -481,8 +483,10 @@ def _process_item_batch(
         if not item or not item.strip():
             continue
         item_slug = slugify(item)
-        if not item_slug:
-            logger.warning("Skipping %s with empty slug: %r", page_type, item)
+        # B1: treat untitled-<hash> as sentinel for nonsense-punctuation names;
+        # empty slug (pre-item-11) and untitled-hash (post-item-11) both mean "skip".
+        if not item_slug or item_slug.startswith("untitled-"):
+            logger.warning("Skipping %s with empty/untitled slug: %r", page_type, item)
             continue
         if item_slug in seen_slugs:
             prev = seen_slugs[item_slug]
