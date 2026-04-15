@@ -227,3 +227,36 @@ def test_proposer_invalid_response_returns_abstain():
             purpose_text="",
         )
     assert result["action"] == "abstain"
+
+
+# ── Task 12: Wikipedia fallback + relevance tests ────────────────
+
+
+def test_wikipedia_fallback_only_for_entity_concept():
+    from kb.lint.augment import _wikipedia_fallback
+    # Page type other than entity/concept should return None
+    result = _wikipedia_fallback(page_id="comparisons/foo-vs-bar", title="Foo vs Bar")
+    assert result is None
+
+
+def test_wikipedia_fallback_returns_url_for_concept():
+    from kb.lint.augment import _wikipedia_fallback
+    result = _wikipedia_fallback(page_id="concepts/mixture-of-experts", title="Mixture of Experts")
+    assert result == "https://en.wikipedia.org/wiki/Mixture_of_experts"
+
+
+def test_relevance_score_uses_scan_tier_llm():
+    from kb.lint.augment import _relevance_score
+    with patch("kb.lint.augment.call_llm_json", return_value={"score": 0.85}):
+        score = _relevance_score(
+            stub_title="Mixture of Experts",
+            extracted_text="MoE is a neural architecture...",
+        )
+    assert score == 0.85
+
+
+def test_relevance_score_invalid_response_returns_zero():
+    from kb.lint.augment import _relevance_score
+    with patch("kb.lint.augment.call_llm_json", return_value={"unexpected": "shape"}):
+        score = _relevance_score(stub_title="X", extracted_text="...")
+    assert score == 0.0

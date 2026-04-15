@@ -246,3 +246,57 @@ def _url_is_allowed(url: str) -> bool:
         if rd_lower and rd_lower == dl:
             return True
     return False
+
+
+# ── Wikipedia fallback + relevance score (Task 12) ───────────────
+
+
+def _wikipedia_fallback(*, page_id: str, title: str) -> str | None:
+    """Derive a Wikipedia URL from an entity/concept page slug.
+
+    Only produces a URL for entity/concept pages (skips comparisons/synthesis/
+    summaries). Normalizes the title using Wikipedia's article-slug convention:
+    spaces become underscores, the first character is uppercased, the remaining
+    characters are lowercased (so "Mixture of Experts" → "Mixture_of_experts").
+
+    Caller is responsible for fetching the URL and applying fuzzy + disambig
+    guards.
+    """
+    if not page_id.startswith(("entities/", "concepts/")):
+        return None
+    if not title or not title.strip():
+        return None
+    slug = title.strip().lower().replace(" ", "_")
+    if slug:
+        slug = slug[0].upper() + slug[1:]
+    return f"https://en.wikipedia.org/wiki/{slug}"
+
+
+_RELEVANCE_SCHEMA = {
+    "type": "object",
+    "properties": {"score": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+    "required": ["score"],
+}
+
+
+def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
+    """Scan-tier relevance score (0.0-1.0) for extracted text vs stub topic.
+
+    Returns 0.0 on any LLM error or invalid response shape.
+    """
+    prompt = (
+        f"Score how relevant the following extracted text is to the topic "
+        f"{stub_title!r}.\n"
+        f'Return JSON: {{"score": <0.0-1.0>}}.\n\n'
+        f"Extracted text (first 2000 chars):\n{extracted_text[:2000]}"
+    )
+    try:
+        response = call_llm_json(prompt, tier="scan", schema=_RELEVANCE_SCHEMA)
+    except Exception as e:
+        logger.warning("Relevance score LLM call failed: %s", e)
+        return 0.0
+    score = response.get("score")
+    try:
+        return float(score)
+    except (TypeError, ValueError):
+        return 0.0
