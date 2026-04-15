@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working Principles
+
+*(Adapted from [Karpathy's LLM coding observations](https://x.com/karpathy/status/2015883857489522876). Bias toward caution over speed on non-trivial work. For a one-line typo fix, use judgment.)*
+
+**Think Before Coding.** Don't assume. Don't hide confusion. Surface tradeoffs.
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+**Goal-Driven Execution.** Transform imperative tasks into verifiable goals:
+- "Fix the bug" → *"Write a failing test that reproduces it, then make it pass."*
+- "Add validation" → *"Write tests for invalid inputs, then make them pass."*
+- "Refactor X" → *"Ensure tests pass before and after."*
+- For multi-step work, state the plan as `[step] → verify: [check]` — then loop.
+
+**Two tests before declaring done:**
+1. *Every changed line should trace directly to the request.* Drop drive-by edits.
+2. *Would a senior engineer say this is overcomplicated?* If yes, simplify.
+
 ## Project
 
 LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Karpathy's LLM Knowledge Bases pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). The system compiles raw sources into structured, interlinked markdown rather than using RAG/vector retrieval.
