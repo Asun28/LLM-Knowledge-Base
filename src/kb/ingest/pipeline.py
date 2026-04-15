@@ -42,6 +42,18 @@ logger = logging.getLogger(__name__)
 # produce malformed YAML (mixed-indent source block).
 _SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]*- [^\n]*\n)*)", re.MULTILINE)
 
+# Adversarial-review fix (BLOCKER): tighter sentinel pattern — matches ONLY the
+# untitled-<6 hex chars> fallback emitted by slugify() for pure-symbol/emoji input.
+# The old startswith("untitled-") guard was a false positive for legitimate entity
+# names like "Untitled-Reports" (slug "untitled-reports"). Exact 6-hex suffix ensures
+# only the computed hash sentinel is suppressed.
+_UNTITLED_SENTINEL_RE = re.compile(r"^untitled-[0-9a-f]{6}$")
+
+
+def _is_untitled_sentinel(slug: str) -> bool:
+    """Return True iff slug matches the untitled-<hash6> fallback from slugify()."""
+    return bool(_UNTITLED_SENTINEL_RE.fullmatch(slug))
+
 
 def _find_affected_pages(
     page_ids: list[str],
@@ -206,8 +218,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for e in entities:
             slug = slugify(e)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            # B1: also skip untitled-<hash> sentinel — nonsense-punctuation names
-            if slug and not slug.startswith("untitled-"):
+            # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
+            if slug and not _is_untitled_sentinel(slug):
                 safe_name = e.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[entities/{slug}|{safe_name}]]")
         lines.append("")
@@ -219,8 +231,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for c in concepts:
             slug = slugify(c)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            # B1: also skip untitled-<hash> sentinel — nonsense-punctuation names
-            if slug and not slug.startswith("untitled-"):
+            # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
+            if slug and not _is_untitled_sentinel(slug):
                 safe_name = c.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[concepts/{slug}|{safe_name}]]")
         lines.append("")
@@ -485,7 +497,9 @@ def _process_item_batch(
         item_slug = slugify(item)
         # B1: treat untitled-<hash> as sentinel for nonsense-punctuation names;
         # empty slug (pre-item-11) and untitled-hash (post-item-11) both mean "skip".
-        if not item_slug or item_slug.startswith("untitled-"):
+        # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith,
+        # so legitimate names like "Untitled-Reports" are not falsely filtered.
+        if not item_slug or _is_untitled_sentinel(item_slug):
             logger.warning("Skipping %s with empty/untitled slug: %r", page_type, item)
             continue
         if item_slug in seen_slugs:
@@ -623,6 +637,19 @@ def ingest_source(
             title,
             summary_slug,
         )
+    elif _is_untitled_sentinel(summary_slug):
+        # Adversarial-review MAJOR: title was pure-symbol/emoji — prefer file stem for
+        # discoverability (e.g. CJK or emoji titles). If stem also yields a sentinel or
+        # empty slug, keep the sentinel (it's the best we can do).
+        stem_slug = slugify(source_path.stem)
+        if stem_slug and not _is_untitled_sentinel(stem_slug):
+            logger.warning(
+                "Title %r produced sentinel slug %r; using source stem slug %r instead",
+                title,
+                summary_slug,
+                stem_slug,
+            )
+            summary_slug = stem_slug
     summary_path = effective_wiki_dir / "summaries" / f"{summary_slug}.md"
     if summary_path.exists():
         _update_existing_page(summary_path, source_ref, verb="Summarized")

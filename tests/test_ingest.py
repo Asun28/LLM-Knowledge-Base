@@ -360,3 +360,115 @@ def test_ingest_skips_pure_punctuation_entities(tmp_path):
     assert "untitled-" not in summary_content, (
         f"Summary injected untitled-<hash> wikilink:\n{summary_content}"
     )
+
+
+def _make_wiki_dir(tmp_project):
+    """Return the wiki dir for a tmp_project, creating required index files."""
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    (wiki_dir / "contradictions.md").touch()
+    (wiki_dir / "index.md").write_text(
+        "---\ntitle: Wiki Index\nupdated: 2026-04-06\n---\n\n# Knowledge Base Index\n\n"
+        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
+        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
+        "## Synthesis\n\n*No pages yet.*\n"
+    )
+    (wiki_dir / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nupdated: 2026-04-06\n---\n\n# Source Mapping\n"
+    )
+    return wiki_dir, raw_dir
+
+
+def test_ingest_allows_legitimate_untitled_prefix_entities(tmp_project, monkeypatch):
+    """Regression: untitled-<hash6> sentinel must NOT drop entities literally named 'Untitled-*'."""
+    from kb.ingest import pipeline
+
+    wiki_dir, raw_dir = _make_wiki_dir(tmp_project)
+    source = raw_dir / "articles" / "legit-names.md"
+    source.write_text("# Legit\nBody.", encoding="utf-8")
+    extraction = {
+        "title": "Legit Names",
+        "summary": "Test.",
+        # Legit names with "untitled-" prefix — NOT the 6-hex sentinel shape
+        "entities_mentioned": ["Untitled-Reports", "untitled-draft"],
+        "concepts_discussed": [],
+    }
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
+    ):
+        pipeline.ingest_source(
+            source_path=source, wiki_dir=wiki_dir, extraction=extraction,
+        )
+    # Both legit entities SHOULD produce pages
+    reports_page = wiki_dir / "entities" / "untitled-reports.md"
+    draft_page = wiki_dir / "entities" / "untitled-draft.md"
+    assert reports_page.exists(), "Untitled-Reports incorrectly filtered"
+    assert draft_page.exists(), "untitled-draft incorrectly filtered"
+
+
+def test_ingest_still_blocks_sentinel_hash_slug(tmp_project, monkeypatch):
+    """Regression: the actual untitled-<hash6> sentinel IS still filtered."""
+    from kb.ingest import pipeline
+
+    wiki_dir, raw_dir = _make_wiki_dir(tmp_project)
+    source = raw_dir / "articles" / "sentinel.md"
+    source.write_text("# Sentinel\nBody.", encoding="utf-8")
+    extraction = {
+        "title": "Sentinel",
+        "summary": "Test.",
+        "entities_mentioned": ["!!!"],  # nonsense punctuation → untitled-<hash6>
+        "concepts_discussed": [],
+    }
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
+    ):
+        pipeline.ingest_source(
+            source_path=source, wiki_dir=wiki_dir, extraction=extraction,
+        )
+    # Sentinel-hash pages MUST NOT be created
+    untitled = list((wiki_dir / "entities").glob("untitled-*.md"))
+    assert not untitled, f"nonsense entity created sentinel page: {untitled}"
+
+
+def test_summary_page_prefers_filename_stem_over_untitled_sentinel(tmp_project, monkeypatch):
+    """Regression: CJK/emoji titles should use source filename stem, not untitled-<hash>."""
+    from kb.ingest import pipeline
+
+    wiki_dir, raw_dir = _make_wiki_dir(tmp_project)
+    source = raw_dir / "articles" / "readable-stem.md"  # readable filename
+    source.write_text("# Body", encoding="utf-8")
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
+    ):
+        pipeline.ingest_source(
+            source_path=source, wiki_dir=wiki_dir,
+            extraction={"title": "😀😀😀", "summary": "s", "entities_mentioned": []},
+        )
+    # Summary should exist under a readable name, not untitled-<hash>
+    summaries = list((wiki_dir / "summaries").glob("*.md"))
+    assert summaries, "no summary page created"
+    summary_name = summaries[0].name
+    assert not summary_name.startswith("untitled-"), (
+        f"summary used untitled-<hash> instead of readable stem: {summary_name}"
+    )
+    assert "readable-stem" in summary_name, f"expected readable-stem in name: {summary_name}"
