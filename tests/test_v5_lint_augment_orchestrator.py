@@ -732,3 +732,40 @@ def test_auto_ingest_dry_run_skips_ingest(tmp_project, create_wiki_page, monkeyp
     )
     # No raw files should exist either
     assert not list((raw_dir / "articles").glob("*.md"))
+
+
+# ── Task 16: post-ingest quality regression tests ─────────────────
+
+
+def test_post_ingest_quality_uses_targeted_check_not_full_lint(
+    tmp_project, create_wiki_page
+):
+    from kb.lint.augment import _post_ingest_quality
+    wiki_dir = tmp_project / "wiki"
+    create_wiki_page(
+        page_id="concepts/now-substantial",
+        title="Now Substantial",
+        content="A" * 500,  # >100 chars, no longer a stub
+        wiki_dir=wiki_dir,
+        page_type="concept",
+        source_ref="raw/articles/x.md",
+    )
+    page_path = wiki_dir / "concepts" / "now-substantial.md"
+    verdict, reason = _post_ingest_quality(page_path=page_path, wiki_dir=wiki_dir)
+    assert verdict == "pass"
+
+
+def test_post_ingest_quality_fails_when_still_stub(tmp_project, create_wiki_page):
+    from kb.lint.augment import _post_ingest_quality
+    wiki_dir = tmp_project / "wiki"
+    create_wiki_page(
+        page_id="concepts/still-stub",
+        title="Still Stub",
+        content="Brief.",  # <100 chars
+        wiki_dir=wiki_dir,
+        page_type="concept",
+    )
+    page_path = wiki_dir / "concepts" / "still-stub.md"
+    verdict, reason = _post_ingest_quality(page_path=page_path, wiki_dir=wiki_dir)
+    assert verdict == "fail"
+    assert "stub" in reason.lower()

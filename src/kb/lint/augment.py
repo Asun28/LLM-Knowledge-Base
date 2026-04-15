@@ -658,21 +658,44 @@ def run_augment(
                 }
             )
 
-            # Quality verdict (Task 16 will refine this)
+            # Targeted post-ingest quality check (Task 16)
+            verdict, reason = _post_ingest_quality(
+                page_path=stub_path, wiki_dir=wiki_dir
+            )
             add_verdict(
                 page_id=stub_id,
                 verdict_type="augment",
-                verdict="pass",
+                verdict=verdict,
                 notes=(
-                    f"augmented from {f['url']} "
+                    f"{reason} | augmented from {f['url']} "
                     f"(relevance {f.get('relevance', 0):.2f})"
                 ),
                 issues=[],
             )
-            verdicts.append({"stub_id": stub_id, "verdict": "pass"})
+            verdicts.append(
+                {"stub_id": stub_id, "verdict": verdict, "reason": reason}
+            )
+
+            if verdict == "fail" and stub_path.exists():
+                # Add a [!gap] callout flagging the page for manual review
+                post = frontmatter.load(str(stub_path))
+                gap_callout = (
+                    f"> [!gap]\n"
+                    f"> Augment run {run_id[:8]} failed quality check: "
+                    f"{reason}. Manual review needed.\n\n"
+                )
+                if "[!gap]" not in post.content:
+                    post.content = gap_callout + post.content
+                    stub_path.write_text(
+                        frontmatter.dumps(post), encoding="utf-8"
+                    )
 
             if manifest is not None:
-                manifest.advance(stub_id, "verdict", payload={"verdict": "pass"})
+                manifest.advance(
+                    stub_id,
+                    "verdict",
+                    payload={"verdict": verdict, "reason": reason},
+                )
                 manifest.advance(stub_id, "done")
 
         if manifest is not None:
@@ -737,3 +760,36 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     if "[!augmented]" not in post.content:
         post.content = callout + post.content
     page_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+
+def _post_ingest_quality(*, page_path: Path, wiki_dir: Path) -> tuple[str, str]:
+    """Targeted post-ingest quality regression: did the augment actually help?
+
+    Checks the SPECIFIC page (not a full wiki scan) for two conditions:
+      1. Body length still passes the stub threshold via ``check_stub_pages``
+      2. ``source:`` frontmatter is non-empty
+
+    Returns ``("pass" | "fail", reason)``.
+    """
+    if not page_path.exists():
+        return "fail", "page not found post-ingest"
+
+    stub_issues = check_stub_pages(wiki_dir=wiki_dir, pages=[page_path])
+    if stub_issues:
+        return (
+            "fail",
+            f"page still a stub after augment ({stub_issues[0]['content_length']} chars)",
+        )
+
+    try:
+        post = frontmatter.load(str(page_path))
+    except Exception as e:
+        return "fail", f"frontmatter unparseable: {e}"
+
+    sources = post.metadata.get("source") or []
+    if isinstance(sources, str):
+        sources = [sources]
+    if not sources:
+        return "fail", "augmented page has no source: in frontmatter"
+
+    return "pass", f"body len ok, {len(sources)} source(s)"
