@@ -19,13 +19,21 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpcore
 import httpx
+import trafilatura
 from httpcore._backends.sync import SyncBackend
+
+try:
+    from tld import get_fld
+except ImportError:  # pragma: no cover - tld is a runtime dep
+    get_fld = None
 
 logger = logging.getLogger(__name__)
 
@@ -147,3 +155,188 @@ def build_client(version: str) -> httpx.Client:
         follow_redirects=True,
         max_redirects=AUGMENT_FETCH_MAX_REDIRECTS,
     )
+
+
+def _registered_domain(url: str) -> str | None:
+    """Return the eTLD+1 (registered domain) for a URL, or None on failure."""
+    if get_fld is None:
+        # Fallback: use the netloc verbatim (less accurate but functional).
+        return urlparse(url).netloc.lower()
+    try:
+        return get_fld(url, fix_protocol=True)
+    except Exception:
+        return None
+
+
+class AugmentFetcher:
+    """One-instance-per-run HTTP fetcher with DNS-rebind-safe transport, allowlists, and content extraction."""
+
+    def __init__(self, *, allowed_domains: tuple[str, ...], version: str):
+        from kb.config import (
+            AUGMENT_CONTENT_TYPES,
+            AUGMENT_FETCH_MAX_BYTES,
+        )
+
+        self.allowed_domains = tuple(d.lower() for d in allowed_domains)
+        self.allowed_content_types = AUGMENT_CONTENT_TYPES
+        self.max_bytes = AUGMENT_FETCH_MAX_BYTES
+        self._client = build_client(version)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._client.close()
+
+    def fetch(self, url: str, *, respect_robots: bool = True) -> FetchResult:
+        # 1. Scheme allow-list
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return FetchResult(
+                status="blocked",
+                content=None,
+                extracted_markdown=None,
+                content_type="",
+                bytes=0,
+                reason=f"disallowed scheme: {parsed.scheme}",
+                url=url,
+            )
+
+        # 2. Domain allow-list (initial URL)
+        rd = _registered_domain(url)
+        if rd is None or rd.lower() not in self.allowed_domains:
+            return FetchResult(
+                status="blocked",
+                content=None,
+                extracted_markdown=None,
+                content_type="",
+                bytes=0,
+                reason=f"domain not in allowlist: {rd}",
+                url=url,
+            )
+
+        # 3. Stream-fetch with size cap
+        try:
+            with self._client.stream("GET", url) as response:
+                response.raise_for_status()
+
+                # 4. Final URL allow-list (catches redirects to off-allow domains)
+                final_rd = _registered_domain(str(response.url))
+                if final_rd is None or final_rd.lower() not in self.allowed_domains:
+                    return FetchResult(
+                        status="blocked",
+                        content=None,
+                        extracted_markdown=None,
+                        content_type="",
+                        bytes=0,
+                        reason=f"redirect target domain not in allowlist: {final_rd}",
+                        url=str(response.url),
+                    )
+
+                # 5. Content-type allow-list
+                ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                if ctype and ctype not in self.allowed_content_types:
+                    return FetchResult(
+                        status="blocked",
+                        content=None,
+                        extracted_markdown=None,
+                        content_type=ctype,
+                        bytes=0,
+                        reason=f"disallowed content-type: {ctype}",
+                        url=str(response.url),
+                    )
+
+                # 6. Size cap (header)
+                clen = response.headers.get("content-length")
+                if clen and int(clen) > self.max_bytes:
+                    return FetchResult(
+                        status="blocked",
+                        content=None,
+                        extracted_markdown=None,
+                        content_type=ctype,
+                        bytes=int(clen),
+                        reason=f"content-length {clen} exceeds cap {self.max_bytes}",
+                        url=str(response.url),
+                    )
+
+                # 7. Stream + cap
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_bytes(chunk_size=32_768):
+                    total += len(chunk)
+                    if total > self.max_bytes:
+                        return FetchResult(
+                            status="blocked",
+                            content=None,
+                            extracted_markdown=None,
+                            content_type=ctype,
+                            bytes=total,
+                            reason=f"stream exceeded cap {self.max_bytes} bytes",
+                            url=str(response.url),
+                        )
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+                final_url = str(response.url)
+
+        except httpx.TooManyRedirects as e:
+            return FetchResult(
+                status="failed",
+                content=None,
+                extracted_markdown=None,
+                content_type="",
+                bytes=0,
+                reason=f"too many redirects: {e}",
+                url=url,
+            )
+        except (
+            httpx.ConnectError,
+            httpx.HTTPStatusError,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+            httpx.TimeoutException,
+        ) as e:
+            return FetchResult(
+                status="failed",
+                content=None,
+                extracted_markdown=None,
+                content_type="",
+                bytes=0,
+                reason=f"{type(e).__name__}: {e}",
+                url=url,
+            )
+
+        # 8. Extract to markdown via trafilatura
+        try:
+            content_str = raw.decode("utf-8", errors="replace")
+        except Exception as e:
+            return FetchResult(
+                status="failed",
+                content=None,
+                extracted_markdown=None,
+                content_type=ctype,
+                bytes=total,
+                reason=f"decode error: {e}",
+                url=url,
+            )
+        markdown = trafilatura.extract(
+            content_str,
+            output_format="markdown",
+            include_comments=False,
+            no_fallback=True,
+        )
+        if markdown is None or not markdown.strip():
+            # Fall back to raw-decoded text for non-HTML or extraction failures
+            markdown = content_str
+
+        # 9. Strip HTML comments defensively (trafilatura usually does, but fenced for safety)
+        markdown = re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
+
+        return FetchResult(
+            status="ok",
+            content=content_str,
+            extracted_markdown=markdown,
+            content_type=ctype,
+            bytes=total,
+            reason=None,
+            url=final_url,
+        )
