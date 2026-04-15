@@ -46,3 +46,28 @@ def test_kb_lint_augment_appends_summary_section(tmp_project, create_wiki_page, 
     # No stubs → augment will examine 0 gaps, but should still append the section
     report = kb_lint(augment=True, wiki_dir=str(tmp_project / "wiki"))
     assert "## Augment Summary" in report
+
+
+def test_kb_lint_execute_without_augment_returns_error():
+    """Three-gate: --execute requires --augment (parity with CLI cli.py:167)."""
+    from kb.mcp.health import kb_lint
+    result = kb_lint(execute=True, augment=False)
+    assert result.startswith("Error:")
+    assert "execute requires" in result.lower()
+
+
+def test_kb_lint_auto_ingest_without_execute_returns_error():
+    """Three-gate: --auto-ingest requires --execute (parity with CLI cli.py:169)."""
+    from kb.mcp.health import kb_lint
+    result = kb_lint(auto_ingest=True, execute=False, augment=True)
+    assert result.startswith("Error:")
+    assert "auto-ingest requires" in result.lower()
+
+
+def test_kb_lint_max_gaps_over_ceiling_returns_error():
+    """max_gaps above AUGMENT_FETCH_MAX_CALLS_PER_RUN rejected (parity with CLI cli.py:171)."""
+    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+    from kb.mcp.health import kb_lint
+    result = kb_lint(augment=True, max_gaps=AUGMENT_FETCH_MAX_CALLS_PER_RUN + 5)
+    assert result.startswith("Error:")
+    assert "max_gaps" in result

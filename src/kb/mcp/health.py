@@ -33,6 +33,20 @@ def kb_lint(
     Returns:
         Formatted lint report. When augment=True, appends ## Augment Summary section.
     """
+    # Three-gate dependency validation — parity with CLI (cli.py:167-175).
+    # MCP tools return "Error: ..." strings instead of raising to the client.
+    from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+
+    if execute and not augment:
+        return "Error: --execute requires --augment"
+    if auto_ingest and not execute:
+        return "Error: --auto-ingest requires --execute (and --augment)"
+    if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
+        return (
+            f"Error: max_gaps={max_gaps} exceeds hard ceiling "
+            f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
+        )
+
     try:
         from kb.lint.runner import format_report, run_all_checks
 
