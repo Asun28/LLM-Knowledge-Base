@@ -38,5 +38,5 @@ def test_valid_verdict_types_module_constant():
     from kb.lint import verdicts as _v
 
     assert hasattr(_v, "VALID_VERDICT_TYPES")
-    expected = {"fidelity", "consistency", "completeness", "review"}
+    expected = {"fidelity", "consistency", "completeness", "review", "augment"}
     assert set(_v.VALID_VERDICT_TYPES) == expected

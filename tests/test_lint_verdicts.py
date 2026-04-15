@@ -197,6 +197,7 @@ def test_get_verdict_summary_counts(tmp_path):
         "consistency": 1,
         "completeness": 1,
         "review": 1,
+        "augment": 0,
     }
 
 
