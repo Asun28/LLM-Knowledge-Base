@@ -83,10 +83,9 @@ def test_resume_returns_none_for_unknown_run(tmp_path, monkeypatch):
 
 
 def test_runs_index_is_appended_on_close(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
-    monkeypatch.setattr(
-        "kb.lint._augment_manifest.RUNS_INDEX_PATH", tmp_path / "augment_runs.jsonl"
-    )
+    # With RUNS_INDEX_PATH derived at call time from MANIFEST_DIR, a single
+    # monkeypatch on MANIFEST_DIR is now sufficient — no separate constant
+    # to remember. (_make_manifest already patches MANIFEST_DIR.)
     m, run_id = _make_manifest(tmp_path, monkeypatch)
     m.advance("concepts/foo", "done")
     m.advance("entities/bar", "abstained", payload={"reason": "x"})

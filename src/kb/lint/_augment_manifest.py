@@ -23,7 +23,6 @@ from kb.utils.io import atomic_json_write, file_lock
 logger = logging.getLogger(__name__)
 
 MANIFEST_DIR = PROJECT_ROOT / ".data"
-RUNS_INDEX_PATH = MANIFEST_DIR / "augment_runs.jsonl"
 
 TERMINAL_STATES = frozenset({"done", "abstained", "failed", "cooldown"})
 # States considered "complete enough" to skip on resume. Includes true terminal
@@ -34,6 +33,17 @@ RESUME_COMPLETE_STATES = TERMINAL_STATES | frozenset({"ingested", "verdict"})
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _runs_index_path() -> Path:
+    """Derive the runs-index path at call time.
+
+    Resolving MANIFEST_DIR lazily lets tests monkeypatch MANIFEST_DIR
+    without also having to patch a module-level constant — avoids the
+    regression class where tests silently appended to the real
+    .data/augment_runs.jsonl.
+    """
+    return MANIFEST_DIR / "augment_runs.jsonl"
 
 
 @dataclass
@@ -149,9 +159,10 @@ class Manifest:
             "gaps_failed": counts["failed"],
             "gaps_cooldown": counts["cooldown"],
         }
-        RUNS_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with file_lock(RUNS_INDEX_PATH):
-            with RUNS_INDEX_PATH.open("a", encoding="utf-8") as fh:
+        runs_index = _runs_index_path()
+        runs_index.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock(runs_index):
+            with runs_index.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
 
     # ---- queries ----
