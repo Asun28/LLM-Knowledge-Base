@@ -45,59 +45,17 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### CRITICAL
 
-- `tests/test_ingest.py:124-132` `test_ingest_source` — patch block omits `kb.ingest.pipeline.WIKI_CONTRADICTIONS`, the `_persist_contradictions` hardcoded global (also flagged R1). The test mock extraction triggers contradiction detection, causing the real production `wiki/contradictions.md` to be mutated on every test run. Isolation bug goes unnoticed because the test itself still passes. (R3)
-  (fix: add `patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md")` inside the existing patch block; create the file before invoking `ingest_source`)
-
-- `tests/test_v0917_contradiction.py:12-30` `test_returns_contradiction_dict` — comment acknowledges "heuristic is intentionally conservative"; when `result` is `[]`, the `for item in result` body never executes, all four `assert "key" in item` lines are silently skipped, test passes. The dict-structure contract (`new_claim`/`existing_page`/`existing_text`/`reason`) is never actually verified; a rename of any key ships undetected. (R3)
-  (fix: seed the scenario with a claim that the heuristic provably catches (same tokens + opposing qualifier) and assert `len(result) >= 1` before the loop; or split into two tests — one asserting empty-list and one asserting the dict shape when fired)
-
-- `tests/test_phase4_audit_security.py:37-45` `test_kb_refine_page_accepts_valid_content` — only assertion is `assert "too large" not in result.lower()`; if `refine_page` raises, returns any other error string, or returns empty, the test still passes. The positive outcome (page body actually updated) is never checked. (R3)
-  (fix: assert `"Updated" in result` AND read back the page file to confirm the new body is present)
+<!-- 16 of 18 CRITICAL items resolved in cycle 1 (commits 9a1ded4, 3ca8f22, a9f09f7, 8223098,
+     d64a8fe, c590627 on branch fix/phase-4.5-critical — see CHANGELOG `[Unreleased]` Phase 4.5
+     CRITICAL cycle 1). Items 4 and 5 below are retained for the immediately-following
+     docs-sync PR (second-gate Opus review moved them out of cycle 1 as preventive-infrastructure
+     drive-by; they land in a focused ≤100-LOC docs PR). -->
 
 - `pyproject.toml:3` vs `src/kb/__init__.py:3` vs `README.md:7` version drift — three different version strings are live at once: `pyproject.toml` ships `0.9.10` (so `pip install` / `pip freeze` report the wrong version); `kb --version` reports `0.10.0` via `__version__`; README badge reports `v0.9.16`. CHANGELOG's `[Unreleased]` block has shipped MEDIUM/LOW audit fixes that no version string reflects. (R3)
   (fix: pick a single source of truth; bump `pyproject.toml` + `__version__` + README badge together — e.g. to `0.10.1` or `0.11.0` — and render the badge from `pyproject.toml` in CI)
 
 - `CLAUDE.md:13, 131, 255` stats drift — claims "1171 tests, 25 MCP tools, 18 modules" and "1171 tests across 55 test files". `pytest --collect-only -q` reports 1177 tests; `find tests -name "test_*.py"` reports 91 test files; `find src/kb -name "*.py"` reports 55 Python files (not 18 "modules" — the "module" unit is ambiguous). `README.md:5,274,287,315` still advertises 1033 tests across 43 files. Agents cite these baselines when proposing changes, so stale counts poison reasoning downstream. (R3)
   (fix: single doc-update pass — CLAUDE.md → `1177 tests / 91 test files / 25 tools`; clarify "modules" vs "files"; README badge → 1177; add a pre-push check `pytest --collect-only` that compares)
-
-- `ingest/pipeline.py:565-576` `ingest_source` duplicate-branch result dict missing keys — the duplicate-content early return omits `affected_pages`, `wikilinks_injected`, and `contradictions` keys entirely while the non-duplicate success path always includes them. Callers (MCP `kb_ingest`, `compile_wiki` loop, test assertions) that index `result["affected_pages"]` unconditionally hit `KeyError` on duplicate re-ingest. Contract inconsistency becomes a crash the moment any downstream caller assumes the full shape. (R4)
-  (fix: always return the same keys — set `affected_pages=[]`, `wikilinks_injected=[]` on the duplicate branch; update docstring to list guaranteed keys; add `assert set(duplicate_result.keys()) == set(normal_result.keys())` dict-shape test)
-
-- `query/engine.py:357` `query_wiki` ignores `wiki_dir` for raw fallback and purpose load — `search_raw_sources(effective_question, max_results=3)` is called with no `raw_dir=` argument, so it always reads the production `RAW_DIR` even when the caller passed a sandbox `wiki_dir`. Combined with `load_purpose(wiki_dir)` reading only wiki (not raw), the query engine leaks into production `raw/` during tests. Same leak surface R2/R3 flagged for `WIKI_CONTRADICTIONS` / `append_wiki_log` / `load_purpose`, but unflagged on this specific site. (R4)
-  (fix: accept `raw_dir: Path | None = None` on `query_wiki` (or derive `raw_dir = wiki_dir.parent / "raw"` when `wiki_dir` is provided); thread into `search_raw_sources(..., raw_dir=raw_dir)`)
-
-- `lint/runner.py:80-98` `run_all_checks` — `check_orphan_pages(graph=shared_graph)` augments `shared_graph` in place by adding `_index:<name>` sentinel nodes and edges (`checks.py:168-171`), then `check_cycles(graph=shared_graph)` runs on the mutated graph. Today the sentinel edges are only outbound so no cycle is forged, but the "shared graph" contract is silently violated — any future augmentation adding a reverse edge would manufacture a spurious cycle issue, with no test covering the interaction. (R4)
-  (fix: `check_orphan_pages` operates on `graph.copy()` or returns augmentations separately so `shared_graph` stays clean for downstream checks)
-
-- `lint/runner.py:53-78` `run_all_checks(fix=True)` — `fix_dead_links` rewrites pages via `atomic_text_write`, but `shared_pages` and `shared_graph` were captured BEFORE the rewrite. Subsequent checks (orphan, staleness, frontmatter, source_coverage, cycles, stub) all see pre-fix state: a page whose only outbound link was broken is still counted as having an outbound edge; a page whose entire body was stripped is not re-checked for stub status; source_coverage misses raw refs inside rewritten wikilinks. Report is internally inconsistent after `--fix`. (R4)
-  (fix: after `fix_dead_links`, re-run `scan_wiki_pages` + `build_graph` on the mutated corpus; OR restrict `--fix` to a post-pass that re-enters `run_all_checks(fix=False)` for the canonical report)
-
-- `review/refiner.py:111` `refine_page` — `updated_content.lstrip()` strips ALL leading whitespace before writing. Markdown code blocks indicated by 4-space indentation (`    def foo():`) lose their indent and render as paragraph text. Any refine that restructures a page to start with an indented code example silently corrupts the content. (R4)
-  (fix: strip only leading blank lines, not whitespace on the first non-blank line — `re.sub(r"\A\n+", "", updated_content)` instead of `.lstrip()`)
-
-- `utils/text.py:128` `slugify` — `re.sub(r"[^\w\s-]", "", text, flags=re.ASCII)` strips all non-ASCII, so any all-CJK/all-emoji title (`"中文标题"`, `"日本語"`, `"あ"`, `"😀"`) collapses to `""` and `slugify` returns empty string. The ingest pipeline writes the page to `wiki/<subdir>/.md` (hidden file on Unix, empty-stem path-join on Windows), shadowing every other empty-stem title; `kb_read_page` cannot address it; next ingest of any other CJK/emoji title silently overwrites it. Tested live: `slugify('中文')` returns `''`. (R4)
-  (fix: drop `flags=re.ASCII` so `\w` keeps CJK/Cyrillic/etc.; detect empty result and raise or fall back to `f"untitled-{content_hash[:6]}"`)
-
-- `utils/markdown.py:5` `WIKILINK_PATTERN` whitespace-only target — pattern `[^\]|]{1,200}` accepts `[[   ]]` and `extract_wikilinks` returns `['']` (verified). Empty-string targets propagate into `inject_wikilinks`, `build_graph` node IDs, and `check_dead_links` reporting — every page with a stray `[[ ]]` (easy LLM extraction artifact) creates a phantom node and an attempt to write `wiki/<subdir>/.md`. (R4)
-  (fix: post-strip `cleaned`, drop links whose stripped form is `""`; or change regex to require at least one non-whitespace char)
-
-- `review/refiner.py:13,120-133` `refine_page` history audit — uses `_history_lock = threading.Lock()` (in-process only) for the load → append → save RMW on `review_history.json`. No `file_lock`. Two processes refining concurrently (CLI + MCP server, or two MCP server instances) both read the same history, each appends one entry, the second `atomic_json_write` clobbers the first — silent loss of audit-trail entries. Thread-Lock-only design creates false confidence. Distinct from R2 audit-order (page-before-log). (R5)
-  (fix: replace `_history_lock` with `file_lock(history_path)` so cross-process safety holds; remove the in-process-only Lock entirely)
-
-- `compile/compiler.py:343-347 + ingest/pipeline.py:686-688` `compile_wiki` ↔ `ingest_source` double manifest write — within ONE iteration, `ingest_source` already did its own `load_manifest → manifest[source_ref] = source_hash → save_manifest` (686-688), then the loop AGAIN does `load_manifest → manifest[rel_path] = pre_hash → save_manifest` (344-347). Neither uses `file_lock`. Concurrent caller B doing its own ingest between `ingest_source`'s save and the loop's reload sees its writes silently overwritten — caller B's source then re-processed on next compile (wasted LLM call) AND caller B's hash is lost. R4 flagged the per-loop reload race; R5 is the **double-write within the same call** that doubles the race window. (R5)
-  (fix: drop the redundant manifest write in the compile loop — the inner `ingest_source` already persisted; or wrap the per-source iteration in `file_lock(manifest_path)`)
-
-- `utils/io.py:74-99` `file_lock` SIGINT cleanup gap — `try/finally` wraps `yield`, but the lock-file write at 76-78 happens BEFORE `try:`. A `KeyboardInterrupt` arriving between `os.write` and the `try:` keyword leaves the lock file with a valid PID but no `finally` to unlink. Ctrl-C in long-running ingest leaves a `hashes.json.lock` containing the killed PID; until the OS reuses that PID for a live process, the lock is stealable but the next caller pays a 5-second timeout PLUS the broken Windows PID-liveness check (R2). Distinct from R4 stale-lock parse-failure: this is the **acquire-side hole** that creates the stale lock. (R5)
-  (fix: move acquisition inside `try:` so `finally` always runs; or use atexit to register cleanup of any lock files this process created)
-
-- `utils/llm.py:85-110` `_make_api_call` `APIStatusError` non-retryable raise — when status code is NOT in `(500, 502, 503, 529)`, raises `LLMError(...) from e` immediately INSIDE the except clause, but does NOT clear `last_error` from the previous loop iteration. If a prior attempt set `last_error` (rate-limit/timeout/connection) and this attempt hits a 4xx, the `from e` chain points at the wrong cause; deterministic 4xx errors (400/401/403) are raised mid-loop without `last_error = e` cleanup, so subsequent inspectors of `__cause__` misattribute the failure. (R5)
-  (fix: set `last_error = e` before raising; or restructure to a small helper returning a `RetryDecision` enum (`retry`/`raise`))
-
-- `utils/llm.py:262-270` `call_llm_json` content-block iteration no-tool-use diagnostic loss — loops `response.content` and returns the FIRST `tool_use`. If the API returns ONLY a `text` content block (content moderation refusal explaining why the model declined), the loop falls through to `LLMError("No tool_use block in response from {model}")` with the entire diagnostic text discarded. R4 flagged the multi-tool-use case; the no-tool-use diagnostic loss is a distinct, more common silent failure that turns "model refused extraction" into "API returned malformed response," sending operators down the wrong debug path. (R5)
-  (fix: when no `tool_use` is found, collect any leading `text` block and include first ~300 chars: `LLMError(f"No tool_use block from {model}; leading text: {text_block.text[:300]!r}")`)
-
-- `ingest/pipeline.py:553-559` `ingest_source` `UnicodeDecodeError → ValueError` chain loss — `raise ValueError(f"Binary file...")` without `from e`, so the original `UnicodeDecodeError` (with byte offset, codec, reason) is wiped. The CLI top-level `except Exception` then prints only the rewritten message; the operator never sees WHICH byte at WHICH offset failed. R4's exception-hierarchy critique is generic; this site is a concrete instance where `from e` would show "binary file: invalid continuation byte at offset 47192" instead of "binary file cannot be ingested." (R5)
-  (fix: `raise ValueError(...) from e`; audit `pipeline.py:546` (`relative_to → ValueError`), `extractors.py:74` (`FileNotFoundError`), `pipeline.py:456` (`ValueError`) for the same fix)
 
 ### HIGH
 
