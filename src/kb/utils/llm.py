@@ -107,6 +107,7 @@ def _make_api_call(kwargs: dict, model: str):
                         MAX_RETRIES + 1,
                     )
             else:
+                last_error = e  # fix item 16: track non-retryable for consistency
                 raise LLMError(f"API error from {model}: {e.status_code} — {e.message}") from e
 
         except anthropic.APIConnectionError as e:

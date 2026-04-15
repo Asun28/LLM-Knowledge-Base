@@ -543,8 +543,8 @@ def ingest_source(
     source_path_nc = Path(os.path.normcase(str(source_path)))
     try:
         source_path_nc.relative_to(raw_dir_nc)
-    except ValueError:
-        raise ValueError(f"Source path must be within raw/ directory: {source_path}")
+    except ValueError as e:
+        raise ValueError(f"Source path must be within raw/ directory: {source_path}") from e
 
     if source_type is None:
         source_type = detect_source_type(source_path)
@@ -553,11 +553,11 @@ def ingest_source(
     raw_bytes = source_path.read_bytes()
     try:
         raw_content = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError:
+    except UnicodeDecodeError as e:
         raise ValueError(
             f"Binary file cannot be ingested: {source_path.name}. "
             "Convert to markdown first (e.g., markitdown or docling)."
-        )
+        ) from e
     source_hash = hash_bytes(raw_bytes)
 
     # Spec §10 — strip leading YAML frontmatter for capture sources only.

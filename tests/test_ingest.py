@@ -274,3 +274,21 @@ def test_ingest_duplicate_branch_returns_all_contract_keys(tmp_path, monkeypatch
     assert result["affected_pages"] == []
     assert result["wikilinks_injected"] == []
     assert result["contradictions"] == []
+
+
+def test_ingest_binary_file_preserves_unicode_decode_cause(tmp_path):
+    """Regression: Phase 4.5 CRITICAL item 18 (UnicodeDecodeError byte-offset diagnostic wiped)."""
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+    binary = raw_dir / "articles" / "binary.md"
+    binary.write_bytes(b"\xff\xfe valid utf-16 bom but not utf-8 \x00\x00")
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir(parents=True, exist_ok=True)
+    with patch("kb.ingest.pipeline.RAW_DIR", raw_dir):
+        try:
+            ingest_source(source_path=binary, wiki_dir=wiki_dir)
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert isinstance(e.__cause__, UnicodeDecodeError), (
+                f"UnicodeDecodeError cause lost; __cause__ = {e.__cause__!r}"
+            )
