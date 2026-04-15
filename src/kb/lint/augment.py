@@ -573,7 +573,115 @@ def run_augment(
                         manifest.advance(f["stub_id"], "done")
                 manifest.close()
 
-    # Phase C: auto-ingest happens in Task 15 (extends this body further)
+    # Phase C: auto-ingest (only if mode == "auto_ingest")
+    if mode == "auto_ingest" and fetches is not None and not dry_run:
+        from kb.ingest.extractors import _build_schema_cached
+        from kb.ingest.pipeline import ingest_source
+        from kb.lint.verdicts import add_verdict
+
+        ingests = []
+        verdicts = []
+
+        for f in fetches:
+            stub_id = f["stub_id"]
+            if f["status"] != "saved":
+                ingests.append(
+                    {
+                        "stub_id": stub_id,
+                        "status": "skipped",
+                        "reason": f"fetch not saved: {f['status']}",
+                    }
+                )
+                continue
+            raw_path = Path(f["raw_path"])
+
+            # Pre-extract at scan tier (Claude Code or API-side)
+            try:
+                schema = _build_schema_cached("article")
+                raw_content = raw_path.read_text(encoding="utf-8")
+                extraction = call_llm_json(
+                    (
+                        "Extract structured data from this article per the schema.\n\n"
+                        f"<untrusted_source>\n{raw_content}\n</untrusted_source>"
+                    ),
+                    tier="scan",
+                    schema=schema,
+                )
+            except Exception as e:
+                msg = f"pre-extract failed: {type(e).__name__}: {e}"
+                if manifest is not None:
+                    manifest.advance(stub_id, "failed", payload={"reason": msg})
+                ingests.append({"stub_id": stub_id, "status": "failed", "reason": msg})
+                continue
+
+            if manifest is not None:
+                manifest.advance(
+                    stub_id, "extracted", payload={"keys": list(extraction.keys())}
+                )
+
+            # Ingest
+            try:
+                ingest_result = ingest_source(
+                    raw_path,
+                    source_type="article",
+                    extraction=extraction,
+                    wiki_dir=wiki_dir,
+                )
+            except Exception as e:
+                msg = f"ingest_source failed: {type(e).__name__}: {e}"
+                if manifest is not None:
+                    manifest.advance(stub_id, "failed", payload={"reason": msg})
+                ingests.append({"stub_id": stub_id, "status": "failed", "reason": msg})
+                continue
+
+            if manifest is not None:
+                manifest.advance(
+                    stub_id,
+                    "ingested",
+                    payload={
+                        "pages_created": ingest_result.get("pages_created", []),
+                        "pages_updated": ingest_result.get("pages_updated", []),
+                    },
+                )
+
+            # Mark the stub page speculative + add [!augmented] callout
+            stub_path = wiki_dir / f"{stub_id}.md"
+            if stub_path.exists():
+                _mark_page_augmented(stub_path, source_url=f["url"])
+
+            ingests.append(
+                {
+                    "stub_id": stub_id,
+                    "status": "ingested",
+                    "pages_created": ingest_result.get("pages_created", []),
+                    "pages_updated": ingest_result.get("pages_updated", []),
+                }
+            )
+
+            # Quality verdict (Task 16 will refine this)
+            add_verdict(
+                page_id=stub_id,
+                verdict_type="augment",
+                verdict="pass",
+                notes=(
+                    f"augmented from {f['url']} "
+                    f"(relevance {f.get('relevance', 0):.2f})"
+                ),
+                issues=[],
+            )
+            verdicts.append({"stub_id": stub_id, "verdict": "pass"})
+
+            if manifest is not None:
+                manifest.advance(stub_id, "verdict", payload={"verdict": "pass"})
+                manifest.advance(stub_id, "done")
+
+        if manifest is not None:
+            manifest.close()
+
+    if mode == "auto_ingest" and dry_run:
+        ingests = [
+            {"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals
+        ]
 
     summary_lines = [f"## Augment Summary (run {run_id[:8]}, mode={mode})"]
     summary_lines.append(f"- Stubs examined: {len(eligible)}")
@@ -609,3 +717,23 @@ def run_augment(
         "manifest_path": manifest_path,
         "summary": "\n".join(summary_lines),
     }
+
+
+def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
+    """Force ``confidence: speculative`` + prepend ``[!augmented]`` callout.
+
+    Idempotent: if a ``[!augmented]`` callout is already present in the body,
+    the callout is not re-inserted (but confidence is still forced to
+    ``speculative`` on every call).
+    """
+    post = frontmatter.load(str(page_path))
+    post.metadata["confidence"] = "speculative"
+    callout = (
+        "> [!augmented]\n"
+        f"> Enriched from {source_url} on "
+        f"{datetime.now(UTC).isoformat(timespec='seconds')}. "
+        "Marked speculative until human review.\n\n"
+    )
+    if "[!augmented]" not in post.content:
+        post.content = callout + post.content
+    page_path.write_text(frontmatter.dumps(post), encoding="utf-8")

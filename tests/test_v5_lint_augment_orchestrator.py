@@ -548,3 +548,187 @@ def test_execute_mode_dry_run_does_not_fetch(tmp_project, create_wiki_page, monk
     assert result["fetches"] is None or all(
         f["status"] == "dry_run_skipped" for f in result["fetches"]
     )
+
+
+# ── Task 15: auto-ingest mode tests ──────────────────────────────
+
+
+def _patch_ingest_dirs(monkeypatch, tmp_project):
+    """Redirect every kb.ingest.* module-level path binding to tmp_project."""
+    wiki = tmp_project / "wiki"
+    raw = tmp_project / "raw"
+    monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw)
+    monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki)
+    monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md")
+    monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md")
+    monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw)
+    monkeypatch.setattr(
+        "kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json"
+    )
+    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr(
+        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+    )
+
+
+def test_auto_ingest_creates_wiki_page_with_speculative_confidence(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    _patch_ingest_dirs(monkeypatch, tmp_project)
+    # Pre-create index/_sources so ingest helpers don't stumble on missing files
+    (wiki_dir / "index.md").write_text(
+        "# Index\n\n## Entities\n\n## Concepts\n\n", encoding="utf-8"
+    )
+    (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+    (wiki_dir / "_categories.md").write_text("# Categories\n\n", encoding="utf-8")
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/moe", title="MoE")
+    create_wiki_page(
+        page_id="entities/transformer",
+        title="Transformer",
+        content="See [[concepts/moe]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/MoE",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article><h1>MoE</h1><p>"
+            + b"Mixture of experts is a neural arch. " * 30
+            + b"</p></article></body></html>"
+        ),
+    )
+
+    fake_extraction = {
+        "title": "MoE",
+        "summary": "Mixture of experts is a neural architecture using gating + experts.",
+        "key_claims": ["gating network routes inputs", "expert subnetworks"],
+        "entities_mentioned": [],
+        "concepts_mentioned": ["moe"],
+    }
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        side_effect=[
+            {
+                "action": "propose",
+                "urls": ["https://en.wikipedia.org/wiki/MoE"],
+                "rationale": "wp",
+            },
+            {"score": 0.95},  # relevance
+            fake_extraction,  # pre-extract for ingest
+        ],
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="auto_ingest", max_gaps=5
+        )
+
+    assert result["ingests"] is not None
+    assert len(result["ingests"]) == 1
+    assert result["ingests"][0]["status"] == "ingested"
+
+    # Check the wiki page was updated with speculative + callout
+    page_path = wiki_dir / "concepts" / "moe.md"
+    body = page_path.read_text()
+    assert "confidence: speculative" in body
+    assert "[!augmented]" in body
+
+
+def test_auto_ingest_missing_api_key_raises_clear_error(
+    tmp_project, create_wiki_page, httpx_mock, monkeypatch
+):
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_ingest_dirs(monkeypatch, tmp_project)
+
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/robots.txt",
+        content=b"User-agent: *\nAllow: /\n",
+        headers={"content-type": "text/plain"},
+    )
+    httpx_mock.add_response(
+        url="https://en.wikipedia.org/wiki/X",
+        headers={"content-type": "text/html"},
+        content=(
+            b"<html><body><article>"
+            + b"Content. " * 30
+            + b"</article></body></html>"
+        ),
+    )
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        side_effect=[
+            {
+                "action": "propose",
+                "urls": ["https://en.wikipedia.org/wiki/X"],
+                "rationale": "wp",
+            },
+            {"score": 0.9},
+            # When ingest extraction is attempted, simulate ANTHROPIC_API_KEY missing
+            RuntimeError("ANTHROPIC_API_KEY not set"),
+        ],
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, mode="auto_ingest", max_gaps=5
+        )
+    # Should not crash; should record a failed ingest with a clear error
+    assert any(
+        i["status"] == "failed" and "API_KEY" in i["reason"]
+        for i in result["ingests"]
+    )
+
+
+def test_auto_ingest_dry_run_skips_ingest(tmp_project, create_wiki_page, monkeypatch):
+    from kb.lint.augment import run_augment
+
+    _patch_ingest_dirs(monkeypatch, tmp_project)
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="See [[concepts/x]] " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value={
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/X"],
+            "rationale": "wp",
+        },
+    ):
+        result = run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=raw_dir,
+            mode="auto_ingest",
+            max_gaps=5,
+            dry_run=True,
+        )
+    assert result["ingests"] is None or all(
+        i["status"] == "dry_run_skipped" for i in result["ingests"]
+    )
+    # No raw files should exist either
+    assert not list((raw_dir / "articles").glob("*.md"))
