@@ -189,6 +189,10 @@ WIKI_SUBDIR_TO_TYPE: dict[str, str] = {
     "synthesis": "synthesis",
 }
 
+# Autogen wiki page prefixes — pages under these subdirs are auto-generated entry points,
+# not stubs to enrich. Used by lint orphan/isolated/stub checks and kb_lint --augment eligibility.
+AUTOGEN_PREFIXES: tuple[str, ...] = ("summaries/", "comparisons/", "synthesis/")
+
 # ── Verdict trend analysis ────────────────────────────────────
 # Threshold for classifying weekly trend direction as significant.
 # Used by kb.lint.trends to determine "improving", "stable", or "declining".
