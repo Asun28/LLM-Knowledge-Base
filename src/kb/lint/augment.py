@@ -13,16 +13,20 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import frontmatter
 
 from kb.config import (
+    AUGMENT_ALLOWED_DOMAINS,
     AUGMENT_COOLDOWN_HOURS,
     AUTOGEN_PREFIXES,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
 from kb.lint.checks import check_stub_pages
+from kb.lint.fetcher import _registered_domain
+from kb.utils.llm import call_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -118,3 +122,127 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
         })
 
     return eligible
+
+
+# ── URL proposer (Task 11) ────────────────────────────────────────
+
+_PROPOSER_PROMPT_TEMPLATE = """\
+You are proposing candidate URLs to enrich a stub wiki page.
+
+Page title: {title}
+Page type: {page_type}
+Existing sources (avoid duplicates): {existing_sources}
+Allowed domains (STRICT — URLs outside this list will be rejected): {allowed_domains}
+
+KB purpose / scope (reject URLs outside this scope; abstain if topic is out of scope):
+{purpose}
+
+Return JSON with EXACTLY this shape:
+  {{"action": "propose", "urls": [up to 3 URLs from allowed domains], "rationale": "1-line"}}
+  OR
+  {{"action": "abstain", "reason": "no authoritative source in allowlist | out of scope | ambiguous title"}}
+
+Constraints:
+- Each URL must be a complete absolute URL (https://...).
+- Each URL's registered domain must be in the allowed list.
+- Do NOT invent URLs you are not confident exist.
+- If you cannot find a high-authority allowlisted source, ABSTAIN. Do not pad the list.
+"""
+
+
+_PROPOSER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["propose", "abstain"]},
+        "urls": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "rationale": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["action"],
+    "additionalProperties": True,
+}
+
+
+def _build_proposer_prompt(stub: dict[str, Any], purpose_text: str) -> str:
+    """Build proposer prompt with title repr-escaped + truncated to 100 chars."""
+    title = repr(str(stub.get("title", ""))[:100])  # truncate + escape
+    existing = stub.get("frontmatter", {}).get("source") or []
+    if isinstance(existing, str):
+        existing = [existing]
+    existing_repr = [repr(str(s)[:200]) for s in existing[:10]]
+    return _PROPOSER_PROMPT_TEMPLATE.format(
+        title=title,
+        page_type=stub.get("page_type", "concept"),
+        existing_sources="[" + ", ".join(existing_repr) + "]",
+        allowed_domains=list(AUGMENT_ALLOWED_DOMAINS),
+        purpose=(purpose_text[:1000] if purpose_text else "(no purpose.md provided)"),
+    )
+
+
+def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
+    """Call scan-tier LLM proposer with eligibility-filtered stub.
+
+    Returns {"action": "propose", "urls": [...], "rationale": "..."}
+    OR     {"action": "abstain", "reason": "..."}
+    """
+    prompt = _build_proposer_prompt(stub, purpose_text)
+    try:
+        response = call_llm_json(prompt, tier="scan", schema=_PROPOSER_SCHEMA)
+    except Exception as e:
+        logger.warning("Proposer LLM call failed for %s: %s", stub.get("page_id"), e)
+        return {"action": "abstain", "reason": f"proposer LLM error: {type(e).__name__}"}
+
+    action = response.get("action")
+    if action == "abstain":
+        return {"action": "abstain", "reason": response.get("reason", "abstained")}
+    if action != "propose":
+        return {"action": "abstain", "reason": f"unexpected action: {action!r}"}
+
+    raw_urls = response.get("urls") or []
+    filtered: list[str] = []
+    for u in raw_urls:
+        if _url_is_allowed(u):
+            filtered.append(u)
+        else:
+            rd = _registered_domain(u)
+            logger.info("Dropping off-allowlist proposed URL: %s (domain=%s)", u, rd)
+
+    if not filtered:
+        return {"action": "abstain", "reason": "no allowlisted URLs in proposer response"}
+
+    return {
+        "action": "propose",
+        "urls": filtered,
+        "rationale": response.get("rationale", ""),
+    }
+
+
+def _url_is_allowed(url: str) -> bool:
+    """Return True if URL's host matches AUGMENT_ALLOWED_DOMAINS.
+
+    Match rule: either the registered domain (eTLD+1) OR the full netloc must
+    equal an allowlist entry, OR the netloc must be a subdomain of an allowlist
+    entry (e.g., "en.wikipedia.org" allows "xx.en.wikipedia.org"). This lets
+    the allowlist use narrow entries like "en.wikipedia.org" without requiring
+    eTLD+1 matching, and still accepts "arxiv.org" directly.
+    """
+    try:
+        netloc = urlparse(url).netloc.lower()
+    except (ValueError, AttributeError):
+        return False
+    if not netloc:
+        return False
+    # Strip userinfo/port
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[1]
+    if ":" in netloc:
+        netloc = netloc.rsplit(":", 1)[0]
+    rd = _registered_domain(url)
+    rd_lower = rd.lower() if rd else None
+    for d in AUGMENT_ALLOWED_DOMAINS:
+        dl = d.lower()
+        if netloc == dl or netloc.endswith("." + dl):
+            return True
+        if rd_lower and rd_lower == dl:
+            return True
+    return False
