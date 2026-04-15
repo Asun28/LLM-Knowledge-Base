@@ -3,7 +3,6 @@ import socket
 from unittest.mock import patch
 
 import httpcore
-import httpx
 import pytest
 
 

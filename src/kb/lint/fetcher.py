@@ -197,7 +197,12 @@ def _secret_scan(text: str) -> tuple[str, str] | None:
 
 
 class AugmentFetcher:
-    """One-instance-per-run HTTP fetcher with DNS-rebind-safe transport, allowlists, and content extraction."""
+    """One-instance-per-run HTTP fetcher.
+
+    Combines DNS-rebind-safe transport, scheme/domain/content-type allowlists,
+    stream-with-size-cap, trafilatura markdown extraction, secret scanning on
+    the extracted view, and optional robots.txt enforcement.
+    """
 
     def __init__(self, *, allowed_domains: tuple[str, ...], version: str):
         from kb.config import (
