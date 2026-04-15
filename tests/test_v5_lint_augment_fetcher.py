@@ -179,3 +179,83 @@ def test_fetch_happy_path_html(httpx_mock):
     assert r.status == "ok"
     assert r.bytes == len(html)
     assert "Real content here." in r.extracted_markdown
+
+
+def test_secret_scan_rejects_aws_key_in_prose(httpx_mock):
+    # split-string, real-looking pattern — never a committed secret
+    aws_key = "AKIA" + "ABCDEFGHIJKLMNOP"
+    body = (
+        f"<html><body><article>The leaked key is {aws_key} "
+        "and it is documented in this article with enough surrounding context "
+        "to survive trafilatura's boilerplate stripper.</article></body></html>"
+    )
+    httpx_mock.add_response(
+        url="https://example.com/leak",
+        headers={"content-type": "text/html"},
+        content=body.encode(),
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/leak")
+    assert r.status == "blocked"
+    assert "secret" in r.reason.lower()
+
+
+def test_secret_scan_allows_aws_key_in_code_fence(httpx_mock):
+    # split, in markdown fence — code-strip should allow this through
+    aws_key = "AKIA" + "EXAMPLEEXAMPLEXX"
+    body_md = (
+        "# IAM tutorial\n\n"
+        "Here is a long explanatory paragraph about IAM access keys "
+        "so trafilatura has enough text to treat this as the main article "
+        "and not strip it as boilerplate noise around a short snippet.\n\n"
+        f"```python\nclient = boto3.client(aws_access_key_id='{aws_key}')\n```\n\n"
+        "This is documentation. The example above uses a fictitious key."
+    )
+    body_html = f"<html><body><article>{body_md}</article></body></html>"
+    httpx_mock.add_response(
+        url="https://example.com/iam-doc",
+        headers={"content-type": "text/html"},
+        content=body_html.encode(),
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/iam-doc")
+    # Code-block-strip should make the AWS-regex sweep miss this
+    assert r.status == "ok", f"expected ok but got {r.status}: {r.reason}"
+
+
+def test_secret_scan_rejects_postgres_dsn(httpx_mock):
+    body = (
+        b"<html><body><article>"
+        b"Use postgresql://admin:supersecret@db.internal.example/mydb to connect. "
+        b"This walkthrough explains how to set up the connection pool "
+        b"and includes enough narrative for trafilatura to recognize it."
+        b"</article></body></html>"
+    )
+    httpx_mock.add_response(
+        url="https://example.com/dsn",
+        headers={"content-type": "text/html"},
+        content=body,
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/dsn")
+    assert r.status == "blocked"
+
+
+def test_secret_scan_rejects_npm_authtoken(httpx_mock):
+    token = "abcdefghij" + "0123456789ABCDEFG_-"
+    body = (
+        "<html><body><article>"
+        "Add to .npmrc:\n"
+        f"//registry.npmjs.org/:_authToken={token}\n"
+        "This enables authenticated npm publish for your package. "
+        "The _authToken above is pulled from your npm account settings."
+        "</article></body></html>"
+    )
+    httpx_mock.add_response(
+        url="https://example.com/npm",
+        headers={"content-type": "text/html"},
+        content=body.encode(),
+    )
+    f = _build_fetcher()
+    r = f.fetch("https://example.com/npm")
+    assert r.status == "blocked"

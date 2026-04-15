@@ -168,6 +168,33 @@ def _registered_domain(url: str) -> str | None:
         return None
 
 
+def _strip_code_for_scan(text: str) -> str:
+    """Strip fenced code blocks + inline code spans for secret scanning purposes only.
+
+    The original text is preserved for output; this helper returns a code-stripped
+    *view* used solely as input to regex sweeps. Documentation pages (e.g.,
+    Wikipedia IAM articles) often contain example AKIA-prefix strings inside
+    code fences - we don't want to reject the whole fetch over that.
+    """
+    # Strip fenced code blocks (``` ... ```)
+    no_fenced = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    # Strip inline code spans (`...`)
+    no_inline = re.sub(r"`[^`\n]+`", "", no_fenced)
+    return no_inline
+
+
+def _secret_scan(text: str) -> tuple[str, str] | None:
+    """Return (label, matched_snippet) on first hit, None if clean."""
+    from kb.capture import _CAPTURE_SECRET_PATTERNS
+
+    code_stripped = _strip_code_for_scan(text)
+    for label, pattern in _CAPTURE_SECRET_PATTERNS:
+        m = pattern.search(code_stripped)
+        if m:
+            return label, m.group(0)[:80]
+    return None
+
+
 class AugmentFetcher:
     """One-instance-per-run HTTP fetcher with DNS-rebind-safe transport, allowlists, and content extraction."""
 
@@ -330,6 +357,20 @@ class AugmentFetcher:
 
         # 9. Strip HTML comments defensively (trafilatura usually does, but fenced for safety)
         markdown = re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
+
+        # 10. Secret scan on code-stripped view (preserve original markdown)
+        leak = _secret_scan(markdown)
+        if leak is not None:
+            label, snippet = leak
+            return FetchResult(
+                status="blocked",
+                content=None,
+                extracted_markdown=None,
+                content_type=ctype,
+                bytes=total,
+                reason=f"secret pattern detected: {label} (snippet: {snippet!r})",
+                url=final_url,
+            )
 
         return FetchResult(
             status="ok",
