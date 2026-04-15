@@ -224,55 +224,94 @@ If score < 0.5, gap is marked `failed: topic_drift`, raw file is NOT saved, verd
 
 The key security property is: **the IP we connect to is the same IP our pre-flight allowed.**
 
+**Correction (Context7, 2026-04-15):** the original sketch subclassed `httpcore.HTTPConnection._open_stream` — that is a **private** method and may break across httpcore minor versions. The documented public extension point in httpcore 1.x is a custom `NetworkBackend` subclass overriding `connect_tcp(host, port, timeout, …)`. We use that.
+
 ```python
-# src/kb/lint/fetcher.py (sketch — full implementation ~80 LOC)
+# src/kb/lint/fetcher.py (sketch — full implementation ~90 LOC)
 import ipaddress
 import socket
+import ssl
 import httpx
 import httpcore
+from httpcore.backends.sync import SyncBackend
 
 
-class SafeConnection(httpcore.HTTPConnection):
-    """Subclass httpcore.HTTPConnection to intercept the connect() call."""
+class SafeBackend(SyncBackend):
+    """httpcore NetworkBackend that pre-validates resolved IPs against
+    private/loopback/link-local/reserved ranges before connecting.
 
-    def _open_stream(self, timeout: httpcore.TimeoutDict) -> httpcore.NetworkStream:
-        host = self._origin.host.decode("ascii")
-        port = self._origin.port or (443 if self._origin.scheme == b"https" else 80)
+    Also defeats DNS rebinding by connecting to the *resolved IP* directly
+    (preserving the SNI / Host: header for the original hostname). This means
+    the OS-level TCP connect cannot be redirected to a private IP after our
+    pre-flight check.
+    """
 
-        # 1. Resolve once.
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        # 2. Validate EVERY returned address.
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: list | None = None,
+    ) -> httpcore.NetworkStream:
+        # 1. Resolve all addresses for the host.
+        try:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise httpcore.ConnectError(f"DNS resolution failed for {host}: {e}") from e
+
+        # 2. Reject if ANY resolved address is private/loopback/link-local/reserved.
+        # (Strict: even one private IP in the RR-set means we don't trust the host.)
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise httpx.ConnectError(f"Blocked private/reserved address {ip} for host {host}")
+                raise httpcore.ConnectError(
+                    f"Blocked private/reserved address {ip} for host {host}"
+                )
+
         # 3. Connect to the first validated IP directly (by-IP) — no re-resolution.
         first_ip = infos[0][4][0]
-        sock = socket.create_connection((first_ip, port), timeout=timeout.get("connect", 5.0))
-        # 4. For HTTPS, SNI/cert verify against the hostname (preserves TLS correctness).
-        if self._origin.scheme == b"https":
-            import ssl
-            ctx = ssl.create_default_context()
-            sock = ctx.wrap_socket(sock, server_hostname=host)
-        return httpcore.NetworkStream(sock)
+        sock = socket.create_connection((first_ip, port), timeout=timeout or 5.0)
+
+        # 4. For HTTPS, wrap with TLS using the *original hostname* for SNI/cert verify.
+        # This preserves TLS correctness while connecting by IP.
+        # The caller (httpx) supplies `host` which is the unmodified original host.
+        # The Host: header is set by httpx from the request URL, also unchanged.
+        return httpcore.backends.sync.SyncStream(sock)
 
 
 class SafeTransport(httpx.HTTPTransport):
-    """httpx HTTPTransport that routes through SafeConnection."""
-    # ~30 LOC: override _dispatcher.get_connection to return SafeConnection.
+    """httpx HTTPTransport with the safe network backend wired in.
+
+    Constructor mirrors httpx.HTTPTransport but injects SafeBackend into the
+    underlying httpcore.ConnectionPool.
+    """
+
+    def __init__(self, *, verify=True, retries=0, **kwargs):
+        super().__init__(verify=verify, retries=retries, **kwargs)
+        # Replace the auto-created pool's network_backend with SafeBackend.
+        # (httpx 0.28 stores the pool at self._pool.)
+        self._pool._network_backend = SafeBackend()
 
 
-def build_client() -> httpx.Client:
+def build_client(__version__: str) -> httpx.Client:
     return httpx.Client(
         transport=SafeTransport(),
         timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
-        headers={"User-Agent": f"LLM-WikiFlywheel/{kb.__version__} (+https://github.com/Asun28/llm-wiki-flywheel)"},
+        headers={
+            "User-Agent": (
+                f"LLM-WikiFlywheel/{__version__} "
+                "(+https://github.com/Asun28/llm-wiki-flywheel)"
+            )
+        },
         follow_redirects=True,
         max_redirects=10,
     )
 ```
 
-Test coverage: dedicated regression with a `SocketMock` that returns PUBLIC IP on the first `getaddrinfo` and PRIVATE IP on the second — passes with bare httpx, fails with `SafeTransport`.
+**Test coverage:** dedicated regression with a `monkeypatch`ed `socket.getaddrinfo` that returns PUBLIC IP on the first call and PRIVATE IP on the second — passes with `SafeBackend` (rejects on the second resolution attempt, since we connect by-IP and never re-resolve), fails with bare httpx (which re-resolves at OS connect time).
+
+**HTTPS note:** wrapping for TLS is done by httpcore's built-in TLS layer based on the original hostname; we don't need to call `ssl.wrap_socket` ourselves. The `host` arg passed into `connect_tcp` is the original hostname, unchanged.
 
 ### 7.2 Scheme allowlist
 
@@ -319,13 +358,41 @@ with client.stream("GET", url) as response:
 
 Connect 5s, read 30s. On `httpx.ReadError` / `httpx.RemoteProtocolError` / partial-body exception: single retry with 2s backoff, max 2 attempts total. Aligns with `_make_api_call` pattern in `kb.utils.llm`.
 
+**Also catch `httpx.TooManyRedirects`** (Context7, 2026-04-15) — raised when `max_redirects=10` is exceeded; classify as `failed` not `blocked`, no retry.
+
 ### 7.8 robots.txt
 
-Advisory in `propose` mode, **blocking** in `--execute` mode. Use `urllib.robotparser.RobotFileParser`; cache per-host for the duration of the run; UA continues to identify as `LLM-WikiFlywheel/...`.
+Advisory in `propose` mode, **blocking** in `--execute` mode. Cached per-host for the duration of the run; UA continues to identify as `LLM-WikiFlywheel/...`.
+
+**Correction (Context7, 2026-04-15):** `RobotFileParser().read()` issues its OWN HTTP fetch via `urllib.request.urlopen`, which **bypasses our `SafeTransport`** — that's an SSRF hole. Instead, fetch `/robots.txt` through `AugmentFetcher.fetch()` (which routes through `SafeTransport`) and feed the bytes into the parser directly:
+
+```python
+from urllib.robotparser import RobotFileParser
+
+def _check_robots(fetcher: AugmentFetcher, url: str, ua: str) -> bool:
+    """Returns True if fetch is allowed."""
+    parsed = urlparse(url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    try:
+        result = fetcher.fetch(robots_url, respect_robots=False)  # avoid recursion
+    except Exception:
+        return True  # robots.txt unavailable → allow (advisory)
+    if result.status != "ok" or not result.content:
+        return True
+    rp = RobotFileParser()
+    rp.parse(result.content.splitlines())
+    return rp.can_fetch(ua, url)
+```
+
+The `respect_robots=False` flag on the inner `fetcher.fetch` call breaks the recursion loop while still routing through `SafeTransport`'s IP allowlist + size cap + content-type check.
 
 ### 7.9 Rate limiting
 
 File: `.data/augment_rate.json`. Schema:
+
+**File-lock note (Context7, 2026-04-15):** on Windows, `msvcrt.locking(fd, LK_NBLCK, nbytes)` requires `nbytes > 0` and is region-based (locks from the current file pointer). Before locking, `os.lseek(fd, 0, 0)` and lock 1 byte (`msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)`). On POSIX, `fcntl.flock(fd, fcntl.LOCK_EX)` is whole-file and advisory-only — both processes must call `flock` for it to work. The shared `kb/utils/io.py::file_lock` helper already handles this; reuse it directly.
+
+
 ```json
 {
   "schema": 1,
