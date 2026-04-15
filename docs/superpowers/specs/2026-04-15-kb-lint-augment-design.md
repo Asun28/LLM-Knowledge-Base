@@ -181,7 +181,7 @@ Augment only considers `stub_pages` from `check_stub_pages`. A stub enters the c
 
 Gates G1–G4, G6, G7 are hard pre-LLM filters (zero cost). G5 is softened into a proposer-context input because scope is fuzzy and rigid filtering would reject legitimately-niche subjects.
 
-After all gates pass: the stub becomes a **gap candidate**. Augment caps at `max_gaps` (default 5) — first-N-by-PageRank descending (high-authority pages first, consistent with the "high-impact first" thesis already present in `kb_evolve`).
+After all gates pass: the stub becomes a **gap candidate**. Augment caps at `max_gaps` (default 5) by taking the first N eligible candidates in the order produced by the eligibility pass (which iterates `check_stub_pages` results plus G1-G7 filtering — stable but not PageRank-weighted). PageRank ordering was considered for high-impact prioritization but deferred as YAGNI; the eligibility pass already biases toward pages with confirmed inbound links via gate G2.
 
 ---
 
