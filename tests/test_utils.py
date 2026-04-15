@@ -18,16 +18,13 @@ from kb.utils.wiki_log import append_wiki_log
         ("  Spaces  and---dashes  ", "spaces-and-dashes"),
         ("CamelCase Test", "camelcase-test"),
         ("special!@#$%chars", "specialchars"),
-        ("", ""),
-        ("!!!", ""),
-        ("---", ""),
         ("a", "a"),
         ("UPPER CASE", "upper-case"),
         ("under_score", "under-score"),
         ("multiple   spaces", "multiple-spaces"),
         ("trailing-dash-", "trailing-dash"),
         ("-leading-dash", "leading-dash"),
-        ("日本語テスト", ""),  # non-ASCII chars stripped by re.ASCII flag
+        ("日本語テスト", "日本語テスト"),  # CJK preserved after dropping re.ASCII (item 11)
         ("mixed 123 numbers", "mixed-123-numbers"),
     ],
 )

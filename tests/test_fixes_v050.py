@@ -232,10 +232,11 @@ def test_config_constants_exist():
 
 
 def test_slugify_empty_input():
-    """slugify returns empty string for punctuation-only input."""
-    assert slugify("...") == ""
-    assert slugify("!!!") == ""
-    assert slugify("") == ""
+    """slugify falls back to untitled-<hash> for punct/empty inputs (item 11 fix: no empty slug)."""
+    # After item-11 fix, slugify never returns empty — pure-punct/empty → untitled-<hash>
+    assert slugify("...").startswith("untitled-")
+    assert slugify("!!!").startswith("untitled-")
+    assert slugify("").startswith("untitled-")
 
 
 def test_slugify_normal():

@@ -98,6 +98,7 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     from different file paths. Skips template entries. Only flags as
     duplicate if the other source file still exists on disk.
     """
+    # TODO(phase-4.5-high): wrap load_manifest→mutate→save_manifest in file_lock(manifest_path); CRITICAL fix removed the double-write, single-writer RMW race remains  # noqa: E501
     try:
         # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
         from kb.compile.compiler import load_manifest
@@ -301,9 +302,7 @@ def _update_existing_page(
     else:
         # Fix 2.9: warn and return early — falling back to full-file treatment risks
         # corrupting body text that contains "updated: ..." patterns.
-        logger.warning(
-            "Could not parse frontmatter block in %s; skipping update", page_path
-        )
+        logger.warning("Could not parse frontmatter block in %s; skipping update", page_path)
         return
 
     # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
@@ -363,9 +362,7 @@ def _update_existing_page(
 
     # Fix 2.1: Use atomic write
     atomic_text_write(content, page_path)
-    append_evidence_trail(
-        page_path, source_ref, f"{verb} in new source — source reference added"
-    )
+    append_evidence_trail(page_path, source_ref, f"{verb} in new source — source reference added")
 
 
 def _update_sources_mapping(
@@ -593,9 +590,9 @@ def ingest_source(
             "pages_updated": [],
             "pages_skipped": [],
             "duplicate": True,
-            "affected_pages": [],       # fix item 6: contract key always present
-            "wikilinks_injected": [],   # fix item 6: contract key always present
-            "contradictions": [],       # fix item 6: contract key always present
+            "affected_pages": [],  # fix item 6: contract key always present
+            "wikilinks_injected": [],  # fix item 6: contract key always present
+            "contradictions": [],  # fix item 6: contract key always present
         }
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
@@ -776,9 +773,7 @@ def ingest_source(
                             block += f"- {claim}\n"
                         atomic_text_write(existing + block, WIKI_CONTRADICTIONS)
                     except Exception as write_err:
-                        logger.warning(
-                            "Failed to write contradictions.md: %s", write_err
-                        )
+                        logger.warning("Failed to write contradictions.md: %s", write_err)
             except Exception as e:
                 logger.debug("Contradiction detection failed (non-fatal): %s", e)
 

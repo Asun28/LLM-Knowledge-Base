@@ -71,29 +71,33 @@ def file_lock(path: Path, timeout: float = 5.0):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     my_pid_bytes = str(os.getpid()).encode()
     deadline = time.monotonic() + timeout
-    while True:
-        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, my_pid_bytes)
-            os.close(fd)
-            break
-        except (FileExistsError, PermissionError):
-            if time.monotonic() > deadline:
-                # Stale lock — verify the recorded PID is no longer running
-                try:
-                    stale_pid = int(lock_path.read_text().strip())
-                    os.kill(stale_pid, 0)  # Raises ProcessLookupError if dead
-                    raise TimeoutError(
-                        f"Lock {lock_path} held by running PID {stale_pid}. "
-                        "Stop that process or delete the lock file."
-                    )
-                except (ValueError, OSError):
-                    pass  # PID unreadable or process dead — safe to steal
-                lock_path.unlink(missing_ok=True)
-                time.sleep(0.05)
-                continue
-            time.sleep(0.05)
+    acquired = False
     try:
+        while not acquired:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                # Lock file now exists on disk; mark it so finally always cleans up.
+                acquired = True
+                try:
+                    os.write(fd, my_pid_bytes)
+                finally:
+                    os.close(fd)
+            except (FileExistsError, PermissionError):
+                if time.monotonic() > deadline:
+                    try:
+                        stale_pid = int(lock_path.read_text().strip())
+                        os.kill(stale_pid, 0)
+                        raise TimeoutError(
+                            f"Lock {lock_path} held by running PID {stale_pid}. "
+                            "Stop that process or delete the lock file."
+                        )
+                    except (ValueError, OSError):
+                        pass
+                    lock_path.unlink(missing_ok=True)
+                    time.sleep(0.05)
+                    continue
+                time.sleep(0.05)
         yield
     finally:
-        lock_path.unlink(missing_ok=True)
+        if acquired:
+            lock_path.unlink(missing_ok=True)

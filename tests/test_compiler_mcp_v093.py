@@ -51,8 +51,12 @@ def test_compile_manifest_not_saved_on_error(tmp_path):
     )
 
 
-def test_compile_manifest_saved_on_success(tmp_path):
-    """When ingest_source succeeds, the manifest MUST record the source hash."""
+def test_compile_reports_pages_on_success(tmp_path):
+    """When ingest_source succeeds, compile_wiki reports pages created.
+
+    After item-14 fix, per-source hash recording is ingest_source's responsibility.
+    This test verifies compile ran and returned correct page lists.
+    """
     # Create a raw source file
     raw_dir = tmp_path / "raw"
     articles_dir = raw_dir / "articles"
@@ -87,9 +91,12 @@ def test_compile_manifest_saved_on_success(tmp_path):
 
     assert result["sources_processed"] == 1
     assert result["pages_created"] == ["summaries/test-ok"]
+    # After item-14 fix: per-source hashes are saved by ingest_source (real), not compiler loop.
+    # Full-mode compile still saves template hashes in manifest:
     manifest = load_manifest(manifest_path)
-    source_keys = [k for k in manifest if not k.startswith("_template/")]
-    assert any("test-ok.md" in k for k in source_keys)
+    assert any(k.startswith("_template/") for k in manifest), (
+        "full-mode compile should persist template hashes"
+    )
 
 
 # ── Fix 2: kb_compile MCP tool ──────────────────────────────────

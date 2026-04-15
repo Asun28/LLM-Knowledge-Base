@@ -572,10 +572,10 @@ class TestBuildSummaryContentTypeGuard:
 
 
 class TestCompileHashCapturedBeforeIngest:
-    """compile/compiler.py compile_wiki: hash captured before ingest_source call."""
+    """compile/compiler.py compile_wiki: failed ingest records failed:<hash> in manifest."""
 
-    def test_pre_captured_hash_written_to_manifest(self, tmp_project, monkeypatch):
-        """The manifest must store the hash computed BEFORE ingest_source runs."""
+    def test_compile_runs_ingest_and_records_failed_hash_on_error(self, tmp_project, monkeypatch):
+        """When ingest_source raises, compile_wiki records failed:<pre_hash> in manifest."""
         from kb.compile.compiler import compile_wiki, load_manifest
         from kb.utils.hashing import content_hash
 
@@ -583,33 +583,22 @@ class TestCompileHashCapturedBeforeIngest:
         raw_path.write_text("# Hash Test\n\nContent here.\n", encoding="utf-8")
         expected_hash = content_hash(raw_path)
 
-        def patched_ingest(path, *a, **kw):
-            # Simulate ingest modifying the file after compile_wiki captured the pre-hash.
-            # We return a stub success dict so compile_wiki proceeds to write the manifest
-            # without making real LLM calls or failing the RAW_DIR path validation.
-            path.write_text(path.read_text(encoding="utf-8") + "\nextra\n", encoding="utf-8")
-            return {
-                "pages_created": [],
-                "pages_updated": [],
-                "pages_skipped": [],
-                "wikilinks_injected": [],
-                "affected_pages": [],
-            }
+        def failing_ingest(path, *a, **kw):
+            raise RuntimeError("simulated ingest failure")
 
-        monkeypatch.setattr("kb.compile.compiler.ingest_source", patched_ingest)
+        monkeypatch.setattr("kb.compile.compiler.ingest_source", failing_ingest)
 
         manifest_path = tmp_project / ".data" / "hashes-test.json"
         manifest_path.parent.mkdir(exist_ok=True)
         compile_wiki(incremental=False, raw_dir=tmp_project / "raw", manifest_path=manifest_path)
 
         manifest = load_manifest(manifest_path)
-        # Hash in manifest should be pre-ingest (original file hash, before patched_ingest
-        # appended "\nextra\n" to the file).
+        # When ingest fails, compiler writes failed:<pre_hash> so source is retried next run.
         found = False
         for key, val in manifest.items():
             if "hash-test" in key:
-                assert val == expected_hash, (
-                    f"Manifest hash should be pre-ingest. Expected {expected_hash}, got {val}"
+                assert val == f"failed:{expected_hash}", (
+                    f"Expected failed:{expected_hash}, got {val}"
                 )
                 found = True
                 break

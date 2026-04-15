@@ -215,3 +215,52 @@ def test_build_backlinks_empty(tmp_wiki):
     """build_backlinks returns empty dict for empty wiki."""
     backlinks = build_backlinks(tmp_wiki)
     assert backlinks == {}
+
+
+def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
+    """Regression: Phase 4.5 CRITICAL item 14.
+
+    Per-loop manifest save duplicated inner ingest save.
+    """
+    import kb.compile.compiler as compiler_mod
+    from kb.compile.compiler import compile_wiki
+
+    call_count = {"save_manifest": 0}
+    real_save = compiler_mod.save_manifest
+
+    def counting_save(manifest, path=None):
+        call_count["save_manifest"] += 1
+        return real_save(manifest, path)
+
+    monkeypatch.setattr(compiler_mod, "save_manifest", counting_save)
+
+    raw_dir = tmp_project / "raw"
+    (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+    (raw_dir / "articles" / "one.md").write_text("# One\nbody.", encoding="utf-8")
+    manifest_path = tmp_project / ".data" / "hashes_test.json"
+
+    # Stub out ingest_source entirely to avoid LLM calls
+    monkeypatch.setattr(
+        compiler_mod,
+        "ingest_source",
+        lambda *a, **k: {
+            "pages_created": ["summaries/one"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": [],
+        },
+    )
+
+    wiki_dir = tmp_project / "wiki"
+    with patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"):
+        compile_wiki(
+            raw_dir=raw_dir,
+            wiki_dir=wiki_dir,
+            manifest_path=manifest_path,
+            incremental=True,
+        )
+
+    assert call_count["save_manifest"] == 1, (
+        f"manifest saved {call_count['save_manifest']}x per source; expected 1"
+    )

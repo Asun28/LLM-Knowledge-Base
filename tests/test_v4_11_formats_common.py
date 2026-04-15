@@ -23,9 +23,11 @@ def test_safe_slug_plain():
 
 
 def test_safe_slug_empty_fallback():
+    # empty string → safe_slug bypasses slugify → returns bare "untitled"
     assert safe_slug("") == "untitled"
-    assert safe_slug("?!?") == "untitled"
-    assert safe_slug("🔥🔥🔥") == "untitled"
+    # pure-symbol / emoji → slugify now returns "untitled-<hash>" (item-11 fix)
+    assert safe_slug("?!?").startswith("untitled")
+    assert safe_slug("🔥🔥🔥").startswith("untitled")
 
 
 def test_safe_slug_length_cap():

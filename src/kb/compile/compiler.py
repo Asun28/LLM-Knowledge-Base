@@ -340,11 +340,6 @@ def compile_wiki(
             if ingest_result.get("duplicate"):
                 results["duplicates"] += 1
 
-            # Reload manifest from disk before overwriting — avoid clobbering concurrent writes
-            manifest = load_manifest(manifest_path)
-            # Store pre-ingest hash and save immediately (crash-safe)
-            manifest[rel_path] = pre_hash
-            save_manifest(manifest, manifest_path)
             processed_count += 1
         except Exception as e:
             logger.exception("compile_wiki: ingest failed for %s", source)
@@ -358,25 +353,22 @@ def compile_wiki(
             except Exception as inner_exc:
                 logger.warning("Failed to record failed hash for %s: %s", source, inner_exc)
 
-    # Save template hashes (reload manifest first to preserve per-source hashes
-    # written during the loop, then merge template hashes).
-    # In incremental mode, find_changed_sources already wrote template hashes;
-    # only recompute them in full mode where find_changed_sources was not called.
-    # Skip the save entirely in incremental mode when nothing was processed — there
-    # is no new information to persist and the unnecessary write wastes I/O.
-    if not incremental or processed_count > 0:
+    # Save template hashes only in full mode.
+    # In incremental mode, find_changed_sources already wrote template hashes and
+    # ingest_source already persisted per-source hashes — no additional save needed.
+    if not incremental:
         current_manifest = load_manifest(manifest_path)
-        if not incremental:
-            current_manifest.update(_template_hashes())
-            # Prune manifest entries for sources that no longer exist on disk
-            stale_keys = [
-                k for k in current_manifest
-                if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
-            ]
-            if stale_keys:
-                for k in stale_keys:
-                    del current_manifest[k]
-                logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
+        current_manifest.update(_template_hashes())
+        # Prune manifest entries for sources that no longer exist on disk
+        stale_keys = [
+            k
+            for k in current_manifest
+            if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
+        ]
+        if stale_keys:
+            for k in stale_keys:
+                del current_manifest[k]
+            logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
         save_manifest(current_manifest, manifest_path)
 
     # Append to log
