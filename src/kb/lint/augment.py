@@ -706,6 +706,14 @@ def run_augment(
             {"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals
         ]
 
+    # G6 cooldown writeback — every stub we examined this run gets a
+    # last_augment_attempted stamp so the next run's cooldown gate can
+    # skip it until AUGMENT_COOLDOWN_HOURS elapses. Skipped on dry_run
+    # (a preview should not alter pages).
+    if not dry_run:
+        for stub in eligible:
+            _record_attempt(wiki_dir / f"{stub['page_id']}.md")
+
     summary_lines = [f"## Augment Summary (run {run_id[:8]}, mode={mode})"]
     summary_lines.append(f"- Stubs examined: {len(eligible)}")
     summary_lines.append(
@@ -759,7 +767,30 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     )
     if "[!augmented]" not in post.content:
         post.content = callout + post.content
-    page_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    atomic_text_write(frontmatter.dumps(post), page_path)
+
+
+def _record_attempt(stub_path: Path) -> None:
+    """Stamp ``last_augment_attempted`` into the stub page's frontmatter.
+
+    Called at the end of every per-stub iteration regardless of outcome
+    (propose, abstain, fetch-fail, rate-limit, ingest-fail, success) so the
+    G6 cooldown gate (_collect_eligible_stubs) can honour its
+    AUGMENT_COOLDOWN_HOURS window on the next run.
+
+    Errors are logged and swallowed — failing to record a cooldown stamp
+    should never abort the overall augment run.
+    """
+    if not stub_path.exists():
+        return
+    try:
+        post = frontmatter.load(str(stub_path))
+        post.metadata["last_augment_attempted"] = (
+            datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        )
+        atomic_text_write(frontmatter.dumps(post), stub_path)
+    except Exception as e:
+        logger.warning("Failed to record last_augment_attempted for %s: %s", stub_path, e)
 
 
 def _post_ingest_quality(*, page_path: Path, wiki_dir: Path) -> tuple[str, str]:

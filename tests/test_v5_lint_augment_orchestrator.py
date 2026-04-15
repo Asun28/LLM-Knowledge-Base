@@ -769,3 +769,90 @@ def test_post_ingest_quality_fails_when_still_stub(tmp_project, create_wiki_page
     verdict, reason = _post_ingest_quality(page_path=page_path, wiki_dir=wiki_dir)
     assert verdict == "fail"
     assert "stub" in reason.lower()
+
+
+# ── G6 cooldown writeback regression ────────────────────────────
+
+
+def test_g6_cooldown_writeback_after_propose_attempt(tmp_project, create_wiki_page):
+    """Every eligible stub examined by run_augment gets last_augment_attempted.
+
+    Without this writeback the G6 cooldown gate was inoperative — the same
+    stub would be retried every run, bypassing AUGMENT_COOLDOWN_HOURS.
+    """
+    import frontmatter as _fm
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/mixture-of-experts", title="MoE")
+    create_wiki_page(
+        page_id="entities/transformer",
+        title="Transformer",
+        content="See [[concepts/mixture-of-experts]] for routing. " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+
+    # _record_attempt stamps at second precision; subtract a second
+    # of wall-clock tolerance so the test is not flakey.
+    from datetime import timedelta as _td
+    before = _dt.now(_UTC).replace(microsecond=0) - _td(seconds=1)
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value={"action": "abstain", "reason": "testing"},
+    ):
+        run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=tmp_project / "raw",
+            mode="propose",
+            max_gaps=5,
+        )
+
+    page_path = wiki_dir / "concepts" / "mixture-of-experts.md"
+    post = _fm.load(str(page_path))
+    stamped = post.metadata.get("last_augment_attempted")
+    assert stamped, "last_augment_attempted must be written after augment attempt"
+    # Parse the ISO stamp (may be str after YAML round-trip)
+    if isinstance(stamped, _dt):
+        stamped_dt = stamped if stamped.tzinfo else stamped.replace(tzinfo=_UTC)
+    else:
+        stamped_dt = _dt.fromisoformat(str(stamped).replace("Z", "+00:00"))
+    assert stamped_dt >= before
+
+
+def test_g6_cooldown_writeback_skipped_on_dry_run(tmp_project, create_wiki_page):
+    """Dry-run mode is a preview and must not mutate the stub page."""
+    import frontmatter as _fm
+
+    from kb.lint.augment import run_augment
+
+    wiki_dir = tmp_project / "wiki"
+    _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
+    create_wiki_page(
+        page_id="entities/linker",
+        title="Linker",
+        content="Reference [[concepts/x]] here. " * 5,
+        wiki_dir=wiki_dir,
+        page_type="entity",
+    )
+
+    with patch(
+        "kb.lint.augment.call_llm_json",
+        return_value={"action": "abstain", "reason": "dry"},
+    ):
+        run_augment(
+            wiki_dir=wiki_dir,
+            raw_dir=tmp_project / "raw",
+            mode="propose",
+            max_gaps=5,
+            dry_run=True,
+        )
+
+    page_path = wiki_dir / "concepts" / "x.md"
+    post = _fm.load(str(page_path))
+    assert "last_augment_attempted" not in post.metadata, (
+        "dry-run must not write cooldown stamp"
+    )
