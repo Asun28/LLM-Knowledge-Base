@@ -223,3 +223,54 @@ def test_ingest_source_does_not_mutate_prod_contradictions(mock_extract, tmp_pat
     assert prod_mtime_before == prod_mtime_after, (
         "Production wiki/contradictions.md was mutated by test — WIKI_CONTRADICTIONS not sandboxed"
     )
+
+
+def test_ingest_duplicate_branch_returns_all_contract_keys(tmp_path, monkeypatch):
+    """Regression: Phase 4.5 CRITICAL item 6 — duplicate early-return omitted contract keys."""
+    from kb.ingest import pipeline
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+    source = raw_dir / "articles" / "dup-test.md"
+    source.write_text("# Duplicate test\nBody content.", encoding="utf-8")
+
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    (wiki_dir / "contradictions.md").touch()
+    (wiki_dir / "index.md").write_text(
+        "---\ntitle: Wiki Index\nupdated: 2026-04-06\n---\n\n# Knowledge Base Index\n\n"
+        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
+        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
+        "## Synthesis\n\n*No pages yet.*\n"
+    )
+    (wiki_dir / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nupdated: 2026-04-06\n---\n\n# Source Mapping\n"
+    )
+
+    extraction = {"title": "Dup", "summary": "s", "entities_mentioned": []}
+
+    # Force duplicate branch unconditionally — we test the return-dict shape, not detection logic.
+    monkeypatch.setattr(pipeline, "_is_duplicate_content", lambda *_: True)
+
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
+        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
+    ):
+        result = pipeline.ingest_source(
+            source_path=source, wiki_dir=wiki_dir, extraction=extraction
+        )
+
+    assert result.get("duplicate") is True, f"expected duplicate=True: {result}"
+    required_keys = {"affected_pages", "wikilinks_injected", "contradictions"}
+    missing = required_keys - set(result.keys())
+    assert not missing, f"duplicate branch missing keys: {missing}; full result: {result}"
+    assert result["affected_pages"] == []
+    assert result["wikilinks_injected"] == []
+    assert result["contradictions"] == []

@@ -529,11 +529,12 @@ def ingest_source(
             summary-only processing (no entity/concept pages).
 
     Returns:
-        dict with keys:
+        dict with guaranteed keys:
             source_path, source_type, content_hash, pages_created, pages_updated,
-            pages_skipped, affected_pages, wikilinks_injected.
-            Also includes ``duplicate: True`` (and omits affected_pages) when the
-            source has identical content to an already-ingested file.
+            pages_skipped, affected_pages, wikilinks_injected, contradictions.
+            Also includes ``duplicate: True`` when the source has identical content
+            to an already-ingested file (all contract keys still present, as empty
+            lists for affected_pages / wikilinks_injected / contradictions).
     """
     source_path = Path(source_path).resolve()
     if not source_path.exists():
@@ -592,6 +593,9 @@ def ingest_source(
             "pages_updated": [],
             "pages_skipped": [],
             "duplicate": True,
+            "affected_pages": [],       # fix item 6: contract key always present
+            "wikilinks_injected": [],   # fix item 6: contract key always present
+            "contradictions": [],       # fix item 6: contract key always present
         }
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR

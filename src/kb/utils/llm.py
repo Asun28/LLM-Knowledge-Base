@@ -260,13 +260,21 @@ def call_llm_json(
 
     response = _make_api_call(kwargs, model)
     for block in response.content:
-        if block.type == "tool_use":
+        if getattr(block, "type", None) == "tool_use":
             if block.name != tool_name:
                 raise LLMError(
                     f"Wrong tool in response from {model}: "
                     f"expected '{tool_name}', got '{block.name}'"
                 )
             return block.input
+    # fix item 17: preserve refusal/diagnostic text in the error for debuggability
+    text_preview = ""
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            text_preview = block.text[:300]
+            break
+    if text_preview:
+        raise LLMError(f"No tool_use block from {model}; leading text: {text_preview!r}")
     raise LLMError(f"No tool_use block in response from {model}")
 
 

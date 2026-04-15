@@ -2,15 +2,12 @@
 
 import json
 import re
-import threading
 from datetime import date, datetime
 from pathlib import Path
 
 from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
-from kb.utils.io import atomic_text_write
+from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.wiki_log import append_wiki_log
-
-_history_lock = threading.Lock()
 
 
 def load_review_history(path: Path | None = None) -> list[dict]:
@@ -107,8 +104,9 @@ def refine_page(
     if re.match(r"---\n.*?\n?---", stripped_content, re.DOTALL):
         return {"error": "Content looks like a frontmatter block — pass only the body text."}
 
-    # Reconstruct page — strip leading whitespace from body for clean output
-    new_text = f"---\n{frontmatter_text}---\n\n{updated_content.lstrip()}\n"
+    # Reconstruct page — strip only leading newlines (preserve indented code blocks)
+    body = re.sub(r"\A\n+", "", updated_content)
+    new_text = f"---\n{frontmatter_text}---\n\n{body}\n"
 
     # Write the page FIRST — if this fails, no history entry is created.
     try:
@@ -116,9 +114,10 @@ def refine_page(
     except OSError as e:
         return {"error": f"Failed to write page {page_id}: {e}"}
 
-    # Persist audit trail AFTER successful page write (thread-safe).
-    with _history_lock:
-        history = load_review_history(history_path)
+    # Persist audit trail AFTER successful page write (cross-process-safe via file_lock).
+    resolved_history_path = history_path or REVIEW_HISTORY_PATH
+    with file_lock(resolved_history_path):
+        history = load_review_history(resolved_history_path)
         history.append(
             {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -130,7 +129,7 @@ def refine_page(
         )
         if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
             history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
-        save_review_history(history, history_path)
+        save_review_history(history, resolved_history_path)
 
     # Append to wiki/log.md (auto-creates if missing)
     log_path = wiki_dir / "log.md"
