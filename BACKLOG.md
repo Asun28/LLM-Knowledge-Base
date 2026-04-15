@@ -239,9 +239,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `lint/checks.py:159` `errors="replace"` on index.md — only `read_text` call in the tree that uses `errors="replace"`; non-UTF-8 bytes substitute to U+FFFD. `extract_wikilinks` then decodes-corrupt multibyte targets (`caf\ufffd`) and silently drops them from the sentinel-backlink augmentation. Real pages get reported as orphans. Attacker can wedge this via byte corruption (R3 wikilink injection above, bad hand-edit, crash mid-atomic-write). (R3)
   (fix: drop `errors="replace"`; let it raise `UnicodeDecodeError`, catch and flag the file as corrupt in the lint report so the operator sees it)
 
-- `CLAUDE.md:245` `kb_lint` MCP docs claim `--fix` support — tool signature is `def kb_lint() -> str:` with zero arguments and no fix-mode branch. `--fix` exists only on the CLI (`cli.py:104`). Agents following CLAUDE.md will call `kb_lint(fix=True)` and hit FastMCP's unknown-kwarg error, or pass it and wonder why fixes never apply. (R3)
-  (fix: either add `fix: bool = False` to `kb_lint` MCP wrapper (routing to `run_all_checks(fix=fix)`) or delete the "supports `--fix`" clause from CLAUDE.md)
-
 - `mcp/core.py` `kb_ingest_content` (~268-360) missing `use_api` parameter — `kb_query` and `kb_ingest` both expose `use_api: bool = False`. `kb_ingest_content`'s docstring ("one-shot: saves content + creates wiki pages in one call") implies the same convenience. Currently forces a 2-call workaround (save_source → ingest with use_api=true); silently breaks any agent trying `kb_ingest_content(use_api=True)` on FastMCP unknown-kwarg rejection. (R3)
   (fix: add `use_api: bool = False`; when true, call `ingest_source(path, source_type)` after the save (mirror `kb_ingest` API branch) instead of requiring `extraction_json`)
 
@@ -655,9 +652,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `lint/runner.py:110-119` `run_all_checks` — `verdict_summary = get_verdict_summary(); verdict_history = verdict_summary` assigns the same dict to two local names; only `verdict_history` is used. More critically, `get_verdict_summary()` reads `VERDICTS_PATH` directly — no `wiki_dir`-aware verdict path, so even when lint is called with `wiki_dir=tmp` the verdict summary leaks the production `.data/lint_verdicts.json` into the tmp report. Same class as R2 `WIKI_*` globals leak, on the `.data/` surface. (R4)
   (fix: delete the duplicate `verdict_summary` local; thread `verdicts_path` kwarg through `run_all_checks` → `get_verdict_summary` so tests/alternate-profile runs don't cross-contaminate production history)
 
-- `lint/checks.py:440-463` `check_stub_pages` summaries-only exemption — skips `summaries/` by prefix but not `comparisons/` or `synthesis/`, which `check_orphan_pages` DOES treat as auto-generated entry points. A fresh comparison page consisting only of a two-entity table is reported as "stub — consider enriching" even though its purpose IS to be concise. Lint rules disagree about which page types are auto-generated. (R4)
-  (fix: centralize `_AUTOGEN_PREFIXES = ("summaries/", "comparisons/", "synthesis/")` in `kb.config` or `kb.lint.checks` and reuse across orphan + stub checks; document in both docstrings)
-
 - `lint/semantic.py:86-102,105-109,112-216` `_group_by_*` triple disk walk — consistency auto-grouping calls `_group_by_shared_sources` (scans all pages for `source:`), then `_group_by_wikilinks` (builds graph), then `_group_by_term_overlap` (re-reads all pages for body). Three independent filesystem sweeps PER `kb_lint_consistency` call, on top of R1-flagged `runner.py` re-parse storm. None accepts optional `pages=` to short-circuit. Same architectural gap as `lint/runner.py:43` but on the semantic surface the R1 fix didn't touch. (R4)
   (fix: thread pre-loaded `pages_bundle` through `build_consistency_context` and all three `_group_by_*`, matching `shared_pages` pattern in `runner.py`)
 
@@ -691,8 +685,8 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 - `mcp/health.py:72-93` `kb_graph_viz` `max_nodes=0` semantics contradict docstring — docstring says `Set 0 for all nodes` (line 84); code silently remaps 0 → 30 (line 86-87). An agent following docstring expecting the full graph gets a 30-node slice with no way to know it was capped. (R4)
   (fix: either honor `0` as "all nodes up to the 500 clamp" or reject 0 with an error explaining `use max_nodes=500 for the maximum`; the silent remap is the worst of the three)
 
-- `mcp/health.py:113-145` `kb_detect_drift` — no `wiki_dir`/`raw_dir`/`manifest_path` plumbing to the underlying `detect_source_drift`. Same gap as R2 `wiki_dir plumbing` theme but for this tool. `detect_source_drift()` accepts all three but `kb_detect_drift()` exposes none, forcing tests to either skip or mutate `kb.config` globally. Extends to `kb_evolve`, `kb_lint`, `kb_stats`, `kb_graph_viz`, `kb_compile_scan`, `kb_verdict_trends` — none accept `wiki_dir`. (R4)
-  (fix: when the R2 plumbing fix lands, extend across every health/browse tool that calls into modules accepting `wiki_dir`; at minimum `kb_detect_drift`, `kb_evolve`, `kb_stats`, `kb_lint`, `kb_graph_viz`)
+- `mcp/health.py:113-145` `kb_detect_drift` — no `wiki_dir`/`raw_dir`/`manifest_path` plumbing to the underlying `detect_source_drift`. Same gap as R2 `wiki_dir plumbing` theme but for this tool. `detect_source_drift()` accepts all three but `kb_detect_drift()` exposes none, forcing tests to either skip or mutate `kb.config` globally. Extends to `kb_evolve`, `kb_stats`, `kb_graph_viz`, `kb_compile_scan`, `kb_verdict_trends` — none accept `wiki_dir`. (`kb_lint` now accepts `wiki_dir` as of Phase 5.0.) (R4)
+  (fix: when the R2 plumbing fix lands, extend across every health/browse tool that calls into modules accepting `wiki_dir`; at minimum `kb_detect_drift`, `kb_evolve`, `kb_stats`, `kb_graph_viz`)
 
 - `mcp/browse.py:48-81` `kb_read_page` no size cap — returns the full page body verbatim. A 1 MB page is returned as a 1 MB response. Contrast `kb_ingest` which truncates to `QUERY_CONTEXT_MAX_CHARS=80_000` with warning. An attacker or runaway ingest producing an oversized page (Phase 4's `## Evidence Trail` is append-only and can grow without bound) can force MCP transport to ship multi-megabyte responses per call. (R4)
   (fix: cap response at `QUERY_CONTEXT_MAX_CHARS` and append `\n\n[Truncated: N chars omitted; use kb_list_pages + targeted tools for large pages]`; or expose `max_chars` parameter with a documented default)
@@ -915,9 +909,9 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 **Tier 1 — Karpathy-verbatim behaviors the project can't yet reproduce:**
 <!-- Tier 1 #1 (`kb_query --format=…` output adapters) SHIPPED in Phase 4.11 (2026-04-14). -->
-1. `kb_lint --augment` — gap-fill via fetch MCP. Reproduces *"impute missing data (with web searchers)"*. Distinct from deferred `kb_evolve mode=research` (proactive) — this is reactive to lint findings. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-2. `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen — makes the wiki retrievable by other agents; renderers over existing frontmatter/graph. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-3. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — Karpathy: *"schema is kept up to date in AGENTS.md"*; enables Codex / Cursor / Gemini CLI / Droid portability without forking schema per tool. Cross-ref: LOW LEVERAGE — Operational.
+<!-- Tier 1 #2 (`kb_lint --augment`) SHIPPED in Phase 5.0 (2026-04-15). -->
+1. `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen — makes the wiki retrievable by other agents; renderers over existing frontmatter/graph. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
+2. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — Karpathy: *"schema is kept up to date in AGENTS.md"*; enables Codex / Cursor / Gemini CLI / Droid portability without forking schema per tool. Cross-ref: LOW LEVERAGE — Operational.
 
 **Tier 2 — Epistemic integrity (unsolved-gap closers every community voice flagged):**
 5. `belief_state: confirmed|uncertain|contradicted|stale|retracted` frontmatter — cross-source aggregate orthogonal to per-source `confidence`. Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
@@ -929,7 +923,7 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 9. `.llmwikiignore` + pre-ingest secret/PII scanner — missing safety rail given every ingest currently sends full content to the API. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
 10. `SessionStart` hook + `raw/` file watcher + `_raw/` staging directory — ship as a three-item bundle that eliminates the "remember to ingest" step. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
 
-**Recommended next target:** #1 (`kb_lint --augment`). Reasons: with output adapters shipped (Phase 4.11), the next-highest Karpathy-fidelity item is the reactive gap-filler — lint detects a coverage gap, `fetch` MCP pulls missing context, `kb_ingest` auto-re-ingests. Contained blast radius in `kb.lint` + fetch-adapter wiring.
+**Recommended next target:** #1 (`/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen). Reasons: with output adapters (Phase 4.11) and reactive gap-fill (Phase 5.0) shipped, the next-highest Karpathy-fidelity item is the machine-consumable publish format — renderers over existing frontmatter + graph, low effort, makes the wiki itself a retrievable source for other agents. Contained blast radius in `kb.compile.publish` (new module) + compile-pipeline hook.
 
 **Already in flight (excluded from ranking):** `kb_capture` MCP tool (spec landed 2026-04-13 in `docs/superpowers/specs/2026-04-13-kb-capture-design.md`), `wiki/purpose.md` KB focus document (shipped 2026-04-13, commit `d505dca`).
 
@@ -978,9 +972,6 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 - `compile/publish.py` `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` — auto-generate AI-agent-consumable outputs alongside markdown during compile: each page gets `.txt`/`.json` siblings; wiki root gets `/llms.txt`, `/graph.jsonld`, `/sitemap.xml`. Makes the wiki itself a retrievable source for other agents. Source: Pratiyush/llm-wiki.
   (effort: Low — renderers over existing frontmatter + graph)
-
-- `lint/augment.py` `kb_lint --augment` — action-mode lint: when a gap is detected (missing entity, unresolved citation, stub page), pull missing data via `fetch` MCP and append as a new raw source, re-ingesting automatically. Distinct from deferred `kb_evolve --research` (proactive gap-filling); this is reactive to lint findings. Source: Karpathy tweet (*"impute missing data with web searchers"*).
-  (effort: Medium — lint check → fetch adapter → ingest dispatcher)
 
 ### MEDIUM LEVERAGE — Synthesis & Exploration
 
