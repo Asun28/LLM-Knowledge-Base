@@ -6,7 +6,10 @@ from kb.query.engine import query_wiki
 
 
 def test_query_raw_fallback_respects_wiki_dir_sandbox(tmp_project, monkeypatch):
-    """Regression: Phase 4.5 CRITICAL item 7 (query_wiki ignored wiki_dir for search_raw_sources)."""
+    """Regression: Phase 4.5 CRITICAL item 7.
+
+    query_wiki ignored wiki_dir for search_raw_sources.
+    """
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
     (raw_dir / "articles").mkdir(parents=True, exist_ok=True)

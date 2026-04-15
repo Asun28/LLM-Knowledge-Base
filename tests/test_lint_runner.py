@@ -39,7 +39,10 @@ def test_check_orphan_pages_does_not_report_index_sentinel(tmp_wiki, create_wiki
 
 
 def test_run_all_checks_fix_rescans_before_downstream_checks(tmp_project, create_wiki_page):
-    """Regression: Phase 4.5 CRITICAL item 9 (fix mode must re-scan so downstream checks see post-fix state)."""
+    """Regression: Phase 4.5 CRITICAL item 9.
+
+    fix mode must re-scan so downstream checks see post-fix state.
+    """
     # Page A has two outbound links: one to existing B, one dead link to Z.
     # After fix_dead_links strips the dead link, A has ONE outbound link (to B).
     # If the re-scan never happened, shared_pages/shared_graph inside run_all_checks would
@@ -73,7 +76,8 @@ def test_run_all_checks_fix_rescans_before_downstream_checks(tmp_project, create
     a_path = wiki_dir / "concepts" / "a.md"
     a_content = a_path.read_text(encoding="utf-8")
     assert "[[concepts/z-nonexistent]]" not in a_content, (
-        f"fix_dead_links did not strip [[concepts/z-nonexistent]] wikilink syntax from disk:\n{a_content}"
+        "fix_dead_links did not strip [[concepts/z-nonexistent]] wikilink syntax "
+        f"from disk:\n{a_content}"
     )
 
     # (4) KEY behavioral assertion — a subsequent clean run must report NO dead links.
@@ -88,7 +92,7 @@ def test_run_all_checks_fix_rescans_before_downstream_checks(tmp_project, create
 
 
 def test_run_all_checks_fix_rescan_call_count(tmp_project, create_wiki_page):
-    """Safety-net: scan_wiki_pages + build_graph must each be called twice when fixes are applied."""
+    """Safety-net for item 9: scan_wiki_pages + build_graph each called twice on fix."""
     # This is the lightweight companion to the behavior test above.
     # It patches at the runner-module level to catch any future refactor that removes the
     # explicit re-scan block without breaking the behavior test indirectly.
