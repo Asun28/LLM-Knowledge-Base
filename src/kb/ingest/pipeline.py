@@ -36,8 +36,11 @@ from kb.utils.wiki_log import append_wiki_log
 logger = logging.getLogger(__name__)
 
 # Fix 2.3 (module-level): compiled once, reused in every _update_existing_page call.
-# Uses [ \t]+ instead of hardcoded 2 spaces to support both 2-space and 4-space YAML indentation.
-_SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]+- [^\n]*\n)*)", re.MULTILINE)
+# Uses [ \t]* (zero or more) to handle both indented (2/4-space) and PyYAML-dumped
+# zero-indent list items. PyYAML normalises "  - item" to "- item" when round-tripping
+# through frontmatter.dumps(), so requiring [ \t]+ would miss those entries and
+# produce malformed YAML (mixed-indent source block).
+_SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]*- [^\n]*\n)*)", re.MULTILINE)
 
 
 def _find_affected_pages(
