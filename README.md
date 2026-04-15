@@ -2,7 +2,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1514-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-1521-brightgreen)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
