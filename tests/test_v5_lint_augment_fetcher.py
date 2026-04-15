@@ -323,22 +323,78 @@ def test_fetch_too_many_redirects(httpx_mock):
     assert "redirect" in r.reason.lower()
 
 
-def test_fetch_redirects_to_off_allowlist_rejected(httpx_mock):
+def test_fetch_redirect_to_off_allowlist_domain_blocks_before_request(httpx_mock):
+    """SSRF defense: redirect to an off-allowlist host must be blocked BEFORE
+    we issue the next request (so no IP/headers leak to the attacker host).
+
+    pytest-httpx fails teardown with 'response was not requested' if we
+    register a mock and never hit it — we exploit that here to PROVE the
+    fetcher never called the attacker URL.
+    """
+    # Register the 302 from the allowlisted origin
     httpx_mock.add_response(
         url="https://example.com/r",
         status_code=302,
         headers={"location": "https://attacker.example/page"},
     )
+    # Do NOT register attacker.example — if we fetch it, pytest-httpx raises
+    # because no mock matches, proving the network request was never issued.
+    f = _build_fetcher(allowed=("example.com",))
+    r = f.fetch("https://example.com/r")
+    assert r.status == "blocked"
+    assert "domain" in r.reason.lower()
+
+
+def test_fetch_follows_same_allowlist_redirect(httpx_mock):
+    """Positive: 302 within the same allowlisted host must follow to the
+    target, validate, and return ok with the final URL."""
     httpx_mock.add_response(
-        url="https://attacker.example/page",
+        url="https://example.com/r",
+        status_code=302,
+        headers={"location": "https://example.com/p"},
+    )
+    httpx_mock.add_response(
+        url="https://example.com/p",
         headers={"content-type": "text/html"},
-        content=b"<html><body>evil</body></html>",
+        content=(
+            b"<html><body><article>"
+            b"Destination page after the in-allowlist 302. Enough text "
+            b"for trafilatura to treat this as main body content."
+            b"</article></body></html>"
+        ),
     )
     f = _build_fetcher(allowed=("example.com",))
     r = f.fetch("https://example.com/r")
-    # httpx itself follows; our post-fetch URL check should catch
+    assert r.status == "ok", f"expected ok, got {r.status}: {r.reason}"
+    assert r.url == "https://example.com/p"
+
+
+def test_fetch_redirect_to_disallowed_scheme_blocked(httpx_mock):
+    """SSRF defense: redirect to file:// / javascript: / data: must be blocked
+    with a clear 'scheme' reason."""
+    httpx_mock.add_response(
+        url="https://example.com/r",
+        status_code=302,
+        headers={"location": "file:///etc/passwd"},
+    )
+    f = _build_fetcher(allowed=("example.com",))
+    r = f.fetch("https://example.com/r")
     assert r.status == "blocked"
-    assert "domain" in r.reason.lower()
+    assert "scheme" in r.reason.lower()
+
+
+def test_fetch_redirect_without_location_header_fails(httpx_mock):
+    """A 3xx without a Location header is server-side broken; return failed
+    cleanly rather than hanging or crashing."""
+    httpx_mock.add_response(
+        url="https://example.com/r",
+        status_code=302,
+        headers={"content-type": "text/html"},
+    )
+    f = _build_fetcher(allowed=("example.com",))
+    r = f.fetch("https://example.com/r")
+    assert r.status == "failed"
+    assert "location" in r.reason.lower()
 
 
 def test_fetch_happy_path_html(httpx_mock):

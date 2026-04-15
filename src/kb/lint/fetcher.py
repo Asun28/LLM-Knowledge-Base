@@ -209,7 +209,12 @@ def build_client(version: str) -> httpx.Client:
                 "(+https://github.com/Asun28/llm-wiki-flywheel)"
             )
         },
-        follow_redirects=True,
+        # follow_redirects=False is load-bearing for SSRF defense:
+        # if httpx followed redirects automatically, it would issue a network
+        # request to the redirect target BEFORE AugmentFetcher.fetch() could
+        # validate the new URL's domain. We handle redirects manually in
+        # fetch() with per-hop allowlist validation.
+        follow_redirects=False,
         max_redirects=AUGMENT_FETCH_MAX_REDIRECTS,
     )
 
@@ -341,7 +346,9 @@ class AugmentFetcher:
         return rp.can_fetch(self._ua, url)
 
     def fetch(self, url: str, *, respect_robots: bool = True) -> FetchResult:
-        # 1. Scheme allow-list
+        from kb.config import AUGMENT_FETCH_MAX_REDIRECTS
+
+        # 1. Scheme allow-list (initial URL)
         parsed = urlparse(url)
         if parsed.scheme.lower() not in {"http", "https"}:
             return FetchResult(
@@ -378,88 +385,166 @@ class AugmentFetcher:
                 url=url,
             )
 
-        # 3. Stream-fetch with size cap
+        # 3. Manual redirect loop with per-hop scheme + allowlist validation.
+        #
+        # The httpx client is configured with follow_redirects=False so we can
+        # validate EVERY redirect target's scheme and domain against the
+        # allowlist BEFORE issuing the next request. If httpx auto-followed,
+        # a 302 to http://169.254.169.254/ or https://attacker.example/ would
+        # already have generated a network call by the time we could inspect
+        # response.url — leaking IP and request headers.
+        current_url = url
+        raw: bytes = b""
+        final_url: str = current_url
+        ctype: str = ""
+        total: int = 0
         try:
-            with self._client.stream("GET", url) as response:
-                response.raise_for_status()
-
-                # 4. Final URL allow-list (catches redirects to off-allow domains)
-                final_url_str = str(response.url)
-                if not _url_is_allowed(final_url_str, self.allowed_domains):
-                    return FetchResult(
-                        status="blocked",
-                        content=None,
-                        extracted_markdown=None,
-                        content_type="",
-                        bytes=0,
-                        reason=(
-                            "redirect target domain not in allowlist: "
-                            f"{_registered_domain(final_url_str)}"
-                        ),
-                        url=final_url_str,
-                    )
-
-                # 5. Content-type allow-list
-                ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
-                if ctype and ctype not in self.allowed_content_types:
-                    return FetchResult(
-                        status="blocked",
-                        content=None,
-                        extracted_markdown=None,
-                        content_type=ctype,
-                        bytes=0,
-                        reason=f"disallowed content-type: {ctype}",
-                        url=str(response.url),
-                    )
-
-                # 6. Size cap (header). Tolerate malformed content-length:
-                # an RFC-violating server might send a non-integer value; fall
-                # back to unknown (None) and rely on the streaming cap below.
-                clen_raw = response.headers.get("content-length")
-                clen: int | None
-                if clen_raw:
-                    try:
-                        clen = int(clen_raw)
-                    except (TypeError, ValueError):
-                        logger.debug(
-                            "Ignoring malformed content-length header %r for %s",
-                            clen_raw,
-                            response.url,
+            for hop in range(AUGMENT_FETCH_MAX_REDIRECTS + 1):
+                # Per-hop scheme + allowlist re-validation. The initial URL
+                # was already validated above, but redirect targets MUST be
+                # re-checked before we issue the next network request.
+                if hop > 0:
+                    hop_parsed = urlparse(current_url)
+                    if hop_parsed.scheme.lower() not in {"http", "https"}:
+                        return FetchResult(
+                            status="blocked",
+                            content=None,
+                            extracted_markdown=None,
+                            content_type="",
+                            bytes=0,
+                            reason=(
+                                f"redirect to disallowed scheme: "
+                                f"{hop_parsed.scheme}"
+                            ),
+                            url=current_url,
                         )
-                        clen = None
-                else:
-                    clen = None
-                if clen is not None and clen > self.max_bytes:
-                    return FetchResult(
-                        status="blocked",
-                        content=None,
-                        extracted_markdown=None,
-                        content_type=ctype,
-                        bytes=clen,
-                        reason=f"content-length {clen} exceeds cap {self.max_bytes}",
-                        url=str(response.url),
-                    )
+                    if not _url_is_allowed(current_url, self.allowed_domains):
+                        return FetchResult(
+                            status="blocked",
+                            content=None,
+                            extracted_markdown=None,
+                            content_type="",
+                            bytes=0,
+                            reason=(
+                                "redirect target domain not in allowlist: "
+                                f"{_registered_domain(current_url)}"
+                            ),
+                            url=current_url,
+                        )
 
-                # 7. Stream + cap
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_bytes(chunk_size=32_768):
-                    total += len(chunk)
-                    if total > self.max_bytes:
+                with self._client.stream("GET", current_url) as response:
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("location")
+                        if not location:
+                            return FetchResult(
+                                status="failed",
+                                content=None,
+                                extracted_markdown=None,
+                                content_type="",
+                                bytes=0,
+                                reason=(
+                                    f"redirect with no Location header "
+                                    f"(status {response.status_code})"
+                                ),
+                                url=current_url,
+                            )
+                        # Resolve relative redirects against current_url
+                        current_url = str(httpx.URL(current_url).join(location))
+                        continue
+
+                    response.raise_for_status()
+
+                    # Final, non-redirect response. After per-hop validation we
+                    # still re-check the final response.url as defense-in-depth
+                    # — covers any case where httpx reports a different URL
+                    # than what we issued (e.g., internal rewrite).
+                    final_url_str = str(response.url)
+                    if not _url_is_allowed(final_url_str, self.allowed_domains):
+                        return FetchResult(
+                            status="blocked",
+                            content=None,
+                            extracted_markdown=None,
+                            content_type="",
+                            bytes=0,
+                            reason=(
+                                "final URL domain not in allowlist: "
+                                f"{_registered_domain(final_url_str)}"
+                            ),
+                            url=final_url_str,
+                        )
+
+                    # 5. Content-type allow-list
+                    ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                    if ctype and ctype not in self.allowed_content_types:
                         return FetchResult(
                             status="blocked",
                             content=None,
                             extracted_markdown=None,
                             content_type=ctype,
-                            bytes=total,
-                            reason=f"stream exceeded cap {self.max_bytes} bytes",
-                            url=str(response.url),
+                            bytes=0,
+                            reason=f"disallowed content-type: {ctype}",
+                            url=final_url_str,
                         )
-                    chunks.append(chunk)
-                raw = b"".join(chunks)
-                final_url = str(response.url)
+
+                    # 6. Size cap (header). Tolerate malformed content-length.
+                    clen_raw = response.headers.get("content-length")
+                    clen: int | None
+                    if clen_raw:
+                        try:
+                            clen = int(clen_raw)
+                        except (TypeError, ValueError):
+                            logger.debug(
+                                "Ignoring malformed content-length header %r for %s",
+                                clen_raw,
+                                final_url_str,
+                            )
+                            clen = None
+                    else:
+                        clen = None
+                    if clen is not None and clen > self.max_bytes:
+                        return FetchResult(
+                            status="blocked",
+                            content=None,
+                            extracted_markdown=None,
+                            content_type=ctype,
+                            bytes=clen,
+                            reason=f"content-length {clen} exceeds cap {self.max_bytes}",
+                            url=final_url_str,
+                        )
+
+                    # 7. Stream + cap
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in response.iter_bytes(chunk_size=32_768):
+                        total += len(chunk)
+                        if total > self.max_bytes:
+                            return FetchResult(
+                                status="blocked",
+                                content=None,
+                                extracted_markdown=None,
+                                content_type=ctype,
+                                bytes=total,
+                                reason=f"stream exceeded cap {self.max_bytes} bytes",
+                                url=final_url_str,
+                            )
+                        chunks.append(chunk)
+                    raw = b"".join(chunks)
+                    final_url = final_url_str
+                    break  # successful non-redirect response — exit loop
+            else:
+                # Loop exhausted without a non-redirect response
+                return FetchResult(
+                    status="failed",
+                    content=None,
+                    extracted_markdown=None,
+                    content_type="",
+                    bytes=0,
+                    reason=f"too many redirects (>{AUGMENT_FETCH_MAX_REDIRECTS})",
+                    url=current_url,
+                )
 
         except httpx.TooManyRedirects as e:
+            # Defensive: should not fire since follow_redirects=False.
             return FetchResult(
                 status="failed",
                 content=None,
@@ -467,7 +552,7 @@ class AugmentFetcher:
                 content_type="",
                 bytes=0,
                 reason=f"too many redirects: {e}",
-                url=url,
+                url=current_url,
             )
         except (
             httpx.ConnectError,
@@ -483,7 +568,7 @@ class AugmentFetcher:
                 content_type="",
                 bytes=0,
                 reason=f"{type(e).__name__}: {e}",
-                url=url,
+                url=current_url,
             )
 
         # 8. Extract to markdown via trafilatura
