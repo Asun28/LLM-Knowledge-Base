@@ -370,7 +370,6 @@ def run_augment(
     mode: Mode = "propose",
     max_gaps: int = 5,
     dry_run: bool = False,
-    resume: str | None = None,
 ) -> dict[str, Any]:
     """Three-gate augment orchestrator. See module docstring.
 
@@ -378,6 +377,9 @@ def run_augment(
     abstained entity/concept stubs). Phase B (execute/auto_ingest): fetch +
     relevance gate + save raw + manifest advance. Phase C (auto_ingest):
     pre-extract + ingest_source + augmented-page marker + quality verdict.
+
+    Note: Manifest.resume() is implemented but not yet wired through the
+    CLI/MCP surface. Crash-resume support is tracked in BACKLOG Phase 5.
     """
     from urllib.parse import urlparse
 

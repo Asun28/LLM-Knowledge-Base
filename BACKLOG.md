@@ -1343,6 +1343,19 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ---
 
+## Phase 5 pre-merge (feat/phase-5-kb-lint-augment, 2026-04-15)
+
+<!-- Discovered by the three reviewers (Codex branch review, spec compliance, code quality)
+     running against feat/phase-5-kb-lint-augment after the feature was declared ready-to-merge.
+     Items ordered by severity. Primary scope: src/kb/lint/augment.py and helpers. -->
+
+### MEDIUM
+
+- `lint/augment.py` `run_augment` — `Manifest.resume()` is implemented in `_augment_manifest.py` but `run_augment(resume=<run_id>)` was never wired through to it; the kwarg was declared and then ignored. Removed the declaration in this branch until the CLI/MCP surface exposes a resume flag. Spec §9 still documents crash-resume as the intended behaviour; re-adding the kwarg should ship alongside a `--resume=<id>` CLI flag and matching MCP parameter. (resolved-here, deferred re-wiring)
+  (fix: re-add `resume: str | None = None` kwarg to `run_augment`; at entry, call `Manifest.resume(run_id_prefix=resume)` and if present skip Phase A and restart iteration from `manifest.incomplete_gaps()`; add `--resume` to cli.py `lint` command and to `mcp/health.py::kb_lint`)
+
+---
+
 ## Resolved Phases
 
 - **Phase 3.92** — all items resolved in v0.9.11
