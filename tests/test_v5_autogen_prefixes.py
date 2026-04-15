@@ -1,4 +1,4 @@
-"""Regression: AUTOGEN_PREFIXES is centralized + skip is applied consistently across orphan/isolated/stub checks."""
+"""Regression: AUTOGEN_PREFIXES centralized; skip applied to orphan/isolated/stub checks."""
 
 
 def test_autogen_prefixes_is_in_config():

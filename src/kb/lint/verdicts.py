@@ -11,7 +11,13 @@ from kb.utils.io import file_lock
 logger = logging.getLogger(__name__)
 
 VALID_SEVERITIES = ("error", "warning", "info")
-VALID_VERDICT_TYPES: tuple[str, ...] = ("fidelity", "consistency", "completeness", "review", "augment")
+VALID_VERDICT_TYPES: tuple[str, ...] = (
+    "fidelity",
+    "consistency",
+    "completeness",
+    "review",
+    "augment",
+)
 MAX_NOTES_LEN = 2000
 
 

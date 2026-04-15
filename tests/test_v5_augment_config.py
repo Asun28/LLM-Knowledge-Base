@@ -25,7 +25,9 @@ def test_augment_allowed_domains_env_override(monkeypatch):
     monkeypatch.setenv("AUGMENT_ALLOWED_DOMAINS", "example.com,foo.org")
     # Force re-import
     import importlib
+
     from kb import config
+
     importlib.reload(config)
     try:
         assert config.AUGMENT_ALLOWED_DOMAINS == ("example.com", "foo.org")

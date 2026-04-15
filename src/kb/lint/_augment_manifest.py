@@ -54,7 +54,7 @@ class Manifest:
         mode: str,
         max_gaps: int,
         stubs: list[dict[str, Any]],
-    ) -> "Manifest":
+    ) -> Manifest:
         MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
         path = MANIFEST_DIR / f"augment-run-{run_id[:8]}.json"
         ts = _now_iso()
@@ -80,7 +80,7 @@ class Manifest:
         return cls(run_id=run_id, path=path, data=data)
 
     @classmethod
-    def resume(cls, *, run_id_prefix: str) -> "Manifest | None":
+    def resume(cls, *, run_id_prefix: str) -> Manifest | None:
         if not MANIFEST_DIR.exists():
             return None
         for f in MANIFEST_DIR.glob(f"augment-run-{run_id_prefix}*.json"):
