@@ -49,6 +49,9 @@ Rules:
 - `query/hybrid.py` `hybrid_search` — wraps `bm25_fn()` and `vector_fn()` in try/except returning `[]`; structured WARN log reports backend name, exception class, exception text, and `len(question.split())` as token proxy; prevents a corrupt page dict or sqlite-vec schema drift from crashing the MCP tool (HIGH R4 #16)
 - `query/dedup.py` `dedup_results` — optional `max_results: int | None = None` clamp applied AFTER all four dedup layers (MED R4 #15); layer 2 falls back to lowercasing `content` when `content_lower` is missing so MCP-provided citations and future chunk rows participate in similarity dedup (MED R4 #30)
 - `query/rewriter.py` `_should_rewrite` — cycle-1 WH-question + proper-noun skip is now locked in by a cycle-2 regression test (LOW R4 #14 retained)
+- `query/engine.py` `query_wiki` — `effective_question` uses `re.sub(r"\s+", " ", …).strip()` so ALL Unicode whitespace (tabs, vertical tab, U+2028, U+2029, non-breaking space, …) collapses to a single space before search; prior code only replaced `\n`/`\r` in the synthesis prompt (LOW R4 #12)
+- `query/engine.py` `search_raw_sources` — `path.stat().st_size > RAW_SOURCE_MAX_BYTES` pre-check skips oversized files with an INFO log BEFORE `read_text`, so a 10 MB scraped article cannot balloon the in-memory corpus; YAML frontmatter stripped via shared `FRONTMATTER_RE` before tokenizing so title/tags no longer mis-rank results (MED R4 #13)
+- `config.py` — new `RAW_SOURCE_MAX_BYTES = 2_097_152` (2 MiB) paired with `CAPTURE_MAX_BYTES`; single source of truth for the raw-source size cap (MED R4 #13)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 

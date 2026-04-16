@@ -72,8 +72,14 @@ def load_feedback(path: Path | None = None) -> dict:
 
 
 def _migrate_page_scores(page_scores: dict) -> None:
-    """Backfill missing useful/wrong/incomplete/trust keys in-place."""
-    _defaults = (("useful", 0), ("wrong", 0), ("incomplete", 0), ("trust", 0.5))
+    """Backfill missing count keys in-place.
+
+    Only COUNT keys (`useful` / `wrong` / `incomplete`) are backfilled; `trust`
+    is intentionally left missing so `get_flagged_pages` can recompute it from
+    the raw counts (cycle 1 Q2 semantics — a neutral 0.5 default would hide
+    legacy entries whose counts already indicate low trust).
+    """
+    _defaults = (("useful", 0), ("wrong", 0), ("incomplete", 0))
     for scores in page_scores.values():
         if not isinstance(scores, dict):
             continue

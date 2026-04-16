@@ -14,9 +14,11 @@ from kb.config import (
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
     QUERY_MAX_TOKENS,
+    RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
     VECTOR_INDEX_PATH_SUFFIX,
 )
+from kb.utils.markdown import FRONTMATTER_RE
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
@@ -282,18 +284,37 @@ def search_raw_sources(
             if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
                 continue
             for f in subdir.glob("*.md"):
+                # Item 13 (cycle 2): skip oversized files before read to prevent
+                # a single 10 MB scraped article from ballooning the in-memory
+                # corpus + BM25 index.
+                try:
+                    size = f.stat().st_size
+                except OSError:
+                    continue
+                if size > RAW_SOURCE_MAX_BYTES:
+                    logger.info(
+                        "search_raw_sources skipped %s: %d bytes > %d cap",
+                        f, size, RAW_SOURCE_MAX_BYTES,
+                    )
+                    continue
                 try:
                     content = f.read_text(encoding="utf-8")
-                    sources.append(
-                        {
-                            "id": f"raw/{subdir.name}/{f.name}",
-                            "path": str(f),
-                            "content": content,
-                            "content_lower": content.lower(),
-                        }
-                    )
                 except (OSError, UnicodeDecodeError):
                     continue
+                # Item 13 (cycle 2): strip YAML frontmatter before tokenizing.
+                # Obsidian Web Clipper prepends `title:`, `author:`, `tags:` —
+                # indexing those as body content mis-ranks hits toward files
+                # whose frontmatter shares vocabulary with the question.
+                fm_match = FRONTMATTER_RE.match(content) if content.startswith("---") else None
+                body = fm_match.group(2) if fm_match else content
+                sources.append(
+                    {
+                        "id": f"raw/{subdir.name}/{f.name}",
+                        "path": str(f),
+                        "content": content,
+                        "content_lower": body.lower(),
+                    }
+                )
 
         if not sources:
             return []
@@ -467,8 +488,12 @@ def query_wiki(
     if effective_raw_dir is None and wiki_dir is not None:
         effective_raw_dir = (wiki_dir.parent / "raw").resolve()
 
-    # Rewrite follow-up queries into standalone queries
-    effective_question = question
+    # Item 12 (cycle 2): collapse ALL Unicode whitespace (Unicode line
+    # separators, paragraph separators, tabs, non-breaking spaces, etc.) to a
+    # single space BEFORE any downstream consumer — prior code only replaced
+    # `\n`/`\r` in the synthesis prompt line 544, so vertical tab `\v`,
+    # `\u2028`, and `\u2029` still reflowed the prompt structure.
+    effective_question = re.sub(r"\s+", " ", question).strip()
     if conversation_context:
         from kb.query.rewriter import rewrite_query
 

@@ -187,16 +187,18 @@ def file_lock(path: Path, timeout: float | None = None):
                         ) from exc
                     try:
                         os.kill(stale_pid, 0)
-                    except ProcessLookupError:
+                    except OSError:
+                        # On POSIX `ProcessLookupError` means dead; on Windows
+                        # `os.kill(pid, 0)` on a nonexistent PID raises a
+                        # generic `OSError` ([WinError 87] "parameter is
+                        # incorrect"). Treat ANY `OSError` here as "PID not
+                        # reachable → safe to steal" since we can't tell the
+                        # two apart cross-platform. Genuinely live but
+                        # permission-denied processes are exceedingly rare
+                        # for a file lock that we ALSO hold a stamp for.
                         lock_path.unlink(missing_ok=True)
                         time.sleep(LOCK_POLL_INTERVAL)
                         continue
-                    except OSError:
-                        # Permission denied on os.kill — PID is live, just not ours.
-                        raise TimeoutError(
-                            f"Lock {lock_path} held by running PID {stale_pid}. "
-                            "Stop that process or delete the lock file."
-                        ) from None
                     else:
                         raise TimeoutError(
                             f"Lock {lock_path} held by running PID {stale_pid}. "

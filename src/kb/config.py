@@ -62,6 +62,11 @@ CAPTURE_MAX_ITEMS = 20  # cap items extracted per scan-tier call
 CAPTURE_KINDS = ("decision", "discovery", "correction", "gotcha")
 CAPTURE_MAX_CALLS_PER_HOUR = 60  # per-process rate limit (sliding 1h window)
 
+# Cycle 2 item 13: per-file size cap for search_raw_sources. Files above this
+# threshold are skipped before `read_text` to prevent a single 10 MB scraped
+# article from ballooning the in-memory corpus and tokenizer.
+RAW_SOURCE_MAX_BYTES = 2_097_152  # 2 MiB
+
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
 SUPPORTED_SOURCE_EXTENSIONS = frozenset(

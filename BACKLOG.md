@@ -231,6 +231,15 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `utils/wiki_log.py:34-35` `append_wiki_log` `except FileExistsError: pass` masks real bugs — when `log_path.open("x")` raises `FileExistsError`, the silent `pass` is correct ONLY for "another concurrent process created it" race. But if `log_path` exists as a DIRECTORY, `open("x")` raises `IsADirectoryError`/`PermissionError` (not `FileExistsError`), which propagates correctly — but when it exists as a SYMLINK pointing nowhere or special file (FIFO, socket on POSIX), `open("x")` raises `FileExistsError` and the silent `pass` proceeds to `open("a")` which raises a different `OSError`. Two-step open-exists-then-append loses original symptom and produces misleading second error. R4 wiki-log-rotation was about size; this is a corruption-of-target-state finding. (R5)
   (fix: after `pass`, verify `log_path.is_file()` and raise a clear `OSError` if it's a directory/symlink/special; or use `os.open(O_WRONLY | O_CREAT)` once and check FD type)
 
+### HIGH (surfaced during cycle 2, pre-existing on main)
+
+- `mcp/browse.py` `kb_search` — `test_kb_search_no_results` fails on `main` (and cycle 2) because `hybrid_search` now returns results for nonsense queries like `"xyzzyplugh"` — the vector-search backend assigns a non-zero similarity to any wiki content. Expected behaviour is "No matching pages found." for queries with zero token overlap + near-zero vector similarity. Likely root cause: RRF fusion keeps any result with `score > 0` from either backend, and vector search has no minimum-cosine threshold. Surfaced 2026-04-17 during cycle 2 regression run; existed on `main` before branch cut.
+  (fix: gate vector-search results on `cosine >= VECTOR_MIN_SIMILARITY` (tune ~0.3); or require BM25 to contribute at least one non-zero-score hit for the results to surface)
+
+### LOW (deferred from cycle 2 — new follow-ups)
+
+- `utils/llm.py` `_make_api_call` — truncation of `e.message` prevents simple prompt-content leak but does not REDACT (user prompts, image base64 fragments, API keys echoed by Anthropic). Follow-up cycle should add pattern-based redaction or prompt-prefix hashing before truncation. (references BACKLOG:701; deferred Step 5 gate Q11)
+
 ### HIGH (deferred from Phase 4.5 HIGH cycle 1)
 
 - `review/refiner.py` `refine_page` write-then-audit ordering — after H1's page-file lock (cycle 1), a crash/OSError on the history-lock step still leaves the page body updated without an audit record. Adopt two-phase write (pending audit first → write page → flip to applied). See `docs/superpowers/decisions/2026-04-16-phase4.5-high-cycle1-design.md` Q_H.
@@ -395,12 +404,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `ingest/contradiction.py:96-106` `_find_overlapping_sentences` missing claim-side filter — function iterates `page_content` sentences and keeps those whose tokens overlap with `overlap_tokens = claim_tokens & page_tokens`, so every returned sentence shares tokens with BOTH. Problem: the CLAIM is never segmented into sentences — treated as one. A multi-sentence claim `"LLMs hallucinate. GPT-4 is reliable."` vs existing page `"GPT-4 hallucinates"` can match on "hallucinate" in the first claim-sentence paired with "GPT-4" from the second, producing a reason referring to neither. (R4)
   (fix: segment claims symmetrically with `re.split(r"(?<=[.!?])\s+", claim)` at top of `detect_contradictions`; iterate per-sentence; reason references only the matching sentence)
-
-- `query/engine.py:203-215` `search_raw_sources` does not strip YAML frontmatter — raw `raw/articles/*.md` files typically begin with a YAML frontmatter block from Obsidian Web Clipper; current implementation tokenizes `title:`, `author:`, `source:`, `tags:` and scores documents by how many query terms match the frontmatter (low-signal keywords) rather than body. Compounds R1 "indexes frontmatter as content" but with a distinct impact: matching by author name or tag list mis-ranks results toward sources whose frontmatter shares vocabulary with the question. (R4)
-  (fix: strip frontmatter via `FRONTMATTER_RE` before tokenizing; return only body to `documents`; keep full content in the dict for section emission)
-
-- `query/engine.py:186-232` `search_raw_sources` does not skip/truncate huge files — `f.read_text(encoding="utf-8")` reads arbitrary raw source files fully into RAM, then builds BM25 index over the whole corpus. A single 10 MB scraped article blows up in-memory corpus, tokenization, and index. `kb_ingest` at MCP boundary enforces 160K cap, but `raw/` can contain older files or direct filesystem drops. R1 flagged the per-query rebuild + frontmatter-in-corpus + all-in-RAM aspect but not this per-file size guardrail. (R4)
-  (fix: `f.stat().st_size` check before read, skip files >2MB with debug log; or `open(f).read(2_000_000)` truncating and logging)
 
 - `query/engine.py:108-123` `PAGERANK_SEARCH_WEIGHT` applied after RRF fusion — comment says `new_score = r["score"] * (1 + PAGERANK_SEARCH_WEIGHT * pr)` multiplies RRF-fused scores by PageRank factor. But RRF scores are ordinal-rank-based (1/(60+rank)), so scores cluster in [0.0, 0.033] regardless of relevance. Multiplying a PageRank centrality (0..1) on top cannot re-rank across orders of magnitude — it uniformly stretches scores by ≤ 1.5×. Design effect is PageRank is merely a tiebreaker among results RRF already ordered, not a true second signal. (R4)
   (fix: apply PageRank blending BEFORE RRF fusion on the BM25-side list (multiply BM25 score by PR factor pre-fusion); or add PageRank as its own `list[dict]` input to `rrf_fusion` — then it competes at rank level, not score scale)
@@ -574,9 +577,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `ingest/__init__.py` empty package — `__init__.py` is only a docstring/header; no `__all__`, no public-API curation. Every caller reaches into `kb.ingest.pipeline`/`kb.ingest.extractors`/`kb.ingest.contradiction`/`kb.ingest.evidence` directly. R1 flagged top-level package; the pattern recurs inside `kb.ingest`. Phase 5 additions (kb_capture, URL adapters, chunk-indexing hooks) will keep reaching into ever-deeper submodules unless a seam is created now. (R4)
   (fix: add `from kb.ingest.pipeline import ingest_source; __all__ = ["ingest_source"]` — single public entry point)
-
-- `query/engine.py:398` question string sanitization is incomplete — `effective_question[:2000].replace(chr(10), " ").replace(chr(13), " ")` strips `\n`/`\r` but misses `\t`, Unicode line separator `\u2028`, paragraph separator `\u2029`, and vertical tab `\v`. Any of these inside the question body reflow or break LLM prompt structure. (R4)
-  (fix: `re.sub(r"[\s]+", " ", effective_question[:2000])` collapses all whitespace to single spaces; or explicitly list `"\n\r\t\v\f\u2028\u2029"`)
 
 - `query/rewriter.py:50` `_should_rewrite` heuristic does not skip WH-questions — canonical standalone questions (`who|what|where|when|why|how`) ending in `?` should never need context rewriting; current heuristic still triggers the scan LLM call if under 5 long words ("who is he?" triggers both). Wastes a scan-tier LLM call per standalone question. (R4)
   (fix: `_WH_QUESTION_RE = re.compile(r"^(who|what|where|when|why|how)\b.*\?$", re.I)`; return False from `_should_rewrite` when matched AND question contains a proper-noun-like token (`re.search(r"[A-Z][a-z]+")`))

@@ -698,7 +698,13 @@ class TestLoadFeedbackShapeValidation:
         assert "page_scores" in result
 
     def test_valid_structure_returned_as_is(self, tmp_path):
-        """A valid feedback file is returned unchanged."""
+        """A valid feedback file's entries list is preserved and core fields are intact.
+
+        Cycle 2 item 24: `load_feedback` now backfills MISSING count keys
+        (`useful`/`wrong`/`incomplete`) once at load, so the page_scores dict
+        may gain those keys. `trust` is preserved exactly. Legacy assertion
+        updated to reflect the one-shot migration contract.
+        """
         import json
 
         from kb.feedback.store import load_feedback
@@ -708,7 +714,12 @@ class TestLoadFeedbackShapeValidation:
         good_file.write_text(json.dumps(good_data), encoding="utf-8")
 
         result = load_feedback(good_file)
-        assert result["page_scores"] == good_data["page_scores"]
+        assert result["entries"] == good_data["entries"]
+        # trust preserved verbatim
+        assert result["page_scores"]["concepts/rag"]["trust"] == 0.7
+        # count keys backfilled (cycle 2 migration)
+        for key in ("useful", "wrong", "incomplete"):
+            assert result["page_scores"]["concepts/rag"][key] == 0
 
 
 class TestRefinePageHorizontalRule:

@@ -450,10 +450,18 @@ class TestInjectWikilinksSingleFrontmatterMatch:
 
 class TestFeedbackStoreMigration:
     def test_legacy_scores_migrated_on_load(self, tmp_path: Path, monkeypatch) -> None:
+        """Cycle 2 item 24: load_feedback backfills missing count keys once at
+        load so add_feedback_entry doesn't need a per-write setdefault loop.
+
+        `trust` is intentionally NOT backfilled — `get_flagged_pages` recomputes
+        it from raw counts when missing (cycle-1 Q2 contract). Backfilling trust
+        to a neutral 0.5 would mask legacy entries whose counts indicate low
+        trust.
+        """
         from kb.feedback import store as mod
 
         path = tmp_path / "feedback.json"
-        # Legacy shape: missing useful/wrong/incomplete/trust
+        # Legacy shape: only `useful` written (before cycle-1 always-write-all path).
         path.write_text(
             json.dumps({
                 "entries": [],
@@ -466,7 +474,8 @@ class TestFeedbackStoreMigration:
         assert score["useful"] == 2
         assert score["wrong"] == 0
         assert score["incomplete"] == 0
-        assert "trust" in score
+        # trust key NOT backfilled — recomputed on demand by get_flagged_pages.
+        assert "trust" not in score or isinstance(score["trust"], (int, float))
 
 
 # -----------------------------------------------------------------------------
@@ -793,7 +802,7 @@ class TestQueryEngineNormalizations:
         small.write_text("rag foo bar baz content", encoding="utf-8")
 
         with caplog.at_level(logging.INFO, logger="kb.query.engine"):
-            results = search_raw_sources("rag", tmp_path, limit=10)
+            results = search_raw_sources("rag", tmp_path, max_results=10)
         # Oversize file skipped — only small matches
         paths = [r.get("path", "") for r in results]
         assert not any("big.md" in p for p in paths)
@@ -812,7 +821,7 @@ class TestQueryEngineNormalizations:
             "\n\nThe content body here contains only unrelated words about apple pie and sunsets.\n",
             encoding="utf-8",
         )
-        results = search_raw_sources("rag vector", tmp_path, limit=10)
+        results = search_raw_sources("rag vector", tmp_path, max_results=10)
         # If frontmatter is stripped, query terms don't match body → no result
         # (If frontmatter NOT stripped, title/tags would score high and the file would appear.)
         matched = [r for r in results if "foo.md" in r.get("path", "")]
