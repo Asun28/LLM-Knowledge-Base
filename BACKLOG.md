@@ -297,9 +297,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `graph/builder.py` `page_id()` lowercasing (~27-34) — lowercases the node ID while `path` attribute keeps original case. On case-sensitive filesystems (CI Linux), any consumer that reconstructs `wiki_dir / f"{pid}.md"` (e.g. `semantic.build_consistency_context:275`) hits `FileNotFoundError` and the page is silently skipped as `*Page not found*`. Windows dev + Linux CI diverge on the same corpus. (R2)
   (fix: normalize filenames on disk to lowercase at ingest; or stop lowercasing in `page_id()` and route all comparisons through a shared `normalize_id` helper applied only on lookup)
 
-- `graph/export.py` `export_mermaid` auto-prune (~80-88) — `heapq.nlargest(max_nodes, graph.degree(), key=lambda x: x[1])` sorts by degree only; on ties (common in sparse wikis) CPython falls back to comparing the second tuple element but insertion-order-dependent. Same wiki produces different pruned diagrams across runs; committed `architecture-diagram.png` churns. (R2)
-  (fix: deterministic secondary key `key=lambda x: (x[1], x[0])`; document tie-breaking as "degree desc, id asc")
-
 - `graph/builder.py` + `utils/pages.py` `scan_wiki_pages` (~16-24, 60-64) — iterates only `WIKI_SUBDIRS`, excluding root-level `index.md` / `_sources.md` / `log.md`. But `graph_stats["nodes"]` is surfaced in `kb_stats` as "wiki size," and `check_dead_links` uses the same list — so `[[index]]` is flagged as a dead link even though `wiki/index.md` exists. Inconsistent with `extract_wikilinks` which returns `[[index]]`. (R2)
   (fix: decide once — include root files as a synthetic `root/` subdir, or filter `extract_wikilinks` targets to exclude index names; document the choice)
 

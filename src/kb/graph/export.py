@@ -78,8 +78,12 @@ def export_mermaid(
     # Auto-prune if needed
     nodes_to_include: set[str]
     if max_nodes > 0 and graph.number_of_nodes() > max_nodes:
-        # Keep top N by total degree (most connected); nlargest is O(n log k) vs O(n log n) sort
-        top = heapq.nlargest(max_nodes, graph.degree(), key=lambda x: x[1])
+        # Keep top N by total degree (most connected); nlargest is O(n log k) vs O(n log n) sort.
+        # Item 27 (cycle 2): deterministic secondary key `(degree desc, id asc)` —
+        # without an explicit tie-break, equal-degree nodes relied on insertion
+        # order, so the same wiki produced different pruned diagrams across runs
+        # and churned the committed architecture PNG.
+        top = heapq.nlargest(max_nodes, graph.degree(), key=lambda x: (x[1], x[0]))
         nodes_to_include = {n for n, _ in top}
         logger.info(
             "Graph pruned from %d to %d nodes (by degree)",
