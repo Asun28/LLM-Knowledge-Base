@@ -27,9 +27,11 @@ class TestFeedbackLockRecovery:
         feedback_path = tmp_path / "feedback.json"
         lock_path = feedback_path.with_suffix(".json.lock")
 
-        # Create a stale lock (simulate crash with lock still present)
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY)
-        os.close(fd)
+        # Create a stale lock (simulate crash with lock still present).
+        # Cycle 2 item 2: lock content must be a valid ASCII integer — seed a
+        # dead PID rather than empty string so the waiter can distinguish
+        # "stale, steal" from "corruption, raise".
+        lock_path.write_text("999999999", encoding="ascii")
 
         # Should succeed by removing stale lock and re-acquiring
         with _feedback_lock(feedback_path, timeout=0.5):
@@ -52,8 +54,8 @@ class TestFeedbackLockRecovery:
         feedback_path = tmp_path / "feedback.json"
         lock_path = feedback_path.with_suffix(".json.lock")
 
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY)
-        os.close(fd)
+        # Cycle 2 item 2: seed dead-PID content, not empty.
+        lock_path.write_text("999999999", encoding="ascii")
 
         with _feedback_lock(feedback_path, timeout=0.5):
             pass

@@ -277,9 +277,18 @@ def test_call_llm_exponential_backoff(mock_get_client, mock_sleep):
     with pytest.raises(LLMError):
         call_llm("Say hello")
 
-    # Verify the exponential backoff delays: 1*2^0=1, 1*2^1=2, 1*2^2=4 (no sleep after final)
+    # Cycle 2 item 6: delays now carry 0.5-1.5× jitter on top of the exponential
+    # curve; assert each delay is within the jittered window and clamped to
+    # RETRY_MAX_DELAY, not an exact value.
+    from kb.utils.llm import RETRY_BASE_DELAY, RETRY_MAX_DELAY
+
     delays = [call.args[0] for call in mock_sleep.call_args_list]
-    assert delays == [1.0, 2.0, 4.0]
+    assert len(delays) == 3
+    for i, d in enumerate(delays):
+        raw = RETRY_BASE_DELAY * (2**i)
+        lo = min(raw * 0.5, RETRY_MAX_DELAY)
+        hi = min(raw * 1.5, RETRY_MAX_DELAY)
+        assert lo <= d <= hi, f"attempt {i}: delay {d} outside jittered window [{lo}, {hi}]"
 
 
 # ── System prompt forwarded ──────────────────────────────────────
@@ -385,12 +394,21 @@ def test_call_llm_mixed_transient_errors(mock_get_client, mock_sleep):
 
 
 def test_backoff_delay_values():
-    """_backoff_delay returns correct exponential values for valid attempts."""
-    from kb.utils.llm import RETRY_BASE_DELAY, _backoff_delay
+    """_backoff_delay returns exponential values within the jitter window.
 
-    assert _backoff_delay(0) == RETRY_BASE_DELAY * 1
-    assert _backoff_delay(1) == RETRY_BASE_DELAY * 2
-    assert _backoff_delay(2) == RETRY_BASE_DELAY * 4
+    Cycle 2 item 6: jitter adds 0.5-1.5× randomization; assert the window,
+    not an exact value (the exact-value assertion broke with the jitter change
+    and was a signature test, not a behaviour test per
+    `feedback_test_behavior_over_signature`).
+    """
+    from kb.utils.llm import RETRY_BASE_DELAY, RETRY_MAX_DELAY, _backoff_delay
+
+    for attempt in (0, 1, 2):
+        raw = RETRY_BASE_DELAY * (2**attempt)
+        lo = min(raw * 0.5, RETRY_MAX_DELAY)
+        hi = min(raw * 1.5, RETRY_MAX_DELAY)
+        d = _backoff_delay(attempt)
+        assert lo <= d <= hi, f"attempt {attempt}: {d} outside [{lo}, {hi}]"
 
 
 def test_backoff_delay_cap():

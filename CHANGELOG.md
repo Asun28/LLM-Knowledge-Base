@@ -32,6 +32,9 @@ Rules:
 - `utils/wiki_log.py` `append_wiki_log` — zero-width-space-escapes leading `#`/`-`/`>`/`!` and `[[...]]` wikilinks in operation + message; audit entries no longer render as active headings, lists, callouts, or clickable links when an ingested source contains markdown markup (MED R4 #8 + R5 #9 retained + LF `newline="\n"` #29)
 - `utils/io.py` `file_lock` — sets `acquired=True` only AFTER `os.write` returns successfully (LOW R6 #1); ASCII-decodes lock PID and RAISES `OSError` on decode/int-parse failure instead of silently stealing the lock; one-time `_purge_legacy_locks()` at module load removes pre-cycle-2 UTF-8/BOM lock files (MED R3 #2)
 - `utils/io.py` `atomic_json_write` / `atomic_text_write` — `f.flush() + os.fsync()` before `Path.replace` to prevent half-written files from atomically replacing a good file on crash (MED R5 #3); tempfile cleanup failures now log WARNING instead of silent swallow, without masking the original exception (MED R5 #4)
+- `utils/llm.py` `call_llm_json` — collects ALL `tool_use` blocks and raises listing every block name when Claude returns multiple; prior code silently discarded all but the first (HIGH R4 #5)
+- `utils/llm.py` `_backoff_delay` — applies 0.5-1.5× jitter per attempt then clamps to `RETRY_MAX_DELAY`; prevents thundering-herd retries when two MCP processes hit 429 simultaneously. Pre-existing `test_llm.py::test_call_llm_exponential_backoff` + `test_backoff_delay_values` updated to assert jittered window instead of exact-value equality (MED R5 #6)
+- `utils/llm.py` `_make_api_call` — `LLMError` truncates `e.message` to ≤500 chars via shared `cli._truncate`; preserves exception class name, model ID, and `status_code` verbatim; prevents Anthropic error bodies that echo full prompts from leaking into logs (MED R4 #7)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
