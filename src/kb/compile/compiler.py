@@ -331,7 +331,8 @@ def compile_wiki(
             results["errors"].append({"source": str(source), "error": str(e)})
             continue
         try:
-            ingest_result = ingest_source(source, wiki_dir=wiki_dir)
+            # H17 fix: suppress per-source rebuild; one rebuild happens at loop tail.
+            ingest_result = ingest_source(source, wiki_dir=wiki_dir, _skip_vector_rebuild=True)
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
             results["pages_updated"].extend(ingest_result["pages_updated"])
@@ -372,8 +373,19 @@ def compile_wiki(
             logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
         save_manifest(current_manifest, manifest_path)
 
+    # H17 fix: single vector index rebuild after all sources are processed.
+    # Per-source ingest_source calls used _skip_vector_rebuild=True to avoid
+    # N redundant rebuilds during a compile run.
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
+    try:
+        from kb.query.embeddings import rebuild_vector_index
+
+        rebuild_vector_index(effective_wiki_dir)
+    except Exception as e:
+        logger.warning("Final vector index rebuild at compile tail failed: %s", e)
+
     # Append to log — use effective_wiki_dir if provided, else fall back to global WIKI_DIR.
-    effective_log_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
+    effective_log_dir = effective_wiki_dir
     append_wiki_log(
         "compile",
         f"{results['mode']} compile: {results['sources_processed']} sources, "

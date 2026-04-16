@@ -607,6 +607,7 @@ def ingest_source(
     *,
     defer_small: bool = False,
     wiki_dir: Path | None = None,
+    _skip_vector_rebuild: bool = False,
 ) -> dict:
     """Ingest a single raw source into the knowledge base.
 
@@ -616,6 +617,10 @@ def ingest_source(
         extraction: Pre-extracted data dict. If None, calls LLM to extract.
         defer_small: If True, sources under SMALL_SOURCE_THRESHOLD chars get
             summary-only processing (no entity/concept pages).
+        _skip_vector_rebuild: If True, suppress the tail-call to
+            ``rebuild_vector_index``. Batch callers (e.g. ``compile_wiki``) pass
+            True in the per-source loop and invoke ``rebuild_vector_index`` once
+            after the loop completes (H17 fix).
 
     Returns:
         dict with guaranteed keys:
@@ -887,4 +892,16 @@ def ingest_source(
         result["deferred_entities"] = True
     if contradiction_warnings:
         result["contradictions"] = contradiction_warnings
+
+    # H17 fix: rebuild vector index at ingest tail so hybrid search stays live.
+    # Batch callers (compile_wiki) suppress this with _skip_vector_rebuild=True
+    # and invoke rebuild_vector_index once after the loop.
+    if not _skip_vector_rebuild:
+        try:
+            from kb.query.embeddings import rebuild_vector_index
+
+            rebuild_vector_index(effective_wiki_dir)
+        except Exception as e:
+            logger.warning("Vector index rebuild at ingest tail failed: %s", e)
+
     return result
