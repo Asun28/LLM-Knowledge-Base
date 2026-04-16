@@ -27,9 +27,9 @@ from kb.utils.io import atomic_text_write
 from kb.utils.llm import LLMError
 from kb.utils.text import slugify, yaml_escape
 
-logger = logging.getLogger(__name__)
+from kb.ingest.pipeline import _TEXT_EXTENSIONS
 
-_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
+logger = logging.getLogger(__name__)
 
 
 def _validate_file_inputs(filename: str, content: str) -> str | None:

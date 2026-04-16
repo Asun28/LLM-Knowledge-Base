@@ -17,6 +17,7 @@ from kb.config import (
     RAW_DIR,
     SMALL_SOURCE_THRESHOLD,
     SOURCE_TYPE_DIRS,
+    SUPPORTED_SOURCE_EXTENSIONS,
     WIKI_DIR,
     WIKI_INDEX,
     WIKI_SOURCES,
@@ -47,6 +48,12 @@ _SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]*- [^\n]*\n)*)", re.MULTIL
 # names like "Untitled-Reports" (slug "untitled-reports"). Exact 6-hex suffix ensures
 # only the computed hash sentinel is suppressed.
 _UNTITLED_SENTINEL_RE = re.compile(r"^untitled-[0-9a-f]{6}$")
+
+# MCP-only allowlist (stricter than SUPPORTED_SOURCE_EXTENSIONS — excludes .pdf
+# which is handled by compile_wiki via the UTF-8 decode "convert first" path).
+# mcp.core re-exports this name; library-boundary enforcement in ingest_source
+# uses SUPPORTED_SOURCE_EXTENSIONS so PDF ingest through compile_wiki still works.
+_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
 
 
 def _is_untitled_sentinel(slug: str) -> bool:
@@ -607,6 +614,7 @@ def ingest_source(
     *,
     defer_small: bool = False,
     wiki_dir: Path | None = None,
+    raw_dir: Path | None = None,
     _skip_vector_rebuild: bool = False,
 ) -> dict:
     """Ingest a single raw source into the knowledge base.
@@ -617,6 +625,11 @@ def ingest_source(
         extraction: Pre-extracted data dict. If None, calls LLM to extract.
         defer_small: If True, sources under SMALL_SOURCE_THRESHOLD chars get
             summary-only processing (no entity/concept pages).
+        wiki_dir: Output wiki directory override (defaults to WIKI_DIR).
+        raw_dir: Source root override used for path-traversal validation plus
+            source-type detection plus source_ref canonicalization. Defaults to
+            module-level ``RAW_DIR``. Required for custom-project isolation
+            (kb_lint --augment auto_ingest mode, multi-project test harnesses).
         _skip_vector_rebuild: If True, suppress the tail-call to
             ``rebuild_vector_index``. Batch callers (e.g. ``compile_wiki``) pass
             True in the per-source loop and invoke ``rebuild_vector_index`` once
@@ -634,9 +647,22 @@ def ingest_source(
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
+    effective_raw_dir = raw_dir if raw_dir is not None else RAW_DIR
+
+    # C2 (Phase 4.5 MEDIUM): reject extensions not in SUPPORTED_SOURCE_EXTENSIONS
+    # at the library boundary, not only at the MCP wrapper, so internal callers
+    # cannot slip suffix-less files (README, LICENSE) through. Uses the broad
+    # allowlist (includes .pdf) so PDFs still hit the UTF-8 decode path where
+    # they fail with the helpful "convert to markdown first" message.
+    if source_path.suffix.lower() not in SUPPORTED_SOURCE_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported source extension: {source_path.suffix!r}. "
+            f"Expected one of: {sorted(SUPPORTED_SOURCE_EXTENSIONS)}"
+        )
+
     # Verify source_path is within raw/ — use normcase on both sides for
     # reliable case-insensitive comparison on Windows (Python 3.12+).
-    raw_dir_nc = Path(os.path.normcase(str(RAW_DIR.resolve())))
+    raw_dir_nc = Path(os.path.normcase(str(effective_raw_dir.resolve())))
     source_path_nc = Path(os.path.normcase(str(source_path)))
     try:
         source_path_nc.relative_to(raw_dir_nc)
@@ -644,7 +670,7 @@ def ingest_source(
         raise ValueError(f"Source path must be within raw/ directory: {source_path}") from e
 
     if source_type is None:
-        source_type = detect_source_type(source_path)
+        source_type = detect_source_type(source_path, raw_dir=effective_raw_dir)
 
     # Fix 2.13: Read bytes once; derive both text and hash from the same read (avoids double read).
     raw_bytes = source_path.read_bytes()
@@ -674,7 +700,7 @@ def ingest_source(
                 break
 
     # Build source reference early for duplicate check
-    source_ref = make_source_ref(source_path)
+    source_ref = make_source_ref(source_path, raw_dir=effective_raw_dir)
 
     # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
     # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
@@ -884,8 +910,15 @@ def ingest_source(
                     )
                     # H3 fix: delegate to _persist_contradictions (file-locked RMW).
                     _persist_contradictions(contradiction_warnings, source_ref, effective_wiki_dir)
-            except Exception as e:
-                logger.debug("Contradiction detection failed (non-fatal): %s", e)
+            except (KeyError, TypeError, ValueError, re.error) as e:
+                # C3 (Phase 4.5 R4 HIGH): narrow from bare Exception so bug-indicating
+                # programming errors (AttributeError, ImportError, NameError) surface
+                # instead of being silently masked as "non-fatal".
+                logger.warning(
+                    "Contradiction detection skipped for %s (non-fatal): %s",
+                    source_ref,
+                    e,
+                )
 
     # Fix 2.21: deduplicate wikilinks_injected
     result = {

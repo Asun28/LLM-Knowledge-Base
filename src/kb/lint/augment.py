@@ -470,6 +470,7 @@ def run_augment(
     *,
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
+    data_dir: Path | None = None,
     mode: Mode = "propose",
     max_gaps: int = 5,
     dry_run: bool = False,
@@ -511,6 +512,24 @@ def run_augment(
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = raw_dir or RAW_DIR
 
+    # B2/B3 (Phase 5 three-round MEDIUM): when caller supplies a custom wiki
+    # but no explicit data_dir, derive `wiki_dir.parent / ".data"` so manifest
+    # and rate-limit state stay with the custom project. Standard runs fall
+    # through to the repo-global defaults (None → Manifest/RateLimiter pick
+    # their module-level MANIFEST_DIR / RATE_PATH).
+    effective_data_dir: Path | None
+    if data_dir is not None:
+        effective_data_dir = Path(data_dir)
+    elif wiki_dir != WIKI_DIR:
+        effective_data_dir = wiki_dir.parent / ".data"
+    else:
+        effective_data_dir = None
+
+    # B4 (Phase 5 three-round MEDIUM): reject max_gaps<1 up front. Negative
+    # values silently fell through Python slicing (proposals[:-1] drops the
+    # last item) and could consume reviewed proposals while skipping work.
+    if not isinstance(max_gaps, int) or max_gaps < 1:
+        raise ValueError(f"max_gaps={max_gaps!r} must be a positive integer")
     if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
         raise ValueError(
             f"max_gaps={max_gaps} exceeds "
@@ -595,9 +614,10 @@ def run_augment(
                 stubs=[
                     {"page_id": p["stub_id"], "title": p["title"]} for p in proposals
                 ],
+                data_dir=effective_data_dir,
             )
             manifest_path = str(manifest.path)
-            limiter = RateLimiter()
+            limiter = RateLimiter(data_dir=effective_data_dir)
             fetches = []
             with AugmentFetcher(
                 allowed_domains=AUGMENT_ALLOWED_DOMAINS,
@@ -620,6 +640,28 @@ def run_augment(
 
                     fetched_ok = False
                     for url in prop["urls"]:
+                        # B5 (Phase 5 three-round MEDIUM): re-run the allowlist
+                        # check on each reviewed URL BEFORE acquiring rate-limit
+                        # quota. A hand-edited proposals file can carry off-
+                        # allowlist or malformed URLs; fetcher.fetch() rejects
+                        # them after network I/O, but RateLimiter.acquire()
+                        # already burned a slot — so a bad reviewed URL poisons
+                        # the hourly cap for good URLs. Reject first, record,
+                        # and continue without touching the limiter.
+                        if not _url_is_allowed(url, AUGMENT_ALLOWED_DOMAINS):
+                            manifest.advance(
+                                stub_id,
+                                "failed",
+                                payload={"reason": f"blocked_by_allowlist: {url}"},
+                            )
+                            fetches.append(
+                                {
+                                    "stub_id": stub_id,
+                                    "status": "blocked_by_allowlist",
+                                    "url": url,
+                                }
+                            )
+                            continue
                         # Normalize to bare hostname (lowercase, no port, no
                         # userinfo). netloc would treat example.com and
                         # example.com:443 as separate buckets, weakening the
@@ -782,6 +824,7 @@ def run_augment(
                     source_type="article",
                     extraction=extraction,
                     wiki_dir=wiki_dir,
+                    raw_dir=raw_dir,  # B1: honor caller's custom raw/
                 )
             except Exception as e:
                 msg = f"ingest_source failed: {type(e).__name__}: {e}"

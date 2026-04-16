@@ -41,6 +41,10 @@ def kb_lint(
         return "Error: --execute requires --augment"
     if auto_ingest and not execute:
         return "Error: --auto-ingest requires --execute (and --augment)"
+    # B4 (Phase 5 three-round MEDIUM): reject non-positive values so negative
+    # max_gaps doesn't silently truncate proposals via Python slicing.
+    if max_gaps < 1:
+        return f"Error: max_gaps={max_gaps} must be a positive integer"
     if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
         return (
             f"Error: max_gaps={max_gaps} exceeds hard ceiling "

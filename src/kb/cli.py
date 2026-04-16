@@ -168,6 +168,10 @@ def lint(
         raise click.UsageError("--execute requires --augment")
     if auto_ingest and not execute:
         raise click.UsageError("--auto-ingest requires --execute (and --augment)")
+    # B4 (Phase 5 three-round MEDIUM): reject non-positive values up front so
+    # negative --max-gaps doesn't silently truncate proposals via Python slicing.
+    if max_gaps < 1:
+        raise click.UsageError(f"--max-gaps={max_gaps} must be a positive integer")
     if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
         raise click.UsageError(
             f"--max-gaps={max_gaps} exceeds hard ceiling "
