@@ -35,6 +35,34 @@ Plus backlog cleanup: removed 3 stale assert→RuntimeError items from Phase 5 k
 
 Plus Phase 4.5 CRITICAL cycle 1: 16 CRITICAL items from the post-v0.10.0 multi-agent audit, fixed across 4 themed commits (test-isolation, contract-consistency, data-integrity, error-chain) via an automated feature-dev pipeline with Opus decision gates + adversarial gates + branch-level Codex + security review.
 
+Plus Phase 4.5 CRITICAL cycle 1 docs-sync (items 4 + 5): version-string alignment across `pyproject.toml` / `__init__.py` / README badge, CLAUDE.md stats updated to current counts (1552 tests / 119 test files / 67 py files / 26 MCP tools), and new `scripts/verify_docs.py` pre-push check. Also 5 new R6 BACKLOG entries from the 2-round post-PR review deferrals.
+
+### Phase 4.5 — CRITICAL cycle 1 docs-sync (2026-04-16)
+
+Immediately-following PR after cycle 1 merged. Addresses the 2 items the second-gate Opus review deferred from cycle 1 as preventive-infrastructure drive-by:
+
+#### Fixed — Phase 4.5 CRITICAL (items 4 + 5)
+
+- **`pyproject.toml` version alignment** (item 4) — bumped from `0.9.10` → `0.10.0` to match `src/kb/__init__.py.__version__` and the README badge. `pip install -e .` / `pip freeze` now report the correct version.
+- **CLAUDE.md stats refresh** (item 5) — test count updated (1531 → 1552 actual), test-file count updated (1434-era claim → 119 actual), replaced ambiguous "24 modules" with "67 Python files in src/kb/", and added Phase 4.5 CRITICAL cycle 1 + docs-sync to the shipped-unreleased list.
+
+#### Added
+
+- **`scripts/verify_docs.py`** — pre-push / CI-friendly drift check:
+  - Verifies `pyproject.toml` version == `src/kb/__init__.py.__version__` == README badge version.
+  - Runs `pytest --collect-only` and compares collected count against CLAUDE.md's claimed "N tests" lines (tolerance ±10 by default; `KB_VERIFY_STRICT=1` env var for exact match).
+  - Checks `CLAUDE.md`'s "across N test files" claim against the actual test-file count.
+  - Reports source file count for reference (not gated — `src/kb/` file count shifts naturally across cycles).
+  - Exit 0 on alignment, exit 1 on drift. Only REPORTS; does not auto-fix.
+
+#### Changed — BACKLOG.md R6 additions
+
+Five deferred findings from the post-PR 2-round adversarial review (commit `99e99d8` addendum) now logged for the next cycle:
+
+- **Phase 4.5 HIGH:** `refine_page` page-file RMW race (no lock on the wiki page body itself; only history RMW was fixed in cycle 1 item 13).
+- **Phase 4.5 MEDIUM:** `query_wiki` raw_dir containment-check tautology (the `try/except ValueError` block is dead code by construction; either remove or anchor against `PROJECT_ROOT` to make it enforce something).
+- **Phase 4.5 LOW ×3:** `utils/io.py` `acquired = True` timing comment misleading; `utils/llm.py` `last_error = e` on non-retryable branch dead code; `test_compile_loop_does_not_double_write_manifest` monkeypatch brittleness.
+
 ### Phase 4.5 — Multi-agent audit CRITICAL cycle 1 (2026-04-15)
 
 Resolves 16 CRITICAL items from the 2026-04-13 multi-agent post-v0.10.0 audit. 4 theme commits + 1 style fix + 1 post-review fix for `slugify` cross-cut regression. Theme 5 (docs-sync, items 4 + 5) deferred to immediately-following PR. Phase 4.5 HIGH/MEDIUM/LOW deferred to subsequent cycles.
