@@ -72,6 +72,28 @@ Rules:
 - `docs/superpowers/decisions/2026-04-17-backlog-by-file-cycle1-design.md` — batch-size, deferral, and dependency ordering rationales
 - `docs/superpowers/specs/2026-04-17-backlog-by-file-cycle1-design.md` — file-grouped scope + test expectations per item
 
+#### PR review — 3 rounds (Opus + Sonnet + 3× Codex)
+
+Round 1 (Opus + Sonnet parallel, Codex round 1): 11 findings addressed
+in commit `fix(pr-review-r1)`:
+- `lint/checks.py` O1 issue key drift `type` → `check: frontmatter_missing_fence`
+- `utils/wiki_log.py` S1 symlink rejection via `lstat` + `S_ISLNK`
+- `lint/verdicts.py` M1 cache thread-safety + return-copy + invalidate-before-save
+- `mcp/quality.py` F1 O_EXCL + fdopen in one try-block (signal-race fix)
+- `mcp/core.py` H1 size cap aligned to `QUERY_CONTEXT_MAX_CHARS*4`
+- `query/engine.py` I3 removed `_LEAK_PREFIX_RE` (dropped legit "RAG:…" rewrites); added raw BM25 cache lock
+- `capture.py` A4 env-var regex accepts quoted-with-spaces values
+- `feedback/store.py` Q1 re-raises `PermissionError` instead of swallowing
+- Test updates: D1 exercises `extract_from_source` with SDK-mutating stub; A3 uses public `capture_items`; S1 symlink regression; I3 legit "RAG:" preserved; A4 quoted-secret; Q1 EACCES propagation
+
+Round 2 (Codex round 2): 4 MAJORS addressed in commit `fix(pr-review-r2)`:
+- `query/engine.py` I3 removed bare "sure"/"okay"/"alright" over-match
+- `query/engine.py` I2 rebuild outside lock + double-check under lock
+- `ingest/contradiction.py` E1 short-token whitelist {c,r,go,f,d}
+- `BACKLOG.md` Phase 4.5 MEDIUM items collapsed to summary pointer
+
+Round 3 (Codex round 3): **APPROVE** — no blocker-severity regressions. One pre-existing scope issue noted (`>= 2` overlap threshold in contradiction detection makes single-token language-name contradictions invisible; predates this PR).
+
 Post-release audit fixes for Phase 4 v0.10.0 — all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
 Plus Phase 4.1 sweep: 16 LOW/NIT backlog items applied directly. One test expectation
 (`TestSymlinkGuard.test_symlink_outside_project_root_refuses_import`) was updated to match
