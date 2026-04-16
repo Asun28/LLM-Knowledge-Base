@@ -63,18 +63,45 @@ def hybrid_search(
     # Collect all result lists
     all_lists: list[list[dict]] = []
 
+    # Item 16 (cycle 2): wrap each backend call in try/except so a corrupt
+    # page dict (BM25), sqlite-vec schema drift, or model2vec import failure
+    # cannot propagate through `search_pages` → `kb_query` and crash the MCP
+    # tool. Each backend failure logs a structured WARNING with backend name,
+    # exception class, exception string, and `len(question.split())` as token
+    # count proxy, then contributes an empty list so the remaining backend
+    # still answers.
+
     # Intentional asymmetry: BM25 scores the ORIGINAL query only. Vector search uses
     # original + semantically expanded variants. BM25 is sensitive to exact-token drift
     # from expansion; cosine similarity handles semantic equivalence naturally, so
     # expanded queries are safe for vector search but degrade BM25 precision.
     bm25_limit = limit * BM25_SEARCH_LIMIT_MULTIPLIER
-    bm25_results = bm25_fn(question, bm25_limit)
+    query_tokens = len(question.split())
+    try:
+        bm25_results = bm25_fn(question, bm25_limit)
+    except Exception as exc:
+        logger.warning(
+            "hybrid_search backend=bm25 failed: %s (%s); query_tokens=%d",
+            exc.__class__.__name__,
+            exc,
+            query_tokens,
+        )
+        bm25_results = []
     if bm25_results:
         all_lists.append(bm25_results)
 
     # Vector search on all query variants
     for q in queries:
-        vec_results = vector_fn(q, vector_limit)
+        try:
+            vec_results = vector_fn(q, vector_limit)
+        except Exception as exc:
+            logger.warning(
+                "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
+                exc.__class__.__name__,
+                exc,
+                len(q.split()),
+            )
+            vec_results = []
         if vec_results:
             all_lists.append(vec_results)
 

@@ -3,8 +3,6 @@
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from datetime import date as _date
-from datetime import time as _time
 from pathlib import Path
 
 from kb.config import VERDICT_TREND_THRESHOLD
@@ -12,22 +10,21 @@ from kb.lint.verdicts import load_verdicts
 
 
 def _parse_timestamp(ts: str) -> datetime:
-    """Parse ISO-8601 timestamp, accepting date-only strings.
+    """Parse ISO-8601 timestamp.
 
-    Phase 4.5 HIGH L4: always returns UTC-aware datetimes. Date-only strings
-    are treated as midnight UTC. Naive datetimes are assumed UTC.
+    Phase 4.5 HIGH L4: always returns UTC-aware datetimes. Naive datetimes are
+    assumed UTC. Item 22 (cycle 2): the vestigial date-only fallback was
+    removed — project pins `python_requires>=3.12` so `fromisoformat` parses
+    both date and datetime strings natively, and tests exercising date-only
+    inputs still succeed through the same call.
     """
-
     ts = ts.replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(ts)
-    except ValueError:
-        # Date-only string (e.g. '2024-01-01') — treat as midnight UTC
-        dt = datetime.combine(_date.fromisoformat(ts), _time.min, tzinfo=UTC)
+    dt = datetime.fromisoformat(ts)
     # Ensure result is always aware (assume naive = UTC)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +42,16 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
         dict with keys: total, overall (pass/fail/warning counts),
         periods (list of period dicts), trend (improving/stable/declining).
     """
-    verdicts = load_verdicts(path)
+    # Item 21 (cycle 2): accept either a path OR a list of verdict dicts.
+    # Tests/direct callers can now pass verdicts without round-tripping to disk.
+    verdicts = path if isinstance(path, list) else load_verdicts(path)
     if not verdicts:
         return {
             "total": 0,
             "overall": {"pass": 0, "fail": 0, "warning": 0},
             "periods": [],
             "trend": "stable",
+            "parse_failures": 0,
         }
 
     # Overall counts and period grouping in a single pass
@@ -59,6 +59,7 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
     period_buckets: dict[str, dict] = defaultdict(
         lambda: {"pass": 0, "fail": 0, "warning": 0, "total": 0}
     )
+    parse_failures = 0
 
     for v in verdicts:
         vrd = v.get("verdict", "")
@@ -70,6 +71,10 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
             # Phase 4.5 HIGH L5: exclude parse failures from BOTH overall
             # and period_buckets (previously counted in overall but skipped
             # in periods, causing sum mismatch).
+            # Item 21 (cycle 2): count them explicitly so callers can surface
+            # "N verdicts skipped due to malformed timestamps" instead of
+            # leaving a silent gap between `total` and `sum(periods)`.
+            parse_failures += 1
             continue
 
         # Count in overall only after timestamp parse succeeds
@@ -120,6 +125,7 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
         "overall": overall,
         "periods": sorted_periods,
         "trend": trend,
+        "parse_failures": parse_failures,
     }
 
 

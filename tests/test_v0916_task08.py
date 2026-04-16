@@ -87,7 +87,8 @@ class TestFeedbackLockSleep:
         fb_file.write_text(json.dumps({"entries": [], "page_scores": {}}), encoding="utf-8")
 
         lock_file = fb_file.with_suffix(".json.lock")
-        lock_file.touch()
+        # Cycle 2 item 2: valid ASCII int for dead PID (empty content now raises).
+        lock_file.write_text("999999999", encoding="ascii")
 
         from kb.feedback.store import _feedback_lock
 

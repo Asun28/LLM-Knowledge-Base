@@ -1,6 +1,7 @@
 """Anthropic API wrapper with model tiering, retry, and timeout."""
 
 import logging
+import random
 import threading
 import time
 
@@ -13,6 +14,7 @@ from kb.config import (
     LLM_RETRY_MAX_DELAY,
     MODEL_TIERS,
 )
+from kb.utils.text import truncate
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +46,17 @@ def _resolve_model(tier: str) -> str:
 
 
 def _backoff_delay(attempt: int) -> float:
-    """Compute capped exponential backoff delay for a given attempt number."""
-    return min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+    """Compute capped exponential backoff delay with jitter.
+
+    Item 6 (cycle 2): prior deterministic `min(BASE * 2**attempt, MAX)` caused
+    thundering-herd retries under concurrent 429s (two MCP processes, or
+    autoresearch loop + interactive user). Adds 0.5-1.5× jitter BEFORE the cap
+    so worst-case delay never exceeds RETRY_MAX_DELAY. Single jitter per call;
+    callers MUST NOT re-jitter the return value.
+    """
+    raw = RETRY_BASE_DELAY * (2**attempt)
+    jittered = raw * random.uniform(0.5, 1.5)
+    return min(jittered, RETRY_MAX_DELAY)
 
 
 def _make_api_call(kwargs: dict, model: str):
@@ -108,7 +119,14 @@ def _make_api_call(kwargs: dict, model: str):
                     )
             else:
                 last_error = e  # fix item 16: track non-retryable for consistency
-                raise LLMError(f"API error from {model}: {e.status_code} — {e.message}") from e
+                # Item 7 (cycle 2): truncate e.message — Anthropic error bodies may
+                # contain tens of KB of echoed prompt content (including sensitive
+                # text). Preserve verbatim: exception class name, model, status code
+                # (so callers can still branch on the structured fields).
+                safe_msg = truncate(str(e.message), limit=500)
+                raise LLMError(
+                    f"API error from {model} ({e.__class__.__name__}): {e.status_code} — {safe_msg}"
+                ) from e
 
         except anthropic.APIConnectionError as e:
             last_error = e
@@ -168,12 +186,16 @@ def _make_api_call(kwargs: dict, model: str):
     elif isinstance(last_error, anthropic.APIConnectionError):
         msg = f"Connection failed after {MAX_RETRIES} retries calling {model}"
     elif isinstance(last_error, anthropic.APIStatusError):
+        # Item 7 (cycle 2): truncate message here as well — the retry-exhausted
+        # path also carries `last_error.message` which may echo prompt content.
+        safe_msg = truncate(str(last_error.message), limit=500)
         msg = (
             f"API error {last_error.status_code} after {MAX_RETRIES} retries "
-            f"calling {model}: {last_error.message}"
+            f"calling {model} ({last_error.__class__.__name__}): {safe_msg}"
         )
     else:
-        msg = f"Failed after {MAX_RETRIES} retries calling {model}: {last_error}"
+        safe_msg = truncate(str(last_error), limit=500)
+        msg = f"Failed after {MAX_RETRIES} retries calling {model}: {safe_msg}"
     raise LLMError(msg) from last_error
 
 
@@ -260,14 +282,26 @@ def call_llm_json(
         kwargs["system"] = system
 
     response = _make_api_call(kwargs, model)
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use":
-            if block.name != tool_name:
-                raise LLMError(
-                    f"Wrong tool in response from {model}: "
-                    f"expected '{tool_name}', got '{block.name}'"
-                )
-            return block.input
+    # Item 5 (cycle 2): collect ALL tool_use blocks before picking one.
+    # Prior code returned the FIRST tool_use block even when the response
+    # contained multiple — the second (a refusal or alternative tool call)
+    # was silently discarded. Multi-block responses are an ambiguity signal:
+    # surface them as an error listing every block name so the caller can
+    # fix the prompt or tool_choice.
+    tool_use_blocks = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
+    if len(tool_use_blocks) > 1:
+        names = [getattr(b, "name", "?") for b in tool_use_blocks]
+        raise LLMError(
+            f"Multiple tool_use blocks from {model}: {names}; "
+            f"expected exactly one matching '{tool_name}'."
+        )
+    if tool_use_blocks:
+        block = tool_use_blocks[0]
+        if block.name != tool_name:
+            raise LLMError(
+                f"Wrong tool in response from {model}: expected '{tool_name}', got '{block.name}'"
+            )
+        return block.input
     # fix item 17: preserve refusal/diagnostic text in the error for debuggability
     text_preview = ""
     for block in response.content:

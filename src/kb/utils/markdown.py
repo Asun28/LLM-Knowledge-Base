@@ -41,8 +41,10 @@ def _strip_code_spans_and_fences(text: str) -> str:
     downstream regex correctness when callers expect line-by-line parity.
     """
     # Strip frontmatter first (anchored) so code fences in the body aren't
-    # confused with the YAML fence.
-    m = FRONTMATTER_RE.match(text)
+    # confused with the YAML fence. Item 10 (cycle 2): fast-path — skip the
+    # regex engine on every page that doesn't start with "---", saving work
+    # in the build_graph + load_all_pages hot paths.
+    m = FRONTMATTER_RE.match(text) if text.startswith("---") else None
     if m:
         # Replace frontmatter block with equivalent-length blanks to preserve
         # line numbers in any caller that uses offsets from the stripped view.

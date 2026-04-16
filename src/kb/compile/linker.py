@@ -26,8 +26,7 @@ def _check_not_in_wikilink(match: re.Match, body: str, pid: str, replacement: st
     open_count = before.count("[[") - before.count("]]")
     if open_count > 0:
         logger.warning(
-            "inject_wikilinks: skipping replacement in %s "
-            "— unmatched [[ before position %d",
+            "inject_wikilinks: skipping replacement in %s — unmatched [[ before position %d",
             pid,
             start,
         )
@@ -188,15 +187,10 @@ def inject_wikilinks(
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Strip frontmatter before checking existing links — a [[target]] in YAML
-        # should not block body injection.
-        fm_match = _FRONTMATTER_RE.match(content)
-        body_for_check = fm_match.group(2) if fm_match else content
-        existing_links = extract_wikilinks(body_for_check)
-        if target_page_id in existing_links:
-            continue
-
-        # Split frontmatter from body — use regex to avoid splitting on --- inside YAML values
+        # Item 26 (cycle 2): match frontmatter ONCE per page and reuse the
+        # result for both the "existing links" guard and the body/frontmatter
+        # split. At 5k pages × N titles per ingest this halves FRONTMATTER_RE
+        # cost in the inject_wikilinks hot path.
         fm_match = _FRONTMATTER_RE.match(content)
         if fm_match:
             frontmatter_section = fm_match.group(1)
@@ -204,6 +198,9 @@ def inject_wikilinks(
         else:
             frontmatter_section = ""
             body = content
+        existing_links = extract_wikilinks(body)
+        if target_page_id in existing_links:
+            continue
 
         # Save original body for final comparison, then mask code blocks so
         # wikilink injection cannot touch content inside ``` ``` or `...` spans.

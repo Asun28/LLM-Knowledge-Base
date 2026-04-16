@@ -95,13 +95,25 @@ def find_connection_opportunities(
         # Phase 4.5 HIGH P3: use shared FRONTMATTER_RE instead of inlined regex
         fm_match = _FRONTMATTER_RE.match(raw)
         content = (fm_match.group(2) if fm_match else raw).lower()
+        # Item 19 (cycle 2): strip `[[wikilink]]` markup before tokenising.
+        # Otherwise slug fragments from shared link targets show up as
+        # shared terms in the connection report — telling the user "A and B
+        # share the term `concepts`" when the real signal is already captured
+        # by the wikilink edge itself, and the pages ARE already linked.
+        content = re.sub(r"\[\[[^\]]+\]\]", " ", content)
         pid = page_id(page_path, wiki_dir)
-        # Extract significant words (longer than 4 chars, not common)
-        words = {
-            stripped
-            for w in content.split()
-            if len(stripped := re.sub(r"[^\w]", "", w)) > 4
-        }
+        # Extract significant words (longer than 4 chars, not common).
+        # Item 18 (cycle 2): drop purely-numeric tokens ("2024", "12345",
+        # "v0100") so year/version matches don't inflate the connection
+        # graph with topic-unrelated pairs.
+        words: set[str] = set()
+        for w in content.split():
+            stripped = re.sub(r"[^\w]", "", w)
+            if len(stripped) <= 4:
+                continue
+            if stripped.isdigit():
+                continue
+            words.add(stripped)
         for word in words:
             if word not in term_index:
                 term_index[word] = []
@@ -283,7 +295,13 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
                 f"Pages: {', '.join(flagged_pages[:5])}. "
                 "Run kb_lint_deep on these to verify source fidelity."
             )
-    except (ImportError, AttributeError, OSError, ValueError) as e:
+    except (KeyError, TypeError) as e:
+        # Item 20 (cycle 2): narrowed from `(ImportError, AttributeError, OSError,
+        # ValueError)`. `kb.feedback.reliability` is imported unconditionally at
+        # MCP startup so `ImportError` is dead code; the real risk is malformed
+        # entries in `get_flagged_pages` producing KeyError/TypeError. OSError
+        # (disk fault) must propagate — silently returning an empty flagged-list
+        # on read failure hides a real incident.
         logger.warning("Feedback data unavailable for evolve report: %s", e)
 
     return {

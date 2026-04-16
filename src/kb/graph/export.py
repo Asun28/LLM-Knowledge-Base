@@ -1,6 +1,5 @@
 """Export wiki graph as Mermaid diagram."""
 
-import heapq
 import logging
 import re
 from pathlib import Path
@@ -78,8 +77,13 @@ def export_mermaid(
     # Auto-prune if needed
     nodes_to_include: set[str]
     if max_nodes > 0 and graph.number_of_nodes() > max_nodes:
-        # Keep top N by total degree (most connected); nlargest is O(n log k) vs O(n log n) sort
-        top = heapq.nlargest(max_nodes, graph.degree(), key=lambda x: x[1])
+        # Item 27 (cycle 2) + PR review R1 MAJOR: deterministic tie-break
+        # `(degree desc, id ASC)`. `heapq.nlargest` sorts descending on the
+        # whole key, so `(x[1], x[0])` would pick id DESC on ties. Use a
+        # full sort with `(-degree, id)` and slice to get degree DESC + id
+        # ASC ordering regardless of CPython heap behaviour.
+        ordered = sorted(graph.degree(), key=lambda x: (-x[1], x[0]))
+        top = ordered[:max_nodes]
         nodes_to_include = {n for n, _ in top}
         logger.info(
             "Graph pruned from %d to %d nodes (by degree)",
@@ -92,11 +96,7 @@ def export_mermaid(
     # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
     # Titles require YAML frontmatter parsing which load_all_pages() handles.
     # Load AFTER pruning and filter to included nodes only to avoid unnecessary disk reads.
-    titles = {
-        p["id"]: p["title"]
-        for p in load_all_pages(wiki_dir)
-        if p["id"] in nodes_to_include
-    }
+    titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir) if p["id"] in nodes_to_include}
 
     # Build Mermaid output
     lines = ["graph LR"]
