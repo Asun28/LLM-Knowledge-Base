@@ -62,12 +62,30 @@ Resolves 16 CRITICAL items from the 2026-04-13 multi-agent post-v0.10.0 audit. 4
 
 - Existing test files updated to reflect behavior changes introduced by items 11 + 14: `test_v4_11_formats_common.py` (slugify `untitled-<hash>` fallback), `test_fixes_v060.py` + `test_v0913_phase394.py` + `test_compiler_mcp_v093.py` (compile-loop single-write manifest contract), `test_capture.py` + `test_utils.py` + `test_fixes_v050.py` + `test_v0914_phase395.py` (CJK slug preservation).
 
+#### Post-PR 2-round adversarial review fixes (commit `4688763`)
+
+Independent 2-round post-PR review (1 Opus architecture + 1 Sonnet edge-cases, dispatched when Codex CLI hit its usage quota) surfaced 1 blocker + 3 majors. All addressed before human merge:
+
+- **`ingest/pipeline.py` `_is_untitled_sentinel` (blocker)** — the post-B1 fix's `slug.startswith("untitled-")` guards false-positived on legitimate entity names like `Untitled-Reports` (slug `untitled-reports`). Tightened to a regex `^untitled-[0-9a-f]{6}$` via new `_is_untitled_sentinel()` helper; all 3 guard sites updated. 2 new regression tests (legit names allowed, sentinel still blocked).
+- **`review/refiner.py` CRLF defense-in-depth** — body regex `r"\A\n+"` → `r"\A[\r\n]+"` so Windows CRLF leading blanks strip even if the upstream `replace("\r\n", "\n")` normalization is bypassed.
+- **`review/refiner.py` history_path wiki_dir derivation** — same test-isolation class as item 7; `refine_page(wiki_dir=tmp)` now derives `resolved_history_path = wiki_dir.parent / ".data" / "review_history.json"` instead of silently falling back to the production global. Regression test asserts prod `.data/review_history.json` mtime unchanged.
+- **`ingest/pipeline.py` summary-page CJK discoverability** — emoji / CJK titles that yield a sentinel slug now fall back to `slugify(source_path.stem)` instead of accepting `untitled-<hash>.md` as the summary filename. Regression test: title `"😀😀😀"` on `readable-stem.md` produces summary `readable-stem.md`.
+
+5 items deferred from review (tracked):
+
+- `utils/io.py` `acquired = True` timing comment misleading (behavior correct, comment-only).
+- `utils/llm.py` `last_error = e` on non-retryable branch dead code (harmless consistency tweak, kept).
+- `review/refiner.py` page-file RMW race (no lock on wiki page file itself; only history JSON locked) — pre-existing, out of scope for item 13 — next HIGH cycle.
+- `ingest/pipeline.py` `_is_duplicate_content` manifest race in single-process MCP — matches C8 TODO comment — Phase 4.5 HIGH cycle.
+- `test_compile_loop_does_not_double_write_manifest` monkeypatch-at-module-level is brittle if `save_manifest` is ever moved — noted.
+
 #### Notes
 
 - **Deferred to follow-up docs-sync PR:** items 4 (version-string drift across `pyproject.toml` / `__init__.py` / README badge) and 5 (CLAUDE.md stats drift + `scripts/verify_docs.py` pre-commit check). Second-gate Opus review moved these out of this cycle as preventive-infrastructure drive-by.
-- **Deferred to Phase 4.5 HIGH cycle:** `_is_duplicate_content` manifest RMW race (TODO planted in `ingest/pipeline.py`) and `file_lock` stale-steal-loop Windows infinite-spin edge case.
-- **Automated pipeline gates exercised:** Opus scope decomposition gate, adversarial Theme 5 deferral gate, Step 1.6 design gate (11 decisions, 2 overrides), Step 2.5 plan gate (7 amendments applied), security review (4-item checklist, 8/8 PASS), branch-level Codex review (1 blocker fixed, 2 majors triaged deferred/accepted).
+- **Deferred to Phase 4.5 HIGH cycle:** `_is_duplicate_content` manifest RMW race (TODO planted in `ingest/pipeline.py`), `file_lock` stale-steal-loop Windows infinite-spin edge case, `refine_page` page-file RMW race.
+- **Automated pipeline gates exercised:** Opus scope decomposition gate, adversarial Theme 5 deferral gate, Step 1.6 design gate (11 decisions, 2 overrides), Step 2.5 plan gate (7 amendments applied), security review (4-item checklist, 8/8 PASS), branch-level Codex review (1 blocker fixed, 2 majors triaged), **post-PR 2-round adversarial review (1 Opus + 1 Sonnet, replacing rate-limited Codex — 1 blocker fixed, 3 majors fixed, 5 deferred)**.
 - **Decision trails:** `docs/superpowers/decisions/2026-04-15-backlog-phase4.5-critical-scope.md`, `2026-04-15-phase4.5-critical-design.md`, `2026-04-15-phase4.5-critical-plan.md`.
+- **Test count movement:** 1530 (baseline) → 1546 (after 16 CRITICAL regression tests) → 1551 (after 5 post-PR review regression tests). 1 skipped throughout.
 
 ### Phase 5.0 — kb_lint --augment reactive gap-fill (2026-04-15)
 
