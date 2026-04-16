@@ -447,9 +447,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `compile/compiler.py:199-276` `detect_source_drift` — calls `find_changed_sources(..., save_hashes=False)` but the `elif deleted_keys:` branch at 192-194 STILL writes the manifest to persist pruning. `detect_source_drift` is advertised as read-only (the `save_hashes=False` kwarg exists for this caller per 127-129 docstring), yet a wiki with deleted raw sources triggers silent manifest mutation on every `kb_detect_drift` call. Violates the documented contract. (R4)
   (fix: split `save_hashes` into `save_template_hashes` + `prune_deleted`; `detect_source_drift` passes both False; or doc-note that deletion pruning is always persisted because stale entries break subsequent reads)
 
-- `compile/linker.py:192-194` `inject_wikilinks` double frontmatter-match — `fm_match = _FRONTMATTER_RE.match(content)` at 192 to compute `body_for_check`, then AGAIN at 199 to split frontmatter from body. Identical call on identical content, 2× regex cost per page per injected title. At 5k-page wiki × N titles per ingest this compounds. Listed explicitly so Phase 5 cross-reference auto-linking (co-mention pass) doesn't inherit the pattern. (R4)
-  (fix: compute `fm_match` once before `existing_links` check; reuse for the split)
-
 - `mcp/app.py:48-77` `_validate_page_id` — accepts (a) Windows reserved device names (`CON`/`PRN`/`AUX`/`NUL`/`COM1-9`/`LPT1-9`) as page slugs — verified: `kb_create_page('concepts/CON', …)` creates `wiki/concepts/CON.md` undeletable from Windows Explorer; (b) URL-encoded traversal `concepts/%2e%2e/etc` (no `..` literally present); (c) arbitrarily long IDs (100K chars accepted — no `len` guard; `WIKI_DIR / f"{page_id}.md"` trips `MAX_PATH`/`OSError: File name too long`). (R4)
   (fix: reject any path component (split on `/` and `\`) matching Windows reserved-name set case-insensitively; reject if `len(page_id) > 200`; URL-decode once and re-check for `..`)
 

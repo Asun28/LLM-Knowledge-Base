@@ -405,31 +405,42 @@ class TestEvidencePipeEscape:
 class TestInjectWikilinksSingleFrontmatterMatch:
     def test_single_frontmatter_match_per_page(self, tmp_path: Path) -> None:
         from kb.compile import linker
-        from kb.utils import markdown as md
 
-        page_a = tmp_path / "a.md"
+        # Scaffold a wiki with one page containing frontmatter
+        for sub in ("entities", "concepts", "summaries", "synthesis", "comparisons"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+        page_a = tmp_path / "entities" / "a.md"
         page_a.write_text(
-            "---\ntitle: A\nsource:\n  - raw/articles/a.md\n---\n\nTopic foo is important.\n",
+            "---\ntitle: A\nsource:\n  - raw/articles/a.md\n---\n\nTopic Foo is important.\n",
             encoding="utf-8",
         )
 
-        match_counter = {"n": 0}
-        orig_match = md.FRONTMATTER_RE.match
+        # Wrap _FRONTMATTER_RE with a counting proxy so we observe how many
+        # match() calls `inject_wikilinks` makes for the single page.
+        class CountingPattern:
+            def __init__(self, real):
+                self.real = real
+                self.calls = 0
 
-        def counting_match(*args, **kwargs):
-            match_counter["n"] += 1
-            return orig_match(*args, **kwargs)
+            def match(self, *args, **kwargs):
+                self.calls += 1
+                return self.real.match(*args, **kwargs)
 
-        with patch.object(md.FRONTMATTER_RE, "match", counting_match):
-            # linker imports via `from kb.utils.markdown import FRONTMATTER_RE`
-            # Patch the re-export too
-            with patch.object(linker, "_FRONTMATTER_RE", md.FRONTMATTER_RE):
-                linker.inject_wikilinks(
-                    wiki_dir=tmp_path,
-                    new_titles=[("Foo", "concepts/foo")],
-                )
-        assert match_counter["n"] <= 1, (
-            f"inject_wikilinks should match frontmatter at most once per page (got {match_counter['n']})"
+            def __getattr__(self, name):
+                return getattr(self.real, name)
+
+        wrapper = CountingPattern(linker._FRONTMATTER_RE)
+        with patch.object(linker, "_FRONTMATTER_RE", wrapper):
+            linker.inject_wikilinks(
+                title="Foo",
+                target_page_id="concepts/foo",
+                wiki_dir=tmp_path,
+            )
+        # One per-page body-check/split (one call) per title. For one title and
+        # one page, the cycle-2 single-match consolidation must keep this ≤ 1.
+        assert wrapper.calls <= 1, (
+            f"inject_wikilinks should match frontmatter at most once per page×title "
+            f"(got {wrapper.calls})"
         )
 
 

@@ -36,6 +36,7 @@ Rules:
 - `utils/llm.py` `_backoff_delay` — applies 0.5-1.5× jitter per attempt then clamps to `RETRY_MAX_DELAY`; prevents thundering-herd retries when two MCP processes hit 429 simultaneously. Pre-existing `test_llm.py::test_call_llm_exponential_backoff` + `test_backoff_delay_values` updated to assert jittered window instead of exact-value equality (MED R5 #6)
 - `utils/llm.py` `_make_api_call` — `LLMError` truncates `e.message` to ≤500 chars via shared `cli._truncate`; preserves exception class name, model ID, and `status_code` verbatim; prevents Anthropic error bodies that echo full prompts from leaking into logs (MED R4 #7)
 - `ingest/evidence.py` `build_evidence_entry` — backtick-wraps `source_ref` and `action` when either contains `|`; pipe-delimited parsers no longer misalign on a legitimate pipe in the path or action text (LOW R4 #28)
+- `compile/linker.py` `inject_wikilinks` — single `_FRONTMATTER_RE.match` call per page; body-check and split share the match result, halving regex cost for N-titles-per-ingest (MED R4 #26)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
