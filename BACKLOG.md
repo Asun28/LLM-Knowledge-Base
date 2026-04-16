@@ -159,9 +159,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `query/engine.py:354` `rewrite_query` failure mode discards original silently — `rewrite_query` catches all exceptions internally and returns `question` on failure; on the happy path it returns the LLM output with only `.strip('"')`. When the scan-tier LLM emits `"The standalone question is: <Q>"` or `"Sure! Here's the rewrite: <Q>"`, the length guard at 66 only rejects when rewritten exceeds 3× input — mid-length prefixes pass through, and the whole downstream pipeline (BM25, vector, raw fallback, synthesis) runs on the polluted query. (R4)
   (fix: reject rewrites containing `:`, `here`, `standalone`, `question is`, or starting with a capital letter followed by a colon; or demand quoted output `"<Q>"` and require leading quote to parse)
 
-- `query/hybrid.py:32-81` `hybrid_search` does not wrap bm25_fn/vector_fn failures consistently — `expand_fn` has try/except (54-58) but `bm25_fn` (68) and `vector_fn` (74) are unprotected. A BM25 exception (corrupt page dict) or vector exception (sqlite-vec segfault) propagates through `search_pages` → `kb_query` and crashes the MCP tool despite the bare `except Exception` upstream. Module docstring implies "falls back gracefully" but fallback only applies when sub-functions return `[]`, not when they raise. (R4)
-  (fix: wrap each `bm25_fn`/`vector_fn` call in try/except returning `[]` with debug log; OR document that callers are responsible for not raising)
-
 - `query/embeddings.py:93-129` `VectorIndex.query` returns `[]` on any SQL exception including schema drift — `except Exception as e: logger.debug(...)` swallows real corruption signals. If the index was built with a different embedding dimension than the current model, the `v.embedding MATCH ?` query raises a vec0 dimension-mismatch error and vector search silently becomes BM25-only forever. `VectorIndex.build` uses `float[{dim}]` for the current model, but `query` does not verify `query_vec` length against the stored schema. Combined with the dead-`build` R2 finding, a once-built index paired with a new model produces silent degradation. (R4)
   (fix: `PRAGMA table_info(vec_pages)` on first query to extract stored dim; assert `len(query_vec) == stored_dim` with WARN log; surface a `kb_vector_health` diagnostic)
 
@@ -399,12 +396,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `ingest/contradiction.py:96-106` `_find_overlapping_sentences` missing claim-side filter — function iterates `page_content` sentences and keeps those whose tokens overlap with `overlap_tokens = claim_tokens & page_tokens`, so every returned sentence shares tokens with BOTH. Problem: the CLAIM is never segmented into sentences — treated as one. A multi-sentence claim `"LLMs hallucinate. GPT-4 is reliable."` vs existing page `"GPT-4 hallucinates"` can match on "hallucinate" in the first claim-sentence paired with "GPT-4" from the second, producing a reason referring to neither. (R4)
   (fix: segment claims symmetrically with `re.split(r"(?<=[.!?])\s+", claim)` at top of `detect_contradictions`; iterate per-sentence; reason references only the matching sentence)
 
-- `query/dedup.py:62-78` layer 2 drops originals that lack `content_lower` — layer 1 runs first and preserves per-page best. Layer 2 token-set build uses `content_lower`; if missing from a result dict (MCP-provided raw citations, Phase 5 chunk-indexed results with `chunk_content`), `.get("content_lower", "")` returns `""`, `_content_tokens("")` returns `set()`, Jaccard with any non-empty kept set = 0 (never "too similar"), so these evade layer 2. A hybrid RRF result list mixing wiki pages (with content_lower) and chunks (without) lets chunks through unfiltered while wiki pages get pruned. (R4)
-  (fix: treat `content_lower == ""` as dedup-skip with debug log; or fallback to `result.get("content", "").lower()`)
-
-- `query/dedup.py:33-48` `dedup_results` has no `max_results` clamp — called with `scored` already limited to `limit*2` (in `hybrid_search`), but nothing enforces final list ≤ requested `limit`. `search_pages` slices `scored[:max_results]` at 122 AFTER `_flag_stale_results`, but callers using `dedup_results` directly (Phase 5 chunk query, future tools) get unbounded output sized by input. Layer 3 uses `max_ratio * len(input)` which R2 flagged, but missing overall cap is distinct. (R4)
-  (fix: add `max_results: int | None = None` param; if set, return `deduped[:max_results]`; or document callers must clamp)
-
 - `query/engine.py:203-215` `search_raw_sources` does not strip YAML frontmatter — raw `raw/articles/*.md` files typically begin with a YAML frontmatter block from Obsidian Web Clipper; current implementation tokenizes `title:`, `author:`, `source:`, `tags:` and scores documents by how many query terms match the frontmatter (low-signal keywords) rather than body. Compounds R1 "indexes frontmatter as content" but with a distinct impact: matching by author name or tag list mis-ranks results toward sources whose frontmatter shares vocabulary with the question. (R4)
   (fix: strip frontmatter via `FRONTMATTER_RE` before tokenizing; return only body to `documents`; keep full content in the dict for section emission)
 
@@ -541,9 +532,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `mcp/quality.py` `kb_save_lint_verdict` (~342-353) — `json.loads(issues)` validates count ≤100 but not per-issue size or shape; nested 100-deep dicts or 100KB strings pass through to the verdict store (disk DoS). (R1)
   (fix: per-issue schema validation `{severity, description}` with ~8KB total cap; reject non-primitive nested values)
-
-- `query/citations.py` `extract_citations` (~33) — 50-char context window slices by char index, can split emoji / combining marks / mid-wikilink; no dedup of repeated `(type, path)` citations, inflating the citation count. (R1)
-  (fix: expand window to nearest whitespace/sentence boundary; dedup by `(type, path)` preserving first context)
 
 - `tests/` missing coverage — no focused test for `_build_query_context` tier-budget logic (`engine.py:235-324`) or `_flag_stale_results` edge cases (missing `sources`, non-ISO `updated`, mtime-eq-page-date). (R1)
   (fix: parametric test asserting per-tier byte budgets given sized summaries; stale-flag edge cases)

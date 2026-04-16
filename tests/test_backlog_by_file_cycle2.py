@@ -637,15 +637,17 @@ class TestCitationsDedup:
         from kb.query.citations import extract_citations
 
         text = (
-            "According to [[concepts/rag]] context A. Later, [[concepts/rag]] context B. "
-            "And in raw/articles/x.md first ref, later in raw/articles/x.md again."
+            "According to [source: concepts/rag] first context. Later, "
+            "[source: concepts/rag] second context. And in [ref: raw/articles/x.md] "
+            "earlier, [ref: raw/articles/x.md] is cited again."
         )
         cites = extract_citations(text)
         keys = [(c["type"], c["path"]) for c in cites]
         assert len(keys) == len(set(keys)), f"duplicates remain: {keys}"
-        # First context preserved — "A" snippet, not "B"
-        rag = [c for c in cites if c["path"].endswith("rag")]
-        assert rag and "context A" in rag[0]["context"]
+        # First context preserved — "first context" snippet, not "second context"
+        rag = [c for c in cites if c["path"] == "concepts/rag"]
+        assert rag and "first context" in rag[0]["context"]
+        assert "second context" not in rag[0]["context"]
 
 
 # -----------------------------------------------------------------------------

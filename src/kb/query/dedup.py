@@ -35,14 +35,24 @@ def dedup_results(
     jaccard_threshold: float = DEDUP_JACCARD_THRESHOLD,
     max_type_ratio: float = DEDUP_MAX_TYPE_RATIO,
     max_per_page: int = DEDUP_MAX_PER_PAGE,
+    max_results: int | None = None,
 ) -> list[dict]:
-    """Apply 4-layer dedup to search results. Returns filtered list."""
+    """Apply 4-layer dedup to search results. Returns filtered list.
+
+    Item 15 (cycle 2): optional ``max_results`` clamp applied AFTER all four
+    dedup layers. Without it, direct callers (Phase 5 chunk query, future
+    tools) got unbounded output sized by the input. ``search_pages`` still
+    clamps externally with ``scored[:max_results]``; this parameter lets
+    other callers request the same behaviour in one call.
+    """
     if not results:
         return []
     deduped = _dedup_by_source(results)
     deduped = _dedup_by_text_similarity(deduped, jaccard_threshold)
     deduped = _enforce_type_diversity(deduped, max_type_ratio)
     deduped = _cap_per_page(deduped, max_per_page)
+    if max_results is not None and max_results > 0:
+        deduped = deduped[:max_results]
     return deduped
 
 
@@ -67,7 +77,14 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
     """
     kept: list[tuple[dict, set[str]]] = []
     for r in results:
-        r_words = _content_tokens(r.get("content_lower", ""))
+        # Item 30 (cycle 2): MCP-provided citations and Phase 5 chunk-indexed
+        # results may land here without the pre-lowered `content_lower` field.
+        # Fall back to lowercasing `content` so these rows still participate
+        # in similarity dedup instead of sneaking through as always-novel.
+        source_text = r.get("content_lower")
+        if source_text is None:
+            source_text = r.get("content", "").lower()
+        r_words = _content_tokens(source_text)
         too_similar = False
         for _, k_words in kept:
             intersection = r_words & k_words

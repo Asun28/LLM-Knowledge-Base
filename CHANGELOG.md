@@ -45,6 +45,10 @@ Rules:
 - `lint/trends.py` `_parse_timestamp` — dropped vestigial `ValueError` fallback for date-only strings; project pins Python 3.12+ where `datetime.fromisoformat` parses both forms natively (LOW R4 #22)
 - `lint/semantic.py` `_group_by_term_overlap` — already imports shared `FRONTMATTER_RE` from `kb.utils.markdown`; cycle-2 regression test locks the import in place to prevent re-divergence in future edits (LOW R4 #23)
 - `graph/export.py` `export_mermaid` — auto-prune key bumped from `lambda x: x[1]` to `lambda x: (x[1], x[0])` so equal-degree nodes are selected deterministically (degree desc, id asc); prevents the committed architecture PNG from churning between runs (MED R2 #27)
+- `query/citations.py` `extract_citations` — dedups citations by `(type, path)` preserving the first occurrence's context (LOW R1 #17)
+- `query/hybrid.py` `hybrid_search` — wraps `bm25_fn()` and `vector_fn()` in try/except returning `[]`; structured WARN log reports backend name, exception class, exception text, and `len(question.split())` as token proxy; prevents a corrupt page dict or sqlite-vec schema drift from crashing the MCP tool (HIGH R4 #16)
+- `query/dedup.py` `dedup_results` — optional `max_results: int | None = None` clamp applied AFTER all four dedup layers (MED R4 #15); layer 2 falls back to lowercasing `content` when `content_lower` is missing so MCP-provided citations and future chunk rows participate in similarity dedup (MED R4 #30)
+- `query/rewriter.py` `_should_rewrite` — cycle-1 WH-question + proper-noun skip is now locked in by a cycle-2 regression test (LOW R4 #14 retained)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 

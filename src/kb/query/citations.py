@@ -14,10 +14,16 @@ def extract_citations(text: str) -> list[dict]:
     Looks for patterns like [source: wiki/path] or [ref: raw/path] in text.
     Overrides type based on path prefix: raw/ paths are always type="raw".
 
+    Item 17 (cycle 2): deduplicate by `(type, path)` preserving the first
+    occurrence's context. Prior behaviour produced duplicate citations from
+    the same page/source mentioned multiple times in one answer, inflating
+    the downstream Sources list.
+
     Returns:
         List of dicts with keys: type ('wiki' or 'raw'), path, context (surrounding text).
     """
     citations = []
+    seen: set[tuple[str, str]] = set()
     for match in _CITATION_PATTERN.finditer(text):
         path = match.group(2)
         if ".." in path or path.startswith("/"):
@@ -31,6 +37,10 @@ def extract_citations(text: str) -> list[dict]:
         # Override type based on path prefix
         if path.startswith("raw/"):
             cite_type = "raw"
+        key = (cite_type, path)
+        if key in seen:
+            continue
+        seen.add(key)
         citations.append(
             {
                 "type": cite_type,
