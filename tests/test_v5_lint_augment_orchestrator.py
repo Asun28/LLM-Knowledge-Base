@@ -921,7 +921,7 @@ def test_rate_limit_bucket_uses_normalized_hostname_not_netloc(
             return False, 60
 
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RateLimiter", lambda: _FakeLimiter()
+        "kb.lint._augment_rate.RateLimiter", lambda *a, **kw: _FakeLimiter()
     )
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
@@ -982,7 +982,7 @@ def test_rate_limit_bucket_lowercases_hostname(
             return False, 60
 
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RateLimiter", lambda: _FakeLimiter()
+        "kb.lint._augment_rate.RateLimiter", lambda *a, **kw: _FakeLimiter()
     )
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")

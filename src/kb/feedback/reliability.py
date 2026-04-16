@@ -16,6 +16,20 @@ def compute_trust_scores(path: Path | None = None) -> dict[str, dict]:
     return data.get("page_scores", {})
 
 
+def _compute_trust_from_counts(score: dict) -> float:
+    """Bayesian-smoothed trust from raw counts. Mirrors add_feedback_entry.
+
+    Q2 (Phase 4.5 R4 HIGH): when a legacy or partially-written score entry
+    lacks ``trust``, recompute it from useful/wrong/incomplete instead of
+    defaulting to 0.5 (neutral). Wrong is weighted 2× — matches the
+    canonical write-path formula in add_feedback_entry.
+    """
+    useful = int(score.get("useful", 0) or 0)
+    wrong = int(score.get("wrong", 0) or 0)
+    incomplete = int(score.get("incomplete", 0) or 0)
+    return (useful + 1) / (useful + 2 * wrong + incomplete + 2)
+
+
 def get_flagged_pages(path: Path | None = None, threshold: float | None = None) -> list[str]:
     """Get page IDs with trust score at or below threshold.
 
@@ -25,10 +39,22 @@ def get_flagged_pages(path: Path | None = None, threshold: float | None = None) 
 
     Returns:
         Sorted list of page IDs at or below the threshold.
+
+    Q2 (Phase 4.5 R4 HIGH): entries missing the ``trust`` key are no longer
+    silently treated as neutral (0.5); trust is recomputed from the raw
+    counts so truly low-trust pages still surface even if a write was
+    downgraded or a legacy entry is present.
     """
     threshold = threshold if threshold is not None else LOW_TRUST_THRESHOLD
     scores = compute_trust_scores(path)
-    return sorted(pid for pid, s in scores.items() if s.get("trust", 0.5) <= threshold)
+    flagged: list[str] = []
+    for pid, s in scores.items():
+        trust = s.get("trust")
+        if trust is None:
+            trust = _compute_trust_from_counts(s)
+        if trust <= threshold:
+            flagged.append(pid)
+    return sorted(flagged)
 
 
 def get_coverage_gaps(path: Path | None = None) -> list[dict]:

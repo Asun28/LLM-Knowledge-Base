@@ -29,6 +29,31 @@ _RAW_REF_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# P1 (Phase 4.5 R4 HIGH): strip fenced code blocks and inline code spans
+# before wikilink + raw-ref matching. Without this, documentation of wiki
+# syntax (e.g. a README showing `[[concepts/rag]]`) is treated as a real
+# edge and pollutes the graph + dead-link lint + BM25.
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def _strip_code_spans_and_fences(text: str) -> str:
+    """Return text with fenced code blocks, inline code spans, and YAML
+    frontmatter replaced by spaces. Preserves character offsets for
+    downstream regex correctness when callers expect line-by-line parity.
+    """
+    # Strip frontmatter first (anchored) so code fences in the body aren't
+    # confused with the YAML fence.
+    m = FRONTMATTER_RE.match(text)
+    if m:
+        # Replace frontmatter block with equivalent-length blanks to preserve
+        # line numbers in any caller that uses offsets from the stripped view.
+        fm_block = m.group(1)
+        text = " " * len(fm_block) + m.group(2)
+    text = _FENCED_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+    text = _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+    return text
+
 
 def extract_wikilinks(text: str) -> list[str]:
     """Extract all [[wikilink]] targets from markdown text.
@@ -36,10 +61,16 @@ def extract_wikilinks(text: str) -> list[str]:
     Normalizes targets: strips whitespace, removes trailing .md.
     Targets longer than 500 chars are rejected; a logger.warning is emitted
     for overlength targets detected by _WIKILINK_OVERLENGTH_PATTERN.
+
+    P1 (Phase 4.5 R4 HIGH): strips fenced code blocks, inline code spans,
+    and YAML frontmatter before pattern matching. Documented wiki-syntax
+    examples (`[[concepts/rag]]` inside a ``` block) no longer manufacture
+    fake edges.
     """
+    stripped = _strip_code_spans_and_fences(text)
     # Q_K_b fix (Phase 4.5 HIGH): warn about overlength targets (>500 chars) that
     # WIKILINK_PATTERN silently rejects (the main pattern only matches up to 500 chars).
-    for overlength_match in _WIKILINK_OVERLENGTH_PATTERN.finditer(text):
+    for overlength_match in _WIKILINK_OVERLENGTH_PATTERN.finditer(stripped):
         target = overlength_match.group(1)
         logger.warning(
             "Wikilink target exceeds 500-char cap (%d chars) — skipping: %r…",
@@ -47,7 +78,7 @@ def extract_wikilinks(text: str) -> list[str]:
             target[:40],
         )
 
-    raw = WIKILINK_PATTERN.findall(text)
+    raw = WIKILINK_PATTERN.findall(stripped)
     result = []
     for link in raw:
         cleaned = link.strip().removesuffix(".md").lower()

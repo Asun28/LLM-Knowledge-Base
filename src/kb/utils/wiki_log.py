@@ -33,7 +33,18 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
             with log_path.open("x", encoding="utf-8") as f:
                 f.write("# Wiki Log\n\n")
         except FileExistsError:
-            pass  # Another concurrent call created it first
+            # Another concurrent call created it first — usually fine, but
+            # S1 (Phase 4.5 R5 HIGH): verify the now-existing target is a
+            # regular file. On Windows, a symlink to nowhere or a special
+            # file (FIFO, socket on POSIX) can also raise FileExistsError
+            # from open("x"), and the follow-up open("a") on a non-regular
+            # path either silently writes to a device or raises a
+            # misleading second error. Surface the real issue instead.
+            if not log_path.is_file():
+                raise OSError(
+                    f"Log target is not a regular file: {log_path} "
+                    f"(directory, symlink, or special file)."
+                )
 
     def _write() -> None:
         with file_lock(log_path):

@@ -21,19 +21,46 @@ VALID_VERDICT_TYPES: tuple[str, ...] = (
 MAX_NOTES_LEN = 2000
 
 
+# M1 (Phase 4.5 MEDIUM): cache keyed on (path_str, mtime_ns, size). A 10k-
+# entry verdict file is 3-5 MB (~50-150 ms per json.loads on Windows); this
+# avoids re-parsing when the file hasn't changed. Invalidated on every save
+# via _invalidate_verdicts_cache.
+_VERDICTS_CACHE: dict[str, tuple[int, int, list[dict]]] = {}
+
+
+def _invalidate_verdicts_cache(path: Path) -> None:
+    """Drop the cache entry for `path` (called after every save)."""
+    _VERDICTS_CACHE.pop(str(path), None)
+
+
 def load_verdicts(path: Path | None = None) -> list[dict]:
-    """Load all stored verdicts from JSON file."""
+    """Load all stored verdicts from JSON file.
+
+    M1 (Phase 4.5 MEDIUM): uses a (mtime_ns, size)-keyed cache so repeated
+    callers (add_verdict, get_page_verdicts, get_verdict_summary, trends,
+    runner.py) skip re-parsing when the file hasn't changed on disk.
+    """
     path = path or VERDICTS_PATH
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
-            return []
-        if not isinstance(data, list):
-            return []
-        return data
-    return []
+    if not path.exists():
+        return []
+    try:
+        stat = path.stat()
+    except OSError as e:
+        logger.warning("Could not stat verdicts file %s: %s", path, e)
+        return []
+    key = str(path)
+    cached = _VERDICTS_CACHE.get(key)
+    if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
+        return []
+    if not isinstance(data, list):
+        return []
+    _VERDICTS_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data)
+    return data
 
 
 def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
@@ -42,6 +69,8 @@ def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
 
     path = path or VERDICTS_PATH
     atomic_json_write(verdicts, path)
+    # M1: invalidate cache — next load re-reads fresh state.
+    _invalidate_verdicts_cache(path)
 
 
 def add_verdict(

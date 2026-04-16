@@ -15,9 +15,11 @@ _REFERENCE_WORDS = _re.compile(r"\b(it|this|that|they|these|those|there|then)\b"
 _QUOTE_CHARS = '"\'\u201c\u201d\u2018\u2019`'
 
 # J2 (Phase 4.5 R4 LOW): canonical standalone WH-question pattern. Matches
-# "who is Andrew Ng?", "what is RAG?", "where did …?" etc. when combined
-# with a proper-noun-like capitalized token elsewhere in the string.
+# "Who is Andrew Ng?" etc. but the proper-noun check must ignore the leading
+# WH word itself (otherwise "How" trips the match and every how-question
+# skips rewrite even when it references "it").
 _WH_QUESTION_RE = _re.compile(r"^(who|what|where|when|why|how)\b.*\?$", _re.IGNORECASE)
+_WH_LEADING_WORD = _re.compile(r"^(who|what|where|when|why|how)\s+", _re.IGNORECASE)
 _PROPER_NOUN_RE = _re.compile(r"\b[A-Z][a-z]+")
 
 
@@ -26,11 +28,15 @@ def _should_rewrite(question: str) -> bool:
 
     J2 (Phase 4.5 R4 LOW): skip rewriting when the question is a canonical
     standalone WH-question ending in '?' AND contains a proper-noun-like
-    token (e.g. "Who is Andrew Ng?"). Avoids burning a scan-tier LLM call
-    on questions that already carry their own context.
+    token AFTER the leading WH word (e.g. "Who is Andrew Ng?" → skip;
+    "How does it work?" → still rewrite because "it" is deictic).
     """
-    if _WH_QUESTION_RE.match(question) and _PROPER_NOUN_RE.search(question):
-        return False
+    if _WH_QUESTION_RE.match(question):
+        # Strip the leading WH word before scanning for a proper noun so
+        # the WH word itself doesn't satisfy the check.
+        body = _WH_LEADING_WORD.sub("", question, count=1)
+        if _PROPER_NOUN_RE.search(body):
+            return False
     if _REFERENCE_WORDS.search(question):
         return True
     words = question.split()
