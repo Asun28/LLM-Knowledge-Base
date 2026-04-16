@@ -97,9 +97,7 @@ class Manifest:
         return cls(run_id=run_id, path=path, data=data, data_dir=resolved)
 
     @classmethod
-    def resume(
-        cls, *, run_id_prefix: str, data_dir: Path | None = None
-    ) -> Manifest | None:
+    def resume(cls, *, run_id_prefix: str, data_dir: Path | None = None) -> Manifest | None:
         resolved = _resolve_data_dir(data_dir)
         if not resolved.exists():
             return None

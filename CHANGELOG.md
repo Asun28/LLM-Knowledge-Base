@@ -21,6 +21,57 @@ Rules:
 
 ## [Unreleased]
 
+### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
+
+38 mechanical bug fixes across 18 files (HIGH + MEDIUM + LOW) grouped by file instead of by severity. One commit per file; full pipeline (threat model → design review → plan gate → implementation → regression tests → security verification) gated end-to-end via subagents.
+
+#### Fixed — Backlog-by-file cycle 1 (38 items)
+
+- `ingest/pipeline.py` `ingest_source` — accepts `raw_dir=None` kwarg threaded to `detect_source_type` + `make_source_ref` so custom-project augment runs can honor caller raw/ (three-round HIGH)
+- `ingest/pipeline.py` `ingest_source` — enforces `SUPPORTED_SOURCE_EXTENSIONS` inside the library, not only at the MCP wrapper; suffix-less files (README, LICENSE) now rejected (Phase 4.5 MED)
+- `ingest/pipeline.py` contradiction detection — narrowed bare `except Exception` to `(KeyError, TypeError, ValueError, re.error)`; warnings promoted from DEBUG (Phase 4.5 R4 HIGH)
+- `lint/augment.py` `run_augment` — passes `raw_dir` to `ingest_source`; adds `data_dir` kwarg derived from `wiki_dir.parent / .data` on custom-wiki runs; rejects `max_gaps < 1`; re-runs `_url_is_allowed` on reviewed proposal URLs before `RateLimiter.acquire` (three-round HIGH + 3× MED)
+- `lint/_augment_manifest.py` `Manifest` — `start` / `resume` accept `data_dir` so custom-project runs do not leak manifests into the main repo's `.data/` (three-round MED)
+- `lint/_augment_rate.py` `RateLimiter` — accepts `data_dir` kwarg; rate state follows the supplied project (three-round MED)
+- `cli.py` / `mcp/health.py` — both reject `max_gaps < 1` at the public surface (three-round MED)
+- `capture.py` `_render_markdown` — removed dead `slug: str` param + 6 test call sites (R3 MED)
+- `capture.py` `_CAPTURE_SCHEMA` — `body.maxLength=2000` caps LLM return size (LOW)
+- `capture.py` `capture_items` / `_write_item_files` — `captures_dir=None` kwarg threaded to all three `CAPTURES_DIR` references (R2 MED + R3 MED)
+- `capture.py` `_CAPTURE_SECRET_PATTERNS` — env-var regex matches suffix variants (`ANTHROPIC_API_KEY`, `DJANGO_SECRET_KEY`, `GH_TOKEN`, `ACCESS_KEY`) + optional shell `export ` prefix; requires `\S{8,}` value to reject `TOKEN_EXPIRY=3600` (MED + 2× LOW)
+- `capture.py` `_path_within_captures` — accepts `base_dir=None` and uses the module-level `_CAPTURES_DIR_RESOLVED` cache (MED)
+- `capture.py` Authorization regex — split into Basic + Bearer patterns; opaque OAuth/Azure/GCP Bearer tokens (16+ chars) now detected (LOW)
+- `ingest/extractors.py` `extract_from_source` — deepcopy schema from the `lru_cache` before handing to the SDK so mutation in one call cannot poison the next (Phase 4.5 MED)
+- `ingest/extractors.py` `build_extraction_prompt` — caps `purpose` interpolation at 4096 chars (R4 HIGH — cap-only subset; sentinel markup deferred)
+- `ingest/contradiction.py` `_extract_significant_tokens` — two-pass tokenization preserves single-char / acronym language names (C, R, C#, C++, F#, Go, .NET) (R4 HIGH)
+- `mcp/quality.py` `kb_create_page` — O_EXCL exclusive-create replaces `exists()` + `atomic_text_write`; source_refs existence check; title capped at 500 chars + control-char stripped (Phase 4.5 MED + 2× LOW)
+- `mcp/quality.py` `kb_refine_page` — caps `revision_notes` at `MAX_NOTES_LEN` and `page_id` at 200 chars before path construction / log writes (Phase 4.5 MED)
+- `mcp/browse.py` `kb_list_sources` — `os.scandir` + per-subdir cap 500 + total response size cap 64KB; skips dotfiles (Phase 4.5 MED)
+- `mcp/browse.py` `kb_search` — rejects queries over `MAX_QUESTION_LEN`; surfaces `[STALE]` alongside score (R4 HIGH)
+- `mcp/browse.py` `kb_read_page` — returns ambiguity error when case-insensitive fallback matches >1 file (R4 LOW)
+- `mcp/core.py` `kb_ingest` — `stat().st_size` pre-check against `MAX_INGEST_CONTENT_CHARS*4` bytes prevents OOM read before truncate; validates `source_type in SOURCE_TYPE_DIRS` (Phase 4.5 HIGH + R4 HIGH)
+- `query/engine.py` `_flag_stale_results` — UTC-aware `datetime.fromtimestamp(..., tz=UTC).date()` eliminates local-TZ/naive mismatch (Phase 4.5 MED)
+- `query/engine.py` `search_raw_sources` — BM25 index cached keyed on `(raw_dir, file_count, max_mtime_ns)` (Phase 4.5 MED)
+- `query/engine.py` `query_wiki` — rejects rewrite output containing newlines or `Sure|Here|Rewritten|Standalone|Query:` preambles; falls back to original (R4 HIGH)
+- `query/rewriter.py` `rewrite_query` — absolute `MAX_REWRITE_CHARS=500` ceiling + floor `max(3*len, 120)`; replaces the 3×-only bound (Phase 4.5 MED)
+- `query/rewriter.py` `_should_rewrite` — skips WH-questions ending in `?` that contain a proper-noun / acronym body (R4 LOW)
+- `query/dedup.py` `_dedup_by_text_similarity` — caches `_content_tokens` per kept result; eliminates O(n·k) re-tokenization (Phase 4.5 MED)
+- `lint/verdicts.py` `load_verdicts` — `(mtime_ns, size)` cache with explicit `save_verdicts` invalidation (Phase 4.5 MED)
+- `lint/checks.py` `check_source_coverage` — short-circuits on pages missing opening frontmatter fence, emitting a frontmatter issue (R4 HIGH)
+- `utils/markdown.py` `extract_wikilinks` — `_strip_code_spans_and_fences` helper strips fenced blocks, inline code, and frontmatter before pattern matching (R4 HIGH)
+- `feedback/store.py` `load_feedback` — widened except to `(JSONDecodeError, OSError, UnicodeDecodeError)` for full corruption-recovery (R5 HIGH)
+- `feedback/reliability.py` `get_flagged_pages` — recomputes trust from raw counts when `trust` key missing instead of defaulting to 0.5 (R4 HIGH)
+- `review/refiner.py` `refine_page` — imports shared `FRONTMATTER_RE`; caps `revision_notes` at `MAX_NOTES_LEN` before log writes (R4 HIGH + R4 LOW)
+- `utils/wiki_log.py` `append_wiki_log` — verifies `log_path.is_file()` so directory / symlink / FIFO targets raise a clear `OSError` instead of a misleading second error from `open("a")` (R5 HIGH)
+
+#### Added — regression coverage
+
+- `tests/test_backlog_by_file_cycle1.py` — 30 parameter / behaviour / regex / path fixtures covering the batch above
+
+#### Decisions
+
+- `docs/superpowers/decisions/2026-04-17-backlog-by-file-cycle1-design.md` — batch-size, deferral, and dependency ordering rationales
+- `docs/superpowers/specs/2026-04-17-backlog-by-file-cycle1-design.md` — file-grouped scope + test expectations per item
+
 Post-release audit fixes for Phase 4 v0.10.0 — all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
 Plus Phase 4.1 sweep: 16 LOW/NIT backlog items applied directly. One test expectation
 (`TestSymlinkGuard.test_symlink_outside_project_root_refuses_import`) was updated to match

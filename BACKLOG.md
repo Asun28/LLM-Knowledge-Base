@@ -93,9 +93,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `tests/test_mcp_quality_new.py:51, 63, 75, 107` mock pages include YAML in `content_lower` — handcrafted mock `content_lower` strings like `"---\ntitle: RAG\n---\nRAG content."` include the frontmatter fence. Real `load_all_pages` stores only `post.content.lower()` (body only). Any code under test that relies on `content_lower` excluding YAML keys (dedup `_content_tokens`, BM25 scoring, `_group_by_term_overlap`) sees a structurally wrong mock. (R3)
   (fix: set `content_lower` to body text only — `"rag content."` — matching `post.content.lower()`)
 
-- `tests/test_phase4_audit_security.py:78-79` `test_query_uses_effective_question_not_raw` — `monkeypatch.setattr(eng, "search_raw_sources", ...)` assumes `search_raw_sources` is module-level-bound in `kb.query.engine`. If the import form is `from kb.query.raw_search import search_raw_sources`, the setattr silently creates a NEW attribute the real code never reads and the actual function still runs (possibly real I/O or LLM call). (R3)
-  (fix: confirm the exact binding site; use `unittest.mock.patch("kb.query.engine.search_raw_sources", ...)` which raises `AttributeError` on mismatch instead of silently succeeding)
-
 - `lint/checks.py:159` `errors="replace"` on index.md — only `read_text` call in the tree that uses `errors="replace"`; non-UTF-8 bytes substitute to U+FFFD. `extract_wikilinks` then decodes-corrupt multibyte targets (`caf\ufffd`) and silently drops them from the sentinel-backlink augmentation. Real pages get reported as orphans. Attacker can wedge this via byte corruption (R3 wikilink injection above, bad hand-edit, crash mid-atomic-write). (R3)
   (fix: drop `errors="replace"`; let it raise `UnicodeDecodeError`, catch and flag the file as corrupt in the lint report so the operator sees it)
 
@@ -111,13 +108,13 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `mcp/*` + `config.py` content-size cap inconsistency + duplicated `MAX_NOTES_LEN` — four distinct behaviors for user strings across the MCP surface: (1) `kb_ingest_content`/`kb_save_source`/`kb_refine_page`/`kb_create_page` reject >160K, (2) `kb_ingest` silently truncates file content to `QUERY_CONTEXT_MAX_CHARS=80K` with only a `logger.warning`, (3) `kb_save_lint_verdict` caps `notes` at `MAX_NOTES_LEN=2000`, (4) `kb_refine_page` `revision_notes` and `kb_query_feedback` `notes` are unbounded at MCP. `MAX_NOTES_LEN=2000` is also defined twice — once in `config.py:165`, once in `lint/verdicts.py:15` — same duplication class as the recently-consolidated `FRONTMATTER_RE`/`STOPWORDS`/`VALID_VERDICT_TYPES`. (R3)
   (fix: single `_validate_notes(notes, field_name)` helper in `mcp/app.py` applied uniformly; reject oversized `kb_ingest` source files at MCP boundary instead of silently truncating; delete duplicate `MAX_NOTES_LEN` in `verdicts.py`)
 
-- `pyproject.toml` `pytest` markers + `tests/` — zero `@pytest.mark.slow` / `integration` / `network` / `llm` markers anywhere; no `markers = [...]` in `pyproject.toml`; no `--strict-markers`; no CI profile. `test_v0917_embeddings.py` triggers real `StaticModel.from_pretrained(EMBEDDING_MODEL)` download/load on first hit and keeps the model cached globally across tests. Phase 5 will add `kb_capture` (LLM), URL adapters (network), chunk indexing (embeddings), `kb_evolve mode=research` (fetch MCP) — each piling more always-on heavy tests with no way to exclude them. (R3)
+- `pyproject.toml` `pytest` markers + `tests/` — only the custom `skip_default_robots` marker is declared; there are still no `slow` / `integration` / `network` / `llm` markers, no `--strict-markers`, and no CI fast/slow profile. `test_v0917_embeddings.py` triggers real `StaticModel.from_pretrained(EMBEDDING_MODEL)` download/load on first hit and keeps the model cached globally across tests. Phase 5 will add `kb_capture` (LLM), URL adapters (network), chunk indexing (embeddings), `kb_evolve mode=research` (fetch MCP) — each piling more always-on heavy tests with no way to exclude them. (R3, revalidated 2026-04-17)
   (fix: declare `markers = ["slow", "network", "integration", "llm"]` in `pyproject.toml` with `--strict-markers`; tag existing embedding/hybrid/RRF tests; add `make test-fast` that excludes `-m "slow or network or llm"`)
 
 - `tests/test_v0p5_purpose.py` + `tests/test_v0917_rewriter.py` happy-path-only coverage — `rewrite_query` has 4 tests, all hitting early-return guards (empty context, None context, empty query, unchanged-when-standalone); the actual LLM rewrite path + length guard + rejection-of-leaked-prefix is never invoked because nothing mocks `call_llm`. `test_v0p5_purpose.py` checks only that the string "KB FOCUS" appears in the prompt; never verifies `query_wiki` actually threads `purpose.md` to the synthesizer. Phase 5's `kb_capture` will follow this template if not corrected. (R3)
   (fix: add `monkeypatch.setattr(rewriter, "call_llm", ...)` test asserting the full rewrite contract — expand reference, reject leaked prefix, enforce length cap; add `query_wiki(..., wiki_dir=tmp)` integration test asserting purpose text reaches the synthesis prompt)
 
-- `tests/test_v0917_embeddings.py` + `src/kb/query/embeddings.py` global-state leak — `embeddings.py` exposes `_reset_model()` for "test teardown" but no test in the suite calls it; `_model` and `_index_cache` are module-level singletons surviving across tests. Order determines whether model is cold-loaded in `TestEmbedTexts` vs `TestVectorIndex`; `_index_cache` accumulates `tmp_path` entries and never sheds them. Phase 5 chunk indexing will multiply `VectorIndex` instances per test; any flaky failure becomes order-dependent and unreproducible. (R3)
+- `tests/test_v0917_embeddings.py` + `src/kb/query/embeddings.py` global-state leak — `embeddings.py` exposes `_reset_model()` and one cache-behavior test calls it manually, but there is still no autouse fixture or suite-level teardown. `_model` and `_index_cache` are module-level singletons surviving across most tests. Order determines whether model is cold-loaded in `TestEmbedTexts` vs `TestVectorIndex`; `_index_cache` accumulates `tmp_path` entries and only clears in tests that remember to call the private reset. Phase 5 chunk indexing will multiply `VectorIndex` instances per test; any flaky failure becomes order-dependent and unreproducible. (R3, revalidated 2026-04-17)
   (fix: autouse fixture in `tests/conftest.py` calling `embeddings._reset_model()` + analogous resets between tests; module-level caches become opt-in via fixture for tests that want warmup)
 
 - `tests/` coverage-visibility — ~50 of 94 files are named `test_v0NNN_taskNN.py` / `test_v0NNN_phaseNNN.py` / `test_phase4_audit_*.py`. To verify `evolve/analyzer.py` has tier-budget coverage you must grep ~50 versioned files because canonical `test_evolve.py` has only 11 tests (none touch numeric tokens, redundant scans, or three-level break — all open in Phase 4.5 MEDIUM). `_compute_pagerank_scores` is searched across 25 files. (R3)
@@ -1038,9 +1035,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `tests/test_capture.py:21` `CAPTURE_KINDS` implicit re-export — test imports `CAPTURE_KINDS` from `kb.capture` rather than its authoritative source `kb.config`. If `capture.py` is refactored to reference `CAPTURE_KINDS` via a different import form (e.g., `kb.config.CAPTURE_KINDS`), the test import breaks silently. (R1)
   (fix: `from kb.config import CAPTURE_KINDS` in the test; or explicitly re-export: `from kb.config import CAPTURE_KINDS as CAPTURE_KINDS  # public re-export` in `capture.py`)
 
-- `capture.py:405-409,455-459` `_write_item_files` `os.scandir` without context manager — both scandir calls in `_write_item_files` iterate without a `with os.scandir(...) as it:` context manager. On Windows, the open directory handle can cause `PermissionError` in rapid test runs or concurrent calls where another operation tries to lock the directory. (R1)
-  (fix: `with os.scandir(CAPTURES_DIR) as it: existing = {e.name[:-3] for e in it if ...}`)
-
 - `capture.py:388-470` `_write_item_files` hardcoded `CAPTURES_DIR` — function uses the module-level `CAPTURES_DIR` constant with no `captures_dir: Path | None = None` parameter. Cannot be unit-tested without monkeypatching the module global; breaks the extension pattern used by `ingest_source(wiki_dir=None)`, `query_wiki(wiki_dir=None)`, etc. (R1)
   (fix: add `captures_dir: Path | None = None` and use `caps = captures_dir or CAPTURES_DIR` throughout; pass from `capture_items`)
 
@@ -1061,17 +1055,8 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `capture.py:240-243` `_extract_items_via_llm` no pre-flight context window guard — prompt inlines up to 50KB of content (≈12.7K tokens). If `CAPTURE_MAX_BYTES` is later raised above ~600KB the Haiku context window will be silently exceeded at the API layer with an opaque error. (R1)
   (fix: `MAX_PROMPT_CHARS = 600_000; assert len(prompt) <= MAX_PROMPT_CHARS` or derive from a config constant)
 
-- `capture.py:537-538` `capture_items` — `_extract_items_via_llm(normalized)` raises `LLMError` on retry exhaustion (documented in docstring) but no `try/except` exists in `capture_items`. `LLMError` propagates to the MCP boundary, violating the project convention "MCP tools return 'Error: ...' strings, never raise exceptions to the MCP client." (R1)
-  (fix: `try: response = _extract_items_via_llm(normalized); except LLMError as e: return CaptureResult(items=[], ..., rejected_reason=f"Error: LLM extraction failed — {e}", ...)`)
-
 - `capture.py:288-298` `_path_within_captures` naming inconsistency — only predicate (bool-returning) function in the module; all others use verb-first names (`_check_*`, `_validate_*`, `_scan_*`, `_build_*`, `_verify_*`, `_extract_*`, `_render_*`, `_write_*`, `_resolve_*`). (R1)
   (fix: rename to `_is_path_within_captures`; update two call sites in `_write_item_files`)
-
-- `capture.py:521` `capture_items` `assert normalized is not None` uses assertion for type narrowing — disabled by `-O`; at that point `_scan_for_secrets(None)` raises `TypeError` from pattern `.search(None)` with an unrelated error message. (R1)
-  (fix: `if normalized is None: raise CaptureError("_validate_input contract violated: returned None without error")`)
-
-- `tests/test_capture.py:343-351` `test_widely_split_secret_not_caught` tautological assertion — `assert result is None or result is not None` always passes; test provides zero regression value. (R1)
-  (fix: either delete and move the spec-§13 residual note to a code comment, or rename to `test_widely_split_secret_no_crash` and assert only `isinstance(result, (tuple, type(None)))`)
 
 - `capture.py:164-181` `_scan_for_secrets` encoded `location` lacks encoding type — `"via encoded form"` does not distinguish base64 vs URL-encoded secrets, making triage harder. (R1)
   (fix: split `_normalize_for_scan` into annotated passes returning `(text, label)` tuples; emit `"via base64"` or `"via URL-encoding"` accordingly)
@@ -1081,7 +1066,7 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### NIT
 
-- `tests/test_capture.py:120-122` comment mismatch — says "25001 CRLF pairs = 50002 raw bytes" but actual expression is `'ab\r\n' * 12501 = 50004 bytes (12501 × 4)`; the test logic is correct but the comment describes different content. (R1)
+- `tests/test_capture.py:120-122` comment mismatch — still says "25001 CRLF pairs = 50002 raw bytes / 50001 post-LF bytes" while the actual expression is `'ab\r\n' * 12501 = 50004 raw bytes` and `37503` bytes after CRLF normalization. The test logic is correct but the comment describes different content. (R1, revalidated 2026-04-17)
   (fix: update comment to match: `# 'ab\r\n' * 12501 = 50004 raw bytes, 37503 post-LF bytes`)
 
 - `capture.py:247-265` `_verify_body_is_verbatim` — `body.strip()` used for containment check but original unstripped `item` returned in `kept`; downstream writer receives bodies with leading/trailing whitespace including newlines. (R1)
@@ -1106,16 +1091,13 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### MEDIUM (R2 — new findings)
 
-- `mcp/core.py:583-591` `_format_capture_result` path reconstruction uses first-occurrence `parts.index("captures")` — finds the FIRST directory component named `"captures"` in the absolute path. If the project is located under a parent directory also named `"captures"` (e.g., `~/captures/llm-wiki-flywheel/raw/captures/slug.md`), `idx` points to the wrong component and `parts[idx-1:idx+2]` produces a path like `captures/llm-wiki-flywheel/raw` instead of `raw/captures/slug.md`. The display path in the MCP response would be silently wrong. (R2)
-  (fix: replace the parts-index logic with `str(item.path.relative_to(PROJECT_ROOT)).replace("\\", "/")` wrapped in `try/except ValueError: rel = item.path.name`)
-
 - `capture.py:419-421` `alongside_for` Phase B stale after Phase C slug retry — `alongside_for[i]` uses the Phase A `slugs` list, which captures pre-collision slug values. When Phase C reassigns a slug for item j (j < i or j > i), neither `alongside_for[i]` nor the already-written files' frontmatter for items before j are corrected. The `# Accepted v1 limitation` comment at line 397 is accurate but understates impact: all sibling files written before the collision permanently contain a dangling `captured_alongside` reference to a filename that was never written. This is data inconsistency in raw/, not a recoverable error, and is invisible to the user unless they inspect the files directly. (R2)
   (fix: either (a) move all slug resolution and markdown rendering after Phase C completes (two-pass: resolve all slugs atomically, then write), or (b) add a post-write fixup pass that rewrites sibling files if any slug changed during retries)
 
 - `capture.py:481` `capture_items` public API missing `captures_dir=None` parameter — every other public write-path function in the project accepts an optional directory override (`ingest_source(..., wiki_dir=None)`, `query_wiki(..., wiki_dir=None)`, `load_all_pages(wiki_dir=None)`). `capture_items(content, provenance=None)` has no such parameter, forcing all tests to monkeypatch the module-level `CAPTURES_DIR` constant (as `tmp_captures_dir` fixture does at conftest.py:157-158). This pattern is fragile: it couples test isolation to the module-level binding and will break if `CAPTURES_DIR` is ever accessed via attribute reference within a function. Extends R1 MEDIUM `_write_item_files` finding to the public API level. (R2)
   (fix: `capture_items(content, provenance=None, *, captures_dir: Path | None = None)` — thread through to `_write_item_files`; update `tmp_captures_dir` fixture to pass `captures_dir=` instead of monkeypatching module global)
 
-- `capture.py:353-357` + `tests/test_capture.py:620-703` yaml_escape double-escape fix needs a round-trip regression test — the R1 HIGH yaml_escape bug is real, but its fix (replacing `yaml_escape()` with a sanitize-only variant before `yaml.dump`) will not be regression-guarded unless a test verifies the round-trip with YAML-significant characters. All existing `TestRenderMarkdown` tests use alphanumeric-only titles (`"Pick atomic N-files"`, `"pay\u202eusalert"` after bidi stripping). No test passes a backslash, double-quote, or embedded newline in the title and asserts the `_fm.loads()` round-trip value equals the input. Without this test, a future accidental re-introduction of yaml_escape in `_render_markdown` would pass all tests silently. (R2)
+- `capture.py:403-435` + `tests/test_capture.py:632-715` yaml_escape double-escape fix needs a round-trip regression test — the R1 HIGH yaml_escape bug is real, but its fix (replacing `yaml_escape()` with a sanitize-only variant before `yaml.dump`) will not be regression-guarded unless a test verifies the round-trip with YAML-significant characters. Current `TestRenderMarkdown` tests still use alphanumeric-only titles (`"Pick atomic N-files"`, `"pay\u202eusalert"` after bidi stripping). No test passes a backslash, double-quote, or embedded newline in the title and asserts the `_fm.loads()` round-trip value equals the input. Without this test, a future accidental re-introduction of yaml_escape in `_render_markdown` would pass all tests silently. (R2, revalidated 2026-04-17)
   (fix: add `test_title_with_backslash_round_trips` and `test_title_with_double_quote_round_trips` in TestRenderMarkdown; confirm `post.metadata["title"] == item["title"]` for `r"C:\path\to\file"` and `'"quoted"'`)
 
 ### LOW (R2 — new findings and downgraded R1 items)
@@ -1153,8 +1135,8 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### HIGH (R3)
 
-- `capture.py:240-243` `_PROMPT_TEMPLATE` fence-break — current code not yet fixed: `--- END INPUT ---` static delimiter remains in production. Any user-controlled content containing that exact 18-character string breaks out of the input section and injects instructions. The verbatim-body check does NOT fully mitigate: a fence-break can manipulate `kind`, `confidence`, `filtered_out_count`, or `title` values without needing a verbatim body match. Fix proposed in R2 (UUID boundary) is still pending. (R3)
-  (fix: generate `boundary = _secrets.token_hex(16)` per call in `_extract_items_via_llm`; replace static `--- INPUT ---` / `--- END INPUT ---` delimiters with `f"<<<INPUT-{boundary}>>>"` / `f"<<<END-INPUT-{boundary}>>>"`; UUID is guaranteed absent from any real input)
+- `capture.py:235-288` `_PROMPT_TEMPLATE` fence handling still uses static delimiters — current code now escapes `--- INPUT ---` / `--- END INPUT ---` variants before building the prompt, so the original prompt-breakout wording is stale. The remaining defect is the R2 data-loss class: legitimate user content containing a delimiter-like line is shown to the LLM in escaped form, but `_verify_body_is_verbatim` checks returned bodies against the original normalized content. A faithful LLM return of the escaped span is dropped as non-verbatim. UUID boundaries are still the cleaner fix because they avoid both injection and delimiter-content loss without mutating user text. (R3, revalidated 2026-04-17)
+  (fix: generate `boundary = _secrets.token_hex(16)` per call in `_extract_items_via_llm`; replace static `--- INPUT ---` / `--- END INPUT ---` delimiters with `f"<<<INPUT-{boundary}>>>"` / `f"<<<END-INPUT-{boundary}>>>"`; choose a boundary absent from the input before rendering the prompt)
 
 ### MEDIUM (R3)
 
@@ -1166,8 +1148,8 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### LOW (R3)
 
-- `capture.py:285-288` `_build_slug` collision suffix while-loop is unbounded — `while f"{base}-{n}" in existing: n += 1` has no upper bound on `n`. With a synthetic `existing` set containing a very long collision chain, the loop spins indefinitely. In practice this requires the `CAPTURES_DIR` to contain millions of files with the same base slug, which is impossible under normal rate-limited use. But a test accidentally constructing a large collision set could hang. (R3)
-  (fix: `while f"{base}-{n}" in existing and n <= len(existing) + 1: n += 1`)
+- `capture.py:319-343` `_build_slug` collision suffix while-loop is unbounded — the code now uses `while True` with a monotonic suffix and comments that termination is guaranteed by eventually finding a distinct candidate, but there is still no hard upper bound on `n`. With a synthetic `existing` set containing a very long collision chain, the loop can spin for an impractical amount of time. In production this requires the `CAPTURES_DIR` to contain millions of colliding names, which is impossible under normal rate-limited use. A test accidentally constructing a large collision set could still hang. (R3, revalidated 2026-04-17)
+  (fix: cap attempts to `len(existing) + 2` or a fixed defensive ceiling, then raise/return a clear collision-exhausted error)
 
 ### NIT (R3)
 
@@ -1183,6 +1165,33 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `lint/augment.py` `run_augment` — `Manifest.resume()` is implemented in `_augment_manifest.py` but `run_augment(resume=<run_id>)` was never wired through to it; the kwarg was declared and then ignored. Removed the declaration in this branch until the CLI/MCP surface exposes a resume flag. Spec §9 still documents crash-resume as the intended behaviour; re-adding the kwarg should ship alongside a `--resume=<id>` CLI flag and matching MCP parameter. (resolved-here, deferred re-wiring)
   (fix: re-add `resume: str | None = None` kwarg to `run_augment`; at entry, call `Manifest.resume(run_id_prefix=resume)` and if present skip Phase A and restart iteration from `manifest.incomplete_gaps()`; add `--resume` to cli.py `lint` command and to `mcp/health.py::kb_lint`)
+
+---
+
+## Phase 5 three-round code review (2026-04-17)
+
+<!-- Discovered by 3 sequential Codex review rounds against the current tree.
+     R1 focused on correctness and API wiring, R2 on reliability/security/state
+     isolation, R3 on tests/config coverage gaps. -->
+
+### HIGH
+
+_All 3 HIGH items resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 1" (raw_dir threading, ingest raw_dir parameter, manifest failed-state advance)._
+
+### MEDIUM
+
+- `lint/augment.py` `run_augment` (~706-729, summary block) — one stub with multiple candidate URLs can record both a failed attempt and a later saved attempt in `fetches`. The summary counts failed entries, not final stub outcomes, so a successful fallback URL reports `Saved: 1, Failed: 1` for a single gap. This makes the run look partially failed when the gap actually succeeded. (R1)
+  (fix: store URL-attempt details under each stub, or compute summary counts from final per-stub states in the manifest)
+
+_3 of 4 MEDIUM items resolved (data_dir threading, max_gaps lower bound, proposal URL re-validation). Summary-count semantic change deliberately deferred — observable behavior change._
+
+### LOW
+
+- `tests/test_v5_lint_augment_cli.py` + `tests/test_v5_kb_lint_signature.py` — CLI/MCP augment coverage only exercises propose/no-stub or validation paths. No test runs `execute` or `auto_ingest` through the public CLI/MCP entry points with `--wiki-dir` / `wiki_dir=` and asserts raw files, manifests, and rate-limit files stay under the same temp project. This is why the custom-dir leaks above remain invisible. (R3)
+  (fix: add public-surface tests for `kb lint --augment --execute --wiki-dir <tmp>/wiki` and `kb_lint(augment=True, execute=True, wiki_dir=...)`; assert writes land in `<tmp>/raw` and `<tmp>/.data`, not repo defaults)
+
+- `tests/test_v5_lint_augment_orchestrator.py` execute-mode cases — direct `run_augment` tests always pass `raw_dir=tmp_project / "raw"` and monkeypatch `MANIFEST_DIR` / `RATE_PATH`, which bypasses the default-path behavior users hit through CLI/MCP. The suite therefore tests a safer dependency-injected path than the product actually exposes. (R3)
+  (fix: add at least one unmonkeypatched default-path regression using an isolated temp project API, or refactor `run_augment` so data/raw dirs are explicit dependencies and public callers must provide them)
 
 ---
 

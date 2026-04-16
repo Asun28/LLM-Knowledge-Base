@@ -19,6 +19,7 @@ def _strip_markdown_structure(content: str) -> str:
     content = re.sub(r"^##+ .+$", "", content, flags=re.MULTILINE)
     return content
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,17 +67,17 @@ def detect_contradictions(
                 continue
 
             # Look for contradictory signal patterns in overlapping content
-            matching_sentences = _find_overlapping_sentences(
-                claim, page_content, overlap
-            )
+            matching_sentences = _find_overlapping_sentences(claim, page_content, overlap)
             for sentence in matching_sentences:
                 if _has_contradiction_signal(claim, sentence):
-                    contradictions.append({
-                        "new_claim": claim,
-                        "existing_page": page["id"],
-                        "existing_text": sentence[:200],
-                        "reason": "Potential factual conflict detected via keyword overlap",
-                    })
+                    contradictions.append(
+                        {
+                            "new_claim": claim,
+                            "existing_page": page["id"],
+                            "existing_text": sentence[:200],
+                            "reason": "Potential factual conflict detected via keyword overlap",
+                        }
+                    )
                     break  # One contradiction per page per claim is enough
 
     return contradictions
@@ -114,9 +115,7 @@ def _extract_significant_tokens(text: str) -> set[str]:
         tok = m.group(0).lower()
         # Only keep if short (>=3 passes through normal filter below) AND
         # the token shape looks like a language name, not a proper noun.
-        if len(tok) < 3 and (len(tok) == 1 or tok in {"go", "r"}) or any(
-            ch in tok for ch in "+#."
-        ):
+        if len(tok) < 3 and (len(tok) == 1 or tok in {"go", "r"}) or any(ch in tok for ch in "+#."):
             lang_tokens.add(tok)
     # Pass 2: general words
     words = re.findall(r"\b\w[\w-]*\w\b", text.lower())

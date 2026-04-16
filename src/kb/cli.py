@@ -104,13 +104,9 @@ def query(question: str, output_format: str):
             click.echo(format_citations(result["citations"]))
         click.echo(f"\n[Searched {len(result.get('source_pages', []))} pages]")
         if result.get("output_path"):
-            click.echo(
-                f"\nOutput: {result['output_path']} ({result['output_format']})"
-            )
+            click.echo(f"\nOutput: {result['output_path']} ({result['output_format']})")
         if result.get("output_error"):
-            click.echo(
-                f"\n[warn] Output format failed: {result['output_error']}", err=True
-            )
+            click.echo(f"\n[warn] Output format failed: {result['output_error']}", err=True)
     except Exception as e:
         click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)

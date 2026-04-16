@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kb.config import MAX_VERDICTS, VERDICTS_PATH
@@ -133,7 +133,7 @@ def add_verdict(
         entry = {
             # Phase 4.5 HIGH L4: write UTC-aware timestamps so trend bucketing
             # is consistent across machines (completes the read-side fix in trends.py).
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "page_id": page_id,
             "verdict_type": verdict_type,
             "verdict": verdict,

@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from kb.config import (
@@ -177,9 +177,7 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
                 # code used date.fromtimestamp(mtime) which applies local TZ,
                 # while date.fromisoformat(updated_str) is naive. On DST/TZ
                 # boundaries near midnight UTC the comparison would flip.
-                mtime = datetime.fromtimestamp(
-                    src_path.stat().st_mtime, tz=timezone.utc
-                ).date()
+                mtime = datetime.fromtimestamp(src_path.stat().st_mtime, tz=UTC).date()
                 if newest_source_mtime is None or mtime > newest_source_mtime:
                     newest_source_mtime = mtime
         if newest_source_mtime and newest_source_mtime > page_date:

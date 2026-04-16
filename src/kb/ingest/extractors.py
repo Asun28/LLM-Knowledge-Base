@@ -214,7 +214,9 @@ def build_extraction_prompt(content: str, template: dict, purpose: str | None = 
     # bounded surface. Sentinel markup (<kb_focus>) deferred per spec doc.
     if purpose and len(purpose) > 4096:
         purpose = purpose[:4096]
-    purpose_section = f"\nKB FOCUS (bias extraction toward these goals):\n{purpose}\n" if purpose else ""
+    purpose_section = (
+        f"\nKB FOCUS (bias extraction toward these goals):\n{purpose}\n" if purpose else ""
+    )
 
     return f"""Extract structured information from the following source document.
 {purpose_section}

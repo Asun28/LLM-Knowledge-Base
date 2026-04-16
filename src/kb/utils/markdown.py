@@ -12,9 +12,7 @@ WIKILINK_PATTERN = re.compile(r"(?<![!\[])\[\[([^\]|]{1,500})(?:\|[^\]]+)?\]\](?
 
 # Wider pattern used only to detect and warn about overlength wikilink targets (501–600 chars).
 # Deliberately limited to 600 so the regex engine doesn't scan unbounded content.
-_WIKILINK_OVERLENGTH_PATTERN = re.compile(
-    r"(?<![!\[])\[\[([^\]|]{501,600})(?:\|[^\]]+)?\]\](?!\])"
-)
+_WIKILINK_OVERLENGTH_PATTERN = re.compile(r"(?<![!\[])\[\[([^\]|]{501,600})(?:\|[^\]]+)?\]\](?!\])")
 
 # Splits YAML frontmatter from page body. Matches the opening ``---`` fence,
 # captures the entire frontmatter block and the remainder of the file.

@@ -27,19 +27,23 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
     safe_op = operation.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
     safe_msg = message.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
     entry = f"- {date.today().isoformat()} | {safe_op} | {safe_msg}\n"
+    # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
+    # On Windows, log_path.open("a") on a directory raises PermissionError
+    # (not IsADirectoryError); on POSIX, a FIFO or socket can also mimic
+    # existence. Verifying `is_file()` once here surfaces the real cause
+    # instead of a misleading second error from the append open.
+    if log_path.exists() and not log_path.is_file():
+        raise OSError(
+            f"Log target is not a regular file: {log_path} (directory, symlink, or special file)."
+        )
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with log_path.open("x", encoding="utf-8") as f:
                 f.write("# Wiki Log\n\n")
         except FileExistsError:
-            # Another concurrent call created it first — usually fine, but
-            # S1 (Phase 4.5 R5 HIGH): verify the now-existing target is a
-            # regular file. On Windows, a symlink to nowhere or a special
-            # file (FIFO, socket on POSIX) can also raise FileExistsError
-            # from open("x"), and the follow-up open("a") on a non-regular
-            # path either silently writes to a device or raises a
-            # misleading second error. Surface the real issue instead.
+            # Another concurrent call created it first — re-check is_file()
+            # in case that concurrent create produced a non-regular file.
             if not log_path.is_file():
                 raise OSError(
                     f"Log target is not a regular file: {log_path} "

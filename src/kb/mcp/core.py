@@ -19,15 +19,13 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
 )
 from kb.feedback.reliability import compute_trust_scores
-from kb.ingest.pipeline import ingest_source
+from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, error_tag, mcp
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import LLMError
 from kb.utils.text import slugify, yaml_escape
-
-from kb.ingest.pipeline import _TEXT_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +84,9 @@ def kb_query(
     fmt_n = (output_format or "").strip().lower()
     if fmt_n and fmt_n != "text":
         from kb.query.formats import VALID_FORMATS
+
         if fmt_n not in VALID_FORMATS:
-            return (
-                f"Error: unknown output_format '{output_format}'. "
-                f"Valid: {sorted(VALID_FORMATS)}"
-            )
+            return f"Error: unknown output_format '{output_format}'. Valid: {sorted(VALID_FORMATS)}"
         if not use_api:
             return (
                 "Error: output_format requires use_api=true "
@@ -116,13 +112,10 @@ def kb_query(
             parts.append(f"\n[Searched {len(result.get('source_pages', []))} pages]")
             if result.get("output_path"):
                 parts.append(
-                    f"\nOutput written to: {result['output_path']} "
-                    f"({result['output_format']})"
+                    f"\nOutput written to: {result['output_path']} ({result['output_format']})"
                 )
             if result.get("output_error"):
-                parts.append(
-                    f"\n[warn] Output format failed: {result['output_error']}"
-                )
+                parts.append(f"\n[warn] Output format failed: {result['output_error']}")
             return "\n".join(parts)
         except anthropic.BadRequestError as e:
             logger.warning("kb_query API bad-request for %r: %s", question[:80], e)

@@ -78,10 +78,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     if len(page_id) > 200:
         return f"Error: page_id too long ({len(page_id)} chars; max 200)."
     if len(revision_notes) > MAX_NOTES_LEN:
-        return (
-            f"Error: revision_notes too long "
-            f"({len(revision_notes)} chars; max {MAX_NOTES_LEN})."
-        )
+        return f"Error: revision_notes too long ({len(revision_notes)} chars; max {MAX_NOTES_LEN})."
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -410,9 +407,7 @@ def kb_create_page(
         return f"Error: {err}"
     if len(content) > MAX_INGEST_CONTENT_CHARS:
         return (
-            f"Error: Content too large "
-            f"({len(content):,} chars; "
-            f"max {MAX_INGEST_CONTENT_CHARS:,})."
+            f"Error: Content too large ({len(content):,} chars; max {MAX_INGEST_CONTENT_CHARS:,})."
         )
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."

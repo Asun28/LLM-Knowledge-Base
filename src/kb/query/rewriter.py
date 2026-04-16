@@ -12,7 +12,7 @@ _REFERENCE_WORDS = _re.compile(r"\b(it|this|that|they|these|those|there|then)\b"
 
 # Phase 4.5 HIGH Q3: strip smart quotes, backticks, and single quotes from LLM output.
 # Models frequently wrap rewrites in Unicode quotes that pass through as literal tokens.
-_QUOTE_CHARS = '"\'\u201c\u201d\u2018\u2019`'
+_QUOTE_CHARS = "\"'\u201c\u201d\u2018\u2019`"
 
 # J2 (Phase 4.5 R4 LOW): canonical standalone WH-question pattern. Matches
 # "Who is Andrew Ng?" etc. but the proper-noun check must ignore the leading
@@ -20,7 +20,8 @@ _QUOTE_CHARS = '"\'\u201c\u201d\u2018\u2019`'
 # skips rewrite even when it references "it").
 _WH_QUESTION_RE = _re.compile(r"^(who|what|where|when|why|how)\b.*\?$", _re.IGNORECASE)
 _WH_LEADING_WORD = _re.compile(r"^(who|what|where|when|why|how)\s+", _re.IGNORECASE)
-_PROPER_NOUN_RE = _re.compile(r"\b[A-Z][a-z]+")
+# Matches proper nouns (Andrew) AND acronyms (RAG, LLM, API).
+_PROPER_NOUN_RE = _re.compile(r"\b(?:[A-Z][a-z]+|[A-Z]{2,})")
 
 
 def _should_rewrite(question: str) -> bool:

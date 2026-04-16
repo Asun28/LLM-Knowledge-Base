@@ -89,23 +89,15 @@ class RateLimiter:
             cutoff = now - 3600
 
             # Global hourly cap
-            state["global"]["hour_window"] = self._purge_old(
-                state["global"]["hour_window"], cutoff
-            )
-            if (
-                len(state["global"]["hour_window"])
-                >= config.AUGMENT_FETCH_MAX_CALLS_PER_HOUR
-            ):
+            state["global"]["hour_window"] = self._purge_old(state["global"]["hour_window"], cutoff)
+            if len(state["global"]["hour_window"]) >= config.AUGMENT_FETCH_MAX_CALLS_PER_HOUR:
                 oldest = state["global"]["hour_window"][0]
                 return False, max(1, int(oldest + 3600 - now) + 1)
 
             # Per-host hourly cap
             host_state = state["per_host"].setdefault(host, {"hour_window": []})
             host_state["hour_window"] = self._purge_old(host_state["hour_window"], cutoff)
-            if (
-                len(host_state["hour_window"])
-                >= config.AUGMENT_FETCH_MAX_CALLS_PER_HOST_PER_HOUR
-            ):
+            if len(host_state["hour_window"]) >= config.AUGMENT_FETCH_MAX_CALLS_PER_HOST_PER_HOUR:
                 oldest = host_state["hour_window"][0]
                 return False, max(1, int(oldest + 3600 - now) + 1)
 

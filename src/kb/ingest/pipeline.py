@@ -895,9 +895,7 @@ def ingest_source(
                 # Phase 4.5 HIGH D6: exclude pages created in THIS ingest to prevent
                 # noisy self-comparison (new summary vs new entities from same source).
                 pages_created_set = set(pages_created)
-                preexisting_pages = [
-                    p for p in all_wiki_pages if p["id"] not in pages_created_set
-                ]
+                preexisting_pages = [p for p in all_wiki_pages if p["id"] not in pages_created_set]
                 contradiction_warnings = detect_contradictions(
                     [str(c) for c in key_claims if isinstance(c, str)],
                     preexisting_pages,

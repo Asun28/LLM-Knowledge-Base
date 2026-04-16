@@ -111,9 +111,7 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # Require 20+ chars AND at least one digit/dot/underscore/slash/plus/eq
         # in the payload, so benign prose like "bearer responsibility-for-all"
         # (pure word chars + hyphens) doesn't trip the scanner.
-        re.compile(
-            r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"
-        ),
+        re.compile(r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"),
     ),
     (
         "JWT",
@@ -519,9 +517,7 @@ def _write_item_files(
     # Initial scan — use context manager to release Windows dir handle promptly
     with os.scandir(_captures_dir) as it:
         existing = {
-            entry.name[:-3]
-            for entry in it
-            if entry.is_file() and entry.name.endswith(".md")
+            entry.name[:-3] for entry in it if entry.is_file() and entry.name.endswith(".md")
         }
 
     # Phase A — resolve all slugs in-process

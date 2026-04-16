@@ -107,21 +107,22 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
         if not graph.has_node(page_id):
             continue
         non_summary_inbound = [
-            src for src in graph.predecessors(page_id)
-            if not src.startswith(AUTOGEN_PREFIXES)
+            src for src in graph.predecessors(page_id) if not src.startswith(AUTOGEN_PREFIXES)
         ]
         if not non_summary_inbound:
             continue
 
-        eligible.append({
-            "page_id": page_id,
-            "title": title,
-            "page_type": post.metadata.get("type", page_id.split("/")[0].rstrip("s")),
-            "frontmatter": dict(post.metadata),
-            "body": post.content,
-            "inbound_count": len(non_summary_inbound),
-            "inbound_pages": non_summary_inbound,
-        })
+        eligible.append(
+            {
+                "page_id": page_id,
+                "title": title,
+                "page_type": post.metadata.get("type", page_id.split("/")[0].rstrip("s")),
+                "frontmatter": dict(post.metadata),
+                "body": post.content,
+                "inbound_count": len(non_summary_inbound),
+                "inbound_pages": non_summary_inbound,
+            }
+        )
 
     return eligible
 
@@ -406,8 +407,7 @@ def _parse_proposals_md(proposals_path: Path) -> list[dict[str, Any]] | None:
             proposals.append(entry)
         else:
             logger.warning(
-                "Skipping malformed proposal block for stub_id=%s (missing "
-                "title or action)",
+                "Skipping malformed proposal block for stub_id=%s (missing title or action)",
                 stub_id,
             )
 
@@ -573,9 +573,7 @@ def run_augment(
         # In execute/auto_ingest we do NOT re-run eligibility or call the
         # LLM proposer — the reviewed file is the source of truth. We still
         # want the G6 cooldown writeback to cover the stubs we touched.
-        eligible = [
-            {"page_id": p["stub_id"], "title": p.get("title", "")} for p in proposals
-        ]
+        eligible = [{"page_id": p["stub_id"], "title": p.get("title", "")} for p in proposals]
     else:
         # Gate 1: propose. Full eligibility pass + LLM proposer.
         eligible = _collect_eligible_stubs(wiki_dir=wiki_dir)[:max_gaps]
@@ -596,24 +594,22 @@ def run_augment(
                         "title": stub["title"],
                         "action": "propose",
                         "urls": [wiki_url],
-                        "rationale": f"wikipedia fallback (proposer abstained: {prop.get('reason')})",
+                        "rationale": (
+                            f"wikipedia fallback (proposer abstained: {prop.get('reason')})"
+                        ),
                     }
             proposals.append(entry)
 
     # Phase B: execute (mode in {execute, auto_ingest})
     if mode in ("execute", "auto_ingest") and proposals:
         if dry_run:
-            fetches = [
-                {"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals
-            ]
+            fetches = [{"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals]
         else:
             manifest = Manifest.start(
                 run_id=run_id,
                 mode=mode,
                 max_gaps=max_gaps,
-                stubs=[
-                    {"page_id": p["stub_id"], "title": p["title"]} for p in proposals
-                ],
+                stubs=[{"page_id": p["stub_id"], "title": p["title"]} for p in proposals],
                 data_dir=effective_data_dir,
             )
             manifest_path = str(manifest.path)
@@ -713,8 +709,7 @@ def run_augment(
                                 "failed",
                                 payload={
                                     "reason": (
-                                        f"relevance {score:.2f} < "
-                                        f"{AUGMENT_RELEVANCE_THRESHOLD}"
+                                        f"relevance {score:.2f} < {AUGMENT_RELEVANCE_THRESHOLD}"
                                     )
                                 },
                             )
@@ -742,9 +737,7 @@ def run_augment(
                                 else "llm-scan"
                             ),
                         )
-                        manifest.advance(
-                            stub_id, "saved", payload={"raw_path": str(raw_path)}
-                        )
+                        manifest.advance(stub_id, "saved", payload={"raw_path": str(raw_path)})
                         fetches.append(
                             {
                                 "stub_id": stub_id,
@@ -757,12 +750,8 @@ def run_augment(
                         fetched_ok = True
                         break
 
-                    if not fetched_ok and not any(
-                        f["stub_id"] == stub_id for f in fetches
-                    ):
-                        manifest.advance(
-                            stub_id, "failed", payload={"reason": "all URLs failed"}
-                        )
+                    if not fetched_ok and not any(f["stub_id"] == stub_id for f in fetches):
+                        manifest.advance(stub_id, "failed", payload={"reason": "all URLs failed"})
 
             if mode == "execute":
                 # Mark saved gaps as terminal "done" (no ingest in execute mode)
@@ -813,9 +802,7 @@ def run_augment(
                 continue
 
             if manifest is not None:
-                manifest.advance(
-                    stub_id, "extracted", payload={"keys": list(extraction.keys())}
-                )
+                manifest.advance(stub_id, "extracted", payload={"keys": list(extraction.keys())})
 
             # Ingest
             try:
@@ -858,22 +845,17 @@ def run_augment(
             )
 
             # Targeted post-ingest quality check (Task 16)
-            verdict, reason = _post_ingest_quality(
-                page_path=stub_path, wiki_dir=wiki_dir
-            )
+            verdict, reason = _post_ingest_quality(page_path=stub_path, wiki_dir=wiki_dir)
             add_verdict(
                 page_id=stub_id,
                 verdict_type="augment",
                 verdict=verdict,
                 notes=(
-                    f"{reason} | augmented from {f['url']} "
-                    f"(relevance {f.get('relevance', 0):.2f})"
+                    f"{reason} | augmented from {f['url']} (relevance {f.get('relevance', 0):.2f})"
                 ),
                 issues=[],
             )
-            verdicts.append(
-                {"stub_id": stub_id, "verdict": verdict, "reason": reason}
-            )
+            verdicts.append({"stub_id": stub_id, "verdict": verdict, "reason": reason})
 
             if verdict == "fail" and stub_path.exists():
                 # Add a [!gap] callout flagging the page for manual review
@@ -899,9 +881,7 @@ def run_augment(
             manifest.close()
 
     if mode == "auto_ingest" and dry_run:
-        ingests = [
-            {"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals
-        ]
+        ingests = [{"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals]
 
     # G6 cooldown writeback — every stub we examined this run gets a
     # last_augment_attempted stamp so the next run's cooldown gate can
@@ -913,16 +893,12 @@ def run_augment(
 
     summary_lines = [f"## Augment Summary (run {run_id[:8]}, mode={mode})"]
     summary_lines.append(f"- Stubs examined: {len(eligible)}")
-    summary_lines.append(
-        f"- Proposals: {sum(1 for p in proposals if p['action'] == 'propose')}"
-    )
+    summary_lines.append(f"- Proposals: {sum(1 for p in proposals if p['action'] == 'propose')}")
     if fetches is not None:
         saved = sum(1 for f in fetches if f["status"] == "saved")
         skipped = sum(1 for f in fetches if f["status"] == "skipped")
         failed = sum(
-            1
-            for f in fetches
-            if f["status"] not in {"saved", "skipped", "dry_run_skipped"}
+            1 for f in fetches if f["status"] not in {"saved", "skipped", "dry_run_skipped"}
         )
         summary_lines.append(f"- Saved: {saved}, Skipped: {skipped}, Failed: {failed}")
     if manifest_path:
@@ -940,9 +916,7 @@ def run_augment(
         # proposals cannot be silently re-consumed by a subsequent execute
         # invocation without a fresh gate-1 review. Rename (not delete) for
         # audit trail.
-        consumed_path = proposals_path.with_name(
-            f"{proposals_path.name}.consumed-{run_id[:8]}"
-        )
+        consumed_path = proposals_path.with_name(f"{proposals_path.name}.consumed-{run_id[:8]}")
         try:
             proposals_path.rename(consumed_path)
             summary_lines.append(f"- Proposals consumed: {consumed_path}")

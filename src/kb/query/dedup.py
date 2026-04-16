@@ -13,9 +13,7 @@ import re as _re
 from kb.config import DEDUP_JACCARD_THRESHOLD, DEDUP_MAX_PER_PAGE, DEDUP_MAX_TYPE_RATIO
 
 _WIKILINK_RE = _re.compile(r"\[\[[^\]]*\]\]")
-_TRAIL_SECTION_RE = _re.compile(
-    r"^## (Evidence Trail|References).*$", _re.MULTILINE | _re.DOTALL
-)
+_TRAIL_SECTION_RE = _re.compile(r"^## (Evidence Trail|References).*$", _re.MULTILINE | _re.DOTALL)
 
 
 def _content_tokens(content: str) -> set[str]:
