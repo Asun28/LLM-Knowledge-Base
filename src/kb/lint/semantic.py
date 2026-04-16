@@ -41,6 +41,8 @@ def _render_sources(sources: list[dict], lines: list[str]) -> None:
     """
     used = sum(len(line) for line in lines) + max(0, len(lines) - 1)
     for i, source in enumerate(sources, 1):
+        if used >= QUERY_CONTEXT_MAX_CHARS:
+            break  # PR review fix: prevent MIN_SOURCE_CHARS from overflowing total cap
         header = f"## Source {i}: {source['path']}\n"
         if source.get("content"):
             remaining = max(
