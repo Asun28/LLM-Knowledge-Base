@@ -10,6 +10,7 @@ from kb.graph.builder import page_id, scan_wiki_pages
 from kb.utils.io import atomic_text_write
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
+from kb.utils.text import wikilink_display_escape
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,7 @@ def inject_wikilinks(
         # Replace first plain-text occurrence in body with wikilink.
         # Use finditer loop so a blocked match (already inside [[ ]]) doesn't
         # silently skip all subsequent occurrences.
-        safe_title = title.replace("|", "\u2014").replace("\n", " ").replace("\r", "")
+        safe_title = wikilink_display_escape(title)
         replacement = f"[[{target_page_id}|{safe_title}]]"
 
         new_body = body

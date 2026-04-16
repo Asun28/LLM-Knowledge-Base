@@ -225,11 +225,13 @@ class TestWikilinkPatternTripleBrackets:
         assert "concepts/rag" in result
 
     def test_length_cap_200(self):
+        # Q_K_b fix (Phase 4.5 HIGH): cap raised from 200 to 500 chars.
+        # A 201-char target now passes (accepted). Kept test name for traceability.
         from kb.utils.markdown import extract_wikilinks
 
         long_target = "a" * 201
         result = extract_wikilinks(f"[[{long_target}]]")
-        assert result == []
+        assert len(result) == 1, "201-char target should be accepted (cap is now 500)"
 
     def test_length_exactly_200_accepted(self):
         from kb.utils.markdown import extract_wikilinks
@@ -237,6 +239,22 @@ class TestWikilinkPatternTripleBrackets:
         target = "a" * 200
         result = extract_wikilinks(f"[[{target}]]")
         assert len(result) == 1
+
+    def test_length_exactly_500_accepted(self):
+        # Q_K_b fix (Phase 4.5 HIGH): 500-char target accepted (at cap boundary).
+        from kb.utils.markdown import extract_wikilinks
+
+        target = "a" * 500
+        result = extract_wikilinks(f"[[{target}]]")
+        assert len(result) == 1, "500-char target should be accepted (at cap boundary)"
+
+    def test_length_501_rejected(self):
+        # Q_K_b fix (Phase 4.5 HIGH): 501-char target rejected.
+        from kb.utils.markdown import extract_wikilinks
+
+        target = "a" * 501
+        result = extract_wikilinks(f"[[{target}]]")
+        assert result == [], "501-char target should be rejected (exceeds 500-char cap)"
 
     def test_quadruple_bracket_not_matched(self):
         from kb.utils.markdown import extract_wikilinks

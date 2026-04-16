@@ -29,7 +29,7 @@ from kb.utils.hashing import hash_bytes
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
-from kb.utils.text import slugify, yaml_escape
+from kb.utils.text import sanitize_extraction_field, slugify, wikilink_display_escape, yaml_escape
 from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
@@ -121,9 +121,15 @@ def _persist_contradictions(
                 if contradictions_path.exists()
                 else header
             )
-            block = f"\n## {source_ref} — {date.today().isoformat()}\n"
+            # H13 fix: take only the FIRST line of source_ref (everything after the first
+            # \n is attacker-controlled injection). Then strip leading # characters and
+            # surrounding whitespace to prevent header injection.
+            first_line = source_ref.split("\n")[0].split("\r")[0]
+            safe_ref = first_line.lstrip("#").strip()
+            block = f"\n## {safe_ref} — {date.today().isoformat()}\n"
             for w in contradictions:
-                claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
+                raw_claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
+                claim = sanitize_extraction_field(raw_claim)
                 block += f"- {claim}\n"
             atomic_text_write(existing + block, contradictions_path)
     except Exception as write_err:
@@ -247,21 +253,21 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         safe_authors = []
         for a in authors:
             if isinstance(a, str):
-                safe_authors.append(a)
+                safe_authors.append(sanitize_extraction_field(a))
             elif isinstance(a, dict) and a.get("name"):
-                safe_authors.append(str(a["name"]))
+                safe_authors.append(sanitize_extraction_field(str(a["name"])))
             else:
                 logger.warning("Dropping non-string author value: %r", a)
         if safe_authors:
             lines.append(f"**Authors:** {', '.join(safe_authors)}\n")
     elif author:
-        lines.append(f"**Author:** {author}\n")
+        lines.append(f"**Author:** {sanitize_extraction_field(author)}\n")
 
     # Core argument / abstract / description
     for field in ("core_argument", "abstract", "description", "problem_solved"):
         val = extraction.get(field)
         if val:
-            lines.append(f"\n## Overview\n\n{val}\n")
+            lines.append(f"\n## Overview\n\n{sanitize_extraction_field(val)}\n")
             break
 
     # Key claims / key points / key arguments
@@ -274,7 +280,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
     if claims and isinstance(claims, list):
         lines.append("\n## Key Claims\n")
         for claim in claims:
-            lines.append(f"- {claim}")
+            safe_claim = sanitize_extraction_field(claim) if isinstance(claim, str) else claim
+            lines.append(f"- {safe_claim}")
         lines.append("")
 
     # Entities
@@ -286,7 +293,7 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
             # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
             if slug and not _is_untitled_sentinel(slug):
-                safe_name = e.replace("|", "-").replace("\n", " ").replace("\r", "")
+                safe_name = wikilink_display_escape(e)
                 lines.append(f"- [[entities/{slug}|{safe_name}]]")
         lines.append("")
 
@@ -299,7 +306,7 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
             # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
             if slug and not _is_untitled_sentinel(slug):
-                safe_name = c.replace("|", "-").replace("\n", " ").replace("\r", "")
+                safe_name = wikilink_display_escape(c)
                 lines.append(f"- [[concepts/{slug}|{safe_name}]]")
         lines.append("")
 
@@ -345,7 +352,7 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
 
     lines = ["## Context\n"]
     for item in relevant[:3]:
-        lines.append(f"- {item}")
+        lines.append(f"- {sanitize_extraction_field(item)}")
     return "\n".join(lines)
 
 
@@ -504,7 +511,7 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
             continue
         if f"[[{subdir}/{slug}|" in content or f"[[{subdir}/{slug}]]" in content:
             continue
-        safe_title = title.replace("|", "-").replace("\n", " ").replace("\r", "")
+        safe_title = wikilink_display_escape(title)
         entry = f"- [[{subdir}/{slug}|{safe_title}]]"
         placeholder = f"{section}\n\n*No pages yet.*"
         if placeholder in content:

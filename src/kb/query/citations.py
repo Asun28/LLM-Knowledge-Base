@@ -20,10 +20,12 @@ def extract_citations(text: str) -> list[dict]:
     citations = []
     for match in _CITATION_PATTERN.finditer(text):
         path = match.group(2)
-        if ".." in path or path.startswith("/") or path.startswith("."):
+        if ".." in path or path.startswith("/"):
             continue
-        # Reject paths with empty components (e.g. raw//page) or consecutive dots mid-component
-        if any(not part or ".." in part for part in path.split("/")):
+        # Q_K_a fix (Phase 4.5 HIGH): reject per-segment leading-dot (e.g. raw/articles/.env)
+        # while allowing legitimate dot-in-name (e.g. raw/articles/foo.env.md).
+        # The old path.startswith(".") check was too broad — it only caught top-level dotfiles.
+        if any(not part or part.startswith(".") for part in path.split("/")):
             continue
         cite_type = "wiki" if match.group(1) == "source" else "raw"
         # Override type based on path prefix
