@@ -45,7 +45,6 @@ def _setup_project(tmp_project, monkeypatch):
     raw_dir = tmp_project / "raw"
     monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.config, "RAW_DIR", raw_dir)
-    monkeypatch.setattr(kb.config, "WIKI_LOG", wiki_dir / "log.md")
     # Also patch feedback/review paths to use tmp
     data_dir = tmp_project / ".data"
     data_dir.mkdir(exist_ok=True)

@@ -269,7 +269,7 @@ def kb_affected_pages(page_id: str) -> str:
     # Find pages sharing same sources using the shared page loader
     shared_source_pages: list[str] = []
     try:
-        all_pages = load_all_pages()
+        all_pages = load_all_pages(wiki_dir=WIKI_DIR)
         this_page = next((p for p in all_pages if p["id"] == page_id), None)
 
         if this_page:

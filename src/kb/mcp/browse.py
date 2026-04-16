@@ -89,7 +89,7 @@ def kb_list_pages(page_type: str = "") -> str:
                    'synthesis'. Empty returns all.
     """
     try:
-        pages = load_all_pages()
+        pages = load_all_pages(wiki_dir=WIKI_DIR)
         if page_type:
             # Accept both singular ("concept") and plural ("concepts") subdir names
             resolved_type = _TYPE_TO_SUBDIR.get(page_type, page_type)
