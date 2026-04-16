@@ -1,5 +1,6 @@
 """Tests for the review module (context + refiner)."""
 
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -274,3 +275,93 @@ def test_refine_page_creates_log_when_missing(tmp_project):
     assert log_path.exists()
     log = log_path.read_text(encoding="utf-8")
     assert "concepts/rag" in log
+
+
+# ── Concurrent-safety regression tests (Phase 4.5 HIGH) ──────────────────────
+
+
+def test_refine_page_concurrent_both_succeed(tmp_project):
+    """Regression: Phase 4.5 HIGH item H1 (refine_page concurrent RMW overwrite).
+
+    Two threads calling refine_page on the same page concurrently must both succeed
+    and both audit entries must appear in the history file.
+    """
+    wiki_dir = tmp_project / "wiki"
+    history_path = tmp_project / "history.json"
+    _create_page(wiki_dir, "concepts/concurrent", "Concurrent", "Original.", "raw/articles/c.md")
+
+    for iteration in range(10):
+        # Reset page content to known state for each iteration
+        _create_page(
+            wiki_dir, "concepts/concurrent", "Concurrent", "Original.", "raw/articles/c.md"
+        )
+
+        results = []
+        errors: list[Exception] = []
+
+        def _refine(body: str, note: str) -> None:
+            try:
+                res = refine_page(
+                    "concepts/concurrent",
+                    body,
+                    note,
+                    wiki_dir=wiki_dir,
+                    history_path=history_path,
+                )
+                results.append(res)
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=_refine, args=("Body from thread-1.", "note-t1"))
+        t2 = threading.Thread(target=_refine, args=("Body from thread-2.", "note-t2"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Iteration {iteration}: unexpected exceptions: {errors}"
+        assert len(results) == 2, f"Iteration {iteration}: expected 2 results, got {results}"
+        for r in results:
+            assert r.get("updated") is True or "error" not in r, (
+                f"Iteration {iteration}: unexpected error result: {r}"
+            )
+
+        # Both audit entries must appear in the history
+        history = load_review_history(history_path)
+        notes = [h["revision_notes"] for h in history if h["page_id"] == "concepts/concurrent"]
+        assert "note-t1" in notes, f"Iteration {iteration}: note-t1 missing from history: {notes}"
+        assert "note-t2" in notes, f"Iteration {iteration}: note-t2 missing from history: {notes}"
+
+
+def test_append_wiki_log_concurrent(tmp_project):
+    """Regression: Phase 4.5 HIGH item H4 (append_wiki_log concurrent append).
+
+    4 threads × 5 appends each = 20 entries; all must appear in the final log.
+    H4 lock was already added in Task 1 — this test is the regression guard.
+    """
+    from kb.utils.wiki_log import append_wiki_log
+
+    wiki_dir = tmp_project / "wiki"
+    log_path = wiki_dir / "log.md"
+    log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
+
+    errors: list[Exception] = []
+
+    def _append_five(thread_id: int) -> None:
+        for i in range(5):
+            try:
+                append_wiki_log("test", f"entry-t{thread_id}-i{i}", log_path)
+            except Exception as exc:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=_append_five, args=(tid,)) for tid in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Unexpected exceptions during concurrent log writes: {errors}"
+    log_content = log_path.read_text(encoding="utf-8")
+    for tid in range(4):
+        for i in range(5):
+            assert f"entry-t{tid}-i{i}" in log_content, f"Missing log entry: entry-t{tid}-i{i}"

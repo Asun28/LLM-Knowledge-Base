@@ -198,3 +198,27 @@ def test_query_wiki_no_results(mock_llm, tmp_wiki):
     result = query_wiki("What is quantum computing?", tmp_wiki)
     assert "No relevant pages" in result["answer"]
     mock_llm.assert_not_called()
+
+
+# ── Phase 4.5 HIGH regression tests ──────────────────────────────────────────
+
+
+@patch("kb.query.engine.call_llm")
+def test_query_wiki_h5_raw_dir_derivation(mock_llm, tmp_wiki):
+    """Regression: Phase 4.5 HIGH item H5 (drop dead raw_dir containment try/except).
+
+    query_wiki must still work after the dead candidate.relative_to() block was removed.
+    raw_dir is now derived unconditionally from wiki_dir without a try/except guard.
+    """
+    mock_llm.return_value = "RAG stands for Retrieval-Augmented Generation."
+    _create_wiki_page(
+        tmp_wiki / "concepts" / "rag.md",
+        "RAG",
+        "RAG is a technique combining retrieval with generation.",
+    )
+    # wiki_dir is tmp_wiki — raw is derived as tmp_wiki.parent / "raw"
+    result = query_wiki("What is RAG?", tmp_wiki)
+    # Must return a valid dict (no crash from the removed try/except)
+    assert isinstance(result, dict)
+    assert "answer" in result
+    assert "citations" in result

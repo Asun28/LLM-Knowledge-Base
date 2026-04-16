@@ -269,7 +269,7 @@ def kb_affected_pages(page_id: str) -> str:
     # Find pages sharing same sources using the shared page loader
     shared_source_pages: list[str] = []
     try:
-        all_pages = load_all_pages()
+        all_pages = load_all_pages(wiki_dir=WIKI_DIR)
         this_page = next((p for p in all_pages if p["id"] == page_id), None)
 
         if this_page:
@@ -475,11 +475,13 @@ confidence: {confidence}
     except OSError as e:
         return f"Error: Failed to write page: {e}"
 
-    # Log
+    # Log — MCP production boundary always uses WIKI_DIR / "log.md".
     try:
         from kb.utils.wiki_log import append_wiki_log
 
-        append_wiki_log("create", f"Created {page_id} ({page_type}, {confidence})")
+        append_wiki_log(
+            "create", f"Created {page_id} ({page_type}, {confidence})", WIKI_DIR / "log.md"
+        )
     except OSError as e:
         logger.warning("Failed to append wiki log after creating %s: %s", page_id, e)
 

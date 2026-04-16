@@ -4,7 +4,7 @@ import logging
 import re as _re
 
 from kb.config import MAX_CONVERSATION_CONTEXT_CHARS
-from kb.utils.llm import call_llm
+from kb.utils.llm import LLMError, call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def rewrite_query(
             return question
         if rewritten:
             return rewritten
-    except Exception as e:
-        logger.debug("Query rewriting failed (non-fatal): %s", e)
+    except LLMError as e:
+        logger.warning("Query rewriting failed for %r (non-fatal): %s", question[:80], e)
 
     return question

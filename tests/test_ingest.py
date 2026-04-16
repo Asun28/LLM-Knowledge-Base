@@ -1,5 +1,6 @@
 """Tests for the ingest pipeline."""
 
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -123,18 +124,15 @@ def test_ingest_source(mock_extract, tmp_path):
     # Create contradictions file so the patch target exists
     (wiki_dir / "contradictions.md").touch()
 
-    # Patch config paths to use temp directory
+    # H6 fix: WIKI_CONTRADICTIONS removed from pipeline; path derived from effective_wiki_dir.
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
         patch("kb.utils.paths.RAW_DIR", raw_dir),
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        # fix item 1: sandbox WIKI_CONTRADICTIONS so prod file is not mutated
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
-        result = ingest_source(source, source_type="article")
+        result = ingest_source(source, source_type="article", wiki_dir=wiki_dir)
 
     assert result["source_type"] == "article"
     assert len(result["pages_created"]) > 0
@@ -207,16 +205,16 @@ def test_ingest_source_does_not_mutate_prod_contradictions(mock_extract, tmp_pat
         prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
     )
 
+    # H6 fix: pipeline now derives contradictions path from effective_wiki_dir, not global.
+    # The patch on WIKI_CONTRADICTIONS is no longer needed (removed from pipeline imports).
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
         patch("kb.utils.paths.RAW_DIR", raw_dir),
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", tmp_contradictions),  # fix item 1
     ):
-        ingest_source(source, source_type="article")
+        ingest_source(source, source_type="article", wiki_dir=wiki_dir)
 
     # Production contradictions.md must NOT have been touched
     prod_mtime_after = prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
@@ -252,7 +250,8 @@ def test_ingest_duplicate_branch_returns_all_contract_keys(tmp_path, monkeypatch
     extraction = {"title": "Dup", "summary": "s", "entities_mentioned": []}
 
     # Force duplicate branch unconditionally — we test the return-dict shape, not detection logic.
-    monkeypatch.setattr(pipeline, "_is_duplicate_content", lambda *_: True)
+    # Q_A fix: ingest_source now calls _check_and_reserve_manifest (was _is_duplicate_content).
+    monkeypatch.setattr(pipeline, "_check_and_reserve_manifest", lambda *_: True)
 
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
@@ -260,8 +259,6 @@ def test_ingest_duplicate_branch_returns_all_contract_keys(tmp_path, monkeypatch
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         result = pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction
@@ -333,8 +330,6 @@ def test_ingest_skips_pure_punctuation_entities(tmp_path):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         result = pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction
@@ -401,11 +396,11 @@ def test_ingest_allows_legitimate_untitled_prefix_entities(tmp_project, monkeypa
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
-            source_path=source, wiki_dir=wiki_dir, extraction=extraction,
+            source_path=source,
+            wiki_dir=wiki_dir,
+            extraction=extraction,
         )
     # Both legit entities SHOULD produce pages
     reports_page = wiki_dir / "entities" / "untitled-reports.md"
@@ -433,11 +428,11 @@ def test_ingest_still_blocks_sentinel_hash_slug(tmp_project, monkeypatch):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
-            source_path=source, wiki_dir=wiki_dir, extraction=extraction,
+            source_path=source,
+            wiki_dir=wiki_dir,
+            extraction=extraction,
         )
     # Sentinel-hash pages MUST NOT be created
     untitled = list((wiki_dir / "entities").glob("untitled-*.md"))
@@ -457,11 +452,10 @@ def test_summary_page_prefers_filename_stem_over_untitled_sentinel(tmp_project, 
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
-            source_path=source, wiki_dir=wiki_dir,
+            source_path=source,
+            wiki_dir=wiki_dir,
             extraction={"title": "😀😀😀", "summary": "s", "entities_mentioned": []},
         )
     # Summary should exist under a readable name, not untitled-<hash>
@@ -472,3 +466,179 @@ def test_summary_page_prefers_filename_stem_over_untitled_sentinel(tmp_project, 
         f"summary used untitled-<hash> instead of readable stem: {summary_name}"
     )
     assert "readable-stem" in summary_name, f"expected readable-stem in name: {summary_name}"
+
+
+# ── Concurrent-safety regression tests (Phase 4.5 HIGH) ──────────────────────
+
+
+def test_append_evidence_trail_concurrent(tmp_path):
+    """Regression: Phase 4.5 HIGH item H2 (append_evidence_trail concurrent RMW).
+
+    Two threads appending to the same wiki page must both have their entries
+    appear in the final content.
+    """
+    from kb.ingest.evidence import append_evidence_trail
+
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    page_path = wiki_dir / "concepts" / "concurrent.md"
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    page_path.write_text(
+        "---\ntitle: Concurrent\nsource:\n  - raw/articles/c.md\n"
+        "created: 2026-04-16\nupdated: 2026-04-16\ntype: concept\nconfidence: stated\n---\n\n"
+        "Initial content.\n",
+        encoding="utf-8",
+    )
+
+    errors: list[Exception] = []
+
+    def _append(source: str, action: str) -> None:
+        try:
+            append_evidence_trail(page_path, source, action, "2026-04-16")
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_append, args=("raw/articles/src-a.md", "action-alpha"))
+    t2 = threading.Thread(target=_append, args=("raw/articles/src-b.md", "action-beta"))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"Unexpected exceptions during concurrent evidence trail writes: {errors}"
+    content = page_path.read_text(encoding="utf-8")
+    assert "action-alpha" in content, "action-alpha missing from evidence trail"
+    assert "action-beta" in content, "action-beta missing from evidence trail"
+    assert content.count("## Evidence Trail") == 1, "Evidence Trail section duplicated"
+
+
+def test_persist_contradictions_concurrent(tmp_path):
+    """Regression: Phase 4.5 HIGH item H3 (_persist_contradictions concurrent RMW).
+
+    Two threads writing different contradiction payloads concurrently must both
+    appear in the final contradictions.md.
+    """
+    from kb.ingest.pipeline import _persist_contradictions
+
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+
+    errors: list[Exception] = []
+
+    def _write(source_ref: str, claim: str) -> None:
+        try:
+            _persist_contradictions(
+                [{"claim": claim}],
+                source_ref,
+                wiki_dir,
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_write, args=("raw/articles/src-a.md", "claim-from-thread-one"))
+    t2 = threading.Thread(target=_write, args=("raw/articles/src-b.md", "claim-from-thread-two"))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"Unexpected exceptions during concurrent contradiction writes: {errors}"
+    content = (wiki_dir / "contradictions.md").read_text(encoding="utf-8")
+    assert "claim-from-thread-one" in content, "Thread-1 claim missing from contradictions.md"
+    assert "claim-from-thread-two" in content, "Thread-2 claim missing from contradictions.md"
+
+
+def _make_wiki_and_raw(tmp_path):
+    """Set up a minimal wiki + raw dir structure for integration tests."""
+    wiki_dir = tmp_path / "wiki"
+    raw_dir = tmp_path / "raw"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True)
+    for subdir in ("articles",):
+        (raw_dir / subdir).mkdir(parents=True)
+    (wiki_dir / "index.md").write_text(
+        "---\ntitle: Wiki Index\nupdated: 2026-04-16\n---\n\n# Knowledge Base Index\n\n"
+        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
+        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
+        "## Synthesis\n\n*No pages yet.*\n"
+    )
+    (wiki_dir / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nupdated: 2026-04-16\n---\n\n# Source Mapping\n"
+    )
+    (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    return wiki_dir, raw_dir
+
+
+@patch("kb.ingest.pipeline.extract_from_source")
+def test_duplicate_content_concurrent_ingest(mock_extract, tmp_path):
+    """Regression: Phase 4.5 HIGH item Q_A (manifest RMW race on duplicate hash).
+
+    Two threads ingesting different source files with identical content: exactly one
+    must create pages, the other must return duplicate: True.
+    """
+    mock_extract.return_value = {
+        "title": "Concurrent Duplicate Article",
+        "author": "Author",
+        "core_argument": "Same content.",
+        "key_claims": [],
+        "entities_mentioned": [],
+        "concepts_mentioned": [],
+    }
+
+    wiki_dir, raw_dir = _make_wiki_and_raw(tmp_path)
+    manifest_path = tmp_path / ".data" / "hashes.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write two source files with identical content (same hash)
+    identical_content = "# Identical Content\n\nThis is the same article."
+    src_a = raw_dir / "articles" / "src-a.md"
+    src_b = raw_dir / "articles" / "src-b.md"
+    src_a.write_text(identical_content, encoding="utf-8")
+    src_b.write_text(identical_content, encoding="utf-8")
+
+    results: list[dict] = []
+    errors: list[Exception] = []
+
+    # Apply all patches BEFORE starting threads — sharing a patched environment between
+    # threads is safe; applying patches from multiple threads concurrently is not.
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+        patch("kb.utils.paths.RAW_DIR", raw_dir),
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+        patch("kb.compile.compiler.HASH_MANIFEST", manifest_path),
+        # PROJECT_ROOT must point to tmp_path so other_path.exists() resolves correctly
+        patch("kb.ingest.pipeline.PROJECT_ROOT", tmp_path),
+    ):
+
+        def _ingest(source) -> None:
+            try:
+                res = ingest_source(source, source_type="article", wiki_dir=wiki_dir)
+                results.append(res)
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=_ingest, args=(src_a,))
+        t2 = threading.Thread(target=_ingest, args=(src_b,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    assert not errors, f"Unexpected exceptions: {errors}"
+    assert len(results) == 2, f"Expected 2 results, got: {results}"
+
+    duplicates = [r for r in results if r.get("duplicate")]
+    non_duplicates = [r for r in results if not r.get("duplicate")]
+
+    assert len(duplicates) == 1, (
+        f"Expected exactly 1 duplicate result; got duplicates={duplicates}, "
+        f"non_duplicates={non_duplicates}"
+    )
+    assert len(non_duplicates) == 1, (
+        f"Expected exactly 1 non-duplicate result; got duplicates={duplicates}, "
+        f"non_duplicates={non_duplicates}"
+    )
+    # The non-duplicate must have created pages
+    assert non_duplicates[0]["pages_created"], "Non-duplicate ingest created no pages"

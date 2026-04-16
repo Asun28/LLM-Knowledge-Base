@@ -1,6 +1,7 @@
 """Page refinement — update content preserving frontmatter, log revisions."""
 
 import json
+import logging
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.wiki_log import append_wiki_log
+
+logger = logging.getLogger(__name__)
 
 
 def load_review_history(path: Path | None = None) -> list[dict]:
@@ -63,58 +66,70 @@ def refine_page(
     if not page_path.exists():
         return {"error": f"Page not found: {page_id}"}
 
+    # H1 fix (Phase 4.5 HIGH): lock the page file for the entire read→write window so
+    # concurrent refine_page calls on the same page don't overwrite each other's body.
+    # Lock-order: page_path acquired FIRST; history_path acquired SECOND (below).
     try:
-        text = page_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
-        return {"error": f"Cannot read {page_id}: {e}"}
-    # Normalize CRLF → LF for consistent frontmatter parsing on Windows
-    text = text.replace("\r\n", "\n")
+        page_lock = file_lock(page_path)
+        page_lock.__enter__()
+    except TimeoutError as e:
+        return {"error": f"Failed to acquire page lock for {page_id}: {e}"}
 
-    # Split frontmatter from content using regex for robust --- matching
-    # Matches: start-of-file, optional whitespace, ---, newline (LF or CRLF), content, ---, rest
-    fm_match = re.match(r"\A\s*---\r?\n(.*?\r?\n)---\r?\n?(.*)", text, re.DOTALL)
-    if not fm_match:
-        return {"error": f"Invalid frontmatter format in {page_id}"}
-
-    frontmatter_text = fm_match.group(1)
-
-    # Update the 'updated' date in frontmatter
-    today = date.today().isoformat()
-    if re.search(r"^updated: \d{4}-\d{2}-\d{2}", frontmatter_text, re.MULTILINE):
-        frontmatter_text = re.sub(
-            r"^updated: \d{4}-\d{2}-\d{2}",
-            f"updated: {today}",
-            frontmatter_text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-    else:
-        # Add updated field if missing
-        frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
-
-    # Guard against empty or whitespace-only content
-    if not updated_content or not updated_content.strip():
-        return {"error": "updated_content cannot be empty."}
-
-    # Normalize CRLF in caller-supplied content before guard check
-    updated_content = updated_content.replace("\r\n", "\n")
-
-    # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
-    stripped_content = updated_content.lstrip()
-    if re.match(r"---\n.*?\n?---", stripped_content, re.DOTALL):
-        return {"error": "Content looks like a frontmatter block — pass only the body text."}
-
-    # Reconstruct page — strip only leading newlines (preserve indented code blocks).
-    # Adversarial-review MAJOR: use [\r\n]+ for defense-in-depth; upstream CRLF→LF
-    # normalization at line ~100 handles most cases, but this guard catches any remnants.
-    body = re.sub(r"\A[\r\n]+", "", updated_content)
-    new_text = f"---\n{frontmatter_text}---\n\n{body}\n"
-
-    # Write the page FIRST — if this fails, no history entry is created.
     try:
-        atomic_text_write(new_text, page_path)
-    except OSError as e:
-        return {"error": f"Failed to write page {page_id}: {e}"}
+        try:
+            text = page_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            return {"error": f"Cannot read {page_id}: {e}"}
+        # Normalize CRLF → LF for consistent frontmatter parsing on Windows
+        text = text.replace("\r\n", "\n")
+
+        # Split frontmatter from content using regex for robust --- matching
+        # Matches: start-of-file, optional whitespace, ---, newline (LF or CRLF), content, ---, rest
+        fm_match = re.match(r"\A\s*---\r?\n(.*?\r?\n)---\r?\n?(.*)", text, re.DOTALL)
+        if not fm_match:
+            return {"error": f"Invalid frontmatter format in {page_id}"}
+
+        frontmatter_text = fm_match.group(1)
+
+        # Update the 'updated' date in frontmatter
+        today = date.today().isoformat()
+        if re.search(r"^updated: \d{4}-\d{2}-\d{2}", frontmatter_text, re.MULTILINE):
+            frontmatter_text = re.sub(
+                r"^updated: \d{4}-\d{2}-\d{2}",
+                f"updated: {today}",
+                frontmatter_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            # Add updated field if missing
+            frontmatter_text = frontmatter_text.rstrip("\n") + f"\nupdated: {today}\n"
+
+        # Guard against empty or whitespace-only content
+        if not updated_content or not updated_content.strip():
+            return {"error": "updated_content cannot be empty."}
+
+        # Normalize CRLF in caller-supplied content before guard check
+        updated_content = updated_content.replace("\r\n", "\n")
+
+        # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
+        stripped_content = updated_content.lstrip()
+        if re.match(r"---\n.*?\n?---", stripped_content, re.DOTALL):
+            return {"error": "Content looks like a frontmatter block — pass only the body text."}
+
+        # Reconstruct page — strip only leading newlines (preserve indented code blocks).
+        # Adversarial-review MAJOR: use [\r\n]+ for defense-in-depth; upstream CRLF→LF
+        # normalization at line ~100 handles most cases, but this guard catches any remnants.
+        body = re.sub(r"\A[\r\n]+", "", updated_content)
+        new_text = f"---\n{frontmatter_text}---\n\n{body}\n"
+
+        # Write the page FIRST — if this fails, no history entry is created.
+        try:
+            atomic_text_write(new_text, page_path)
+        except OSError as e:
+            return {"error": f"Failed to write page {page_id}: {e}"}
+    finally:
+        page_lock.__exit__(None, None, None)
 
     # Persist audit trail AFTER successful page write (cross-process-safe via file_lock).
     # Adversarial-review MAJOR: derive history path from wiki_dir when history_path is
@@ -143,9 +158,13 @@ def refine_page(
             history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
         save_review_history(history, resolved_history_path)
 
-    # Append to wiki/log.md (auto-creates if missing)
+    # Append to wiki/log.md (best-effort — page + history already written successfully;
+    # a log failure must not crash the caller or hide the successful refine result).
     log_path = wiki_dir / "log.md"
-    append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)
+    try:
+        append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)
+    except OSError as e:
+        logger.warning("Failed to append wiki log after successful refine: %s", e)
 
     return {
         "page_id": page_id,

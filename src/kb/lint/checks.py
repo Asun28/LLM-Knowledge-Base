@@ -124,13 +124,16 @@ def fix_dead_links(
 
     # Log fixes to audit trail
     if fixes:
+        from kb.config import WIKI_DIR as _WIKI_DIR
         from kb.utils.wiki_log import append_wiki_log
 
         fixed_count = len(fixes)
         pages_fixed = len({f["page"] for f in fixes})
+        effective_log_dir = wiki_dir if wiki_dir is not None else _WIKI_DIR
         append_wiki_log(
             "lint-fix",
             f"Auto-fixed {fixed_count} broken wikilink(s) across {pages_fixed} page(s)",
+            effective_log_dir / "log.md",
         )
 
     return fixes

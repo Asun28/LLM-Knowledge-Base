@@ -179,3 +179,70 @@ def yaml_escape(value: str) -> str:
         .replace("\r", "\\r")
         .replace("\t", "\\t")
     )
+
+
+# Matches a whole line that is a YAML frontmatter fence (--- optionally followed by spaces/tabs).
+_FRONTMATTER_FENCE_RE = re.compile(r"^---[ \t]*$", re.MULTILINE)
+
+# Matches HTML comments including their content (greedy-safe via non-greedy).
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# Matches markdown ATX headers at level 2 or deeper (##, ###, etc.) — whole line.
+# Does NOT match level-1 headers (single #) to preserve legitimate page titles.
+_MD_HEADER_RE = re.compile(r"^##+ .*$", re.MULTILINE)
+
+
+def sanitize_extraction_field(value: str | None, max_len: int = 2000) -> str:
+    """Sanitize an untrusted extraction_json string field before writing to wiki body.
+
+    Strips prompt-injection vectors from LLM-supplied extraction fields:
+    - C0/C1 control characters (via yaml_sanitize)
+    - Frontmatter fence lines (``---``)
+    - HTML comments ``<!-- ... -->``
+    - Markdown headers at level 2+ (``##``, ``###``, …) — whole line removed
+      to prevent ``## Review Checklist`` / ``## Evidence Trail`` forgeries
+    - Truncates to ``max_len`` chars, appending ``... [truncated]`` marker
+
+    Does NOT strip em-dashes (—), inline code (`…`), hyphenated year ranges
+    (2024-25), or normal bullet list items (``- item``).
+
+    Returns ``""`` for ``None`` or empty input.
+    """
+    if not value:
+        return ""
+
+    # 1. Strip control characters and bidi marks via the shared sanitizer.
+    value = yaml_sanitize(value)
+
+    # 2. Remove HTML comments (including content).
+    value = _HTML_COMMENT_RE.sub("", value)
+
+    # 3. Remove whole frontmatter fence lines.
+    value = _FRONTMATTER_FENCE_RE.sub("", value)
+
+    # 4. Remove markdown headers at level 2+.
+    value = _MD_HEADER_RE.sub("", value)
+
+    # 5. Length cap.
+    if len(value) > max_len:
+        value = value[:max_len] + "... [truncated]"
+
+    return value
+
+
+def wikilink_display_escape(title: str) -> str:
+    """Escape a title for safe use as wikilink display text ``[[target|TITLE]]``.
+
+    Replaces characters that would break the wikilink syntax or allow injection:
+    - ``]`` → ``)``  (prevents early close-bracket escape)
+    - ``[`` → ``(``  (prevents paired open-bracket)
+    - ``|`` → `` ``  (pipe is the wikilink display separator)
+    - newlines (``\\n``, ``\\r``) → `` ``  (wikilinks are single-line)
+    """
+    return (
+        title.replace("]", ")")
+        .replace("[", "(")
+        .replace("|", " ")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )

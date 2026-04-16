@@ -1,6 +1,5 @@
 """Tests for wiki/purpose.md KB focus document feature."""
 
-
 from kb.ingest.extractors import build_extraction_prompt
 from kb.utils.pages import load_purpose
 
@@ -28,6 +27,28 @@ def test_load_purpose_empty_file(tmp_path):
     wiki_dir.mkdir()
     (wiki_dir / "purpose.md").write_text("   \n", encoding="utf-8")
     assert load_purpose(wiki_dir) is None
+
+
+def test_h8_load_purpose_reads_from_wiki_dir_not_production(tmp_path):
+    """Regression: Phase 4.5 HIGH item H8 (load_purpose always read production wiki/purpose.md)."""
+    from kb.config import WIKI_DIR as prod_wiki_dir
+
+    tmp_wiki = tmp_path / "wiki"
+    tmp_wiki.mkdir()
+    (tmp_wiki / "purpose.md").write_text("# Test Purpose\n\nThis is the test KB.", encoding="utf-8")
+
+    # Should read from tmp_wiki, not from the production WIKI_DIR
+    result = load_purpose(tmp_wiki)
+    assert result is not None
+    assert "Test Purpose" in result
+
+    # Production purpose.md should NOT have been read (we'd get its content instead)
+    prod_purpose = prod_wiki_dir / "purpose.md"
+    if prod_purpose.exists():
+        prod_content = prod_purpose.read_text(encoding="utf-8").strip()
+        assert result != prod_content or "Test Purpose" in prod_content, (
+            "H8: load_purpose(wiki_dir) returned production purpose.md instead of tmp_wiki"
+        )
 
 
 # ── build_extraction_prompt() ───────────────────────────────────────────────
