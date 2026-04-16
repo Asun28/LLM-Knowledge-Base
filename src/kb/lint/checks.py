@@ -410,9 +410,11 @@ def check_source_coverage(
         # fence, emit a frontmatter issue and skip the YAML parse (which would
         # silently return empty metadata).
         if not content.lstrip().startswith("---"):
+            # PR review round 1: use "check" key so `runner.py` and downstream
+            # consumers filtering by `i["check"]` surface this class (was "type").
             issues.append(
                 {
-                    "type": "frontmatter",
+                    "check": "frontmatter_missing_fence",
                     "severity": "warning",
                     "page": str(page_path.relative_to(wiki_dir))
                     if page_path.is_relative_to(wiki_dir)

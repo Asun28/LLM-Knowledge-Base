@@ -497,17 +497,20 @@ confidence: {confidence}
 
     try:
         page_path.parent.mkdir(parents=True, exist_ok=True)
-        # F1 (Phase 4.5 MEDIUM): O_EXCL reservation, then atomic_text_write
-        # on the reserved slot. Close the fd immediately so the follow-up
-        # atomic writer can replace atomically.
+        # F1 (Phase 4.5 MEDIUM): O_EXCL reservation + write in the SAME try
+        # block so a signal (SIGTERM) or KeyboardInterrupt between the open
+        # and write cannot leave a 0-byte zombie reservation.
+        # PR review round 1 (Opus+Sonnet MAJOR): previously `os.close(fd)`
+        # was followed by a separate `try: atomic_text_write(...)` — the
+        # gap between close and the try was unguarded.
         fd = os.open(
             str(page_path),
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o644,
         )
-        os.close(fd)
         try:
-            atomic_text_write(frontmatter + content, page_path)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(frontmatter + content)
         except BaseException:
             page_path.unlink(missing_ok=True)
             raise

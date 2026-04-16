@@ -46,6 +46,12 @@ def load_feedback(path: Path | None = None) -> dict:
         return _default_feedback()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        # PR review round 1 (Codex M-NEW-3): propagate EACCES so callers
+        # can't silently overwrite an unreadable file on the next write.
+        # Permission-denied is an operator bug, not corruption; recovery
+        # would destroy state the user might want to inspect first.
+        raise
     except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         logger.warning("Feedback file unreadable, using defaults: %s", e)
         return _default_feedback()

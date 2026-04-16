@@ -39,27 +39,47 @@ def test_a2_capture_schema_caps_body_length():
 
 
 def test_a3_capture_items_accepts_captures_dir(tmp_path, monkeypatch):
-    """A3: capture_items honors captures_dir override without monkeypatching globals."""
-    from kb.capture import _write_item_files
+    """A3: capture_items (public API) threads captures_dir through without
+    monkeypatching the module-level CAPTURES_DIR constant.
 
-    items = [
-        {
-            "title": "Pick atomic N-files",
-            "kind": "decision",
-            "body": "We chose N-files for atomicity.",
-            "one_line_summary": "N-files preserve raw immutability.",
-            "confidence": "stated",
+    PR review round 1 (Sonnet MINOR): the prior test called _write_item_files
+    directly, bypassing the public plumbing. This version exercises the real
+    capture_items entry point with a fake LLM that returns a trivial item."""
+    from kb import capture
+
+    # Stub out LLM + rate limit so the public API reaches the write path
+    # deterministically.
+    def fake_extract(normalized):
+        return {
+            "items": [
+                {
+                    "title": "Pick atomic N-files",
+                    "kind": "decision",
+                    "body": "We chose N-files for atomicity.",
+                    "one_line_summary": "N-files preserve raw immutability.",
+                    "confidence": "stated",
+                }
+            ],
+            "filtered_out_count": 0,
         }
-    ]
-    written, err = _write_item_files(
-        items,
-        provenance="test-2026-04-17T00-00-00Z",
-        captured_at="2026-04-17T00:00:00Z",
+
+    monkeypatch.setattr(capture, "_extract_items_via_llm", fake_extract)
+    monkeypatch.setattr(capture, "_check_rate_limit", lambda: (True, 0))
+    # Identity verifier — accept the fake body verbatim
+    monkeypatch.setattr(
+        capture,
+        "_verify_body_is_verbatim",
+        lambda raw_items, normalized: (list(raw_items), 0),
+    )
+
+    result = capture.capture_items(
+        "We chose N-files for atomicity.",
+        provenance="test",
         captures_dir=tmp_path,
     )
-    assert err is None, f"unexpected write error: {err}"
-    assert len(written) == 1
-    assert written[0].path.is_relative_to(tmp_path)
+    assert result.rejected_reason is None, result.rejected_reason
+    assert len(result.items) == 1
+    assert result.items[0].path.is_relative_to(tmp_path)
 
 
 def test_a4_secret_regex_catches_anthropic_api_key_suffix():
@@ -98,6 +118,20 @@ def test_a6_authorization_regex_matches_bearer():
     assert _scan_for_secrets("Authorization: Bearer abcdefghijklmnop1234") is not None
     # Short Bearer should not false-positive
     assert _scan_for_secrets("Authorization: Bearer abc") is None
+
+
+def test_a4_env_var_regex_matches_quoted_value_with_spaces():
+    """PR review round 1 (Codex M-NEW-2): quoted values containing spaces
+    must be caught — previously `\\S{8,}` stopped at the first whitespace."""
+    from kb.capture import _scan_for_secrets
+
+    positives = [
+        'SECRET="has spaces and is still a long secret"',
+        "API_KEY='quoted with spaces is still secret'",
+        'DATABASE_URL="postgres://u:p@host/db with spaces"',
+    ]
+    for s in positives:
+        assert _scan_for_secrets(s) is not None, f"expected match for: {s!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -177,23 +211,48 @@ def test_c2_ingest_rejects_unsupported_suffix(tmp_project):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_d1_cached_schema_is_deepcopied_per_extraction():
-    """D1: mutating the returned schema does not poison the next call."""
-    from kb.ingest.extractors import _build_schema_cached
+def test_d1_cached_schema_is_deepcopied_per_extraction(monkeypatch):
+    """D1: extract_from_source deepcopies the cached schema so an SDK mutation
+    in one call cannot poison the next.
 
-    s1 = _build_schema_cached("article")
-    # mutate the cached copy
-    s1["properties"]["POISON"] = True
-    # the extractor itself must deepcopy before passing to the SDK — verify
-    # by importing the guard used in extract_from_source
-    import copy
+    PR review round 1 (Opus MAJOR): the prior test exercised copy.deepcopy
+    directly and would pass even if `extract_from_source` stopped deepcopying.
+    This test instead stubs `call_llm_json` to MUTATE the schema it receives
+    and verifies the next call sees a pristine copy."""
+    from kb.ingest import extractors
 
-    s2 = copy.deepcopy(_build_schema_cached("article"))
-    # s2 must still contain the poison key (cache returned same obj) but a
-    # deepcopy breaks the link so a mutation on s2 doesn't affect s1
-    assert "POISON" in s2["properties"]
-    s2["properties"]["MORE_POISON"] = True
-    assert "MORE_POISON" not in s1["properties"]
+    # Clear any previous cached schema so the first call populates it fresh.
+    extractors._build_schema_cached.cache_clear()
+
+    seen_schemas: list[dict] = []
+    call_counter = {"n": 0}
+
+    def mutating_stub(prompt, *, tier, system, schema, tool_description):
+        seen_schemas.append(schema)
+        call_counter["n"] += 1
+        # Mutate only on the first call. The second call must receive a
+        # pristine schema — if extract_from_source skipped the deepcopy,
+        # the mutation from call 1 would still be visible because lru_cache
+        # returns the same object.
+        if call_counter["n"] == 1:
+            schema["properties"]["POISONED_FROM_SDK"] = True
+        return {
+            "title": "X",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+
+    monkeypatch.setattr(extractors, "call_llm_json", mutating_stub)
+    monkeypatch.setattr(extractors, "load_purpose", lambda _d=None: None)
+
+    extractors.extract_from_source("body one", "article")
+    extractors.extract_from_source("body two", "article")
+
+    assert len(seen_schemas) == 2
+    # Each call must receive its OWN schema object (distinct ids) AND the
+    # second call must not inherit the poison the first injected.
+    assert seen_schemas[0] is not seen_schemas[1]
+    assert "POISONED_FROM_SDK" not in seen_schemas[1].get("properties", {})
 
 
 def test_d2a_purpose_caps_at_4kb():
@@ -334,6 +393,32 @@ def test_i3_rewrite_prefix_leak_rejected():
     assert called_with["question"] == "original question"
 
 
+def test_i3_legit_domain_prefix_rewrite_preserved():
+    """PR review round 1 (Opus MINOR + Codex M-NEW-1): legit rewrites like
+    "RAG: methodology" must NOT be treated as a prefix leak.
+
+    The prior `_LEAK_PREFIX_RE = ^[A-Z][a-zA-Z ]{0,40}:\\s*` dropped these;
+    the tightened keyword-anchored regex accepts them."""
+    from kb.query import engine as engine_mod
+
+    called_with: dict = {}
+
+    def fake_search_pages(*a, **kw):
+        called_with["question"] = a[0] if a else kw.get("question")
+        return []
+
+    def fake_rewrite_query(_q, _ctx):
+        return "RAG: methodology and evaluation approach"
+
+    with (
+        patch.object(engine_mod, "search_pages", side_effect=fake_search_pages),
+        patch("kb.query.rewriter.rewrite_query", side_effect=fake_rewrite_query),
+    ):
+        engine_mod.query_wiki("what about RAG?", conversation_context="ctx")
+
+    assert called_with["question"] == "RAG: methodology and evaluation approach"
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Theme J — query/rewriter.py (J1 bounds; J2 WH-skip)
 # ─────────────────────────────────────────────────────────────────────────
@@ -414,7 +499,8 @@ def test_m1_verdict_cache_invalidates_on_write(tmp_path):
 
 
 def test_o1_missing_frontmatter_fence_flagged(tmp_path):
-    """O1: page without opening --- fence emits a frontmatter issue."""
+    """O1: page without opening --- fence emits a frontmatter issue under the
+    canonical 'check' key (not 'type' — see PR review round 1 Sonnet MAJOR)."""
     from kb.lint.checks import check_source_coverage
 
     wiki = tmp_path / "wiki"
@@ -424,8 +510,8 @@ def test_o1_missing_frontmatter_fence_flagged(tmp_path):
     bad_page = wiki / "concepts" / "no-fence.md"
     bad_page.write_text("No frontmatter here.\n", encoding="utf-8")
     issues = check_source_coverage(wiki_dir=wiki, raw_dir=raw, pages=[bad_page])
-    types = [i.get("type") for i in issues]
-    assert "frontmatter" in types
+    checks = [i.get("check") for i in issues]
+    assert "frontmatter_missing_fence" in checks
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -458,6 +544,23 @@ def test_q1_load_feedback_handles_unicode_decode_error(tmp_path):
     path.write_bytes(b"\x80\x81\x82 not valid utf-8")
     data = load_feedback(path)
     assert data == {"entries": [], "page_scores": {}}
+
+
+def test_q1_load_feedback_propagates_permission_error(tmp_path, monkeypatch):
+    """PR review round 1 (Codex M-NEW-3): Q1's widened OSError catch must
+    NOT swallow PermissionError. Silent recovery on EACCES would let a
+    subsequent write overwrite an unreadable file, destroying state."""
+    from kb.feedback import store
+
+    path = tmp_path / "feedback.json"
+    path.write_text('{"entries": [], "page_scores": {}}', encoding="utf-8")
+
+    def raise_permission(*_args, **_kwargs):
+        raise PermissionError("EACCES: simulated read-deny")
+
+    monkeypatch.setattr(Path, "read_text", raise_permission)
+    with pytest.raises(PermissionError):
+        store.load_feedback(path)
 
 
 def test_q2_get_flagged_pages_recomputes_trust(tmp_path):
@@ -497,3 +600,27 @@ def test_s1_log_directory_raises_oserror(tmp_path):
     target.mkdir()
     with pytest.raises(OSError, match="not a regular file"):
         append_wiki_log("test_op", "test message", target)
+
+
+def test_s1_log_symlink_raises_oserror(tmp_path):
+    """S1: append_wiki_log rejects symlink targets even when the symlink
+    points at a valid regular file.
+
+    PR review round 1 (Sonnet MAJOR S1 + Codex): the prior implementation
+    used `is_file()`, which follows symlinks and returned True for a
+    symlink → regular file. Spec says "directory/symlink/special-file must
+    be rejected".
+    """
+    from kb.utils.wiki_log import append_wiki_log
+
+    real_log = tmp_path / "real.md"
+    real_log.write_text("# Wiki Log\n\n", encoding="utf-8")
+    symlink = tmp_path / "log.md"
+    try:
+        symlink.symlink_to(real_log)
+    except OSError:
+        # Windows without developer mode cannot create symlinks — skip
+        pytest.skip("symlink creation not permitted on this platform")
+
+    with pytest.raises(OSError, match="not a regular file"):
+        append_wiki_log("test_op", "test message", symlink)

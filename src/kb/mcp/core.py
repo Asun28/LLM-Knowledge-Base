@@ -228,19 +228,18 @@ def kb_ingest(
         return f"Error: Unsupported file type '{path.suffix}'."
 
     # H1 (Phase 4.5 HIGH): stat-based size pre-check before read. Prevents
-    # OOM from an attacker-controlled large raw/ file — we'd otherwise load
-    # the entire file into memory, then truncate to MAX_INGEST_CONTENT_CHARS.
-    # stat().st_size returns bytes; UTF-8 can be up to 4× bytes vs chars, so
-    # compare against chars*4 as a conservative upper bound.
+    # OOM from an attacker-controlled large raw/ file. Align the cap with
+    # the downstream QUERY_CONTEXT_MAX_CHARS truncation: chars*4 bytes is a
+    # conservative UTF-8 upper bound for 80KB of text. PR review round 1
+    # noted the earlier MAX_INGEST_CONTENT_CHARS*4 was 8× this, making the
+    # "OOM protection" framing loose.
     try:
         file_bytes = path.stat().st_size
     except OSError as e:
         return f"Error: cannot stat source: {e}"
-    if file_bytes > MAX_INGEST_CONTENT_CHARS * 4:
-        return (
-            f"Error: Source too large ({file_bytes} bytes; "
-            f"max {MAX_INGEST_CONTENT_CHARS * 4} bytes)."
-        )
+    max_bytes = QUERY_CONTEXT_MAX_CHARS * 4
+    if file_bytes > max_bytes:
+        return f"Error: Source too large ({file_bytes} bytes; max {max_bytes} bytes)."
 
     # H2 (Phase 4.5 R4 HIGH): reject unknown source_type before template
     # loading or ingest. Previously `source_type='totally_bogus'` with a

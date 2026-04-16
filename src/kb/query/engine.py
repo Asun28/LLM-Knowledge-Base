@@ -2,6 +2,7 @@
 
 import logging
 import re
+import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -190,15 +191,24 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
 # index. Keyed on (resolved_raw_dir, file_count, max_mtime_ns) so deletion
 # (count change) or any file update (mtime change) invalidates. Resolves
 # the per-query rebuild hot path on large raw/ trees.
+#
+# PR review round 1 (Codex m-new-1): under FastMCP's thread pool two
+# concurrent queries can both miss the cache and both rebuild. The lock
+# serializes the check-then-set so only the first rebuild runs.
 _RAW_BM25_CACHE: dict[tuple[str, int, int], tuple[list[dict], "BM25Index"]] = {}
+_RAW_BM25_CACHE_LOCK = threading.Lock()
 
-# I3 (Phase 4.5 R4 HIGH): rewrite-leak prefix detectors. The patterns match
-# LLM scaffolding phrases that sometimes survive rewriter output and would
-# pollute downstream search if accepted. Both are case-insensitive.
-_LEAK_PREFIX_RE = re.compile(r"^[A-Z][a-zA-Z ]{0,40}:\s*", re.IGNORECASE)
+# I3 (Phase 4.5 R4 HIGH): rewrite-leak detection. PR review round 1
+# (Opus MINOR I3 + Codex M-NEW-1): the original `^[A-Z][a-zA-Z ]{0,40}:\s*`
+# dropped legitimate domain-prefixed rewrites like "RAG: methodology and
+# evaluation". Replaced with a keyword-anchored pattern that only fires on
+# known LLM scaffolding phrases. Case-insensitive.
 _LEAK_KEYWORD_RE = re.compile(
-    r"^\s*(sure|okay|certainly|here(\'s)? (is|the|your)|the standalone|"
-    r"rewritten|standalone question is|query:)",
+    r"^\s*(sure|okay|certainly|alright|"
+    r"here(\'s)? (is|the|your)|the (standalone|rewritten|revised)|"
+    r"rewritten (query|question)|standalone question is|"
+    r"(the )?(rewritten|standalone|revised) (query|question)(\s+is)?:|"
+    r"query:)",
     re.IGNORECASE,
 )
 
@@ -248,7 +258,10 @@ def search_raw_sources(
         return []
 
     cache_key = _raw_sources_cache_key(raw_dir)
-    cached = _RAW_BM25_CACHE.get(cache_key) if cache_key is not None else None
+    # Serialize check-then-set under the lock so concurrent queries hitting
+    # an uncached key cannot both rebuild the index.
+    with _RAW_BM25_CACHE_LOCK:
+        cached = _RAW_BM25_CACHE.get(cache_key) if cache_key is not None else None
     if cached is not None:
         sources, index = cached
     else:
@@ -276,7 +289,8 @@ def search_raw_sources(
         documents = [tokenize(s["content_lower"]) for s in sources]
         index = BM25Index(documents)
         if cache_key is not None:
-            _RAW_BM25_CACHE[cache_key] = (sources, index)
+            with _RAW_BM25_CACHE_LOCK:
+                _RAW_BM25_CACHE[cache_key] = (sources, index)
 
     scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
 
@@ -448,10 +462,11 @@ def query_wiki(
         # original question so search quality doesn't silently degrade.
         leaked = False
         if effective_question != question:
-            # Multi-line output or leading `Xxx: ...` preamble is a leak.
+            # PR review round 1 (Opus MINOR I3 + Codex M-NEW-1): only treat
+            # embedded newlines and known LLM-scaffolding keywords as leaks.
+            # The prior generic `^[A-Z][a-zA-Z ]{0,40}:\s*` rejected legit
+            # domain-prefixed rewrites like "RAG: methodology and evaluation".
             if "\n" in effective_question:
-                leaked = True
-            elif _LEAK_PREFIX_RE.match(effective_question):
                 leaked = True
             elif _LEAK_KEYWORD_RE.match(effective_question):
                 leaked = True

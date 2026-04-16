@@ -1,6 +1,7 @@
 """Wiki log utilities — append operation entries to wiki/log.md."""
 
 import logging
+import stat as _stat
 from datetime import date
 from pathlib import Path
 
@@ -30,25 +31,32 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
     # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
     # On Windows, log_path.open("a") on a directory raises PermissionError
     # (not IsADirectoryError); on POSIX, a FIFO or socket can also mimic
-    # existence. Verifying `is_file()` once here surfaces the real cause
-    # instead of a misleading second error from the append open.
-    if log_path.exists() and not log_path.is_file():
-        raise OSError(
-            f"Log target is not a regular file: {log_path} (directory, symlink, or special file)."
-        )
+    # existence. Symlinks follow by default with is_file(), so a symlink to
+    # a regular file would pass — use lstat and S_ISLNK for the symlink
+    # check, then verify the underlying mode is a regular file.
+    # PR review round 1 (Sonnet MAJOR S1): `is_file()` alone followed the
+    # symlink and returned True for symlink → regular file, silently
+    # accepting what spec says should be rejected.
+    def _reject_if_not_regular_file(p: Path) -> None:
+        try:
+            st = p.lstat()
+        except FileNotFoundError:
+            return
+        if _stat.S_ISLNK(st.st_mode) or not _stat.S_ISREG(st.st_mode):
+            raise OSError(
+                f"Log target is not a regular file: {p} (directory, symlink, or special file)."
+            )
+
+    _reject_if_not_regular_file(log_path)
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with log_path.open("x", encoding="utf-8") as f:
                 f.write("# Wiki Log\n\n")
         except FileExistsError:
-            # Another concurrent call created it first — re-check is_file()
-            # in case that concurrent create produced a non-regular file.
-            if not log_path.is_file():
-                raise OSError(
-                    f"Log target is not a regular file: {log_path} "
-                    f"(directory, symlink, or special file)."
-                )
+            # Another concurrent call created it first — re-check the target
+            # type in case the concurrent creator produced a non-regular file.
+            _reject_if_not_regular_file(log_path)
 
     def _write() -> None:
         with file_lock(log_path):

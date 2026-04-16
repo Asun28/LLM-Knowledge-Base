@@ -143,9 +143,14 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # A4 (Phase 5 kb-capture MED + 2× LOW merged): broaden to catch suffix
         # variants (ANTHROPIC_API_KEY, DJANGO_SECRET_KEY, GH_TOKEN, APP_SECRET,
         # ACCESS_KEY, ENCRYPTION_KEY) and optional shell `export ` prefix.
-        # Prefix group is optional so bare `API_KEY=…` still matches. Require
-        # {8,} on value to avoid false positives on `TOKEN_EXPIRY=3600` or
-        # short demo constants.
+        # Prefix group is optional so bare `API_KEY=…` still matches.
+        #
+        # PR review round 1 (Codex M-NEW-2): original `['\"]?\S{8,}` stopped
+        # at the first whitespace, so quoted values with spaces like
+        # `SECRET="has spaces but is still a long secret"` bypassed the
+        # scanner. Updated pattern accepts either 8+ non-space chars OR a
+        # quote-wrapped run of 8+ chars including spaces (but no closing
+        # line). Closing quote may be the same or absent.
         "env-var assignment",
         re.compile(
             r"(?im)^\s*(?:export\s+)?"
@@ -153,7 +158,8 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"(API_KEY|SECRET_KEY|SECRET|PASSWORD|PASSWD|TOKEN|AUTH_TOKEN|"
             r"ACCESS_TOKEN|ACCESS_KEY|DATABASE_URL|DB_PASS|PRIVATE_KEY|"
             r"ENCRYPTION_KEY|API_SECRET)"
-            r"\s*=\s*['\"]?\S{8,}"
+            r"\s*=\s*"
+            r"(?:['\"][^\n'\"]{8,}['\"]?|\S{8,})"
         ),
     ),
     (
