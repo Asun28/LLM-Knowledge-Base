@@ -43,19 +43,18 @@ def build_evidence_entry(
     return f"- {d} | {source_ref} | {action}"
 
 
-def format_evidence_entry(
-    source_ref: str,
-    action: str,
-    entry_date: str | None = None,
-) -> str:
+def format_evidence_entry(date_str: str, source: str, summary: str) -> str:
     """Render an evidence trail line with backtick-escaped pipes (item 28).
 
-    This is the form `append_evidence_trail` persists. The escape is applied
-    render-time only — callers building the entry purely for logical
-    comparison should use `build_evidence_entry` to preserve the raw string.
+    Cycle 2 PR review R3 MAJOR: signature restored to the original positional
+    contract `(date_str, source, summary)` — callers that predated cycle 2
+    (or internal call sites matching the high-cycle1 plan) keep working; only
+    the internal pipe-escape behaviour changes. This is the render form that
+    `append_evidence_trail` persists. The escape is applied render-time only —
+    callers building the entry purely for logical comparison should use
+    `build_evidence_entry` to preserve the raw string.
     """
-    d = entry_date or date.today().isoformat()
-    return f"- {d} | {_neutralize_pipe(source_ref)} | {_neutralize_pipe(action)}"
+    return f"- {date_str} | {_neutralize_pipe(source)} | {_neutralize_pipe(summary)}"
 
 
 def append_evidence_trail(
@@ -81,7 +80,8 @@ def append_evidence_trail(
     # so concurrent append_evidence_trail calls on the same page don't lose entries.
     with file_lock(page_path):
         content = page_path.read_text(encoding="utf-8")
-        entry = format_evidence_entry(source_ref, action, entry_date)
+        d = entry_date or date.today().isoformat()
+        entry = format_evidence_entry(d, source_ref, action)
 
         if SENTINEL in content:
             # Sentinel already present — insert new entry right after the sentinel line.

@@ -174,6 +174,31 @@ class TestIoLockHardening:
             with mod.file_lock(target):
                 pass
 
+    def test_write_failure_cleans_up_lock_file(self, tmp_path: Path, monkeypatch) -> None:
+        """R3 MAJOR regression: if `os.write` fails after an `O_EXCL` open,
+        the lock file must still be unlinked so the next waiter does not
+        encounter an empty-content lock that the RAISE-on-unparseable policy
+        (item 2) rejects forever."""
+        from kb.utils import io as mod
+
+        target = tmp_path / "guarded.json"
+        lock_path = target.with_suffix(target.suffix + ".lock")
+
+        real_write = os.write
+
+        def failing_write(fd, data):
+            raise OSError("simulated disk full")
+
+        monkeypatch.setattr(mod.os, "write", failing_write)
+        with pytest.raises(OSError, match="simulated disk full"):
+            with mod.file_lock(target):
+                pass
+        monkeypatch.setattr(mod.os, "write", real_write)
+        assert not lock_path.exists(), (
+            "Lock file must be cleaned up when write fails — otherwise the "
+            "RAISE-on-unparseable policy wedges future acquirers."
+        )
+
     def test_ascii_valid_int_stale_lock_still_steals(self, tmp_path: Path, monkeypatch) -> None:
         """Legitimate ASCII-int lock for a dead PID is still stolen."""
         from kb.utils import io as mod
@@ -389,9 +414,9 @@ class TestEvidencePipeEscape:
         from kb.ingest.evidence import format_evidence_entry
 
         rendered = format_evidence_entry(
-            source_ref="raw/articles/foo|bar.md",
-            action="Summarized",
-            entry_date="2026-04-17",
+            "2026-04-17",
+            "raw/articles/foo|bar.md",
+            "Summarized",
         )
         assert "`raw/articles/foo|bar.md`" in rendered
         assert rendered.startswith("- 2026-04-17 | ")
@@ -412,9 +437,9 @@ class TestEvidencePipeEscape:
         from kb.ingest.evidence import format_evidence_entry
 
         entry = format_evidence_entry(
-            source_ref="raw/articles/foo.md",
-            action="Summarized",
-            entry_date="2026-04-17",
+            "2026-04-17",
+            "raw/articles/foo.md",
+            "Summarized",
         )
         assert entry == "- 2026-04-17 | raw/articles/foo.md | Summarized"
 
@@ -678,6 +703,25 @@ class TestGraphExportTieBreak:
         out1 = export_mermaid(tmp_path, max_nodes=2)
         out2 = export_mermaid(tmp_path, max_nodes=2)
         assert out1 == out2, "export_mermaid must be deterministic across runs"
+
+    def test_mermaid_prune_selects_alphabetically_lowest_on_tie(self, tmp_path: Path) -> None:
+        """R3 MINOR: strengthen item 27 test — verify the tie-break chooses
+        alphabetically LOWEST ids (not highest). `alpha` + `beta` must be
+        retained; `gamma` must be dropped when max_nodes=2 and all three
+        pages have equal degree."""
+        from kb.graph.export import export_mermaid
+
+        for subdir in ("entities", "concepts"):
+            (tmp_path / subdir).mkdir()
+        for slug in ("alpha", "beta", "gamma"):
+            (tmp_path / "entities" / f"{slug}.md").write_text(
+                f"---\ntitle: {slug}\n---\n\nBody.\n", encoding="utf-8"
+            )
+
+        out = export_mermaid(tmp_path, max_nodes=2)
+        assert "alpha" in out, "alphabetically first node must be kept"
+        assert "beta" in out, "alphabetically second node must be kept"
+        assert "gamma" not in out, "alphabetically last equal-degree node must be dropped"
 
 
 # -----------------------------------------------------------------------------

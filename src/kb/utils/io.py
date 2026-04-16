@@ -176,14 +176,31 @@ def file_lock(path: Path, timeout: float | None = None):
         while not acquired:
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                write_ok = False
                 try:
                     os.write(fd, my_pid_bytes)
-                    # Item 1 (cycle 2): mark acquired AFTER successful write so a
-                    # mid-write OSError doesn't leave `acquired` truthy with an
-                    # empty lock content that the next waiter can't parse.
+                    write_ok = True
+                    # Item 1 (cycle 2): mark acquired right after the WRITE
+                    # succeeds so the outer `finally: if acquired: unlink`
+                    # runs even if a later step (e.g. `os.close` interrupted
+                    # by SIGINT) raises — preserves Phase 4.5 CRITICAL item 15
+                    # "no orphan lock on SIGINT during acquire".
                     acquired = True
                 finally:
                     os.close(fd)
+                    # Cycle 2 PR review R3 MAJOR: if `os.write` raised, the lock
+                    # file exists on disk with no PID content — unlink here so
+                    # the next waiter doesn't see an empty file that the
+                    # cycle-2 RAISE-on-unparseable policy (item 2) would
+                    # permanently reject.
+                    if not write_ok:
+                        try:
+                            lock_path.unlink(missing_ok=True)
+                        except OSError:  # pragma: no cover — best effort
+                            logger.warning(
+                                "Failed to unlink orphan lock %s after write failure",
+                                lock_path,
+                            )
             except (FileExistsError, PermissionError):
                 if time.monotonic() > deadline:
                     # Item 2 (cycle 2): ASCII-only decode + int-parse. Any
