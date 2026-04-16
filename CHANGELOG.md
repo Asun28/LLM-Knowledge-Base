@@ -41,6 +41,9 @@ Rules:
 - `feedback/reliability.py` `get_coverage_gaps` — dedup now keeps entry with LONGEST notes (ties broken by newest timestamp); prior first-occurrence policy suppressed later, more-specific notes (MED R2 #25)
 - `evolve/analyzer.py` `find_connection_opportunities` — strips `[[wikilink]]` markup + drops purely-numeric tokens before tokenising; prior behaviour flagged pages sharing year/version numbers or wikilink slug fragments as false "connection opportunities" (MED R2+R4 #18, #19)
 - `evolve/analyzer.py` `generate_evolution_report` — narrowed over-broad `(ImportError, AttributeError, OSError, ValueError)` catch around `get_flagged_pages` to `(KeyError, TypeError)`; OSError on feedback read now propagates so disk faults surface instead of producing a silent empty flagged-list (MED R4 #20)
+- `lint/trends.py` `compute_verdict_trends` — now accepts either a path or a list of verdict dicts; surfaces `parse_failures` counter in the returned dict so malformed-timestamp counts no longer silently widen the gap between `total` and `sum(periods)` (MED R5 #21)
+- `lint/trends.py` `_parse_timestamp` — dropped vestigial `ValueError` fallback for date-only strings; project pins Python 3.12+ where `datetime.fromisoformat` parses both forms natively (LOW R4 #22)
+- `lint/semantic.py` `_group_by_term_overlap` — already imports shared `FRONTMATTER_RE` from `kb.utils.markdown`; cycle-2 regression test locks the import in place to prevent re-divergence in future edits (LOW R4 #23)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
