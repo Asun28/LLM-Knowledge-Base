@@ -45,19 +45,17 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### CRITICAL
 
-<!-- 16 of 18 CRITICAL items resolved in cycle 1 (commits 9a1ded4, 3ca8f22, a9f09f7, 8223098,
-     d64a8fe, c590627 on branch fix/phase-4.5-critical — see CHANGELOG `[Unreleased]` Phase 4.5
-     CRITICAL cycle 1). Items 4 and 5 below are retained for the immediately-following
-     docs-sync PR (second-gate Opus review moved them out of cycle 1 as preventive-infrastructure
-     drive-by; they land in a focused ≤100-LOC docs PR). -->
+<!-- All 18 Phase 4.5 CRITICAL items resolved. Cycle 1 (16 items, PR #9 merged 2026-04-16)
+     shipped the code fixes. Cycle 1-docs-sync (items 4 + 5, this PR) aligns version strings
+     across pyproject.toml/__init__.py/README and updates CLAUDE.md stats + adds
+     scripts/verify_docs.py as a pre-push guard against future drift. See CHANGELOG. -->
 
-- `pyproject.toml:3` vs `src/kb/__init__.py:3` vs `README.md:7` version drift — three different version strings are live at once: `pyproject.toml` ships `0.9.10` (so `pip install` / `pip freeze` report the wrong version); `kb --version` reports `0.10.0` via `__version__`; README badge reports `v0.9.16`. CHANGELOG's `[Unreleased]` block has shipped MEDIUM/LOW audit fixes that no version string reflects. (R3)
-  (fix: pick a single source of truth; bump `pyproject.toml` + `__version__` + README badge together — e.g. to `0.10.1` or `0.11.0` — and render the badge from `pyproject.toml` in CI)
-
-- `CLAUDE.md:13, 131, 255` stats drift — claims "1171 tests, 25 MCP tools, 18 modules" and "1171 tests across 55 test files". `pytest --collect-only -q` reports 1177 tests; `find tests -name "test_*.py"` reports 91 test files; `find src/kb -name "*.py"` reports 55 Python files (not 18 "modules" — the "module" unit is ambiguous). `README.md:5,274,287,315` still advertises 1033 tests across 43 files. Agents cite these baselines when proposing changes, so stale counts poison reasoning downstream. (R3)
-  (fix: single doc-update pass — CLAUDE.md → `1177 tests / 91 test files / 25 tools`; clarify "modules" vs "files"; README badge → 1177; add a pre-push check `pytest --collect-only` that compares)
+_All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 + docs-sync._
 
 ### HIGH
+
+- `review/refiner.py` `refine_page` page-file RMW race — after the CRITICAL cycle 1 fix (item 13) wrapped the audit-history RMW in `file_lock`, the WIKI PAGE FILE itself still has no lock. Two concurrent `refine_page(page_id="concepts/x", ...)` calls each `read_text()` then `atomic_text_write()` to the same page — last writer wins, first writer's changes silently lost. History audit now correctly records both calls, but the page body reflects only one. Surfaced by the 2026-04-15 post-PR 2-round adversarial review (Sonnet round 2). Distinct from the R2 `file_lock(history_path)` fix that shipped. (R6)
+  (fix: extend `file_lock` scope to cover `page_path` in addition to `resolved_history_path`; or add a per-page-id lock file; or serialize `refine_page` calls via a page-id mutex dict)
 
 - `ingest/pipeline.py` `_update_existing_page` (~283-289) — on `frontmatter.loads()` exception the `except` block logs but falls through to source-injection + References append, causing duplicate `source:` entries and duplicate `- Mentioned in` lines on every re-ingest of the same source. (R1)
   (fix: `return` inside except; or raw-text pre-check `f'"{source_ref}"' in content`)
@@ -381,6 +379,9 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
   (fix: catch `LLMError`/`anthropic.BadRequestError`/`anthropic.RateLimitError` specifically; emit category-tagged strings: `"Error[rate_limit]: ..."`, `"Error[prompt_too_long]: try max_results=5"`, `"Error[corrupt_page]: page X failed to parse"`; let unexpected exceptions bubble to a single top-level handler)
 
 ### MEDIUM
+
+- `query/engine.py` `query_wiki` `raw_dir` containment check tautology — the CRITICAL cycle 1 fix (item 7) derives `candidate = (wiki_dir.parent / "raw").resolve()` then `candidate.relative_to(wiki_dir.parent.resolve())` — which is always true by construction (candidate was built from the same parent it's being checked against). The docstring honestly notes "Does NOT enforce PROJECT_ROOT containment" but the `try/except ValueError` block is then dead code. Not a live vulnerability (no external caller injects `wiki_dir`), but misleading to a future maintainer who expects the containment check to DO something. Surfaced by the 2026-04-15 post-PR 2-round review (Opus round 1) and earlier by the branch-level Codex pre-merge review. (R6)
+  (fix: either drop the dead `try/except` block and document that `wiki_dir.parent/raw` is always the derived path, OR anchor the check against `PROJECT_ROOT` so it actually blocks traversal escapes from crafted `wiki_dir` inputs)
 
 - `ingest/extractors.py` `_build_schema_cached` (~191-199) — `@lru_cache` returns the same dict; Anthropic SDK could mutate it (e.g. `additionalProperties`, field reordering) and corrupt subsequent extractions for the same source type. `load_template` already `deepcopy`s; schema path does not. (R1)
   (fix: `schema = copy.deepcopy(_build_schema_cached(source_type))` in `extract_from_source`)
@@ -731,6 +732,15 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
   (fix: distinguish in error messages: `OSError` after the file_path was created → `f"Error[partial]: {filename} written but {bytes} bytes; rerun with overwrite=true to retry"`; `KeyboardInterrupt` → re-raise (correct); other `BaseException` → log + raise)
 
 ### LOW
+
+- `utils/io.py` `file_lock` `acquired = True` timing — the CRITICAL cycle 1 fix (item 15) sets `acquired = True` immediately AFTER `os.open` succeeds but BEFORE `os.write(fd, my_pid_bytes)` runs. If `os.write` fails (disk full, quota, I/O error) the `finally` block unlinks a lock file whose PID content was never written. Behaviorally correct (next acquirer's stale-PID check catches the unreadable int and falls through to `unlink(missing_ok=True)`), but the code comment "Lock file now exists on disk; mark it so finally always cleans up" is misleading — `acquired = True` really means "we own the O_EXCL slot", not "lock content is valid". Surfaced by the 2026-04-15 post-PR 2-round review (Opus round 1). (R6)
+  (fix: move `acquired = True` AFTER `os.write` returns successfully; OR update the comment to "O_EXCL slot owned; cleanup unconditional even if write fails")
+
+- `utils/llm.py` `_make_api_call` `last_error = e` dead code — the CRITICAL cycle 1 fix (item 16) adds `last_error = e` on the non-retryable `APIStatusError` branch for consistency with other except branches that DO use `last_error` across retry iterations. But the non-retryable branch `raise LLMError(...)` immediately on the next line, so `last_error` is never read. Harmless (the `raise ... from e` already sets `__cause__` correctly), but strictly dead code. Surfaced by the 2026-04-15 post-PR 2-round review (Sonnet round 2). (R6)
+  (fix: delete the `last_error = e` line OR refactor `_make_api_call` to use a unified post-loop raise-path that actually reads `last_error`, which would give item 16 a runtime effect)
+
+- `tests/test_compile.py` `test_compile_loop_does_not_double_write_manifest` monkeypatch at module level — the CRITICAL cycle 1 item 14 regression test uses `monkeypatch.setattr(pipeline, "save_manifest", ...)` AND `monkeypatch.setattr(compiler_mod, "save_manifest", ...)` to count calls. If `save_manifest` is ever relocated or renamed in the future, the test passes silently with call_count=0 instead of failing loudly. Surfaced by the 2026-04-15 post-PR 2-round review (Sonnet round 2). (R6)
+  (fix: add a secondary behavioral assertion that doesn't depend on module-level patching — e.g., count actual file writes to the manifest path via `os.stat` inode checks, or inspect manifest contents before/after to verify single-source single-write contract)
 
 - `ingest/pipeline.py` References section regex (~335-341) — substitution requires each entry line to end with `\n`; files saved by editors that strip the final newline silently drop new source refs without warning. (R1)
   (fix: normalize `body_text = body_text if body_text.endswith("\n") else body_text + "\n"` before the substitution)
