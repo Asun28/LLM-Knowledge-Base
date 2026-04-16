@@ -91,9 +91,37 @@ _CONTRADICTION_SIGNALS = re.compile(
 
 
 def _extract_significant_tokens(text: str) -> set[str]:
-    """Extract significant lowercase tokens (no stopwords, length >= 3)."""
+    """Extract significant lowercase tokens (no stopwords, length >= 3).
+
+    E1 (Phase 4.5 R4 HIGH): preserve short language-name tokens that the
+    general length>=3 filter drops. `C`, `R`, `Go`, `C++`, `F#`, `C#`,
+    `.NET` carry identity we don't want to lose — a claim about "R is
+    outdated" vs existing page mentioning "R" could not participate in
+    overlap detection before this fix.
+
+    Two passes: (1) match language-name patterns case-sensitively on the
+    original text (so `C` matches but not `c` in "can"); (2) general word
+    tokens with >=3 length floor on the lowercased text. Union, stopword
+    filter, return. Both passes preserve `+`/`#`/`.` where they're part of
+    the language name.
+    """
+    # Pass 1: language-name tokens — match on ORIGINAL case so `C` / `R` /
+    # `Go` only match when capitalized (avoids "can" → "c"). Preserves
+    # C++, F#, C#, .NET by including `+`/`#`/`.` in the character class
+    # after the anchor letter.
+    lang_tokens: set[str] = set()
+    for m in re.finditer(r"(?:\.NET|[A-Z][+#a-z]*)", text):
+        tok = m.group(0).lower()
+        # Only keep if short (>=3 passes through normal filter below) AND
+        # the token shape looks like a language name, not a proper noun.
+        if len(tok) < 3 and (len(tok) == 1 or tok in {"go", "r"}) or any(
+            ch in tok for ch in "+#."
+        ):
+            lang_tokens.add(tok)
+    # Pass 2: general words
     words = re.findall(r"\b\w[\w-]*\w\b", text.lower())
-    return {w for w in words if w not in _STOPWORDS and len(w) >= 3}
+    general = {w for w in words if w not in _STOPWORDS and len(w) >= 3}
+    return (lang_tokens | general) - _STOPWORDS
 
 
 def _find_overlapping_sentences(

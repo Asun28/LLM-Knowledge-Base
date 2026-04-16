@@ -207,6 +207,13 @@ def build_extraction_prompt(content: str, template: dict, purpose: str | None = 
     field_descriptions = "\n".join(f"- {f}" for f in fields)
     source_name = template.get("name", "document")
     source_desc = template.get("description", "")
+    # D2a (Phase 4.5 R4 HIGH — cap-only subset): truncate purpose text so an
+    # unbounded wiki/purpose.md cannot bloat every extraction prompt by tens
+    # of KB. 4096 chars keeps "focus goals" role intact while preventing
+    # prompt-cache defeat + making persistent prompt injection via refine a
+    # bounded surface. Sentinel markup (<kb_focus>) deferred per spec doc.
+    if purpose and len(purpose) > 4096:
+        purpose = purpose[:4096]
     purpose_section = f"\nKB FOCUS (bias extraction toward these goals):\n{purpose}\n" if purpose else ""
 
     return f"""Extract structured information from the following source document.
@@ -246,7 +253,13 @@ def extract_from_source(content: str, source_type: str, wiki_dir=None) -> dict:
     template = load_template(source_type)
     purpose = load_purpose(wiki_dir)
     prompt = build_extraction_prompt(content, template, purpose=purpose)
-    schema = _build_schema_cached(source_type)
+    # D1 (Phase 4.5 MEDIUM): deepcopy the lru_cached schema before handing it
+    # to the Anthropic SDK. The SDK may reorder fields or add
+    # `additionalProperties: False` in-place; without deepcopy, subsequent
+    # extractions of the same source_type get the mutated schema. load_template
+    # already deepcopies its return value, but _build_schema_cached caches the
+    # BUILT schema as a single dict — the lru_cache returns the same object.
+    schema = copy.deepcopy(_build_schema_cached(source_type))
     system_msg = "You are a precise information extractor."
 
     return call_llm_json(
