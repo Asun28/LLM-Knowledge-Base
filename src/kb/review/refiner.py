@@ -1,6 +1,7 @@
 """Page refinement — update content preserving frontmatter, log revisions."""
 
 import json
+import logging
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.wiki_log import append_wiki_log
+
+logger = logging.getLogger(__name__)
 
 
 def load_review_history(path: Path | None = None) -> list[dict]:
@@ -155,9 +158,13 @@ def refine_page(
             history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
         save_review_history(history, resolved_history_path)
 
-    # Append to wiki/log.md (auto-creates if missing)
+    # Append to wiki/log.md (best-effort — page + history already written successfully;
+    # a log failure must not crash the caller or hide the successful refine result).
     log_path = wiki_dir / "log.md"
-    append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)
+    try:
+        append_wiki_log("refine", f"Refined {page_id}: {revision_notes}", log_path)
+    except OSError as e:
+        logger.warning("Failed to append wiki log after successful refine: %s", e)
 
     return {
         "page_id": page_id,

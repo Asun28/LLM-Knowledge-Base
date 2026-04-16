@@ -125,7 +125,7 @@ def _persist_contradictions(
             # \n is attacker-controlled injection). Then strip leading # characters and
             # surrounding whitespace to prevent header injection.
             first_line = source_ref.split("\n")[0].split("\r")[0]
-            safe_ref = first_line.lstrip("#").strip()
+            safe_ref = first_line.strip().lstrip("#").strip()
             block = f"\n## {safe_ref} — {date.today().isoformat()}\n"
             for w in contradictions:
                 raw_claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
@@ -827,13 +827,17 @@ def ingest_source(
     except Exception as e:
         logger.debug("Failed to update hash manifest (unexpected): %s", e)
 
-    # 7. Append to log
-    append_wiki_log(
-        "ingest",
-        f"Ingested {source_ref} → created {len(pages_created)} pages, "
-        f"updated {len(pages_updated)} pages",
-        effective_wiki_dir / "log.md",
-    )
+    # 7. Append to log (best-effort — page writes already succeeded; a log failure
+    # must not crash the caller or hide the successful ingest result).
+    try:
+        append_wiki_log(
+            "ingest",
+            f"Ingested {source_ref} → created {len(pages_created)} pages, "
+            f"updated {len(pages_updated)} pages",
+            effective_wiki_dir / "log.md",
+        )
+    except OSError as e:
+        logger.warning("Failed to append wiki log after successful ingest: %s", e)
 
     # Load all pages once — shared by affected-pages analysis and contradiction detection
     all_wiki_pages = load_all_pages(wiki_dir=effective_wiki_dir)

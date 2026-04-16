@@ -69,7 +69,7 @@ def file_lock(path: Path, timeout: float = 5.0):
 
     Lock-order convention (Phase 4.5 HIGH cycle 1):
       page_path < history_path < contradictions_path < log_path < manifest_path
-      (No call path holds more than one lock today.)
+      (refine_page is the only nested-lock path today: page_path then history_path.)
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
