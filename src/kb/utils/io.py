@@ -66,6 +66,10 @@ def file_lock(path: Path, timeout: float = 5.0):
     verify the lock is stale (holder process no longer running) before stealing.
 
     Raises TimeoutError if the lock is held by a running process.
+
+    Lock-order convention (Phase 4.5 HIGH cycle 1):
+      page_path < history_path < contradictions_path < log_path < manifest_path
+      (No call path holds more than one lock today.)
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)

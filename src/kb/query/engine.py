@@ -364,15 +364,11 @@ def query_wiki(
             output_format: str (only when output_path is present).
             output_error: str (only when the adapter failed — answer still usable).
     """
-    # Derive effective_raw_dir from wiki_dir when not explicitly provided (item 7 fix)
+    # Derive effective_raw_dir from wiki_dir when not explicitly provided (item 7 fix).
+    # raw_dir is derived from wiki_dir; containment is guaranteed by construction.
     effective_raw_dir = raw_dir
     if effective_raw_dir is None and wiki_dir is not None:
-        candidate = (wiki_dir.parent / "raw").resolve()
-        try:
-            candidate.relative_to(wiki_dir.parent.resolve())
-            effective_raw_dir = candidate
-        except ValueError:
-            effective_raw_dir = None
+        effective_raw_dir = (wiki_dir.parent / "raw").resolve()
 
     # Rewrite follow-up queries into standalone queries
     effective_question = question

@@ -4,7 +4,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from kb.utils.io import atomic_text_write
+from kb.utils.io import atomic_text_write, file_lock
 
 
 def build_evidence_entry(
@@ -40,16 +40,19 @@ def append_evidence_trail(
     If the page has no ## Evidence Trail section, one is created at the end.
     New entries are inserted at the top of the trail (reverse chronological).
     """
-    content = page_path.read_text(encoding="utf-8")
-    entry = build_evidence_entry(source_ref, action, entry_date)
+    # H2 fix (Phase 4.5 HIGH): lock the page file for the entire read→modify→write window
+    # so concurrent append_evidence_trail calls on the same page don't lose entries.
+    with file_lock(page_path):
+        content = page_path.read_text(encoding="utf-8")
+        entry = build_evidence_entry(source_ref, action, entry_date)
 
-    trail_match = re.search(r"^## Evidence Trail\r?\n", content, re.MULTILINE)
-    if trail_match:
-        # Insert new entry right after the header
-        insert_pos = trail_match.end()
-        content = content[:insert_pos] + entry + "\n" + content[insert_pos:]
-    else:
-        # Add new section at the end
-        content = content.rstrip("\n") + "\n\n## Evidence Trail\n" + entry + "\n"
+        trail_match = re.search(r"^## Evidence Trail\r?\n", content, re.MULTILINE)
+        if trail_match:
+            # Insert new entry right after the header
+            insert_pos = trail_match.end()
+            content = content[:insert_pos] + entry + "\n" + content[insert_pos:]
+        else:
+            # Add new section at the end
+            content = content.rstrip("\n") + "\n\n## Evidence Trail\n" + entry + "\n"
 
-    atomic_text_write(content, page_path)
+        atomic_text_write(content, page_path)

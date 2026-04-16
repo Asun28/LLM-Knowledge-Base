@@ -26,7 +26,7 @@ from kb.ingest.contradiction import detect_contradictions
 from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import hash_bytes
-from kb.utils.io import atomic_text_write
+from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
 from kb.utils.text import slugify, yaml_escape
@@ -102,14 +102,45 @@ def _find_affected_pages(
     return sorted(affected)
 
 
+def _persist_contradictions(
+    contradictions: list[dict],
+    source_ref: str,
+    effective_wiki_dir: Path,
+) -> None:
+    """Append contradiction warnings to wiki/contradictions.md (file-locked).
+
+    H3 fix (Phase 4.5 HIGH): wraps read→append→write in file_lock(contradictions_path)
+    so concurrent ingests on the same wiki don't overwrite each other's blocks.
+    """
+    contradictions_path = effective_wiki_dir / "contradictions.md"
+    header = "# Contradictions\n\nAppend-only log of conflicts detected during ingest.\n\n"
+    try:
+        with file_lock(contradictions_path):
+            existing = (
+                contradictions_path.read_text(encoding="utf-8")
+                if contradictions_path.exists()
+                else header
+            )
+            block = f"\n## {source_ref} — {date.today().isoformat()}\n"
+            for w in contradictions:
+                claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
+                block += f"- {claim}\n"
+            atomic_text_write(existing + block, contradictions_path)
+    except Exception as write_err:
+        logger.warning("Failed to write contradictions.md: %s", write_err)
+
+
 def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     """Check if a source with this content hash was already ingested.
 
     Compares against the compile manifest to detect duplicate content
     from different file paths. Skips template entries. Only flags as
     duplicate if the other source file still exists on disk.
+
+    DEPRECATED path: direct callers should use _check_and_reserve_manifest instead
+    so the duplicate check + reservation are atomic. Kept for backward compatibility
+    with tests that call this function directly.
     """
-    # TODO(phase-4.5-high): wrap load_manifest→mutate→save_manifest in file_lock(manifest_path); CRITICAL fix removed the double-write, single-writer RMW race remains  # noqa: E501
     try:
         # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
         from kb.compile.compiler import load_manifest
@@ -125,6 +156,42 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
                     return True
     except Exception as e:
         logger.debug("Duplicate check skipped: %s", e)
+    return False
+
+
+def _check_and_reserve_manifest(
+    source_hash: str,
+    source_ref: str,
+    manifest_path: "Path | None" = None,
+) -> bool:
+    """Q_A fix (Phase 4.5 HIGH): Atomic duplicate check + manifest reservation.
+
+    Acquires file_lock(manifest_path) once, checks for duplicate hash, and if
+    not a duplicate, reserves the slot (manifest[source_ref] = source_hash) before
+    releasing the lock. This prevents the RMW race where two concurrent ingests of
+    the same content both pass the duplicate check and both write pages.
+
+    Returns True if the content is a duplicate (caller should return early).
+    Returns False if not a duplicate; the reservation has been written to manifest.
+    """
+    try:
+        from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
+
+        effective_manifest_path = manifest_path or HASH_MANIFEST
+        with file_lock(effective_manifest_path):
+            manifest = load_manifest(effective_manifest_path)
+            for ref, stored_hash in manifest.items():
+                if ref.startswith("_template/"):
+                    continue
+                if stored_hash == source_hash and ref != source_ref:
+                    other_path = PROJECT_ROOT / ref
+                    if other_path.exists():
+                        return True  # Duplicate detected — caller returns early
+            # Not a duplicate — reserve the slot atomically
+            manifest[source_ref] = source_hash
+            save_manifest(manifest, effective_manifest_path)
+    except Exception as e:
+        logger.debug("Duplicate check/reservation skipped: %s", e)
     return False
 
 
@@ -596,8 +663,11 @@ def ingest_source(
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path)
 
-    # Duplicate detection: check if this content hash was already ingested
-    if _is_duplicate_content(source_hash, source_ref):
+    # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
+    # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
+    # reserves manifest[source_ref] = source_hash before releasing. This prevents the RMW
+    # race where two concurrent ingests of the same content both pass the duplicate check.
+    if _check_and_reserve_manifest(source_hash, source_ref):
         logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
         return {
             "source_path": str(source_path),
@@ -728,14 +798,16 @@ def ingest_source(
     all_pages = pages_created + pages_updated
     _update_sources_mapping(source_ref, all_pages, wiki_dir=effective_wiki_dir)
 
-    # 6. Record hash in manifest for duplicate detection
+    # 6. Q_A fix (Phase 4.5 HIGH) — Phase 2: idempotent manifest confirmation.
+    # Re-acquires file_lock(HASH_MANIFEST) to write the final hash (Phase 1 already
+    # reserved it, but this re-confirms after all ingest work completes, consistent with C5).
     try:
-        # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
-        from kb.compile.compiler import load_manifest, save_manifest
+        from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
 
-        manifest = load_manifest()
-        manifest[source_ref] = source_hash
-        save_manifest(manifest)
+        with file_lock(HASH_MANIFEST):
+            manifest = load_manifest()
+            manifest[source_ref] = source_hash  # idempotent — same value as Phase 1 reservation
+            save_manifest(manifest)
     except (OSError, json.JSONDecodeError) as e:
         # Fix 2.14: narrow bare except — log at WARNING, not DEBUG
         logger.warning("Failed to update hash manifest: %s", e)
@@ -787,26 +859,8 @@ def ingest_source(
                         len(contradiction_warnings),
                         source_ref,
                     )
-                    # Persist contradictions to wiki/contradictions.md (append-only).
-                    # H6 fix: derive path from effective_wiki_dir, not global WIKI_CONTRADICTIONS.
-                    try:
-                        contradictions_path = effective_wiki_dir / "contradictions.md"
-                        header = (
-                            "# Contradictions\n\n"
-                            "Append-only log of conflicts detected during ingest.\n\n"
-                        )
-                        existing = (
-                            contradictions_path.read_text(encoding="utf-8")
-                            if contradictions_path.exists()
-                            else header
-                        )
-                        block = f"\n## {source_ref} — {date.today().isoformat()}\n"
-                        for w in contradiction_warnings:
-                            claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
-                            block += f"- {claim}\n"
-                        atomic_text_write(existing + block, contradictions_path)
-                    except Exception as write_err:
-                        logger.warning("Failed to write contradictions.md: %s", write_err)
+                    # H3 fix: delegate to _persist_contradictions (file-locked RMW).
+                    _persist_contradictions(contradiction_warnings, source_ref, effective_wiki_dir)
             except Exception as e:
                 logger.debug("Contradiction detection failed (non-fatal): %s", e)
 
