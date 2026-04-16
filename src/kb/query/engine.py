@@ -200,15 +200,23 @@ _RAW_BM25_CACHE_LOCK = threading.Lock()
 
 # I3 (Phase 4.5 R4 HIGH): rewrite-leak detection. PR review round 1
 # (Opus MINOR I3 + Codex M-NEW-1): the original `^[A-Z][a-zA-Z ]{0,40}:\s*`
-# dropped legitimate domain-prefixed rewrites like "RAG: methodology and
-# evaluation". Replaced with a keyword-anchored pattern that only fires on
-# known LLM scaffolding phrases. Case-insensitive.
+# dropped legitimate domain-prefixed rewrites like "RAG: methodology".
+# Replaced with a keyword-anchored pattern that only fires on known LLM
+# scaffolding phrases.
+# PR review round 2 (Codex): removed bare "alright" / "okay" / "sure"
+# alternation — those matched legitimate conversational rewrite output.
+# Each keyword now requires a trailing ,/./:/phrase that marks it as a
+# preamble, not a legitimate leading word. Case-insensitive.
 _LEAK_KEYWORD_RE = re.compile(
-    r"^\s*(sure|okay|certainly|alright|"
-    r"here(\'s)? (is|the|your)|the (standalone|rewritten|revised)|"
-    r"rewritten (query|question)|standalone question is|"
-    r"(the )?(rewritten|standalone|revised) (query|question)(\s+is)?:|"
-    r"query:)",
+    r"^\s*("
+    r"(sure|okay|certainly|alright)[,.!]?\s+(here|so|the|i('|')?ll)\b|"
+    r"here(\'s)? (is|the|your)|"
+    r"the (standalone|rewritten|revised)|"
+    r"rewritten (query|question)|"
+    r"standalone question is|"
+    r"(rewritten|standalone|revised) (query|question)(\s+is)?:|"
+    r"query:"
+    r")",
     re.IGNORECASE,
 )
 
@@ -258,8 +266,12 @@ def search_raw_sources(
         return []
 
     cache_key = _raw_sources_cache_key(raw_dir)
-    # Serialize check-then-set under the lock so concurrent queries hitting
-    # an uncached key cannot both rebuild the index.
+    # PR review round 2 (Codex MAJOR): the check-then-set lock alone let
+    # two concurrent misses both rebuild the index (doubling disk I/O and
+    # racing on shared state). Fix: check once under the lock; if miss,
+    # rebuild OUTSIDE the lock to avoid blocking other queries for 1-2s of
+    # disk I/O; then double-check INSIDE the lock before store so whoever
+    # finishes first wins and the other reuses that result.
     with _RAW_BM25_CACHE_LOCK:
         cached = _RAW_BM25_CACHE.get(cache_key) if cache_key is not None else None
     if cached is not None:
@@ -290,7 +302,13 @@ def search_raw_sources(
         index = BM25Index(documents)
         if cache_key is not None:
             with _RAW_BM25_CACHE_LOCK:
-                _RAW_BM25_CACHE[cache_key] = (sources, index)
+                winner = _RAW_BM25_CACHE.get(cache_key)
+                if winner is not None:
+                    # Another thread populated the cache during our rebuild
+                    # — use their result and discard ours.
+                    sources, index = winner
+                else:
+                    _RAW_BM25_CACHE[cache_key] = (sources, index)
 
     scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
 

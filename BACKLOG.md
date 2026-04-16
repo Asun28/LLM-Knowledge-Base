@@ -256,38 +256,14 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### MEDIUM
 
-- `ingest/extractors.py` `_build_schema_cached` (~191-199) — `@lru_cache` returns the same dict; Anthropic SDK could mutate it (e.g. `additionalProperties`, field reordering) and corrupt subsequent extractions for the same source type. `load_template` already `deepcopy`s; schema path does not. (R1)
-  (fix: `schema = copy.deepcopy(_build_schema_cached(source_type))` in `extract_from_source`)
-
-- `ingest/contradiction.py` `detect_contradictions` (~56-62) — `_extract_significant_tokens(page_content)` runs once per `(claim, page)` pair despite being invariant across claims; `max_claims=10` × 1000 pages = 10k redundant tokenizations per ingest. (R1)
-  (fix: precompute `{page_id: tokens}` once outside the claim loop)
-
-- `ingest/contradiction.py` logger placement (~10-22) — `logger = logging.getLogger(__name__)` defined after a module-level function; any future logging added to `_strip_markdown_structure` raises `NameError` at import time. (R1)
-  (fix: move `logger` to top of module after imports)
-
-- `mcp/quality.py` `kb_create_page` (~447-474) — `page_path.exists()` then `atomic_text_write` is TOCTOU; two concurrent calls both see "missing" and one silently overwrites the other. `kb_ingest_content` / `kb_save_source` correctly use `O_EXCL`; this does not. (R1)
-  (fix: `os.open(path, O_WRONLY | O_CREAT | O_EXCL, 0o644)` exclusive-create; match the existing pattern)
-
-- `mcp/browse.py` `kb_list_sources` (~126-143) — `sorted(subdir.glob("*"))` materializes every file; no depth, count, or response-size cap. Accidental or malicious million-file `raw/articles/` OOMs the server or blows MCP transport limits. (R1)
-  (fix: per-subdir cap 500 entries + total-response size cap; `os.scandir` instead of `glob`; skip dotfiles)
-
-- `mcp/quality.py` `kb_refine_page` (~62-87) — `revision_notes` is unbounded (written to `wiki/log.md`, `review_history.json`, and echoed in response); `page_id` not length-bounded before path construction. (R1)
-  (fix: cap `revision_notes` at `MAX_NOTES_LEN=2000`; cap `page_id` at ~200 chars up front)
-
-- `mcp/core.py` `kb_ingest` + `ingest/pipeline.py:552` — `_TEXT_EXTENSIONS` allow-list enforced only at MCP wrapper, not inside `ingest_source`; suffix-less files (README) slip through; some MCP error branches leak resolved absolute paths. (R1)
-  (fix: move the allow-list into `ingest_source`; use `_rel(path)` consistently in error strings)
-
-- `query/rewriter.py` length guard (~66-70) — `len(rewritten) > 3 * len(question)` rejects legitimate short rewrites ("what about it?" → 46-char expansion trips 3× bound) while allowing long LLM rambles through unchecked. (R1)
-  (fix: absolute cap `MAX_REWRITE_CHARS=500` + floor `max(3*len(question), 120)`; reject newlines or explanatory prefixes like "The standalone question is:")
-
-- `query/engine.py` `search_raw_sources` (~186-232) — rebuilds BM25 + tokenized corpus from disk on every query; indexes frontmatter as content; no title boost; holds all file contents in memory even though only top-5 are returned. Fallback designed for small KBs is slowest on large ones. (R1)
-  (fix: cache BM25 index keyed on raw-dir mtime; strip frontmatter via `utils.pages` helpers; only read content for top-K after scoring)
-
-- `query/engine.py` `_flag_stale_results` (~169-180) — `date.fromtimestamp(mtime)` applies local TZ; `date.fromisoformat(updated_str)` is naive; DST/TZ boundaries flip the flag around midnight UTC. mtime equal to `page_date` is silently treated as fresh. (R1)
-  (fix: `datetime.fromtimestamp(mtime, tz=timezone.utc).date()`; document day-granularity tradeoff)
-
-- `query/dedup.py` `_dedup_by_text_similarity` (~62-78) — `_content_tokens(kept)` re-runs regex + set construction inside the inner loop on content that never changes; O(n·k) wasted work at `max_results*2` candidates × k kept. (R1)
-  (fix: compute tokens once per kept result; store parallel list or `(result, tokens)` tuple)
+_Items closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (2026-04-17):
+`_build_schema_cached` deepcopy (D1), `ingest/contradiction.py` logger
+placement + tokens hoist + single-char language names (E1 + verified
+pre-fixed), `kb_create_page` O_EXCL (F1), `kb_list_sources` cap (G1),
+`kb_refine_page` caps (F2), `_TEXT_EXTENSIONS` library enforcement (C2),
+`query/rewriter.py` length guard (J1), `search_raw_sources` BM25 cache
+(I2), `_flag_stale_results` UTC (I1), `_dedup_by_text_similarity`
+tokens (K1)._
 
 - `models/page.py` dataclasses are dead — `WikiPage` / `RawSource` exist but nothing returns them; `load_all_pages` / `ingest_source` / `query_wiki` each return ad-hoc dicts. "What is a page?" has ≥4 answers (dict, `Post`, `Path`, markdown blob); chunk indexing in Phase 5 will fork it again. (R1)
   (fix: delete dataclasses, or make them the canonical return type and migrate callers)
@@ -304,8 +280,7 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `compile/compiler.py` `compile_wiki` (~320-380) — per-source loop saves manifest after ingest but does not roll back wiki writes if a later manifest save fails; failure-recording branch swallows nested exceptions with a warning; final `append_wiki_log` runs even on partial failure. (R1)
   (fix: per-source "in-progress" marker in manifest cleared only after page write + log append; escalate manifest-write failure to CRITICAL)
 
-- `lint/verdicts.py` `load_verdicts` (~18-30) — `read_text + json.loads` on every call; no cache, no mtime short-circuit. Called by `add_verdict`, `get_page_verdicts`, `get_verdict_summary`, `trends.compute_verdict_trends`, and per-run from `runner.py:112`. At the 10k-entry cap the file is 3-5 MB (~50-150 ms per parse on Windows). (R1)
-  (fix: cache keyed on `(mtime_ns, size)`, invalidate inside `atomic_json_write`; consider append-only JSONL companion for writes)
+_`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (M1)._
 
 - `lint/checks.py` `check_source_coverage` (~370-382) — reads the file, then `frontmatter.loads(content)` re-splits the YAML fence and runs PyYAML on the exact same string. At 5k pages this is 5k redundant YAML parses on top of the duplication above. (R1)
   (fix: reuse parsed frontmatter from the shared corpus; or `FRONTMATTER_RE` + `yaml.safe_load` on captured fence)

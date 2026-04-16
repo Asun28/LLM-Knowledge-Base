@@ -110,12 +110,20 @@ def _extract_significant_tokens(text: str) -> set[str]:
     # `Go` only match when capitalized (avoids "can" → "c"). Preserves
     # C++, F#, C#, .NET by including `+`/`#`/`.` in the character class
     # after the anchor letter.
+    #
+    # PR review round 2 (Codex MAJOR E1): earlier logic admitted ANY
+    # single capital letter (X, Q, Z) as a signal token — stray labels
+    # like "Point X" polluted contradiction matching with noise. Now the
+    # short-token set is restricted to a narrow whitelist of real language
+    # names that reach beyond the length>=3 general filter. Tokens with
+    # +/#/. always pass (C++, F#, .NET).
+    _LANG_SHORT_WHITELIST = {"c", "r", "go", "f", "d"}
     lang_tokens: set[str] = set()
     for m in re.finditer(r"(?:\.NET|[A-Z][+#a-z]*)", text):
         tok = m.group(0).lower()
-        # Only keep if short (>=3 passes through normal filter below) AND
-        # the token shape looks like a language name, not a proper noun.
-        if len(tok) < 3 and (len(tok) == 1 or tok in {"go", "r"}) or any(ch in tok for ch in "+#."):
+        if any(ch in tok for ch in "+#."):
+            lang_tokens.add(tok)
+        elif len(tok) < 3 and tok in _LANG_SHORT_WHITELIST:
             lang_tokens.add(tok)
     # Pass 2: general words
     words = re.findall(r"\b\w[\w-]*\w\b", text.lower())
