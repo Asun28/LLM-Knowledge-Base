@@ -282,9 +282,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `feedback/store.py` weighted-Bayesian trust comment (~125) — docstring claims `"wrong" is weighted 2x because incorrect information is worse than incomplete`; the formula `(useful+1)/(useful + 2*wrong + incomplete + 2)` gives ~1.5× effective penalty at low sample counts (1-5 ratings), converging to 2× only asymptotically. Misleads developers writing tests that assert "wrong is 2× worse." (R2)
   (fix: rewrite comment to state the asymptotic contract: `"wrong" contributes 2× to the denominator; effective penalty ratio is ~1.5× at small N, converging to 2× at high N`)
 
-- `feedback/reliability.py` `get_coverage_gaps` (~43) — dedup keeps the FIRST occurrence of each question and discards all later `incomplete` ratings. Feedback is stored oldest-first, so more-specific `notes` added later are silently suppressed; the evolve report accumulates stale, vague notes over time. (R2)
-  (fix: keep entry with longest/newest notes — overwrite `notes` when newer entry's notes are non-empty; or sort newest-first before dedup)
-
 - `evolve/analyzer.py` `find_connection_opportunities` numeric tokens (~98) — word filter `re.sub(r"[^\w]", "", w)` preserves digits; tokens like `2024`, `12345`, `v0100` pass the `len > 4` threshold and populate the term index. Pages sharing year/version numbers are flagged as "connection opportunities" even when topics are unrelated. (R2)
   (fix: exclude purely-numeric tokens — `not stripped.isdigit()` or `not re.fullmatch(r"[\d._-]+", stripped)` in the set comprehension)
 
@@ -646,9 +643,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `graph/export.py:122` `title = node.split("/")[-1]` fallback when `_sanitize_label` returns empty — if a page title is all special characters (`"?!@#"`), sanitization strips everything; fallback uses the bare slug. Then `_safe_node_id` replaces `-` with `_` in the display text (not just the id). Label shows `foo_bar` when filename is `foo-bar.md`. Cosmetic but mismatches wiki filename in diagram viewers users compare against. (R4)
   (fix: fallback title to `node.split("/")[-1]` unchanged (no `_`/`-` replacement) since label isn't used as a Mermaid identifier)
-
-- `feedback/store.py:138-139` redundant per-entry key initialization — `for key, default in [("useful", 0), ...]: scores.setdefault(key, default)` runs on every `add_feedback_entry` call even for fully-initialized entries. Tight loop but negligible under `MAX_PAGE_SCORES=10_000`. Cleaner contract: do migration once at `load_feedback` time, not per-write. (R4)
-  (fix: add a one-time schema migration in `load_feedback` that backfills missing keys; drop the per-call `setdefault` loop)
 
 - `config.py:7` `PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent` — assumes package layout `src/kb/config.py` always sits 3 levels under PROJECT_ROOT. When installed via `pip install -e .` from checkout it works; installed from a built wheel into `site-packages/kb/config.py`, it points at `site-packages/kb/../../` — the `site-packages` directory itself, NOT the user's project. `PROJECT_ROOT` then derives `RAW_DIR`, `WIKI_DIR`, etc. Package only works when installed via `-e` from a checkout containing `raw/`+`wiki/`; undocumented. (R4)
   (fix: prefer `os.environ.get("KB_PROJECT_ROOT", ...)` with explicit detection — walk up from cwd looking for `pyproject.toml` + `wiki/`, fall back to the heuristic; document in README that the package is checkout-local, not pip-installable as a library)

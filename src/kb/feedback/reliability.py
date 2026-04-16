@@ -60,18 +60,32 @@ def get_flagged_pages(path: Path | None = None, threshold: float | None = None) 
 def get_coverage_gaps(path: Path | None = None) -> list[dict]:
     """Get questions where the answer was rated 'incomplete'.
 
-    Deduplicates by question text, keeping the first occurrence.
+    Item 25 (cycle 2): deduplicates by question text, keeping the entry with
+    the LONGEST notes (ties broken by newest timestamp). Prior behaviour kept
+    the first occurrence; because feedback is stored oldest-first, later,
+    more-specific notes were silently suppressed and evolve reports
+    accumulated stale/vague notes over time.
 
     Returns:
         List of dicts with 'question' and 'notes' keys.
     """
     data = load_feedback(path)
-    seen: set[str] = set()
-    gaps = []
+    best_by_question: dict[str, dict] = {}
     for e in data.get("entries", []):
-        if e.get("rating") == "incomplete" and e.get("question"):
-            q = e["question"]
-            if q not in seen:
-                seen.add(q)
-                gaps.append({"question": q, "notes": e.get("notes", "")})
-    return gaps
+        if e.get("rating") != "incomplete":
+            continue
+        q = e.get("question")
+        if not q:
+            continue
+        notes = e.get("notes", "") or ""
+        ts = e.get("timestamp", "")
+        current = best_by_question.get(q)
+        if current is None:
+            best_by_question[q] = {"question": q, "notes": notes, "timestamp": ts}
+            continue
+        # Keep the entry with richer notes; break ties by newer timestamp.
+        if len(notes) > len(current["notes"]) or (
+            len(notes) == len(current["notes"]) and ts > current["timestamp"]
+        ):
+            best_by_question[q] = {"question": q, "notes": notes, "timestamp": ts}
+    return [{"question": v["question"], "notes": v["notes"]} for v in best_by_question.values()]

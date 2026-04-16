@@ -63,7 +63,23 @@ def load_feedback(path: Path | None = None) -> dict:
         or not isinstance(data["page_scores"], dict)
     ):
         return _default_feedback()
+    # Item 24 (cycle 2): one-shot schema migration — legacy entries written by
+    # older code may be missing useful/wrong/incomplete/trust keys. Backfill
+    # once at load so add_feedback_entry doesn't have to re-setdefault on
+    # every write.
+    _migrate_page_scores(data["page_scores"])
     return data
+
+
+def _migrate_page_scores(page_scores: dict) -> None:
+    """Backfill missing useful/wrong/incomplete/trust keys in-place."""
+    _defaults = (("useful", 0), ("wrong", 0), ("incomplete", 0), ("trust", 0.5))
+    for scores in page_scores.values():
+        if not isinstance(scores, dict):
+            continue
+        for key, default in _defaults:
+            if key not in scores:
+                scores[key] = default
 
 
 def save_feedback(data: dict, path: Path | None = None) -> None:
@@ -149,9 +165,10 @@ def add_feedback_entry(
                     "trust": 0.5,
                 }
             scores = data["page_scores"][page_id]
-            # Initialize missing keys from older code versions
-            for key, default in [("useful", 0), ("wrong", 0), ("incomplete", 0), ("trust", 0.5)]:
-                scores.setdefault(key, default)
+            # Item 24 (cycle 2): per-write `setdefault` loop removed — migration
+            # now runs once in load_feedback. Legacy files written before the
+            # migration are normalized on next load; on cold start the create
+            # path above inserts all four keys.
             scores[rating] += 1
             weighted_negative = 2 * scores["wrong"] + scores["incomplete"]
             scores["trust"] = round(

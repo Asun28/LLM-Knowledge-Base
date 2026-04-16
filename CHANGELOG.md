@@ -37,6 +37,8 @@ Rules:
 - `utils/llm.py` `_make_api_call` — `LLMError` truncates `e.message` to ≤500 chars via shared `cli._truncate`; preserves exception class name, model ID, and `status_code` verbatim; prevents Anthropic error bodies that echo full prompts from leaking into logs (MED R4 #7)
 - `ingest/evidence.py` `build_evidence_entry` — backtick-wraps `source_ref` and `action` when either contains `|`; pipe-delimited parsers no longer misalign on a legitimate pipe in the path or action text (LOW R4 #28)
 - `compile/linker.py` `inject_wikilinks` — single `_FRONTMATTER_RE.match` call per page; body-check and split share the match result, halving regex cost for N-titles-per-ingest (MED R4 #26)
+- `feedback/store.py` `load_feedback` — one-shot schema migration backfills legacy `useful` / `wrong` / `incomplete` / `trust` keys once at load; per-write `setdefault` loop removed from `add_feedback_entry` (LOW R4 #24)
+- `feedback/reliability.py` `get_coverage_gaps` — dedup now keeps entry with LONGEST notes (ties broken by newest timestamp); prior first-occurrence policy suppressed later, more-specific notes (MED R2 #25)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
