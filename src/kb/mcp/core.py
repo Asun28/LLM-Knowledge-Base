@@ -234,6 +234,28 @@ def kb_ingest(
     if path.suffix.lower() not in _TEXT_EXTENSIONS:
         return f"Error: Unsupported file type '{path.suffix}'."
 
+    # H1 (Phase 4.5 HIGH): stat-based size pre-check before read. Prevents
+    # OOM from an attacker-controlled large raw/ file — we'd otherwise load
+    # the entire file into memory, then truncate to MAX_INGEST_CONTENT_CHARS.
+    # stat().st_size returns bytes; UTF-8 can be up to 4× bytes vs chars, so
+    # compare against chars*4 as a conservative upper bound.
+    try:
+        file_bytes = path.stat().st_size
+    except OSError as e:
+        return f"Error: cannot stat source: {e}"
+    if file_bytes > MAX_INGEST_CONTENT_CHARS * 4:
+        return (
+            f"Error: Source too large ({file_bytes} bytes; "
+            f"max {MAX_INGEST_CONTENT_CHARS * 4} bytes)."
+        )
+
+    # H2 (Phase 4.5 R4 HIGH): reject unknown source_type before template
+    # loading or ingest. Previously `source_type='totally_bogus'` with a
+    # valid extraction_json wrote `type: totally_bogus` into wiki frontmatter.
+    if source_type and source_type not in SOURCE_TYPE_DIRS:
+        valid = ", ".join(sorted(SOURCE_TYPE_DIRS))
+        return f"Error: Unknown source_type '{source_type}'. Valid: {valid}"
+
     # ── API mode ──
     if use_api:
         try:
