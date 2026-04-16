@@ -1,8 +1,15 @@
 """Browse & stats MCP tools — search, read, list, stats."""
 
 import logging
+import os
 
-from kb.config import MAX_SEARCH_RESULTS, RAW_DIR, WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.config import (
+    MAX_QUESTION_LEN,
+    MAX_SEARCH_RESULTS,
+    RAW_DIR,
+    WIKI_DIR,
+    WIKI_SUBDIR_TO_TYPE,
+)
 from kb.mcp.app import _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 
@@ -10,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 # Maps singular type names to subdir names: "entity" → "entities", etc.
 _TYPE_TO_SUBDIR = {v: k for k, v in WIKI_SUBDIR_TO_TYPE.items()}
+
+# G1 (Phase 4.5 MEDIUM): per-subdir entry cap + total-response size cap.
+# Prevents accidental or malicious million-file raw/ subdir from OOMing
+# the MCP process or blowing the MCP transport buffer.
+_LIST_SOURCES_PER_SUBDIR_CAP = 500
+_LIST_SOURCES_TOTAL_CAP_BYTES = 64 * 1024
 
 
 @mcp.tool()
@@ -22,6 +35,10 @@ def kb_search(query: str, max_results: int = 10) -> str:
     """
     if not query or not query.strip():
         return "Error: Query cannot be empty."
+    # G2 (Phase 4.5 R4 HIGH): reject over-long queries to avoid DoS from
+    # `query="x"*1_000_000` being tokenized + BM25-scored against every page.
+    if len(query) > MAX_QUESTION_LEN:
+        return f"Error: Query too long ({len(query)} chars; max {MAX_QUESTION_LEN})."
 
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
@@ -34,8 +51,11 @@ def kb_search(query: str, max_results: int = 10) -> str:
         lines = [f"Found {len(results)} matching page(s):\n"]
         for r in results:
             snippet = r["content"][:200].replace("\n", " ").strip()
+            # G2 (Phase 4.5 R4 HIGH): surface staleness alongside score so
+            # discoverability matches kb_query's [STALE] treatment.
+            stale_marker = " [STALE]" if r.get("stale") else ""
             lines.append(
-                f"- **{r['id']}** (type: {r['type']}, score: {r['score']})\n"
+                f"- **{r['id']}** (type: {r['type']}, score: {r['score']}){stale_marker}\n"
                 f"  Title: {r['title']}\n"
                 f"  Snippet: {snippet}..."
             )
@@ -61,16 +81,29 @@ def kb_read_page(page_id: str) -> str:
         if len(parts) == 2:
             subdir = WIKI_DIR / parts[0]
             if subdir.exists():
+                # G3 (Phase 4.5 R4 LOW): collect ALL case-insensitive matches
+                # and reject if >1. Insertion-order wins on collisions is
+                # non-deterministic; surfacing ambiguity is safer than
+                # silently picking one match.
+                matches = []
                 for f in subdir.glob("*.md"):
                     if f.stem.lower() == parts[1].lower():
-                        # Verify the resolved path stays within WIKI_DIR
                         try:
                             f.resolve().relative_to(WIKI_DIR.resolve())
                         except ValueError:
                             continue
-                        logger.warning("Case-insensitive match for '%s' → '%s'", page_id, f.stem)
-                        page_path = f
-                        break
+                        matches.append(f)
+                if len(matches) > 1:
+                    match_names = sorted(f.stem for f in matches)
+                    return (
+                        f"Error: ambiguous page_id — multiple files match "
+                        f"{page_id} case-insensitively: {match_names}"
+                    )
+                if len(matches) == 1:
+                    logger.warning(
+                        "Case-insensitive match for '%s' → '%s'", page_id, matches[0].stem
+                    )
+                    page_path = matches[0]
     if not page_path.exists():
         return f"Page not found: {page_id}"
     try:
@@ -116,30 +149,70 @@ def kb_list_pages(page_type: str = "") -> str:
 
 @mcp.tool()
 def kb_list_sources() -> str:
-    """List all raw source files in the knowledge base."""
+    """List all raw source files in the knowledge base.
+
+    G1 (Phase 4.5 MEDIUM): per-subdir cap (500 files) + total response size
+    cap (64KB) + os.scandir (streaming) + skip dotfiles. Prevents a
+    million-file subdir from OOMing the MCP process or blowing the
+    transport buffer.
+    """
     if not RAW_DIR.exists():
         return "No raw directory found."
 
     try:
         lines = ["# Raw Sources\n"]
         total = 0
+        total_bytes = 0
+        truncated_notice = ""
         for subdir in sorted(RAW_DIR.iterdir()):
             if not subdir.is_dir() or subdir.name.startswith("."):
                 continue
-            files = sorted(subdir.glob("*"))
-            files = [f for f in files if f.is_file() and f.name != ".gitkeep"]
-            if files:
-                lines.append(f"\n## {subdir.name}/ ({len(files)} files)")
-                for f in files:
+            entries = []
+            truncated_subdir = False
+            with os.scandir(subdir) as it:
+                for entry in it:
+                    name = entry.name
+                    if name.startswith(".") or name == ".gitkeep":
+                        continue
                     try:
-                        size_kb = f.stat().st_size / 1024
-                        lines.append(f"  - {f.name} ({size_kb:.1f} KB)")
+                        if not entry.is_file():
+                            continue
+                    except OSError:
+                        continue
+                    entries.append(entry)
+                    if len(entries) >= _LIST_SOURCES_PER_SUBDIR_CAP:
+                        truncated_subdir = True
+                        break
+            entries.sort(key=lambda e: e.name)
+            if entries:
+                header = (
+                    f"\n## {subdir.name}/ ({len(entries)} file(s)"
+                    + (" — truncated" if truncated_subdir else "")
+                    + ")"
+                )
+                lines.append(header)
+                for entry in entries:
+                    try:
+                        size_kb = entry.stat().st_size / 1024
+                        lines.append(f"  - {entry.name} ({size_kb:.1f} KB)")
                     except OSError as e:
-                        logger.warning("Could not stat %s: %s", f.name, e)
-                        lines.append(f"  - {f.name} (size unknown)")
-                total += len(files)
+                        logger.warning("Could not stat %s: %s", entry.name, e)
+                        lines.append(f"  - {entry.name} (size unknown)")
+                    # Estimate output size — break once cap approached.
+                    total_bytes = sum(len(s) for s in lines)
+                    if total_bytes >= _LIST_SOURCES_TOTAL_CAP_BYTES:
+                        truncated_notice = (
+                            "\n\n*(Output truncated at "
+                            f"{_LIST_SOURCES_TOTAL_CAP_BYTES // 1024}KB.)*"
+                        )
+                        break
+                total += len(entries)
+                if truncated_notice:
+                    break
 
         lines.insert(1, f"**Total:** {total} source file(s)")
+        if truncated_notice:
+            lines.append(truncated_notice)
         return "\n".join(lines)
     except OSError as e:
         logger.error("Error listing sources: %s", e)

@@ -31,25 +31,46 @@ class TestFixDeadLinksAtomicWrite:
 
 
 class TestKbCreatePageAtomicWrite:
-    """mcp/quality.py kb_create_page must use atomic_text_write."""
+    """mcp/quality.py kb_create_page must write atomically.
 
-    def test_kb_create_page_uses_atomic_write(self, tmp_wiki):
-        """kb_create_page should call atomic_text_write, not page_path.write_text."""
+    Phase 4.5 backlog-by-file cycle 1 replaced the prior
+    `exists()`+`atomic_text_write` pattern with `os.open(O_EXCL)` + inline
+    fdopen write to close the TOCTOU + signal-race windows. The new write
+    path is still atomic (O_EXCL creates the file in one step; fdopen write
+    fills it; any failure unlinks).
+    """
+
+    def test_kb_create_page_creates_new_file_atomically(self, tmp_wiki, monkeypatch):
+        """kb_create_page should create the target file with the expected
+        frontmatter + body, and leave no half-written file on FileExistsError."""
         # Ensure the comparisons subdir exists so the call doesn't error
         (tmp_wiki / "comparisons").mkdir(exist_ok=True)
-        with (
-            patch("kb.mcp.quality.WIKI_DIR", tmp_wiki),
-            patch("kb.mcp.quality.atomic_text_write") as mock_atw,
-        ):
-            from kb.mcp.quality import kb_create_page
+        # PROJECT_ROOT patch is required so the new source_refs=[] path
+        # doesn't try to resolve against the real repo.
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", tmp_wiki)
+        monkeypatch.setattr("kb.mcp.quality.PROJECT_ROOT", tmp_wiki.parent)
+        from kb.mcp.quality import kb_create_page
 
-            result = kb_create_page(
-                page_id="comparisons/test-comp",
-                title="Test Comparison",
-                content="Some comparison content.",
-            )
-            assert "Error" not in result, f"Unexpected error: {result}"
-            mock_atw.assert_called_once()
+        result = kb_create_page(
+            page_id="comparisons/test-comp",
+            title="Test Comparison",
+            content="Some comparison content.",
+        )
+        assert "Error" not in result, f"Unexpected error: {result}"
+        page_path = tmp_wiki / "comparisons" / "test-comp.md"
+        assert page_path.is_file()
+        text = page_path.read_text(encoding="utf-8")
+        assert 'title: "Test Comparison"' in text
+        assert "Some comparison content." in text
+
+        # Second create must be rejected with an "already exists" error,
+        # proving O_EXCL is enforced.
+        second = kb_create_page(
+            page_id="comparisons/test-comp",
+            title="Duplicate",
+            content="body 2",
+        )
+        assert "already exists" in second.lower()
 
 
 class TestInjectWikilinksAtomicWrite:

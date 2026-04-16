@@ -19,7 +19,7 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
 )
 from kb.feedback.reliability import compute_trust_scores
-from kb.ingest.pipeline import ingest_source
+from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
 from kb.mcp.app import _format_ingest_result, _rel, error_tag, mcp
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
@@ -28,8 +28,6 @@ from kb.utils.llm import LLMError
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
-
-_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
 
 
 def _validate_file_inputs(filename: str, content: str) -> str | None:
@@ -86,11 +84,9 @@ def kb_query(
     fmt_n = (output_format or "").strip().lower()
     if fmt_n and fmt_n != "text":
         from kb.query.formats import VALID_FORMATS
+
         if fmt_n not in VALID_FORMATS:
-            return (
-                f"Error: unknown output_format '{output_format}'. "
-                f"Valid: {sorted(VALID_FORMATS)}"
-            )
+            return f"Error: unknown output_format '{output_format}'. Valid: {sorted(VALID_FORMATS)}"
         if not use_api:
             return (
                 "Error: output_format requires use_api=true "
@@ -116,13 +112,10 @@ def kb_query(
             parts.append(f"\n[Searched {len(result.get('source_pages', []))} pages]")
             if result.get("output_path"):
                 parts.append(
-                    f"\nOutput written to: {result['output_path']} "
-                    f"({result['output_format']})"
+                    f"\nOutput written to: {result['output_path']} ({result['output_format']})"
                 )
             if result.get("output_error"):
-                parts.append(
-                    f"\n[warn] Output format failed: {result['output_error']}"
-                )
+                parts.append(f"\n[warn] Output format failed: {result['output_error']}")
             return "\n".join(parts)
         except anthropic.BadRequestError as e:
             logger.warning("kb_query API bad-request for %r: %s", question[:80], e)
@@ -233,6 +226,27 @@ def kb_ingest(
     # Reject binary file types
     if path.suffix.lower() not in _TEXT_EXTENSIONS:
         return f"Error: Unsupported file type '{path.suffix}'."
+
+    # H1 (Phase 4.5 HIGH): stat-based size pre-check before read. Prevents
+    # OOM from an attacker-controlled large raw/ file. Align the cap with
+    # the downstream QUERY_CONTEXT_MAX_CHARS truncation: chars*4 bytes is a
+    # conservative UTF-8 upper bound for 80KB of text. PR review round 1
+    # noted the earlier MAX_INGEST_CONTENT_CHARS*4 was 8× this, making the
+    # "OOM protection" framing loose.
+    try:
+        file_bytes = path.stat().st_size
+    except OSError as e:
+        return f"Error: cannot stat source: {e}"
+    max_bytes = QUERY_CONTEXT_MAX_CHARS * 4
+    if file_bytes > max_bytes:
+        return f"Error: Source too large ({file_bytes} bytes; max {max_bytes} bytes)."
+
+    # H2 (Phase 4.5 R4 HIGH): reject unknown source_type before template
+    # loading or ingest. Previously `source_type='totally_bogus'` with a
+    # valid extraction_json wrote `type: totally_bogus` into wiki frontmatter.
+    if source_type and source_type not in SOURCE_TYPE_DIRS:
+        valid = ", ".join(sorted(SOURCE_TYPE_DIRS))
+        return f"Error: Unknown source_type '{source_type}'. Valid: {valid}"
 
     # ── API mode ──
     if use_api:

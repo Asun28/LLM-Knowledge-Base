@@ -111,9 +111,7 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # Require 20+ chars AND at least one digit/dot/underscore/slash/plus/eq
         # in the payload, so benign prose like "bearer responsibility-for-all"
         # (pure word chars + hyphens) doesn't trip the scanner.
-        re.compile(
-            r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"
-        ),
+        re.compile(r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"),
     ),
     (
         "JWT",
@@ -129,15 +127,39 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("Twilio Auth Token (SK form)", re.compile(r"SK[a-f0-9]{32}")),
     ("npm token", re.compile(r"npm_[A-Za-z0-9]{36}")),
     (
+        # A6 (Phase 5 kb-capture LOW): keep Basic label so existing tests still
+        # match on "HTTP Basic" substring; value pattern preserved.
         "HTTP Basic Authorization header",
         re.compile(r"(?i)Authorization:\s*Basic\s+[A-Za-z0-9+/=]+"),
     ),
     (
+        # A6 (Phase 5 kb-capture LOW): opaque Bearer tokens (OAuth2, Azure AD,
+        # GCP, non-JWT session tokens). Require 16+ chars so short demo Bearer
+        # doesn't false-positive; JWT Bearer is still caught by the JWT pattern.
+        "HTTP Bearer Authorization header",
+        re.compile(r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9+/=._~-]{16,}"),
+    ),
+    (
+        # A4 (Phase 5 kb-capture MED + 2× LOW merged): broaden to catch suffix
+        # variants (ANTHROPIC_API_KEY, DJANGO_SECRET_KEY, GH_TOKEN, APP_SECRET,
+        # ACCESS_KEY, ENCRYPTION_KEY) and optional shell `export ` prefix.
+        # Prefix group is optional so bare `API_KEY=…` still matches.
+        #
+        # PR review round 1 (Codex M-NEW-2): original `['\"]?\S{8,}` stopped
+        # at the first whitespace, so quoted values with spaces like
+        # `SECRET="has spaces but is still a long secret"` bypassed the
+        # scanner. Updated pattern accepts either 8+ non-space chars OR a
+        # quote-wrapped run of 8+ chars including spaces (but no closing
+        # line). Closing quote may be the same or absent.
         "env-var assignment",
         re.compile(
-            r"(?im)^\s*(API_KEY|SECRET_KEY|SECRET|PASSWORD|PASSWD|TOKEN|"
-            r"AUTH_TOKEN|ACCESS_TOKEN|DATABASE_URL|DB_PASS|PRIVATE_KEY)"
-            r"\s*=\s*\S+"
+            r"(?im)^\s*(?:export\s+)?"
+            r"(?:[A-Z][A-Z0-9_]*_)?"  # OPTIONAL prefix like ANTHROPIC_, DJANGO_
+            r"(API_KEY|SECRET_KEY|SECRET|PASSWORD|PASSWD|TOKEN|AUTH_TOKEN|"
+            r"ACCESS_TOKEN|ACCESS_KEY|DATABASE_URL|DB_PASS|PRIVATE_KEY|"
+            r"ENCRYPTION_KEY|API_SECRET)"
+            r"\s*=\s*"
+            r"(?:['\"][^\n'\"]{8,}['\"]?|\S{8,})"
         ),
     ),
     (
@@ -219,7 +241,10 @@ _CAPTURE_SCHEMA = {
                 "properties": {
                     "title": {"type": "string", "maxLength": 100},
                     "kind": {"enum": list(CAPTURE_KINDS)},
-                    "body": {"type": "string", "minLength": 1},
+                    # A2 (Phase 5 kb-capture LOW): cap body at 2000 chars so a
+                    # faithful LLM return cannot echo back the entire 50KB input
+                    # as one item's body, defeating the atomization purpose.
+                    "body": {"type": "string", "minLength": 1, "maxLength": 2000},
                     "one_line_summary": {"type": "string", "maxLength": 200},
                     "confidence": {"enum": ["stated", "inferred", "speculative"]},
                 },
@@ -343,14 +368,28 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
         n += 1
 
 
-def _path_within_captures(path: Path) -> bool:
-    """Belt-and-suspenders: refuse any resolved path outside CAPTURES_DIR.
+def _path_within_captures(path: Path, base_dir: Path | None = None) -> bool:
+    """Belt-and-suspenders: refuse any resolved path outside base_dir.
 
-    Relies on CAPTURES_DIR itself being inside PROJECT_ROOT — enforced by the
-    module-import-time assertion at the end of this module.
+    Relies on base_dir itself being inside PROJECT_ROOT — enforced by the
+    module-import-time assertion at the end of this module (which resolves
+    CAPTURES_DIR only; a caller-supplied base_dir outside PROJECT_ROOT is
+    resolved here for each check).
+
+    A5 (Phase 5 kb-capture MED): when base_dir is None and equals the global
+    CAPTURES_DIR, fall through to the pre-resolved module-level constant to
+    avoid the stat+readlink syscalls of Path.resolve() on every call.
     """
+    if base_dir is None:
+        resolved_base = _CAPTURES_DIR_RESOLVED
+    else:
+        try:
+            resolved_base = base_dir.resolve()
+        except OSError as e:
+            logger.warning("Path resolve failed for base_dir %s: %s", base_dir, e)
+            return False
     try:
-        path.resolve().relative_to(CAPTURES_DIR.resolve())
+        path.resolve().relative_to(resolved_base)
         return True
     except ValueError:
         return False
@@ -402,7 +441,6 @@ def _resolve_provenance(provenance: str | None) -> str:
 
 def _render_markdown(
     item: dict,
-    slug: str,
     captured_alongside: list[str],
     provenance: str,
     captured_at: str,
@@ -412,6 +450,11 @@ def _render_markdown(
     Field order is preserved for predictable diffs (sort_keys=False).
     yaml_sanitize strips bidi marks + control chars; yaml.dump then handles
     escaping. (Using yaml_escape here would double-escape backslashes/quotes.)
+
+    A1 (Phase 5 kb-capture R3 MEDIUM): removed dead `slug` param — it was
+    accepted but never referenced in the function body, so the R2 proposal
+    to re-render on slug retry was a no-op. See spec for two-pass write
+    design rationale (deferred to v2).
     """
     fm = {
         "title": yaml_sanitize(item["title"]),
@@ -452,10 +495,18 @@ def _write_item_files(
     items: list[dict],
     provenance: str,
     captured_at: str,
+    *,
+    captures_dir: Path | None = None,
 ) -> tuple[list[CaptureItem], str | None]:
     """Resolve slugs, compute captured_alongside, write each file atomically.
 
     Spec §4 step 9 + §7 Class D.
+
+    A3 (Phase 5 kb-capture R2 + R3 MEDIUM): accepts keyword-only `captures_dir`
+    override so unit tests can write to an isolated directory without
+    monkeypatching the module-level `CAPTURES_DIR` constant. When None, the
+    module default is used. The override replaces all three bare CAPTURES_DIR
+    references (mkdir, path construction, os.scandir retry).
 
     Returns (written_items, error_msg). On partial failure, error_msg is set and
     `written` contains only the items written before the failure. Accepted v1
@@ -466,14 +517,13 @@ def _write_item_files(
     if not items:
         return [], None
 
-    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+    _captures_dir = captures_dir if captures_dir is not None else CAPTURES_DIR
+    _captures_dir.mkdir(parents=True, exist_ok=True)
 
     # Initial scan — use context manager to release Windows dir handle promptly
-    with os.scandir(CAPTURES_DIR) as it:
+    with os.scandir(_captures_dir) as it:
         existing = {
-            entry.name[:-3]
-            for entry in it
-            if entry.is_file() and entry.name.endswith(".md")
+            entry.name[:-3] for entry in it if entry.is_file() and entry.name.endswith(".md")
         }
 
     # Phase A — resolve all slugs in-process
@@ -497,16 +547,15 @@ def _write_item_files(
         alongside = alongside_for[i]
         markdown = _render_markdown(
             item=item,
-            slug=slug,
             captured_alongside=alongside,
             provenance=provenance,
             captured_at=captured_at,
         )
         success = False
         for _attempt in range(10):
-            path = CAPTURES_DIR / f"{slug}.md"
-            if not _path_within_captures(path):
-                return written, f"Error: slug escapes CAPTURES_DIR: {slug!r}"
+            path = _captures_dir / f"{slug}.md"
+            if not _path_within_captures(path, base_dir=_captures_dir):
+                return written, f"Error: slug escapes captures dir: {slug!r}"
             try:
                 _exclusive_atomic_write(path, markdown)
                 written.append(
@@ -522,7 +571,7 @@ def _write_item_files(
                 break
             except FileExistsError:
                 # Cross-process race — re-scan and re-resolve (context-managed)
-                with os.scandir(CAPTURES_DIR) as it:
+                with os.scandir(_captures_dir) as it:
                     existing = {
                         entry.name[:-3]
                         for entry in it
@@ -549,7 +598,12 @@ class CaptureResult:
     provenance: str
 
 
-def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
+def capture_items(
+    content: str,
+    provenance: str | None = None,
+    *,
+    captures_dir: Path | None = None,
+) -> CaptureResult:
     """Atomize messy text into discrete raw/captures/<slug>.md files.
 
     Public API. See spec §3-§4 for the data flow.
@@ -627,7 +681,9 @@ def capture_items(content: str, provenance: str | None = None) -> CaptureResult:
 
     # Step 9: write files
     captured_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    written, write_error = _write_item_files(kept, resolved_prov, captured_at)
+    written, write_error = _write_item_files(
+        kept, resolved_prov, captured_at, captures_dir=captures_dir
+    )
 
     return CaptureResult(
         items=written,
@@ -661,3 +717,8 @@ if not _captures_resolved.is_relative_to(_project_resolved):
         f"SECURITY: CAPTURES_DIR resolves outside PROJECT_ROOT — refusing to load. "
         f"CAPTURES_DIR={_captures_resolved}, PROJECT_ROOT={_project_resolved}"
     )
+
+# A5 (Phase 5 kb-capture MED): public alias for the already-resolved
+# CAPTURES_DIR. _path_within_captures uses this cached value when base_dir=None
+# to avoid stat+readlink syscalls on every call.
+_CAPTURES_DIR_RESOLVED: Path = _captures_resolved

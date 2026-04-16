@@ -31,24 +31,39 @@ def _default_feedback() -> dict:
 def load_feedback(path: Path | None = None) -> dict:
     """Load feedback data from JSON file.
 
-    Returns default structure if file is missing, corrupted, or wrong shape.
+    Returns default structure if file is missing, corrupted, unreadable, or
+    wrong shape.
+
+    Q1 (Phase 4.5 R5 HIGH): widen except from `json.JSONDecodeError` only to
+    also catch `OSError` (file locked by AV mid-write, EACCES on read,
+    race with atomic rename on Windows) and `UnicodeDecodeError` (byte
+    corruption). The design intent is corruption-recovery: always return a
+    default and let the next write replace it, never raise through the MCP
+    tool boundary.
     """
     path = path or FEEDBACK_PATH
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return _default_feedback()
-        if (
-            not isinstance(data, dict)
-            or "entries" not in data
-            or "page_scores" not in data
-            or not isinstance(data["entries"], list)
-            or not isinstance(data["page_scores"], dict)
-        ):
-            return _default_feedback()
-        return data
-    return _default_feedback()
+    if not path.exists():
+        return _default_feedback()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        # PR review round 1 (Codex M-NEW-3): propagate EACCES so callers
+        # can't silently overwrite an unreadable file on the next write.
+        # Permission-denied is an operator bug, not corruption; recovery
+        # would destroy state the user might want to inspect first.
+        raise
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+        logger.warning("Feedback file unreadable, using defaults: %s", e)
+        return _default_feedback()
+    if (
+        not isinstance(data, dict)
+        or "entries" not in data
+        or "page_scores" not in data
+        or not isinstance(data["entries"], list)
+        or not isinstance(data["page_scores"], dict)
+    ):
+        return _default_feedback()
+    return data
 
 
 def save_feedback(data: dict, path: Path | None = None) -> None:

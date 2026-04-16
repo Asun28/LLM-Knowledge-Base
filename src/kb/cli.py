@@ -104,13 +104,9 @@ def query(question: str, output_format: str):
             click.echo(format_citations(result["citations"]))
         click.echo(f"\n[Searched {len(result.get('source_pages', []))} pages]")
         if result.get("output_path"):
-            click.echo(
-                f"\nOutput: {result['output_path']} ({result['output_format']})"
-            )
+            click.echo(f"\nOutput: {result['output_path']} ({result['output_format']})")
         if result.get("output_error"):
-            click.echo(
-                f"\n[warn] Output format failed: {result['output_error']}", err=True
-            )
+            click.echo(f"\n[warn] Output format failed: {result['output_error']}", err=True)
     except Exception as e:
         click.echo(f"Error: {_truncate(str(e))}", err=True)
         raise SystemExit(1)
@@ -168,6 +164,10 @@ def lint(
         raise click.UsageError("--execute requires --augment")
     if auto_ingest and not execute:
         raise click.UsageError("--auto-ingest requires --execute (and --augment)")
+    # B4 (Phase 5 three-round MEDIUM): reject non-positive values up front so
+    # negative --max-gaps doesn't silently truncate proposals via Python slicing.
+    if max_gaps < 1:
+        raise click.UsageError(f"--max-gaps={max_gaps} must be a positive integer")
     if max_gaps > AUGMENT_FETCH_MAX_CALLS_PER_RUN:
         raise click.UsageError(
             f"--max-gaps={max_gaps} exceeds hard ceiling "

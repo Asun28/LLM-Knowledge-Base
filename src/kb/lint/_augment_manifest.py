@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,15 +35,19 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _runs_index_path() -> Path:
-    """Derive the runs-index path at call time.
-
-    Resolving MANIFEST_DIR lazily lets tests monkeypatch MANIFEST_DIR
-    without also having to patch a module-level constant — avoids the
-    regression class where tests silently appended to the real
-    .data/augment_runs.jsonl.
+def _resolve_data_dir(data_dir: Path | None) -> Path:
+    """B2 (Phase 5 three-round MEDIUM): honor caller-supplied data_dir so
+    custom-project runs (kb_lint --augment --wiki-dir /tmp/x/wiki) do not
+    leak manifests into the main repo's .data/.
     """
-    return MANIFEST_DIR / "augment_runs.jsonl"
+    return data_dir if data_dir is not None else MANIFEST_DIR
+
+
+def _runs_index_path(data_dir: Path | None = None) -> Path:
+    """Derive the runs-index path. See B2 — lazy resolution plus data_dir
+    override prevent cross-project state bleed.
+    """
+    return _resolve_data_dir(data_dir) / "augment_runs.jsonl"
 
 
 @dataclass
@@ -53,6 +57,7 @@ class Manifest:
     run_id: str
     path: Path
     data: dict
+    data_dir: Path = field(default_factory=lambda: MANIFEST_DIR)
 
     # ---- factories ----
 
@@ -64,9 +69,11 @@ class Manifest:
         mode: str,
         max_gaps: int,
         stubs: list[dict[str, Any]],
+        data_dir: Path | None = None,
     ) -> Manifest:
-        MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
-        path = MANIFEST_DIR / f"augment-run-{run_id[:8]}.json"
+        resolved = _resolve_data_dir(data_dir)
+        resolved.mkdir(parents=True, exist_ok=True)
+        path = resolved / f"augment-run-{run_id[:8]}.json"
         ts = _now_iso()
         data = {
             "schema": 1,
@@ -87,13 +94,14 @@ class Manifest:
         }
         with file_lock(path):
             atomic_json_write(data, path)
-        return cls(run_id=run_id, path=path, data=data)
+        return cls(run_id=run_id, path=path, data=data, data_dir=resolved)
 
     @classmethod
-    def resume(cls, *, run_id_prefix: str) -> Manifest | None:
-        if not MANIFEST_DIR.exists():
+    def resume(cls, *, run_id_prefix: str, data_dir: Path | None = None) -> Manifest | None:
+        resolved = _resolve_data_dir(data_dir)
+        if not resolved.exists():
             return None
-        for f in MANIFEST_DIR.glob(f"augment-run-{run_id_prefix}*.json"):
+        for f in resolved.glob(f"augment-run-{run_id_prefix}*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as e:
@@ -101,7 +109,7 @@ class Manifest:
                 continue
             if data.get("ended_at"):
                 continue  # already complete
-            return cls(run_id=data["run_id"], path=f, data=data)
+            return cls(run_id=data["run_id"], path=f, data=data, data_dir=resolved)
         return None
 
     # ---- mutators ----
@@ -159,7 +167,7 @@ class Manifest:
             "gaps_failed": counts["failed"],
             "gaps_cooldown": counts["cooldown"],
         }
-        runs_index = _runs_index_path()
+        runs_index = _runs_index_path(self.data_dir)
         runs_index.parent.mkdir(parents=True, exist_ok=True)
         with file_lock(runs_index):
             with runs_index.open("a", encoding="utf-8") as fh:

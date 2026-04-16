@@ -57,16 +57,21 @@ SOURCE_TYPE_DIRS: dict[str, Path] = {
 }
 
 # ── Capture configuration (Phase 5 — kb_capture MCP tool) ───────
-CAPTURE_MAX_BYTES = 50_000              # hard input size cap (UTF-8 bytes)
-CAPTURE_MAX_ITEMS = 20                  # cap items extracted per scan-tier call
+CAPTURE_MAX_BYTES = 50_000  # hard input size cap (UTF-8 bytes)
+CAPTURE_MAX_ITEMS = 20  # cap items extracted per scan-tier call
 CAPTURE_KINDS = ("decision", "discovery", "correction", "gotcha")
-CAPTURE_MAX_CALLS_PER_HOUR = 60         # per-process rate limit (sliding 1h window)
+CAPTURE_MAX_CALLS_PER_HOUR = 60  # per-process rate limit (sliding 1h window)
 
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
-SUPPORTED_SOURCE_EXTENSIONS = frozenset({
-    ".md", ".txt", ".pdf", ".json", ".yaml", ".yml", ".rst", ".csv"
-})
+SUPPORTED_SOURCE_EXTENSIONS = frozenset(
+    {".md", ".txt", ".pdf", ".json", ".yaml", ".yml", ".rst", ".csv"}
+)
+
+# J1 (Phase 4.5 MEDIUM): hard ceiling on rewriter output. Floor is
+# max(3 * len(question), 120) — these two together accept legitimate
+# short reference expansions while rejecting LLM rambles.
+MAX_REWRITE_CHARS = 500
 
 # ── Valid source types for extraction ────────────────────────────────
 # Includes comparison/synthesis which have templates but no raw/ subdirectory.
@@ -138,7 +143,7 @@ MAX_SEARCH_RESULTS = 100
 # ── RRF hybrid search ─────────────────────────────────────────
 RRF_K = 60  # RRF fusion constant: score = 1/(K + rank)
 VECTOR_SEARCH_LIMIT_MULTIPLIER = 2  # Vector search fetches limit * N candidates
-BM25_SEARCH_LIMIT_MULTIPLIER = 1    # BM25 candidates = limit * this (intentionally 1×)
+BM25_SEARCH_LIMIT_MULTIPLIER = 1  # BM25 candidates = limit * this (intentionally 1×)
 EMBEDDING_MODEL = "minishlab/potion-base-8M"  # model2vec model (~8MB, local)
 VECTOR_INDEX_PATH_SUFFIX = ".data/vector_index.db"  # sqlite-vec index file
 

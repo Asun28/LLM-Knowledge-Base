@@ -2,7 +2,8 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kb.config import MAX_VERDICTS, VERDICTS_PATH
@@ -21,19 +22,60 @@ VALID_VERDICT_TYPES: tuple[str, ...] = (
 MAX_NOTES_LEN = 2000
 
 
+# M1 (Phase 4.5 MEDIUM): cache keyed on (path_str, mtime_ns, size). A 10k-
+# entry verdict file is 3-5 MB (~50-150 ms per json.loads on Windows); this
+# avoids re-parsing when the file hasn't changed. Invalidated on every save
+# via _invalidate_verdicts_cache.
+#
+# PR review round 1 (Sonnet MAJOR M1 + Codex m-new-2):
+#   - Threads acquire `_VERDICTS_CACHE_LOCK` around get/set so the module-
+#     level dict is not corrupted under FastMCP's 40-thread pool.
+#   - `load_verdicts` returns a SHALLOW COPY of the cached list so callers
+#     that mutate (e.g. `add_verdict` → `verdicts.append(...)`) cannot
+#     retroactively corrupt subsequent readers within the same (mtime,size)
+#     window.
+_VERDICTS_CACHE: dict[str, tuple[int, int, list[dict]]] = {}
+_VERDICTS_CACHE_LOCK = threading.Lock()
+
+
+def _invalidate_verdicts_cache(path: Path) -> None:
+    """Drop the cache entry for `path` (called after every save)."""
+    with _VERDICTS_CACHE_LOCK:
+        _VERDICTS_CACHE.pop(str(path), None)
+
+
 def load_verdicts(path: Path | None = None) -> list[dict]:
-    """Load all stored verdicts from JSON file."""
+    """Load all stored verdicts from JSON file.
+
+    M1 (Phase 4.5 MEDIUM): uses a (mtime_ns, size)-keyed cache so repeated
+    callers (add_verdict, get_page_verdicts, get_verdict_summary, trends,
+    runner.py) skip re-parsing when the file hasn't changed on disk. The
+    cache is thread-safe and returns a shallow copy so callers mutating the
+    result cannot poison subsequent reads.
+    """
     path = path or VERDICTS_PATH
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
-            return []
-        if not isinstance(data, list):
-            return []
-        return data
-    return []
+    if not path.exists():
+        return []
+    try:
+        stat = path.stat()
+    except OSError as e:
+        logger.warning("Could not stat verdicts file %s: %s", path, e)
+        return []
+    key = str(path)
+    with _VERDICTS_CACHE_LOCK:
+        cached = _VERDICTS_CACHE.get(key)
+        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+            return list(cached[2])
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
+        return []
+    if not isinstance(data, list):
+        return []
+    with _VERDICTS_CACHE_LOCK:
+        _VERDICTS_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data)
+    return list(data)
 
 
 def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
@@ -41,6 +83,10 @@ def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
     from kb.utils.io import atomic_json_write
 
     path = path or VERDICTS_PATH
+    # PR review round 1 (Sonnet MAJOR M1): invalidate BEFORE the write. If
+    # the write fails partway, the cache reflects "unknown" (forcing a
+    # re-read) instead of the attempted-but-uncommitted state.
+    _invalidate_verdicts_cache(path)
     atomic_json_write(verdicts, path)
 
 
@@ -104,7 +150,7 @@ def add_verdict(
         entry = {
             # Phase 4.5 HIGH L4: write UTC-aware timestamps so trend bucketing
             # is consistent across machines (completes the read-side fix in trends.py).
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "page_id": page_id,
             "verdict_type": verdict_type,
             "verdict": verdict,

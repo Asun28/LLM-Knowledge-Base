@@ -12,6 +12,7 @@ from kb.config import (
     MAX_NOTES_LEN,
     MAX_QUESTION_LEN,
     PAGE_TYPES,
+    PROJECT_ROOT,
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
@@ -70,7 +71,14 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         updated_content: New markdown body (frontmatter preserved automatically).
         revision_notes: What changed and why.
     """
+    # F2 (Phase 4.5 MEDIUM): cap page_id + revision_notes up front, before
+    # path construction and log writes. Prevents pathological lengths from
+    # reaching wiki/log.md (which collapses to one line → unreadable file).
     page_id = _strip_control_chars(page_id)
+    if len(page_id) > 200:
+        return f"Error: page_id too long ({len(page_id)} chars; max 200)."
+    if len(revision_notes) > MAX_NOTES_LEN:
+        return f"Error: revision_notes too long ({len(revision_notes)} chars; max {MAX_NOTES_LEN})."
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -388,15 +396,18 @@ def kb_create_page(
         source_refs: Comma-separated source references (e.g., 'raw/articles/a.md,raw/papers/b.md').
     """
     page_id = _strip_control_chars(page_id)
+    # F4 (Phase 4.5 R4 LOW): cap title + strip control chars for parity with
+    # page_id. Guards against 100KB titles corrupting kb_list_pages output.
+    title = _strip_control_chars(title)
+    if len(title) > 500:
+        return f"Error: title too long ({len(title)} chars; max 500)."
     # Validate page_id — reuse shared validator first (handles traversal + resolve check)
     err = _validate_page_id(page_id, check_exists=False)
     if err:
         return f"Error: {err}"
     if len(content) > MAX_INGEST_CONTENT_CHARS:
         return (
-            f"Error: Content too large "
-            f"({len(content):,} chars; "
-            f"max {MAX_INGEST_CONTENT_CHARS:,})."
+            f"Error: Content too large ({len(content):,} chars; max {MAX_INGEST_CONTENT_CHARS:,})."
         )
     if "/" not in page_id:
         return "Error: page_id must include subdirectory (e.g., 'comparisons/rag-vs-finetuning')."
@@ -442,12 +453,27 @@ def kb_create_page(
             )
         if not src.startswith("raw/"):
             return f"Error: source_ref '{src}' must start with 'raw/'."
+        # F3 (Phase 4.5 R4 LOW): reject source_refs pointing at non-existent
+        # files. Prevents hallucinated traceability entries (wiki/_sources.md
+        # gets a bogus entry; check_source_coverage iterates page refs, not
+        # the reverse, so the fake never surfaces otherwise).
+        src_path = PROJECT_ROOT / src
+        try:
+            resolved_src = src_path.resolve()
+            # Also confirm the resolved path stays under PROJECT_ROOT so a
+            # symlink doesn't escape the raw/ tree.
+            resolved_src.relative_to(PROJECT_ROOT.resolve())
+        except (OSError, ValueError):
+            return f"Error: source_ref '{src}' does not resolve within project."
+        if not resolved_src.is_file():
+            return f"Error: source_ref '{src}' does not exist."
 
     page_path = WIKI_DIR / f"{page_id}.md"
-    if page_path.exists():
-        return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
 
-    # Write page with frontmatter
+    # F1 (Phase 4.5 MEDIUM): use O_EXCL exclusive-create instead of exists()
+    # + atomic_text_write. Closes the TOCTOU window between the existence
+    # check and the write — two concurrent kb_create_page calls for the same
+    # page_id can no longer both pass and overwrite each other.
     today = date.today().isoformat()
     safe_title = yaml_escape(title)
 
@@ -471,7 +497,25 @@ confidence: {confidence}
 
     try:
         page_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_text_write(frontmatter + content, page_path)
+        # F1 (Phase 4.5 MEDIUM): O_EXCL reservation + write in the SAME try
+        # block so a signal (SIGTERM) or KeyboardInterrupt between the open
+        # and write cannot leave a 0-byte zombie reservation.
+        # PR review round 1 (Opus+Sonnet MAJOR): previously `os.close(fd)`
+        # was followed by a separate `try: atomic_text_write(...)` — the
+        # gap between close and the try was unguarded.
+        fd = os.open(
+            str(page_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o644,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(frontmatter + content)
+        except BaseException:
+            page_path.unlink(missing_ok=True)
+            raise
+    except FileExistsError:
+        return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
     except OSError as e:
         return f"Error: Failed to write page: {e}"
 

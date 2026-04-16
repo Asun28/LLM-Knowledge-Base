@@ -6,8 +6,14 @@ import re
 from datetime import date, datetime
 from pathlib import Path
 
-from kb.config import MAX_REVIEW_HISTORY_ENTRIES, REVIEW_HISTORY_PATH, WIKI_DIR
+from kb.config import (
+    MAX_NOTES_LEN,
+    MAX_REVIEW_HISTORY_ENTRIES,
+    REVIEW_HISTORY_PATH,
+    WIKI_DIR,
+)
 from kb.utils.io import atomic_text_write, file_lock
+from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
@@ -47,7 +53,9 @@ def refine_page(
     Args:
         page_id: Wiki page ID (e.g., 'concepts/rag').
         updated_content: New markdown body (replaces everything after frontmatter).
-        revision_notes: What changed and why.
+        revision_notes: What changed and why. Capped at MAX_NOTES_LEN
+            chars before append_wiki_log to prevent pathological lengths
+            collapsing to a single line in wiki/log.md.
         wiki_dir: Path to wiki directory.
         history_path: Path to review history JSON.
 
@@ -56,6 +64,12 @@ def refine_page(
     """
     wiki_dir = wiki_dir or WIKI_DIR
     page_path = wiki_dir / f"{page_id}.md"
+
+    # R1 (Phase 4.5 R4 LOW): cap revision_notes BEFORE any log/history
+    # write. append_wiki_log collapses newlines to spaces, so a multi-
+    # megabyte note becomes a single unreadable line otherwise.
+    if len(revision_notes) > MAX_NOTES_LEN:
+        revision_notes = revision_notes[:MAX_NOTES_LEN]
 
     # Guard against path traversal — page must resolve within wiki_dir
     try:
@@ -85,13 +99,23 @@ def refine_page(
         # Normalize CRLF → LF for consistent frontmatter parsing on Windows
         text = text.replace("\r\n", "\n")
 
-        # Split frontmatter from content using regex for robust --- matching
-        # Matches: start-of-file, optional whitespace, ---, newline (LF or CRLF), content, ---, rest
-        fm_match = re.match(r"\A\s*---\r?\n(.*?\r?\n)---\r?\n?(.*)", text, re.DOTALL)
+        # R1 (Phase 4.5 R4 HIGH): use the shared FRONTMATTER_RE from
+        # utils/markdown. The previous local regex permitted leading
+        # whitespace before the opening fence, which diverged from
+        # load_all_pages / build_graph / BM25 — refine_page would succeed
+        # while the same file was treated as "no frontmatter" elsewhere,
+        # making the refined page's wikilinks disappear from the graph.
+        fm_match = FRONTMATTER_RE.match(text)
         if not fm_match:
             return {"error": f"Invalid frontmatter format in {page_id}"}
 
-        frontmatter_text = fm_match.group(1)
+        fm_block = fm_match.group(1)  # ---\n...\n---\n? (includes fences)
+        # Extract inner YAML between the fences so downstream date-update
+        # regex still matches `^updated:` at line starts.
+        inner_match = re.match(r"---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n?", fm_block, re.DOTALL)
+        if not inner_match:
+            return {"error": f"Invalid frontmatter format in {page_id}"}
+        frontmatter_text = inner_match.group(1) + "\n"
 
         # Update the 'updated' date in frontmatter
         today = date.today().isoformat()

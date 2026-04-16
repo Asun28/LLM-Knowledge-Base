@@ -19,6 +19,7 @@ def _strip_markdown_structure(content: str) -> str:
     content = re.sub(r"^##+ .+$", "", content, flags=re.MULTILINE)
     return content
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,17 +67,17 @@ def detect_contradictions(
                 continue
 
             # Look for contradictory signal patterns in overlapping content
-            matching_sentences = _find_overlapping_sentences(
-                claim, page_content, overlap
-            )
+            matching_sentences = _find_overlapping_sentences(claim, page_content, overlap)
             for sentence in matching_sentences:
                 if _has_contradiction_signal(claim, sentence):
-                    contradictions.append({
-                        "new_claim": claim,
-                        "existing_page": page["id"],
-                        "existing_text": sentence[:200],
-                        "reason": "Potential factual conflict detected via keyword overlap",
-                    })
+                    contradictions.append(
+                        {
+                            "new_claim": claim,
+                            "existing_page": page["id"],
+                            "existing_text": sentence[:200],
+                            "reason": "Potential factual conflict detected via keyword overlap",
+                        }
+                    )
                     break  # One contradiction per page per claim is enough
 
     return contradictions
@@ -91,9 +92,43 @@ _CONTRADICTION_SIGNALS = re.compile(
 
 
 def _extract_significant_tokens(text: str) -> set[str]:
-    """Extract significant lowercase tokens (no stopwords, length >= 3)."""
+    """Extract significant lowercase tokens (no stopwords, length >= 3).
+
+    E1 (Phase 4.5 R4 HIGH): preserve short language-name tokens that the
+    general length>=3 filter drops. `C`, `R`, `Go`, `C++`, `F#`, `C#`,
+    `.NET` carry identity we don't want to lose — a claim about "R is
+    outdated" vs existing page mentioning "R" could not participate in
+    overlap detection before this fix.
+
+    Two passes: (1) match language-name patterns case-sensitively on the
+    original text (so `C` matches but not `c` in "can"); (2) general word
+    tokens with >=3 length floor on the lowercased text. Union, stopword
+    filter, return. Both passes preserve `+`/`#`/`.` where they're part of
+    the language name.
+    """
+    # Pass 1: language-name tokens — match on ORIGINAL case so `C` / `R` /
+    # `Go` only match when capitalized (avoids "can" → "c"). Preserves
+    # C++, F#, C#, .NET by including `+`/`#`/`.` in the character class
+    # after the anchor letter.
+    #
+    # PR review round 2 (Codex MAJOR E1): earlier logic admitted ANY
+    # single capital letter (X, Q, Z) as a signal token — stray labels
+    # like "Point X" polluted contradiction matching with noise. Now the
+    # short-token set is restricted to a narrow whitelist of real language
+    # names that reach beyond the length>=3 general filter. Tokens with
+    # +/#/. always pass (C++, F#, .NET).
+    _LANG_SHORT_WHITELIST = {"c", "r", "go", "f", "d"}
+    lang_tokens: set[str] = set()
+    for m in re.finditer(r"(?:\.NET|[A-Z][+#a-z]*)", text):
+        tok = m.group(0).lower()
+        if any(ch in tok for ch in "+#."):
+            lang_tokens.add(tok)
+        elif len(tok) < 3 and tok in _LANG_SHORT_WHITELIST:
+            lang_tokens.add(tok)
+    # Pass 2: general words
     words = re.findall(r"\b\w[\w-]*\w\b", text.lower())
-    return {w for w in words if w not in _STOPWORDS and len(w) >= 3}
+    general = {w for w in words if w not in _STOPWORDS and len(w) >= 3}
+    return (lang_tokens | general) - _STOPWORDS
 
 
 def _find_overlapping_sentences(

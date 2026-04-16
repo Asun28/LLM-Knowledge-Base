@@ -20,11 +20,22 @@ def _setup_quality_paths(tmp_path, monkeypatch):
         (wiki_dir / subdir).mkdir(parents=True)
     (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
 
+    # F3 (Phase 4.5 R4 LOW): kb_create_page now validates source_refs exist
+    # on disk under PROJECT_ROOT. Monkeypatch PROJECT_ROOT to tmp_path so the
+    # existence check sees the fake raw files we seed below instead of the
+    # real repo. Raw files with simple content prevent false rejects.
+    raw_dir = tmp_path / "raw" / "articles"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    for fname in ("rag.md", "finetuning.md", "llm.md", "spec.md"):
+        (raw_dir / fname).write_text("# stub\n", encoding="utf-8")
+
     data_dir = tmp_path / ".data"
     data_dir.mkdir(exist_ok=True)
 
     monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(kb.mcp.quality, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(kb.mcp.quality, "PROJECT_ROOT", tmp_path)
     # H7: wiki_log.WIKI_LOG no longer exists (log_path now required per call-site)
     monkeypatch.setattr(kb.lint.verdicts, "VERDICTS_PATH", data_dir / "lint_verdicts.json")
 
