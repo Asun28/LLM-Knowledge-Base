@@ -233,24 +233,26 @@ class TestIoLockHardening:
         from kb.utils import io as mod
 
         target = tmp_path / "d.json"
-
-        # Fail the write so cleanup path runs; simultaneously fail cleanup unlink.
-        def bad_write(self, data):  # type: ignore[no-redef]
-            raise OSError("disk full")
-
+        # Trigger the except-cleanup path by making `Path.replace` fail so the
+        # caller-visible exception is the replace OSError — then make the
+        # cleanup unlink fail too. The original OSError must still propagate
+        # and the cleanup WARN must be logged.
         real_unlink = Path.unlink
+        real_replace = Path.replace
+
+        def failing_replace(self, _target):
+            raise OSError("replace failed")
 
         def failing_unlink(self, *args, **kwargs):
-            if self.suffix == ".tmp" or ".tmp" in self.name:
+            if str(self).endswith(".tmp"):
                 raise OSError("cleanup failure")
             return real_unlink(self, *args, **kwargs)
 
-        # Monkeypatch at the exact I/O layer atomic_json_write uses
-        with patch("os.write", side_effect=OSError("disk full")):
-            with patch.object(Path, "unlink", failing_unlink):
-                with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
-                    with pytest.raises(OSError, match="disk full"):
-                        mod.atomic_json_write({"k": "v"}, target)
+        monkeypatch.setattr(Path, "replace", failing_replace)
+        monkeypatch.setattr(Path, "unlink", failing_unlink)
+        with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
+            with pytest.raises(OSError, match="replace failed"):
+                mod.atomic_json_write({"k": "v"}, target)
         assert any("cleanup" in rec.message.lower() for rec in caplog.records)
 
 

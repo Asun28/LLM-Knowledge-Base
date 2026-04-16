@@ -30,6 +30,8 @@ Rules:
 - `utils/hashing.py` `content_hash` / `hash_bytes` — normalize CRLF / lone CR to LF before hashing so Windows clones with `core.autocrlf=true` hash the same as POSIX; prevents full corpus re-ingest on first compile (LOW)
 - `utils/markdown.py` `_strip_code_spans_and_fences` — fast-path `startswith("---")` before running `FRONTMATTER_RE.match`; saves regex work for every page without frontmatter in `build_graph` + `load_all_pages` hot paths (MED R2)
 - `utils/wiki_log.py` `append_wiki_log` — zero-width-space-escapes leading `#`/`-`/`>`/`!` and `[[...]]` wikilinks in operation + message; audit entries no longer render as active headings, lists, callouts, or clickable links when an ingested source contains markdown markup (MED R4 #8 + R5 #9 retained + LF `newline="\n"` #29)
+- `utils/io.py` `file_lock` — sets `acquired=True` only AFTER `os.write` returns successfully (LOW R6 #1); ASCII-decodes lock PID and RAISES `OSError` on decode/int-parse failure instead of silently stealing the lock; one-time `_purge_legacy_locks()` at module load removes pre-cycle-2 UTF-8/BOM lock files (MED R3 #2)
+- `utils/io.py` `atomic_json_write` / `atomic_text_write` — `f.flush() + os.fsync()` before `Path.replace` to prevent half-written files from atomically replacing a good file on crash (MED R5 #3); tempfile cleanup failures now log WARNING instead of silent swallow, without masking the original exception (MED R5 #4)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
