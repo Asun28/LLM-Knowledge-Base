@@ -37,6 +37,48 @@ Plus Phase 4.5 CRITICAL cycle 1: 16 CRITICAL items from the post-v0.10.0 multi-a
 
 Plus Phase 4.5 CRITICAL cycle 1 docs-sync (items 4 + 5): version-string alignment across `pyproject.toml` / `__init__.py` / README badge, CLAUDE.md stats updated to current counts (1552 tests / 119 test files / 67 py files / 26 MCP tools), and new `scripts/verify_docs.py` pre-push check. Also 5 new R6 BACKLOG entries from the 2-round post-PR review deferrals.
 
+Plus Phase 4.5 HIGH cycle 1: 22 HIGH-severity items from the post-v0.10.0 multi-agent audit, fixed across 4 themed commits (wiki_dir plumbing, cross-process RMW locking, prompt-injection sanitization + security, error-handling + vector-index lifecycle) via the automated feature-dev pipeline with Opus design + plan decision gates.
+
+### Phase 4.5 — HIGH cycle 1 (2026-04-16)
+
+22 HIGH-severity bugs from Rounds 1-6 of the Phase 4.5 multi-agent audit. 4 themed commits.
+
+#### Fixed — Phase 4.5 HIGH (22 items)
+
+- `review/refiner.py` `refine_page` — page-file RMW lock via `file_lock(page_path)` (R6 HIGH)
+- `ingest/evidence.py` `append_evidence_trail` — page-file lock around RMW (R2)
+- `ingest/pipeline.py` `_persist_contradictions` — contradictions-path `file_lock` (R4)
+- `utils/wiki_log.py` `append_wiki_log` — `file_lock` + retry-once; `log_path` now required (R2)
+- `query/engine.py` `query_wiki` — dropped dead `raw_dir` containment `try/except` (R6 MEDIUM)
+- `ingest/pipeline.py` `_is_duplicate_content` → `_check_and_reserve_manifest` — dual-phase `file_lock(MANIFEST_PATH)` around hash-dedup check+save (R2; fulfills cycle-1 C8 commitment)
+- `ingest/pipeline.py` contradictions path — derived from `effective_wiki_dir` (R1)
+- `utils/wiki_log.py` `append_wiki_log` — `wiki_dir`/`log_path` required parameter, no default (R2)
+- `utils/pages.py` `load_purpose` + MCP `load_all_pages` — `wiki_dir` parameter (R2)
+- `tests/conftest.py` `create_wiki_page` — factory requires explicit `wiki_dir` kwarg (R3)
+- `ingest/pipeline.py` `_build_summary_content` + `_update_existing_page` — `sanitize_extraction_field` on all untrusted fields (R1; Q_J expansion)
+- `compile/linker.py` `inject_wikilinks` — `wikilink_display_escape` replaces ad-hoc `safe_title` (R3)
+- `ingest/evidence.py` — HTML-comment sentinel `<!-- evidence-trail:begin -->` with FIRST-match heuristic (R2)
+- `ingest/pipeline.py` `_persist_contradictions` — `source_ref` newline/leading-`#` stripped (R2)
+- `review/context.py` `build_review_context` — XML sentinels + untrusted-content instruction in `build_review_checklist` (R4; Q_L)
+- `review/context.py` `pair_page_with_sources` — symlink traversal blocked outside `raw/` (R1 HIGH security)
+- `query/citations.py` `extract_citations` — per-segment leading-dot rejection (R4)
+- `utils/markdown.py` `WIKILINK_PATTERN` — 200→500-char cap + `logger.warning` on drop (R4)
+- `query/rewriter.py` `rewrite_query` — narrowed `except` to `LLMError`; logs at WARNING (R5)
+- `mcp/core.py` `kb_query` — category-tagged errors via `ERROR_TAG_FORMAT` in `mcp/app.py` (R5)
+- `query/embeddings.py` + `ingest/pipeline.py` + `compile/compiler.py` — hybrid vector-index lifecycle: mtime-gated `rebuild_vector_index`, `_skip_vector_rebuild` for batch callers (R2)
+- `mcp/core.py` `kb_query` — `conversation_context` wired in Claude Code mode (R4)
+- `ingest/pipeline.py` `_update_existing_page` — returns on frontmatter parse error (R1)
+
+#### Added
+
+- `sanitize_extraction_field(value, max_len=2000)` helper in `kb.utils.text` — strips control chars, frontmatter fences, markdown headers, HTML comments, length-caps untrusted extraction fields
+- `wikilink_display_escape(title)` helper in `kb.utils.text` — strips `]`/`[`/`|`/newlines for safe wikilink display
+- `ERROR_TAG_FORMAT` constant + `error_tag(category, message)` helper in `kb.mcp.app` — categories: `prompt_too_long`, `rate_limit`, `corrupt_page`, `invalid_input`, `internal`
+- `rebuild_vector_index(wiki_dir, force=False)` in `kb.query.embeddings` — mtime-gated with `_hybrid_available` flag
+- `_persist_contradictions` helper extracted from inline `ingest_source` code
+- `_check_and_reserve_manifest` replacing `_is_duplicate_content` with lock discipline
+- `tests/fixtures/injection_payloads.py` — attack payload catalog from BACKLOG R1-R4
+
 ### Phase 4.5 — CRITICAL cycle 1 docs-sync (2026-04-16)
 
 Immediately-following PR after cycle 1 merged. Addresses the 2 items the second-gate Opus review deferred from cycle 1 as preventive-infrastructure drive-by:
