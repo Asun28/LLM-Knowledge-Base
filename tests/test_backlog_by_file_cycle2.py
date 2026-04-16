@@ -555,11 +555,15 @@ class TestEvolveAnalyzer:
 
     def test_generate_evolution_report_does_not_swallow_oserror(self, tmp_path, monkeypatch) -> None:
         from kb.evolve import analyzer as mod
+        from kb.feedback import reliability
 
         def boom(*a, **kw):
             raise OSError("disk fault")
 
-        monkeypatch.setattr(mod, "get_flagged_pages", boom)
+        monkeypatch.setattr(reliability, "get_flagged_pages", boom)
+        # Scaffold minimal wiki layout so the earlier steps don't crash first.
+        for sub in ("entities", "concepts", "summaries", "synthesis", "comparisons"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
         # Must propagate — not return a partial report with silent defaults
         with pytest.raises(OSError, match="disk fault"):
             mod.generate_evolution_report(tmp_path)
