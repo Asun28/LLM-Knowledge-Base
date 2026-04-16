@@ -10,6 +10,24 @@ from kb.config import PROJECT_ROOT, WIKI_DIR
 
 logger = logging.getLogger(__name__)
 
+# Error tagging for MCP tools that call the Anthropic API.
+# Categories: prompt_too_long, rate_limit, corrupt_page, invalid_input, internal.
+ERROR_TAG_FORMAT = "Error[{category}]: {message}"
+
+
+def error_tag(category: str, message: str) -> str:
+    """Return a categorised error string for MCP tool responses.
+
+    Categories:
+      - ``prompt_too_long`` — request exceeded the model's context window.
+      - ``rate_limit``       — API rate limit hit; caller should retry later.
+      - ``corrupt_page``     — a wiki page could not be read or parsed.
+      - ``invalid_input``    — bad request parameters (non-context 400 error).
+      - ``internal``         — unexpected LLM or system failure.
+    """
+    return ERROR_TAG_FORMAT.format(category=category, message=message)
+
+
 mcp = FastMCP(
     "LLM Knowledge Base",
     instructions=(

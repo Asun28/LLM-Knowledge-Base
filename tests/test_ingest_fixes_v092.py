@@ -96,8 +96,9 @@ class TestUpdateExistingPageCorruptedFrontmatter:
             _update_existing_page(page, "raw/articles/new.md")
 
         content = page.read_text(encoding="utf-8")
-        # Should still add the source reference even with bad frontmatter
-        assert '"raw/articles/new.md"' in content
+        # Q_C fix: on frontmatter parse error, the function returns early to prevent
+        # duplicate source injection. The file should be unchanged (no new source added).
+        assert '"raw/articles/new.md"' not in content
         # Should have logged a warning about the parse failure
         assert any("Failed to parse frontmatter" in r.message for r in caplog.records)
 

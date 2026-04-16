@@ -378,6 +378,7 @@ def _update_existing_page(
             return  # Already referenced in frontmatter
     except (ValueError, AttributeError, yaml.YAMLError) as e:
         logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
+        return
 
     # 1. Update frontmatter source: list
     safe_ref = yaml_escape(source_ref)

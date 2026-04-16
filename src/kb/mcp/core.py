@@ -6,6 +6,8 @@ import os
 from datetime import date
 from pathlib import Path
 
+import anthropic
+
 from kb.capture import CaptureResult, capture_items
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
@@ -18,9 +20,11 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import ingest_source
-from kb.mcp.app import _format_ingest_result, _rel, mcp
+from kb.mcp.app import _format_ingest_result, _rel, error_tag, mcp
 from kb.query.engine import query_wiki, search_pages
+from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
+from kb.utils.llm import LLMError
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
@@ -120,11 +124,26 @@ def kb_query(
                     f"\n[warn] Output format failed: {result['output_error']}"
                 )
             return "\n".join(parts)
+        except anthropic.BadRequestError as e:
+            logger.warning("kb_query API bad-request for %r: %s", question[:80], e)
+            if "too long" in str(e).lower() or "context" in str(e).lower():
+                return error_tag("prompt_too_long", str(e))
+            return error_tag("invalid_input", str(e))
+        except anthropic.RateLimitError as e:
+            logger.warning("kb_query API rate-limited for %r: %s", question[:80], e)
+            return error_tag("rate_limit", str(e))
+        except LLMError as e:
+            logger.error("kb_query API LLM failure for %r: %s", question[:80], e)
+            return error_tag("internal", f"LLM call failed: {e}")
         except Exception as e:
-            logger.exception("Error in kb_query API mode for: %s", question)
-            return f"Error: Query failed — {e}"
+            logger.exception("kb_query API unexpected error for: %s", question)
+            return error_tag("internal", f"unexpected error: {e}")
 
     # Default: Claude Code mode — return context for synthesis
+    # H18: apply multi-turn query rewriting when conversation context is present
+    if conversation_context:
+        question = rewrite_query(question, conversation_context)
+
     try:
         results = search_pages(question, max_results=max_results)
     except Exception as e:
