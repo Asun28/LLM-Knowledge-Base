@@ -142,19 +142,20 @@ def add_feedback_entry(
             scores["trust"] = round(
                 (scores["useful"] + 1) / (scores["useful"] + weighted_negative + 2), 4
             )
+            # Phase 4.5 HIGH D4: track last-touched for timestamp-based eviction
+            scores["last_touched"] = datetime.now().isoformat(timespec="seconds")
 
         # Cap page_scores dict to prevent unbounded growth
         if len(data["page_scores"]) > MAX_PAGE_SCORES:
-            # Eviction policy: sort by total activity count (helpful + wrong + incomplete).
-            # Intentionally uses raw activity count rather than trust score — a page with many
-            # mixed signals stays in the store over one with few interactions. The 2x wrong-
-            # penalty from the trust formula does NOT drive eviction.
+            # Phase 4.5 HIGH D4: evict by last-touched timestamp (oldest first).
+            # Previous activity-count eviction allowed attackers to flood useful
+            # ratings for sacrificial page IDs, aging out genuinely flagged pages.
             sorted_pages = sorted(
                 data["page_scores"].items(),
-                key=lambda x: x[1]["useful"] + x[1]["wrong"] + x[1]["incomplete"],
-                reverse=True,
+                key=lambda x: x[1].get("last_touched", ""),
             )
-            data["page_scores"] = dict(sorted_pages[:MAX_PAGE_SCORES])
+            # Keep newest entries (highest last_touched values)
+            data["page_scores"] = dict(sorted_pages[-MAX_PAGE_SCORES:])
 
         save_feedback(data, effective_path)
 

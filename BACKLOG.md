@@ -54,17 +54,8 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 ### HIGH
 
-- `ingest/pipeline.py` contradictions path (~746-754) — hardcoded `WIKI_CONTRADICTIONS` global bypasses the `effective_wiki_dir` plumbing; `ingest_source(wiki_dir=tmp)` in tests writes into the production `wiki/contradictions.md`. (R1)
-  (fix: derive path from `effective_wiki_dir / "contradictions.md"`, consistent with every other index file)
-
 - `mcp/core.py` `kb_ingest` (~241) — `path.read_text()` reads the full file before any size check; truncation to `QUERY_CONTEXT_MAX_CHARS` happens after the full content is in memory. Attacker-controlled large file in `raw/` OOMs the MCP process. (R1)
   (fix: `stat().st_size` pre-check against a hard cap, or `open().read(cap+1)` and fail fast)
-
-- `query/engine.py` `_build_query_context` tier budget (~291-302) — `tier1_used` is computed from the corpus-wide accumulator; the `CONTEXT_TIER1_BUDGET` check gates the loop but not individual summary size. One 30K summary pushes `total` past the 20K Tier-1 cap, starving Tier 2 against the 80K ceiling. Documented tiered-loading contract is not actually enforced. (R1)
-  (fix: pass per-tier `remaining` budget into `_try_add`; enforce the per-tier cap on each addition, not as a stopping rule)
-
-- `query/hybrid.py` RRF metadata merge (~24-27) — on id collision between BM25 and vector result lists, only `score` is summed; other fields (`stale`, `sources`, `content_lower`, `type`) silently come from whichever list hit first. Breaks the moment backends diverge (chunk indexing / per-variant metadata). (R1)
-  (fix: explicit `scores[pid] = {**scores[pid], **result, "score": scores[pid]["score"] + rrf_score}`; or document a metadata-stability contract)
 
 - `query/embeddings.py` `VectorIndex` (~24-29, 93-129) — every `query()` opens a new `sqlite3.connect()` and reloads `sqlite_vec`; `_index_cache` insert is un-locked; extension-load failure silently falls back to empty results with only a WARN log (degrading hybrid → BM25-only invisibly). (R1)
   (fix: load extension once in `__init__`, reuse connection; lock `_index_cache`; promote extension-load failure to a single startup-level error, not per-query)
@@ -72,56 +63,14 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `kb/__init__.py` public API — top-level `__init__.py` exposes only `__version__`; `models/__init__.py` is empty. All consumers (CLI, MCP, tests) reach into deep submodules, so every internal move is a breaking change with no refactor seam. (R1)
   (fix: curated top-level re-exports + `__all__` — `ingest_source`, `compile_wiki`, `query_wiki`, `build_graph`, `WikiPage`, `RawSource`, `LLMError` — and same for `models/__init__.py`)
 
-- `config.py` vs `ingest/extractors.py` `VALID_SOURCE_TYPES` — defined twice with divergent values (config includes `comparison`/`synthesis`; extractors omits them). Same bug class as the recently-consolidated `FRONTMATTER_RE` / `STOPWORDS` / `VALID_VERDICT_TYPES`. (R1)
-  (fix: delete the redefinition in `extractors.py`; single source of truth in `config.py`)
-
 - `compile/compiler.py` naming inversion (~16-17) — `compile_wiki` is a thin orchestration shell over `ingest_source` + a manifest; real compilation primitives (`linker.py`) live in `compile/` but are consumed by `ingest/`. Dependency arrows invert the directory names; every new feature placement becomes a coin-flip. (R1)
   (fix: rename to `pipeline/orchestrator.py` and treat `compile/` as wikilink primitives only; or collapse `compile/compiler.py` into `kb.ingest.batch`)
 
 - `utils/llm.py` — `LLMError` is the only custom exception in the codebase; CLI (`cli.py:54,79,98,121,135`), `compile/compiler.py:349`, and MCP catch bare `Exception` and string-format. Cannot retry selectively, cannot test error paths, bugs in manifest-write are indistinguishable from LLM failures. (R1)
   (fix: `kb.errors` with `KBError` → `IngestError` / `CompileError` / `QueryError` / `ValidationError` / `StorageError`; narrow `except` at the boundary)
 
-- `lint/runner.py` `run_all_checks` (~43-100) — every rule re-parses each page from disk independently (`check_staleness`, `check_frontmatter`, `check_source_coverage`, `check_stub_pages`, `build_graph`, `resolve_wikilinks`). At 5k pages this is 20-30k YAML parses per `kb lint`. (R1)
-  (fix: pre-load corpus once `{path, raw_bytes, metadata, body}` and thread through all checks + `build_graph`; extend `load_all_pages` or introduce a `LintCorpus` helper)
-
-- `lint/checks.py` `check_cycles` (~218) — `nx.simple_cycles` is unbounded; worst case is super-exponential in cycle count on dense link graphs, trivially reachable on chatty summaries. (R1)
-  (fix: `itertools.islice(nx.simple_cycles(g), 100)` with "aborted after N" warning; or `nx.find_cycle` in a loop on the condensation)
-
-- `lint/semantic.py` `_group_by_term_overlap` (~210-216) — silently `return []` above 500 pages (loses a whole grouping strategy at the scale where it would matter most); below that, O(n²) with per-page tokenization every run. (R1)
-  (fix: invert to `term → {page_ids}` postings; emit pairs from postings with a shared-term Counter; removes the 500-page wall)
-
-- `lint/checks.py` `check_dead_links` (~38) + `graph/builder.py:60-69` — `resolve_wikilinks` and `build_graph` both walk every page body independently for the same information; roughly doubles lint I/O. (R1)
-  (fix: return broken-link report as a side product of `build_graph`; or drive both from the shared corpus)
-
-- `ingest/pipeline.py` `_persist_contradictions` (~751-753) — writer reads `w.get("claim", str(w))`, but `detect_contradictions` returns dicts keyed `new_claim`/`existing_page`/`existing_text`/`reason`; the default `str(w)` branch dumps the whole dict repr (including `existing_text[:200]` from a possibly-poisoned page) into `wiki/contradictions.md`, letting a malicious source plant forged `## Source/Date` headers and `[[wikilinks]]` into the append-only log. (R2)
-  (fix: use `w["new_claim"]` explicitly; render the markdown line through a sanitizer that strips `\r\n`, `|`, backticks, leading `#`)
-
 - `review/refiner.py` `refine_page` (~114-137) — writes page atomically, THEN appends `review_history.json`, THEN `wiki/log.md`. Crash or disk-full between steps leaves the page mutated with zero audit record, violating the documented refine-has-audit-trail guarantee; `append_wiki_log` further swallows `OSError` with a warning. (R2)
   (fix: write audit record first with `status="pending"`, write page, flip status to `"applied"`; or stage via a `page.md.pending` sidecar flipped only after log is synced)
-
-- `feedback/store.py` `page_scores` eviction (~147-157) — at cap, evicts by `useful + wrong + incomplete` descending (keeps highest-activity pages). An attacker submitting via `kb_query_feedback` floods `useful` ratings for sacrificial page IDs until a genuinely untrusted page ages out; trust defaults to 0.5 and the negative signal is erased. (R2)
-  (fix: evict by last-touched timestamp or by net_negative ascending — keep worst actors; or never evict trust metadata (bytes-per-page is tiny))
-
-- `review/refiner.py` frontmatter-block guard (~107) — `re.match(r'---\n.*?\n?---', body, re.DOTALL)` rejects any body that starts with `---` and contains a second `---` anywhere; legitimate wiki bodies using two horizontal rules (`---\n\n## Section\n\n---`) are silently refused as "looks like a frontmatter block." (R2)
-  (fix: require a `key: value` line between fences — `r"---\n\s*\w+\s*:.*?\n---"`, DOTALL; or validate every inter-delimiter line matches YAML k/v)
-
-- `review/refiner.py` frontmatter split (~78) — `\A\s*---\r?\n...` does not match files starting with a UTF-8 BOM (`\ufeff` not in `\s`); Windows editors that emit BOM break `kb_refine_page` permanently for that page with a misleading `Invalid frontmatter format` error. (R2)
-  (fix: `text = text.lstrip("\ufeff")` before the regex, or `encoding="utf-8-sig"` in `read_text`)
-
-- `lint/trends.py` week bucketing (~14-25, 70-71) — `_parse_timestamp` returns naive for date-only / aware for ISO-with-offset; `add_verdict` writes `datetime.now().isoformat()` (naive local). At 23:59 Sunday local, a verdict assigns to week N on one machine and week N+1 on a UTC machine; trend direction silently flips across dev / CI. (R2)
-  (fix: force all timestamps UTC-aware before bucketing (`ts.astimezone(timezone.utc)`) AND write `datetime.now(timezone.utc).isoformat(...)` in `add_verdict`)
-
-- `lint/trends.py` parse-failure accounting (~58-75) — on `_parse_timestamp` failure the loop `continue`s, so the verdict is excluded from `period_buckets` but was already counted in `overall` three lines earlier. Weekly sums do not reconcile to headline total; a week of only-malformed timestamps disappears entirely. (R2)
-  (fix: `logger.warning`; track a `skipped` counter in the return dict; skip BOTH `overall` and `period_buckets` (or neither) for consistency)
-
-- `lint/semantic.py` `_render_sources` (~37-48) — `used` starts as `sum(len(line) for line in lines)`, already including the full wiki page body; on a 30-60KB page plus `QUERY_CONTEXT_MAX_CHARS=80000`, `remaining` for the first source is ~0. `_truncate_source` with `budget=0` returns content untouched, so sources exceed the documented cap in exactly the case the guard exists for. (R2)
-  (fix: per-source minimum floor (`max(MIN_SOURCE_CHARS, remaining)`); treat `budget <= 0` as an explicit "truncation notice" rather than pass-through)
-
-- `graph/builder.py` PageRank / betweenness (~112-137) — both catch `NetworkXError`, log a warning, return `[]`. The returned dict has no `pagerank_failed: bool`; consumers cannot distinguish "failed" from "no inbound links anywhere." On a fully-disconnected wiki `nx.pagerank` succeeds with uniform 1/N and the `if d>0` filter produces `[]` — again indistinguishable. (R2)
-  (fix: wrap each centrality as `{"values": [...], "status": "ok"|"failed"|"degenerate"}`; or sibling `graph_warnings: list[str]`)
-
-- `utils/markdown.py` `FRONTMATTER_RE` (~9) — non-greedy `.*?` stops at the first interior `---\n`, including one inside a YAML block scalar (`description: |\n  text\n  ---\n  more`); downstream consumers (`build_graph:67-68`, BM25 corpus) see YAML values as body content and index them as wikilink sources / search tokens. Invisible corpus corruption. (R2)
-  (fix: parse via `python-frontmatter` and use `.content` everywhere — dep already installed; or require closing fence to be `---[ \t]*$` followed by newline)
 
 - `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes across existing pages. Every step is independently atomic, none reversible. A crash between manifest-write (step 6) and log-append (step 7) leaves the manifest claiming "already ingested" while the log shows nothing; a mid-wikilink-injection failure leaves partial retroactive backlinks. (R2)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests; retries idempotent at step granularity)
@@ -137,12 +86,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `graph/builder.py` `build_graph` disk re-read (~60-69) — independently calls `page_path.read_text(encoding="utf-8")` per page to extract wikilinks, while callers in the same request already called `load_all_pages`. Double disk I/O + double `FRONTMATTER_RE` per page. At 5k pages, query-path + lint-path = 20k+ file opens per run on NTFS (AV-scanned each). (R2)
   (fix: accept optional `pages: list[dict]` on `build_graph` (matches `lint.runner`'s `shared_pages` pattern); extract wikilinks from the already-loaded `content` field)
-
-- `graph/builder.py` bare-slug wikilink resolution (~72-83) — for every wikilink target not matching an existing node ID, loops all 5 `WIKI_SUBDIR_TO_TYPE` entries and tests `f"{subdir}/{target}" in existing_ids`, building a new string per probe. 50k wikilinks × 30 % bare × 5 probes = 75k hash probes + 75k allocations per graph build. (R2)
-  (fix: `slug_index = {id.split("/")[-1]: id for id in existing_ids}` built once before the loop; bare slugs resolve with one O(1) lookup)
-
-- `utils/pages.py` `load_all_pages` `content_lower` (~80) — pre-computed for every caller, not just search. `kb_list_pages`, `kb_lint_consistency`, `graph/export`, and `evolve/analyzer` pay the allocation + `.lower()` cost and carry an extra ~40 MB resident at 5k pages. (R2)
-  (fix: `load_all_pages(include_content_lower=False)` default off; `search_pages` opts in. Or lazy `functools.cached_property` on a wrapper class)
 
 - `tests/test_v0917_evidence_trail.py:9-16` `test_basic_entry` midnight flake — assertion reads `f"- {date.today().isoformat()}"` while `build_evidence_entry` also calls `date.today()` internally. At the 00:00:00 UTC boundary the two calls can produce different dates; test becomes non-deterministic on slow CI near midnight. (R3)
   (fix: pass an explicit `entry_date="2026-01-01"` to `build_evidence_entry` in the test; assert against the constant)
@@ -201,9 +144,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 - `ingest/pipeline.py:724-760` `ingest_source` contradiction detection — bare `except Exception:` at 759 swallows ALL errors as `logger.debug` (not warning), including bug-indicating `ValueError`/`AttributeError`/`TypeError`. The inner nested `except Exception as write_err` at 755 also logs a warning, producing double-handled silent swallow. A faulty contradiction detector silently disables contradiction flagging across the whole wiki. (R4)
   (fix: narrow outer except to `(KeyError, TypeError, re.error)`; raise unexpected exceptions; at minimum promote to `logger.warning` with source_ref context)
 
-- `ingest/contradiction.py:42-48` `detect_contradictions` silent claim truncation — when `len(new_claims) > max_claims`, only a `logger.debug` fires (suppressed by default because no `basicConfig` is called per R3). An extraction with 50 key_claims silently gets contradiction-checked on the FIRST 10, and the last 40 — which could be the contradicting ones — are ignored. Default `CONTRADICTION_MAX_CLAIMS_TO_CHECK=10` is applied to the CLAIM list, not the PAGE list as the docstring implies. (R4)
-  (fix: return `(contradictions, truncated_claim_count)` tuple or surface `{truncated: N}`; promote to `logger.warning`; bump default to match `MAX_ENTITIES_PER_INGEST=50`)
-
 - `ingest/pipeline.py:604-606` `ingest_source` summary re-ingest path — `_update_existing_page(summary_path, source_ref, verb="Summarized")` is called with no `name=` or `extraction=` argument, so the enrichment branch is skipped by design. Re-ingesting a summary with substantially different `extraction` (different core_argument, different key_claims) adds ONLY a source ref — the body content from the FIRST ingest remains authoritative forever. Evidence trail records "Summarized in new source" but the page body has no trace of what the new source actually claimed — the OPPOSITE of Phase 4's "compiled truth is REWRITTEN on new evidence" contract. (R4)
   (fix: append the new source's extracted claims/entities as a `## [source_ref]` subsection to the summary body, or call `_build_summary_content` again and merge; document the "summary append-on-reingest" contract)
 
@@ -212,9 +152,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `ingest/contradiction.py:92` `_extract_significant_tokens` word-char regex — pattern `\b\w[\w-]*\w\b` requires length ≥ 2, so all 1-char significant tokens ("C", "R", "C#", "Go") are silently dropped. A claim about "R is outdated" vs existing claims cannot participate in overlap detection. Additionally `[\w-]` drops `+`/`#`/`.` so "C++", "F#", ".NET" reduce to "c"/"f"/"net", losing language identity. (R4)
   (fix: lower floor to 1 for tokens matching `[A-Z][+#]?` (language names) before stopword filter; keep `len >= 3` for general English; or extend pattern to preserve trailing `++`/`#`)
-
-- `ingest/pipeline.py:725-732` `ingest_source` contradiction detection page scope — `detect_contradictions(claims, all_wiki_pages)` receives the FULL page list including pages created/updated in THIS ingest. A just-created summary page's claim compared against an existing concept page with overlapping tokens + negation signal fires every time, causing noisy first-ingest floods; a page compared against itself is silently dropped only because negation asymmetry holds, fragile. (R4)
-  (fix: compute `preexisting_pages = [p for p in all_wiki_pages if p["id"] not in pages_created]`; pass that to `detect_contradictions`; matches the documented "auto-contradiction detection" semantics)
 
 - `query/engine.py:327-430` `query_wiki` return dict breaks contract vs MCP handler — docstring enumerates `question/answer/citations/source_pages/context_pages`, omitting the `stale` field `search_pages` emits on every result. `mcp/core.py:79` `use_api=True` branch feeds `result["answer"]` + `result["citations"]` through `format_citations` with no stale signal ever reaching the client. Users asking "is this answer current?" get no hint in api mode. (R4)
   (fix: propagate per-citation stale flags into synthesis prompt (`[STALE]` inline next to each page header in `_build_query_context`) and re-emit in citations list; update docstring to document `stale` on result items)
@@ -230,9 +167,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `query/embeddings.py:93-129` `VectorIndex.query` returns `[]` on any SQL exception including schema drift — `except Exception as e: logger.debug(...)` swallows real corruption signals. If the index was built with a different embedding dimension than the current model, the `v.embedding MATCH ?` query raises a vec0 dimension-mismatch error and vector search silently becomes BM25-only forever. `VectorIndex.build` uses `float[{dim}]` for the current model, but `query` does not verify `query_vec` length against the stored schema. Combined with the dead-`build` R2 finding, a once-built index paired with a new model produces silent degradation. (R4)
   (fix: `PRAGMA table_info(vec_pages)` on first query to extract stored dim; assert `len(query_vec) == stored_dim` with WARN log; surface a `kb_vector_health` diagnostic)
-
-- `query/rewriter.py:64-65` `rewrite_query` uses bare `.strip('"')` stripping only ASCII double-quote — models frequently wrap rewrites in smart quotes `"..."` (U+201C/U+201D), single quotes, or backticks. None are stripped, so the wrapper string passes through as a literal token, tanking BM25 quality. Unicode is a real path because CJK/accented questions cross the scan-tier LLM boundary. (R4)
-  (fix: `rewritten = rewritten.strip().strip('"\'\u201c\u201d\u2018\u2019' + chr(0x60))`; or `re.sub(r'^[\s\"\'`\u2018-\u201f]+|[\s\"\'`\u2018-\u201f]+$', "", rewritten)`)
 
 - `compile/compiler.py:367-380` `compile_wiki` full-mode manifest pruning — `stale_keys` filter uses `raw_dir.parent / k` to check `.exists()`, but `raw_dir.parent` is NOT the project root when a caller passes a non-default `raw_dir` — every entry gets pruned. The prune also runs on `current_manifest` AFTER the per-source loop wrote successful hashes; between the two `load_manifest` calls there's no lock, so a concurrent `kb_ingest` adding a manifest entry in the window gets silently deleted on save. (R4)
   (fix: compute prune base once as `raw_dir.resolve().parent` matching `_canonical_rel_path`'s base; wrap "reload + prune + update templates + save" in `file_lock(manifest_path)` matching the per-source reload-save pattern)
@@ -266,9 +200,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `feedback/reliability.py:31` `get_flagged_pages` missing-`trust` default — `s.get("trust", 0.5)` treats legacy entries with `{useful, wrong, incomplete}` but no `trust` key as neutral (0.5, NOT flagged). `add_feedback_entry` always writes `trust` on the current path, but downgraded/partial writes from older versions, hand-edited JSON, or a store truncated by R1 `file_lock` PID steal can leave entries without `trust`. Silently un-flags what should be flagged. (R4)
   (fix: recompute `trust` on the fly when missing — `trust = (useful+1) / (useful + 2*wrong + incomplete + 2)`; or reject load of malformed entries and surface a warning)
-
-- `evolve/analyzer.py:95` frontmatter-strip regex duplication — inlines `re.sub(r"\A---\r?\n.*?\r?\n---\r?\n?", "", raw, count=1, flags=re.DOTALL)` instead of using shared `FRONTMATTER_RE` from `utils/markdown.py`. Same bug class as consolidated regexes and R2 YAML-block-scalar `---` interior-fence issue. Future fixes to `FRONTMATTER_RE` (block-scalar `---` handling, fast-path backtracking) leave this site stale, diverging `find_connection_opportunities` tokenization from `build_graph`. (R4)
-  (fix: `fm_match = FRONTMATTER_RE.match(raw); content = (fm_match.group(2) if fm_match else raw).lower()`)
 
 - `utils/markdown.py:5` `WIKILINK_PATTERN` indexes inside fenced code blocks AND inline code spans — verified: `extract_wikilinks` returns `['in-frontmatter', 'real-target', 'in-code-span', 'in-fenced-code']` for obvious cases. Frontmatter, ```` ``` ```` blocks, and `` ` `` spans should all be excluded per Obsidian semantics (and to prevent BM25/build_graph/dead-link from treating documentation-of-syntax as real edges). At scale this manufactures fake edges from any page documenting wiki syntax, README snippets, or inlined templates. (R4)
   (fix: pre-strip ```` ``` ```` blocks and `` ` `` spans before regex — `_strip_code_spans` helper; or parse via `markdown-it-py` AST and walk text nodes only)
@@ -408,9 +339,6 @@ _All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 
 
 - `utils/pages.py` `load_all_pages` error handling (~83-92) — broad `except (OSError, ValueError, TypeError, AttributeError, YAMLError, UnicodeDecodeError)` logs a warning per page and continues. If every page is unreadable (permissions, corrupt drive), returns `[]` — indistinguishable from a fresh install. BM25 / hybrid / `export_mermaid` treat it as "no results" with no surfaced error. (R2)
   (fix: track `load_errors` count; raise or surface `{"pages": [...], "load_errors": N}` when >50 % of entries fail; opt-in warning-only)
-
-- `lint/semantic.py` `_group_by_term_overlap` regex group index (~189) — uses `fm_match.group(1)` after the `utils/markdown.py:9` regex, but `group(1)` is the FENCE (`---\n...\n---\n`), not the body (`group(2)`). Consistency grouping tokenizes YAML keys (`title`, `source`, `confidence`, `inferred`, `stated`) instead of body text. Pages cluster by shared frontmatter fields rather than content overlap. (R2)
-  (fix: change `fm_match.group(1)` → `fm_match.group(2)` (body); add a regression test asserting the tokenized output contains no known YAML keys)
 
 - `graph/builder.py` `page_id()` lowercasing (~27-34) — lowercases the node ID while `path` attribute keeps original case. On case-sensitive filesystems (CI Linux), any consumer that reconstructs `wiki_dir / f"{pid}.md"` (e.g. `semantic.build_consistency_context:275`) hits `FileNotFoundError` and the page is silently skipped as `*Page not found*`. Windows dev + Linux CI diverge on the same corpus. (R2)
   (fix: normalize filenames on disk to lowercase at ingest; or stop lowercasing in `page_id()` and route all comparisons through a shared `normalize_id` helper applied only on lookup)

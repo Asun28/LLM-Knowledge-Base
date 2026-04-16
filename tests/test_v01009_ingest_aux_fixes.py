@@ -33,21 +33,24 @@ def test_evidence_trail_crlf_header(tmp_path):
 
 
 def test_contradiction_truncation_logged(caplog):
-    """Truncating claims for contradiction check must emit a debug log."""
+    """Truncating claims for contradiction check must emit a warning log.
+
+    Phase 4.5 HIGH D5: promoted from debug to warning level.
+    """
     from kb.config import CONTRADICTION_MAX_CLAIMS_TO_CHECK
     from kb.ingest.contradiction import detect_contradictions
 
     extra = CONTRADICTION_MAX_CLAIMS_TO_CHECK + 5
     claims = [f"claim number {i}" for i in range(extra)]
     dummy_page = {"id": "concepts/dummy", "content": "This is a dummy claim for testing."}
-    with caplog.at_level(logging.DEBUG, logger="kb.ingest.contradiction"):
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.contradiction"):
         detect_contradictions(claims, existing_pages=[dummy_page])
-    # At least one debug message about truncation
-    msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+    # At least one warning message about truncation
+    msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
     truncation_msgs = [
         m for m in msgs
         if str(CONTRADICTION_MAX_CLAIMS_TO_CHECK) in m
         or "truncat" in m.lower()
         or "first" in m.lower()
     ]
-    assert truncation_msgs, f"Expected truncation debug log, got: {msgs}"
+    assert truncation_msgs, f"Expected truncation warning log, got: {msgs}"

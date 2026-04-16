@@ -14,6 +14,7 @@ from kb.config import (
 )
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 from kb.lint.checks import check_stub_pages
+from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
 
@@ -91,8 +92,9 @@ def find_connection_opportunities(
         except (OSError, UnicodeDecodeError):
             logger.warning("Skipping unreadable page %s in connection analysis", page_path)
             continue
-        # Strip YAML frontmatter to avoid false-positive matches on structural keywords
-        content = re.sub(r"\A---\r?\n.*?\r?\n---\r?\n?", "", raw, count=1, flags=re.DOTALL).lower()
+        # Phase 4.5 HIGH P3: use shared FRONTMATTER_RE instead of inlined regex
+        fm_match = _FRONTMATTER_RE.match(raw)
+        content = (fm_match.group(2) if fm_match else raw).lower()
         pid = page_id(page_path, wiki_dir)
         # Extract significant words (longer than 4 chars, not common)
         words = {

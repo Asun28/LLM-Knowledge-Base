@@ -2,8 +2,8 @@
 
 import logging
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from datetime import date as _date
-from datetime import datetime, timedelta
 from datetime import time as _time
 from pathlib import Path
 
@@ -14,15 +14,20 @@ from kb.lint.verdicts import load_verdicts
 def _parse_timestamp(ts: str) -> datetime:
     """Parse ISO-8601 timestamp, accepting date-only strings.
 
-    Forward-compatible: Python 3.11+ accepts date-only strings in fromisoformat,
-    but Python 3.10 and earlier raise ValueError. This helper handles both.
+    Phase 4.5 HIGH L4: always returns UTC-aware datetimes. Date-only strings
+    are treated as midnight UTC. Naive datetimes are assumed UTC.
     """
+
     ts = ts.replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(ts)
+        dt = datetime.fromisoformat(ts)
     except ValueError:
         # Date-only string (e.g. '2024-01-01') — treat as midnight UTC
-        return datetime.combine(_date.fromisoformat(ts), _time.min)
+        dt = datetime.combine(_date.fromisoformat(ts), _time.min, tzinfo=UTC)
+    # Ensure result is always aware (assume naive = UTC)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +62,19 @@ def compute_verdict_trends(path: Path | None = None) -> dict:
 
     for v in verdicts:
         vrd = v.get("verdict", "")
-        if vrd in overall:
-            overall[vrd] += 1
 
         ts_str = v.get("timestamp", "")
         try:
             ts = _parse_timestamp(ts_str)
         except (ValueError, TypeError):
+            # Phase 4.5 HIGH L5: exclude parse failures from BOTH overall
+            # and period_buckets (previously counted in overall but skipped
+            # in periods, causing sum mismatch).
             continue
+
+        # Count in overall only after timestamp parse succeeds
+        if vrd in overall:
+            overall[vrd] += 1
 
         # Compute period key (start of the week)
         period_start = ts - timedelta(days=ts.weekday())

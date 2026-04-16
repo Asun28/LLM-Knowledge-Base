@@ -435,8 +435,12 @@ class TestVerdictTrends:
         assert len(result["periods"]) >= 1
         assert result["trend"] in ("improving", "stable", "declining")
 
-    def test_bad_timestamp_still_counted_in_overall(self, tmp_path):
-        """Verdicts with invalid timestamps count in overall but not period buckets."""
+    def test_bad_timestamp_excluded_from_overall(self, tmp_path):
+        """Phase 4.5 HIGH L5: verdicts with invalid timestamps excluded from both.
+
+        Previously counted in overall but not periods, causing sum mismatch.
+        Now excluded from both for consistency.
+        """
         path = tmp_path / "verdicts.json"
         verdicts = [
             {
@@ -461,9 +465,11 @@ class TestVerdictTrends:
         from kb.lint.trends import compute_verdict_trends
 
         result = compute_verdict_trends(path)
+        # total = raw count from file (always reflects file contents)
         assert result["total"] == 2
-        assert result["overall"]["pass"] == 1
-        assert result["overall"]["fail"] == 1
+        # Phase 4.5 HIGH L5: bad timestamps excluded from BOTH overall and periods
+        assert result["overall"]["pass"] == 0
+        assert result["overall"]["fail"] == 0
         assert result["periods"] == []  # no valid timestamps → no period buckets
 
     def test_mcp_tool_returns_string(self):

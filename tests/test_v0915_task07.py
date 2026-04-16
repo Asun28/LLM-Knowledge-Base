@@ -4,13 +4,18 @@
 class TestRefinerFrontmatterGuard:
     """Fix 7.1: refine_page must reject empty frontmatter blocks."""
 
-    def test_empty_frontmatter_block_rejected(self, tmp_wiki, create_wiki_page):
+    def test_frontmatter_block_with_keys_rejected(self, tmp_wiki, create_wiki_page):
+        """Phase 4.5 HIGH D1: guard requires key:value between fences.
+
+        Empty fences (---\\n---) are allowed (horizontal rules). Only blocks
+        containing YAML key: value lines are rejected.
+        """
         from kb.review.refiner import refine_page
 
         create_wiki_page("concepts/test", wiki_dir=tmp_wiki, content="Original.")
         result = refine_page(
             "concepts/test",
-            "---\n---\nReal body",
+            "---\ntitle: Injected\ntype: entity\n---\nReal body",
             wiki_dir=tmp_wiki,
             history_path=tmp_wiki / "history.json",
         )

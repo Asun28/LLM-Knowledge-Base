@@ -5,7 +5,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.config import WIKI_DIR
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS
@@ -34,7 +34,9 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
-def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
+def build_graph(
+    wiki_dir: Path | None = None, pages: list[dict] | None = None
+) -> nx.DiGraph:
     """Build a directed graph from wiki pages and their wikilinks.
 
     Nodes are wiki page IDs (e.g., 'concepts/rag', 'entities/openai').
@@ -42,48 +44,72 @@ def build_graph(wiki_dir: Path | None = None) -> nx.DiGraph:
 
     Args:
         wiki_dir: Path to wiki directory. Uses config default if None.
+        pages: Pre-loaded page dicts (id, path, content keys). When provided,
+            skips disk I/O — avoids redundant reads when callers already loaded pages.
 
     Returns:
         nx.DiGraph with page nodes and wikilink edges.
     """
     wiki_dir = wiki_dir or WIKI_DIR
     graph = nx.DiGraph()
-    pages = scan_wiki_pages(wiki_dir)
 
-    # Add all pages as nodes
-    for page_path in pages:
-        pid = page_id(page_path, wiki_dir)
-        graph.add_node(pid, path=str(page_path))
+    if pages is not None:
+        # Phase 4.5 HIGH L3: use pre-loaded pages to avoid disk re-reads
+        for p in pages:
+            graph.add_node(p["id"], path=p.get("path", ""))
 
-    # Add edges from wikilinks (only to existing nodes)
-    existing_ids = set(graph.nodes())
-    for page_path in pages:
-        try:
-            content = page_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Failed to read %s: %s", page_path, e)
-            continue
-        # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
-        fm_match = _FRONTMATTER_RE.match(content)
-        body = fm_match.group(2) if fm_match else content
-        links = extract_wikilinks(body)
-        source_id = page_id(page_path, wiki_dir)
-        for link in links:
-            target = link
-            # Resolve bare slugs (e.g. [[foo]] → entities/foo) by trying known subdirs
-            if target not in existing_ids:
-                for subdir in WIKI_SUBDIR_TO_TYPE:
-                    candidate = f"{subdir}/{target}"
-                    if candidate in existing_ids:
+        existing_ids = set(graph.nodes())
+        # Phase 4.5 HIGH P1: pre-built slug index for O(1) bare-slug resolution
+        slug_index = {pid.split("/")[-1]: pid for pid in existing_ids}
+
+        for p in pages:
+            content = p.get("content", "")
+            fm_match = _FRONTMATTER_RE.match(content)
+            body = fm_match.group(2) if fm_match else content
+            links = extract_wikilinks(body)
+            source_id = p["id"]
+            for link in links:
+                target = link
+                if target not in existing_ids:
+                    resolved = slug_index.get(target)
+                    if resolved:
+                        target = resolved
+                if target in existing_ids and target != source_id:
+                    graph.add_edge(source_id, target)
+    else:
+        page_paths = scan_wiki_pages(wiki_dir)
+
+        for page_path in page_paths:
+            pid = page_id(page_path, wiki_dir)
+            graph.add_node(pid, path=str(page_path))
+
+        existing_ids = set(graph.nodes())
+        # Phase 4.5 HIGH P1: pre-built slug index for O(1) bare-slug resolution
+        slug_index = {pid.split("/")[-1]: pid for pid in existing_ids}
+
+        for page_path in page_paths:
+            try:
+                content = page_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning("Failed to read %s: %s", page_path, e)
+                continue
+            fm_match = _FRONTMATTER_RE.match(content)
+            body = fm_match.group(2) if fm_match else content
+            links = extract_wikilinks(body)
+            source_id = page_id(page_path, wiki_dir)
+            for link in links:
+                target = link
+                if target not in existing_ids:
+                    resolved = slug_index.get(target)
+                    if resolved:
                         logger.debug(
                             "Resolved bare-slug [[%s]] → %s in %s",
-                            link, candidate, source_id,
+                            link, resolved, source_id,
                         )
-                        target = candidate
-                        break
-            # Fix 5.1: guard against self-loops (page linking to itself)
-            if target in existing_ids and target != source_id:
-                graph.add_edge(source_id, target)
+                        target = resolved
+                # Fix 5.1: guard against self-loops (page linking to itself)
+                if target in existing_ids and target != source_id:
+                    graph.add_edge(source_id, target)
 
     return graph
 
@@ -109,19 +135,26 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     n_components = nx.number_weakly_connected_components(graph)
 
     # Top 10 pages by PageRank
+    # Phase 4.5 HIGH Q4: include status metadata so consumers can distinguish
+    # "failed" from "no inbound links" (degenerate).
+    pagerank_status = "ok"
     try:
         pr = nx.pagerank(graph)
         pagerank = sorted(pr.items(), key=lambda x: x[1], reverse=True)[:10]
+        if not pagerank or all(d == 0 for _, d in pagerank):
+            pagerank_status = "degenerate"
     except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError) as e:
         logger.warning(
             "PageRank failed to converge on %d-node graph: %s",
             graph.number_of_nodes(), e,
         )
         pagerank = []
+        pagerank_status = "failed"
 
     # Top 10 pages by betweenness centrality (bridge nodes)
     # Use sampling approximation for large graphs to avoid O(V·E) stall.
     # Fix 5.4: seed=0 makes approximation deterministic across calls.
+    bridge_status = "ok"
     try:
         if graph.number_of_nodes() > 500:
             bc = nx.betweenness_centrality(graph, k=500, seed=0)
@@ -132,9 +165,12 @@ def graph_stats(graph: nx.DiGraph) -> dict:
             key=lambda x: x[1],
             reverse=True,
         )[:10]
+        if not bridge_nodes:
+            bridge_status = "degenerate"
     except (nx.NetworkXError, ValueError, RuntimeError) as e:
         logger.warning("betweenness_centrality failed: %s", e)
         bridge_nodes = []
+        bridge_status = "failed"
 
     return {
         "nodes": graph.number_of_nodes(),
@@ -145,5 +181,7 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         "orphans": isolated,  # alias for isolated (degree-zero nodes)
         "most_linked": most_linked,
         "pagerank": pagerank,
+        "pagerank_status": pagerank_status,
         "bridge_nodes": bridge_nodes,
+        "bridge_nodes_status": bridge_status,
     }

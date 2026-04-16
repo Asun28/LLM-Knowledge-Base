@@ -13,9 +13,11 @@ from kb.utils.pages import load_purpose
 
 logger = logging.getLogger(__name__)
 
-# Restrict to types that have raw/ directory mappings (excludes comparison/synthesis).
-# compiler.py imports this to guard template-change detection and looks up SOURCE_TYPE_DIRS.
-VALID_SOURCE_TYPES = frozenset(SOURCE_TYPE_DIRS.keys())
+# Phase 4.5 HIGH C1: removed duplicate SOURCE_TYPE_DIRS definition.
+# Extraction validation uses SOURCE_TYPE_DIRS directly (types with raw/ directory
+# mappings). config.py's SOURCE_TYPE_DIRS includes comparison/synthesis which
+# have no raw/ dirs — using it here would allow invalid source types to reach
+# template loading and KeyError in SOURCE_TYPE_DIRS lookups.
 
 # Fields that are always lists across all extraction templates.
 # Used as fallback when template specs lack explicit type annotations.
@@ -64,10 +66,10 @@ KNOWN_LIST_FIELDS = frozenset(
 @functools.lru_cache(maxsize=16)
 def _load_template_cached(source_type: str) -> dict:
     """Internal LRU-cached template loader. Returns the raw dict — do not mutate."""
-    if source_type not in VALID_SOURCE_TYPES:
+    if source_type not in SOURCE_TYPE_DIRS:
         raise ValueError(
             f"Invalid source type: {source_type!r}. "
-            f"Valid types: {', '.join(sorted(VALID_SOURCE_TYPES))}"
+            f"Valid types: {', '.join(sorted(SOURCE_TYPE_DIRS))}"
         )
     template_path = TEMPLATES_DIR / f"{source_type}.yaml"
     if not template_path.exists():

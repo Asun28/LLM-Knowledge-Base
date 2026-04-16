@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 _REFERENCE_WORDS = _re.compile(r"\b(it|this|that|they|these|those|there|then)\b", _re.I)
 
+# Phase 4.5 HIGH Q3: strip smart quotes, backticks, and single quotes from LLM output.
+# Models frequently wrap rewrites in Unicode quotes that pass through as literal tokens.
+_QUOTE_CHARS = '"\'\u201c\u201d\u2018\u2019`'
+
 
 def _should_rewrite(question: str) -> bool:
     """Return True if this question likely needs rewriting (has deictic/pronoun refs)."""
@@ -62,7 +66,7 @@ def rewrite_query(
             "STANDALONE QUESTION:"
         )
         rewritten = call_llm(prompt, tier="scan", max_tokens=200)
-        rewritten = rewritten.strip().strip('"')
+        rewritten = rewritten.strip().strip(_QUOTE_CHARS)
         if len(rewritten) > 3 * len(question):
             logger.debug(
                 "Rewrite too long (%d chars vs %d); falling back", len(rewritten), len(question)

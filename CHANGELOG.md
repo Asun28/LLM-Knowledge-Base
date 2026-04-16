@@ -39,6 +39,39 @@ Plus Phase 4.5 CRITICAL cycle 1 docs-sync (items 4 + 5): version-string alignmen
 
 Plus Phase 4.5 HIGH cycle 1: 22 HIGH-severity items from the post-v0.10.0 multi-agent audit, fixed across 4 themed commits (wiki_dir plumbing, cross-process RMW locking, prompt-injection sanitization + security, error-handling + vector-index lifecycle) via the automated feature-dev pipeline with Opus design + plan decision gates.
 
+### Phase 4.5 — HIGH cycle 2 (2026-04-17)
+
+22 HIGH-severity bugs across 5 themes (Query, Lint, Data Integrity, Performance, DRY).
+
+#### Fixed — Phase 4.5 HIGH cycle 2 (22 items)
+
+- `utils/markdown.py` `FRONTMATTER_RE` — bounded to 10KB to prevent catastrophic backtracking on malformed pages (D3)
+- `review/refiner.py` frontmatter guard — require YAML key:value between fences; horizontal rules (`---`) no longer rejected (D1)
+- `review/refiner.py` — strip UTF-8 BOM before frontmatter parsing (D2)
+- `evolve/analyzer.py` — replaced inlined frontmatter regex with shared `FRONTMATTER_RE` import (P3)
+- `lint/semantic.py` `_group_by_term_overlap` — fixed `group(1)` → `group(2)` so consistency checking tokenizes body text, not YAML keys (L7)
+- `ingest/extractors.py` — removed duplicate `VALID_SOURCE_TYPES`; uses `SOURCE_TYPE_DIRS` directly (C1)
+- `compile/compiler.py` — imports `SOURCE_TYPE_DIRS` from config instead of extractors (C1)
+- `lint/checks.py` `check_cycles` — bounded `nx.simple_cycles` to 100 via `itertools.islice` (L1)
+- `lint/semantic.py` `_group_by_term_overlap` — replaced O(n²) pairwise loop with inverted postings index; removed 500-page wall (L2)
+- `graph/builder.py` `build_graph` — accepts optional `pages: list[dict]` param to avoid redundant disk reads (L3)
+- `lint/trends.py` `_parse_timestamp` — all timestamps now UTC-aware; date-only strings treated as midnight UTC (L4)
+- `lint/trends.py` `compute_verdict_trends` — parse failures excluded from both `overall` and `period_buckets` (L5)
+- `lint/semantic.py` `_render_sources` — per-source minimum budget floor of 500 chars; large wiki pages no longer starve source context (L6)
+- `feedback/store.py` — eviction changed from activity-count to timestamp-based; oldest entries evicted first (D4)
+- `ingest/contradiction.py` — claim truncation promoted from `logger.debug` to `logger.warning` with unchecked count (D5)
+- `ingest/pipeline.py` — contradiction detection excludes pages created in current ingest to prevent noisy self-comparison (D6)
+- `query/engine.py` `_build_query_context` — tier 1 budget enforced per-addition; one oversized summary no longer starves tier 2 (Q1)
+- `query/hybrid.py` `rrf_fusion` — metadata merge preserves all fields on id collision, not just score (Q2)
+- `query/rewriter.py` — strips smart quotes, backticks, and single quotes from LLM-rewritten queries (Q3)
+- `graph/builder.py` `graph_stats` — PageRank and betweenness centrality include `status` metadata (ok/failed/degenerate) (Q4)
+- `graph/builder.py` `build_graph` — bare-slug resolution uses pre-built `slug_index` dict for O(1) lookup (P1)
+- `utils/pages.py` `load_all_pages` — `include_content_lower` param (default True) allows callers to skip unnecessary `.lower()` computation (P2)
+
+#### Stats
+
+- 1645 tests across 126 test files
+
 ### Phase 4.5 — HIGH cycle 1 (2026-04-16)
 
 22 HIGH-severity bugs from Rounds 1-6 of the Phase 4.5 multi-agent audit. 4 themed commits.

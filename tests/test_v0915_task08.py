@@ -350,19 +350,24 @@ class TestFrontmatterRegex:
         find_connection_opportunities(wiki_dir=tmp_wiki)
 
     def test_regex_has_no_leading_whitespace_prefix(self):
-        """The regex in find_connection_opportunities anchors with \\A---, not \\A\\s*---."""
+        """The regex in find_connection_opportunities uses shared FRONTMATTER_RE.
+
+        Phase 4.5 HIGH P3: consolidated to use shared regex import instead of
+        inlined pattern.
+        """
         import inspect
 
         from kb.evolve import analyzer
 
         source = inspect.getsource(analyzer)
-        # Find the re.sub call used for frontmatter stripping
-        # It should NOT contain r"\A\s*---"
+        # Should NOT contain the old inlined regex
         assert r"\A\s*---" not in source, (
-            "Frontmatter regex still has \\A\\s*--- prefix; should be \\A---"
+            "Frontmatter regex still has \\A\\s*--- prefix; should use shared FRONTMATTER_RE"
         )
-        # And it SHOULD contain r"\A---"
-        assert r"\A---" in source, "Frontmatter regex \\A--- not found in analyzer"
+        # Should use shared FRONTMATTER_RE (imported, not inlined)
+        assert "FRONTMATTER_RE" in source, (
+            "analyzer should import and use shared FRONTMATTER_RE"
+        )
 
 
 # ── Fix 8.9 — analyze_coverage threshold < 3 ─────────────────────────────────
