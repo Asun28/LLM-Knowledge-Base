@@ -59,18 +59,45 @@ class TestMarkdownFrontmatterFastPath:
     def test_no_regex_when_content_missing_opening_fence(self) -> None:
         import kb.utils.markdown as mod
 
-        body = "just a plain paragraph, no frontmatter here.\n" * 50
-        with patch.object(mod.FRONTMATTER_RE, "match", wraps=mod.FRONTMATTER_RE.match) as spy:
+        # Substitute FRONTMATTER_RE with a wrapper that counts match() calls.
+        class CountingPattern:
+            def __init__(self, real):
+                self.real = real
+                self.calls = 0
+
+            def match(self, *args, **kwargs):
+                self.calls += 1
+                return self.real.match(*args, **kwargs)
+
+            def sub(self, *args, **kwargs):
+                return self.real.sub(*args, **kwargs)
+
+            def findall(self, *args, **kwargs):
+                return self.real.findall(*args, **kwargs)
+
+        wrapper = CountingPattern(mod.FRONTMATTER_RE)
+        with patch.object(mod, "FRONTMATTER_RE", wrapper):
+            body = "just a plain paragraph, no frontmatter here.\n" * 50
             mod._strip_code_spans_and_fences(body)
-            assert spy.call_count == 0, "FRONTMATTER_RE.match must not be called when content lacks ---"
+        assert wrapper.calls == 0, "FRONTMATTER_RE.match must not be called when content lacks ---"
 
     def test_regex_still_called_when_fence_present(self) -> None:
         import kb.utils.markdown as mod
 
-        body = "---\ntitle: x\n---\nbody here\n"
-        with patch.object(mod.FRONTMATTER_RE, "match", wraps=mod.FRONTMATTER_RE.match) as spy:
+        class CountingPattern:
+            def __init__(self, real):
+                self.real = real
+                self.calls = 0
+
+            def match(self, *args, **kwargs):
+                self.calls += 1
+                return self.real.match(*args, **kwargs)
+
+        wrapper = CountingPattern(mod.FRONTMATTER_RE)
+        with patch.object(mod, "FRONTMATTER_RE", wrapper):
+            body = "---\ntitle: x\n---\nbody here\n"
             mod._strip_code_spans_and_fences(body)
-            assert spy.call_count == 1
+        assert wrapper.calls == 1
 
 
 # -----------------------------------------------------------------------------

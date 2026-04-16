@@ -28,6 +28,7 @@ Rules:
 #### Fixed — Backlog-by-file cycle 2 (30 items)
 
 - `utils/hashing.py` `content_hash` / `hash_bytes` — normalize CRLF / lone CR to LF before hashing so Windows clones with `core.autocrlf=true` hash the same as POSIX; prevents full corpus re-ingest on first compile (LOW)
+- `utils/markdown.py` `_strip_code_spans_and_fences` — fast-path `startswith("---")` before running `FRONTMATTER_RE.match`; saves regex work for every page without frontmatter in `build_graph` + `load_all_pages` hot paths (MED R2)
 
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 

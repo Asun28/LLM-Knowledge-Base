@@ -342,9 +342,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `query/hybrid.py` RRF new-result insert (~27) — `scores[pid] = {**result, "score": rrf_score}` materializes a shallow dict copy on first insert. Phase 5 chunk indexing (K variants × limit×2) will push this to ~1000 dict copies per query; also tangles with the Round 1 metadata-collision finding. (R2)
   (fix: store `scores[pid] = (rrf_score, result)`; assemble output list at sort time; eliminates copies on repeat hits)
 
-- `utils/markdown.py` `FRONTMATTER_RE` backtrack (~9) — non-greedy `.*?` with DOTALL still scans forward through every byte looking for a closing fence on files without one. Any page missing its closing `---` causes the full body to be re-scanned per regex attempt; in `build_graph` + `load_all_pages` hot paths, one malformed 100 KB page can add ~500 MB of regex scan traffic per lint run. (R2)
-  (fix: fast-path `content.startswith("---")` before running the regex; or bound with a `{3,10000}` length ceiling)
-
 - `query/embeddings.py` `embed_texts` (~50) — `[vec.tolist() for vec in embeddings]` bounces model2vec's contiguous numpy array into Python float lists; then `sqlite_vec.serialize_float32(vec)` re-converts back to bytes. Double conversion. At 5k pages × 256-dim index build = 1.28 M Python float objects allocated only to be re-serialized. (R2)
   (fix: pass the numpy array directly to `sqlite_vec.serialize_float32` (accepts buffer protocol); drop the `.tolist()` bounce)
 
