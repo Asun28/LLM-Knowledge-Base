@@ -68,6 +68,11 @@ SUPPORTED_SOURCE_EXTENSIONS = frozenset({
     ".md", ".txt", ".pdf", ".json", ".yaml", ".yml", ".rst", ".csv"
 })
 
+# J1 (Phase 4.5 MEDIUM): hard ceiling on rewriter output. Floor is
+# max(3 * len(question), 120) — these two together accept legitimate
+# short reference expansions while rejecting LLM rambles.
+MAX_REWRITE_CHARS = 500
+
 # ── Valid source types for extraction ────────────────────────────────
 # Includes comparison/synthesis which have templates but no raw/ subdirectory.
 VALID_SOURCE_TYPES = frozenset(list(SOURCE_TYPE_DIRS.keys()) + ["comparison", "synthesis"])

@@ -60,13 +60,18 @@ def _dedup_by_source(results: list[dict]) -> list[dict]:
 
 
 def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dict]:
-    """Layer 2: Remove results with Jaccard similarity > threshold to kept results."""
-    kept: list[dict] = []
+    """Layer 2: Remove results with Jaccard similarity > threshold to kept results.
+
+    K1 (Phase 4.5 MEDIUM): cache ``_content_tokens`` once per kept result.
+    Previously the inner loop recomputed tokens for every already-kept entry
+    on every candidate — O(n·k) wasted work on unchanging content at
+    ``max_results*2`` candidates × ``k`` kept.
+    """
+    kept: list[tuple[dict, set[str]]] = []
     for r in results:
         r_words = _content_tokens(r.get("content_lower", ""))
         too_similar = False
-        for k in kept:
-            k_words = _content_tokens(k.get("content_lower", ""))
+        for _, k_words in kept:
             intersection = r_words & k_words
             union = r_words | k_words
             jaccard = len(intersection) / len(union) if union else 0.0
@@ -74,8 +79,8 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
                 too_similar = True
                 break
         if not too_similar:
-            kept.append(r)
-    return kept
+            kept.append((r, r_words))
+    return [r for r, _ in kept]
 
 
 def _enforce_type_diversity(results: list[dict], max_ratio: float) -> list[dict]:

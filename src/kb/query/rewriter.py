@@ -3,7 +3,7 @@
 import logging
 import re as _re
 
-from kb.config import MAX_CONVERSATION_CONTEXT_CHARS
+from kb.config import MAX_CONVERSATION_CONTEXT_CHARS, MAX_REWRITE_CHARS
 from kb.utils.llm import LLMError, call_llm
 
 logger = logging.getLogger(__name__)
@@ -14,9 +14,23 @@ _REFERENCE_WORDS = _re.compile(r"\b(it|this|that|they|these|those|there|then)\b"
 # Models frequently wrap rewrites in Unicode quotes that pass through as literal tokens.
 _QUOTE_CHARS = '"\'\u201c\u201d\u2018\u2019`'
 
+# J2 (Phase 4.5 R4 LOW): canonical standalone WH-question pattern. Matches
+# "who is Andrew Ng?", "what is RAG?", "where did …?" etc. when combined
+# with a proper-noun-like capitalized token elsewhere in the string.
+_WH_QUESTION_RE = _re.compile(r"^(who|what|where|when|why|how)\b.*\?$", _re.IGNORECASE)
+_PROPER_NOUN_RE = _re.compile(r"\b[A-Z][a-z]+")
+
 
 def _should_rewrite(question: str) -> bool:
-    """Return True if this question likely needs rewriting (has deictic/pronoun refs)."""
+    """Return True if this question likely needs rewriting (has deictic/pronoun refs).
+
+    J2 (Phase 4.5 R4 LOW): skip rewriting when the question is a canonical
+    standalone WH-question ending in '?' AND contains a proper-noun-like
+    token (e.g. "Who is Andrew Ng?"). Avoids burning a scan-tier LLM call
+    on questions that already carry their own context.
+    """
+    if _WH_QUESTION_RE.match(question) and _PROPER_NOUN_RE.search(question):
+        return False
     if _REFERENCE_WORDS.search(question):
         return True
     words = question.split()
@@ -67,9 +81,18 @@ def rewrite_query(
         )
         rewritten = call_llm(prompt, tier="scan", max_tokens=200)
         rewritten = rewritten.strip().strip(_QUOTE_CHARS)
-        if len(rewritten) > 3 * len(question):
+        # J1 (Phase 4.5 MEDIUM): absolute cap + floor. Previous bound
+        # `3 * len(question)` was too tight for short reference questions
+        # ("what about it?" → 46-char expansion exceeded 3×) and too loose
+        # for long LLM rambles. Floor at max(3*len, 120) preserves legitimate
+        # short expansions; hard ceiling MAX_REWRITE_CHARS (500) catches
+        # runaway output.
+        upper = min(MAX_REWRITE_CHARS, max(3 * len(question), 120))
+        if len(rewritten) > upper:
             logger.debug(
-                "Rewrite too long (%d chars vs %d); falling back", len(rewritten), len(question)
+                "Rewrite too long (%d chars, cap=%d); falling back",
+                len(rewritten),
+                upper,
             )
             return question
         if rewritten:
