@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 SENTINEL = "<!-- evidence-trail:begin -->"
 
 
+def _neutralize_pipe(value: str) -> str:
+    """Item 28 (cycle 2): backtick-wrap values containing `|` so the pipe is
+    unambiguous inside the evidence-trail table-like row format. Future
+    temporal-claim parsers splitting on `|` used to misalign fields when a
+    legitimate source_ref or action contained a pipe. Backtick-wrap only when
+    the pipe is actually present — unchanged cells keep backwards-compat with
+    existing evidence-trail entries.
+    """
+    if "|" in value:
+        return f"`{value}`"
+    return value
+
+
 def build_evidence_entry(
     source_ref: str,
     action: str,
@@ -24,9 +37,16 @@ def build_evidence_entry(
     """Build a single evidence trail entry line.
 
     Format: - YYYY-MM-DD | source_ref | action
+
+    Item 28 (cycle 2): `source_ref` and `action` are backtick-wrapped when
+    they contain `|` so pipe-delimited parsers do not misalign. This IS the
+    persisted form (the entry is rendered-and-stored in one step; there is
+    no separate storage layer).
     """
     d = entry_date or date.today().isoformat()
-    return f"- {d} | {source_ref} | {action}"
+    safe_ref = _neutralize_pipe(source_ref)
+    safe_action = _neutralize_pipe(action)
+    return f"- {d} | {safe_ref} | {safe_action}"
 
 
 def format_evidence_entry(date_str: str, source: str, summary: str) -> str:
