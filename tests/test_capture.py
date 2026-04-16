@@ -644,7 +644,6 @@ class TestRenderMarkdown:
     def test_all_fields_present(self):
         md = _render_markdown(
             item=self._sample_item(),
-            slug="decision-pick-atomic-n-files",
             captured_alongside=["discovery-foo", "gotcha-bar"],
             provenance="claude-code-2026-04-13T17-45-00Z",
             captured_at="2026-04-13T17:45:23Z",
@@ -662,7 +661,6 @@ class TestRenderMarkdown:
     def test_empty_alongside_renders_empty_list(self):
         md = _render_markdown(
             item=self._sample_item(),
-            slug="decision-foo",
             captured_alongside=[],
             provenance="capture-x",
             captured_at="2026-04-13T17:45:23Z",
@@ -673,7 +671,6 @@ class TestRenderMarkdown:
     def test_z_suffix_preserved_in_raw_yaml(self):
         md = _render_markdown(
             item=self._sample_item(),
-            slug="decision-foo",
             captured_alongside=[],
             provenance="capture-x",
             captured_at="2026-04-13T17:45:23Z",
@@ -690,7 +687,6 @@ class TestRenderMarkdown:
         item["body"] = "first part\n---\nsecond part with --- triple dashes"
         md = _render_markdown(
             item=item,
-            slug="x",
             captured_alongside=[],
             provenance="p",
             captured_at="2026-04-13T00:00:00Z",
@@ -704,7 +700,6 @@ class TestRenderMarkdown:
         item["title"] = "pay\u202eusalert"  # RLO embedded
         md = _render_markdown(
             item=item,
-            slug="x",
             captured_alongside=[],
             provenance="p",
             captured_at="2026-04-13T00:00:00Z",
@@ -1311,7 +1306,7 @@ class TestAdversarialAuditFixes:
             "one_line_summary": 'summary with "quotes"',
             "confidence": "stated",
         }
-        md = _render_markdown(item, "s", [], "prov", "2026-04-14T00:00:00Z")
+        md = _render_markdown(item, [], "prov", "2026-04-14T00:00:00Z")
         post = _fm.loads(md)
         assert post.metadata["title"] == r"path C:\Users\foo"
         assert post.metadata["one_line_summary"] == 'summary with "quotes"'
