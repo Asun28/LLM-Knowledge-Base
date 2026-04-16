@@ -1,7 +1,8 @@
 """Query engine — BM25 + vector hybrid search + LLM synthesis with citations."""
 
 import logging
-from datetime import date
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from kb.config import (
@@ -172,7 +173,13 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
         for src in sources:
             src_path = root / src
             if src_path.exists():
-                mtime = date.fromtimestamp(src_path.stat().st_mtime)
+                # I1 (Phase 4.5 MEDIUM): UTC-aware mtime date computation. Prior
+                # code used date.fromtimestamp(mtime) which applies local TZ,
+                # while date.fromisoformat(updated_str) is naive. On DST/TZ
+                # boundaries near midnight UTC the comparison would flip.
+                mtime = datetime.fromtimestamp(
+                    src_path.stat().st_mtime, tz=timezone.utc
+                ).date()
                 if newest_source_mtime is None or mtime > newest_source_mtime:
                     newest_source_mtime = mtime
         if newest_source_mtime and newest_source_mtime > page_date:
@@ -181,12 +188,56 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
     return flagged
 
 
+# I2 (Phase 4.5 MEDIUM): module-level cache for search_raw_sources BM25
+# index. Keyed on (resolved_raw_dir, file_count, max_mtime_ns) so deletion
+# (count change) or any file update (mtime change) invalidates. Resolves
+# the per-query rebuild hot path on large raw/ trees.
+_RAW_BM25_CACHE: dict[tuple[str, int, int], tuple[list[dict], "BM25Index"]] = {}
+
+# I3 (Phase 4.5 R4 HIGH): rewrite-leak prefix detectors. The patterns match
+# LLM scaffolding phrases that sometimes survive rewriter output and would
+# pollute downstream search if accepted. Both are case-insensitive.
+_LEAK_PREFIX_RE = re.compile(r"^[A-Z][a-zA-Z ]{0,40}:\s*", re.IGNORECASE)
+_LEAK_KEYWORD_RE = re.compile(
+    r"^\s*(sure|okay|certainly|here(\'s)? (is|the|your)|the standalone|"
+    r"rewritten|standalone question is|query:)",
+    re.IGNORECASE,
+)
+
+
+def _raw_sources_cache_key(raw_dir: Path) -> tuple[str, int, int] | None:
+    """Return cache key for raw_dir or None if it can't be computed."""
+    try:
+        resolved = str(raw_dir.resolve())
+    except OSError:
+        return None
+    count = 0
+    max_mtime = 0
+    for subdir in raw_dir.iterdir():
+        if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
+            continue
+        for f in subdir.glob("*.md"):
+            try:
+                count += 1
+                mt = f.stat().st_mtime_ns
+                if mt > max_mtime:
+                    max_mtime = mt
+            except OSError:
+                continue
+    return (resolved, count, max_mtime)
+
+
 def search_raw_sources(
     question: str, raw_dir: Path | None = None, max_results: int = 5
 ) -> list[dict]:
     """Search raw/ source files using BM25 for verbatim context fallback.
 
     Returns list of dicts with keys: id, path, content, score.
+
+    I2 (Phase 4.5 MEDIUM): cache the BM25 index + loaded sources keyed on
+    (raw_dir, file_count, max_mtime_ns) so subsequent queries skip the
+    per-query disk rebuild. Cache is busted by any raw/*.md addition,
+    deletion, or mtime bump.
     """
     from kb.config import RAW_DIR
 
@@ -198,29 +249,37 @@ def search_raw_sources(
     if not query_tokens:
         return []
 
-    sources = []
-    for subdir in raw_dir.iterdir():
-        if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
-            continue
-        for f in subdir.glob("*.md"):
-            try:
-                content = f.read_text(encoding="utf-8")
-                sources.append(
-                    {
-                        "id": f"raw/{subdir.name}/{f.name}",
-                        "path": str(f),
-                        "content": content,
-                        "content_lower": content.lower(),
-                    }
-                )
-            except (OSError, UnicodeDecodeError):
+    cache_key = _raw_sources_cache_key(raw_dir)
+    cached = _RAW_BM25_CACHE.get(cache_key) if cache_key is not None else None
+    if cached is not None:
+        sources, index = cached
+    else:
+        sources = []
+        for subdir in raw_dir.iterdir():
+            if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
                 continue
+            for f in subdir.glob("*.md"):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    sources.append(
+                        {
+                            "id": f"raw/{subdir.name}/{f.name}",
+                            "path": str(f),
+                            "content": content,
+                            "content_lower": content.lower(),
+                        }
+                    )
+                except (OSError, UnicodeDecodeError):
+                    continue
 
-    if not sources:
-        return []
+        if not sources:
+            return []
 
-    documents = [tokenize(s["content_lower"]) for s in sources]
-    index = BM25Index(documents)
+        documents = [tokenize(s["content_lower"]) for s in sources]
+        index = BM25Index(documents)
+        if cache_key is not None:
+            _RAW_BM25_CACHE[cache_key] = (sources, index)
+
     scores = index.score(query_tokens, k1=BM25_K1, b=BM25_B)
 
     scored = []
@@ -384,6 +443,26 @@ def query_wiki(
         from kb.query.rewriter import rewrite_query
 
         effective_question = rewrite_query(question, conversation_context)
+        # I3 (Phase 4.5 R4 HIGH): reject rewrites with LLM prefix leaks.
+        # Scan-tier models sometimes emit "Sure! Here's the rewrite: …" or
+        # "The standalone question is: …" — these pollute downstream BM25,
+        # vector, and synthesis prompts. If detected, fall back to the
+        # original question so search quality doesn't silently degrade.
+        leaked = False
+        if effective_question != question:
+            # Multi-line output or leading `Xxx: ...` preamble is a leak.
+            if "\n" in effective_question:
+                leaked = True
+            elif _LEAK_PREFIX_RE.match(effective_question):
+                leaked = True
+            elif _LEAK_KEYWORD_RE.match(effective_question):
+                leaked = True
+        if leaked:
+            logger.warning(
+                "rewrite_query output rejected as prefix-leak; reverting to original: %r",
+                effective_question[:200],
+            )
+            effective_question = question
 
     # 1. Search for relevant pages
     matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)
