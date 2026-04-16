@@ -22,7 +22,10 @@ def rrf_fusion(lists: list[list[dict]], k: int = RRF_K) -> list[dict]:
             pid = result["id"]
             rrf_score = 1.0 / (k + rank)
             if pid in scores:
-                scores[pid]["score"] += rrf_score
+                # Phase 4.5 HIGH Q2: merge ALL metadata fields on collision,
+                # not just score. Later lists take precedence for non-score fields.
+                accumulated_score = scores[pid]["score"] + rrf_score
+                scores[pid] = {**scores[pid], **result, "score": accumulated_score}
             else:
                 scores[pid] = {**result, "score": rrf_score}
 

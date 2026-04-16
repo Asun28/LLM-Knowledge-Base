@@ -80,6 +80,8 @@ def refine_page(
             text = page_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
             return {"error": f"Cannot read {page_id}: {e}"}
+        # Phase 4.5 HIGH D2: strip UTF-8 BOM so frontmatter regex matches
+        text = text.lstrip("\ufeff")
         # Normalize CRLF → LF for consistent frontmatter parsing on Windows
         text = text.replace("\r\n", "\n")
 
@@ -112,9 +114,10 @@ def refine_page(
         # Normalize CRLF in caller-supplied content before guard check
         updated_content = updated_content.replace("\r\n", "\n")
 
-        # Reject full frontmatter blocks (---\nkey: val\n---) but allow horizontal rules (---\n)
+        # Phase 4.5 HIGH D1: reject frontmatter blocks (---\nkey: val\n---) but allow
+        # horizontal rules (---\n). Require at least one YAML key: value line between fences.
         stripped_content = updated_content.lstrip()
-        if re.match(r"---\n.*?\n?---", stripped_content, re.DOTALL):
+        if re.match(r"---\n\s*\w+\s*:.*?\n---", stripped_content, re.DOTALL):
             return {"error": "Content looks like a frontmatter block — pass only the body text."}
 
         # Reconstruct page — strip only leading newlines (preserve indented code blocks).

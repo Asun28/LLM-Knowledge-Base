@@ -40,10 +40,13 @@ def detect_contradictions(
         return []
 
     if len(new_claims) > max_claims:
-        logger.debug(
-            "Checking first %d of %d claims for contradictions (truncated)",
+        # Phase 4.5 HIGH D5: promote to WARNING — silent claim truncation hid
+        # the fact that the last N claims were never checked for contradictions.
+        logger.warning(
+            "Checking first %d of %d claims for contradictions (truncated — %d unchecked)",
             max_claims,
             len(new_claims),
+            len(new_claims) - max_claims,
         )
     claims_to_check = new_claims[:max_claims]
     contradictions = []

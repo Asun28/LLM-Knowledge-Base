@@ -1,5 +1,6 @@
 """Individual lint checks: orphans, dead links, staleness, circular refs, coverage gaps."""
 
+import itertools
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -228,7 +229,10 @@ def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) 
         graph = build_graph(wiki_dir)
     issues = []
 
-    for cycle in nx.simple_cycles(graph):
+    # Phase 4.5 HIGH L1: bound cycle detection to 100 to prevent super-exponential
+    # runtime on dense link graphs. nx.simple_cycles is unbounded; islice caps output.
+    _MAX_CYCLES = 100
+    for cycle in itertools.islice(nx.simple_cycles(graph), _MAX_CYCLES):
         if len(cycle) >= 2:
             cycle_str = " → ".join(cycle + [cycle[0]])
             issues.append(
@@ -239,6 +243,16 @@ def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) 
                     "message": f"Wikilink cycle detected: {cycle_str}",
                 }
             )
+
+    if len(issues) >= _MAX_CYCLES:
+        issues.append(
+            {
+                "check": "wikilink_cycle",
+                "severity": "warning",
+                "cycle": [],
+                "message": f"Cycle detection aborted after {_MAX_CYCLES} cycles — graph may contain more",
+            }
+        )
 
     return issues
 

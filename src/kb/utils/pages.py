@@ -49,11 +49,19 @@ def normalize_sources(sources: str | list | None) -> list[str]:
     return result
 
 
-def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
+def load_all_pages(
+    wiki_dir: Path | None = None, *, include_content_lower: bool = True
+) -> list[dict]:
     """Load all wiki pages with metadata and content.
 
     Returns a list of dicts with keys: id, path, title, type, confidence,
-    sources, created, updated, content, content_lower.
+    sources, created, updated, content, and optionally content_lower.
+
+    Args:
+        wiki_dir: Path to wiki directory. Defaults to WIKI_DIR from config.
+        include_content_lower: If True (default), includes pre-lowercased content.
+            Phase 4.5 HIGH P2: callers that don't need content_lower (kb_list_pages,
+            build_graph, lint, export, evolve) can pass False to save ~40MB at 5k pages.
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = []
@@ -66,20 +74,20 @@ def load_all_pages(wiki_dir: Path | None = None) -> list[dict]:
                 post = frontmatter.load(str(page_path))
                 pid = _page_id(page_path, wiki_dir)
                 sources = normalize_sources(post.metadata.get("source"))
-                pages.append(
-                    {
-                        "id": pid,
-                        "path": str(page_path),
-                        "title": str(post.metadata.get("title", page_path.stem)),
-                        "type": post.metadata.get("type", "unknown"),
-                        "confidence": post.metadata.get("confidence", "unknown"),
-                        "sources": sources,
-                        "created": _date_str(post.metadata.get("created")),
-                        "updated": _date_str(post.metadata.get("updated")),
-                        "content": post.content,
-                        "content_lower": post.content.lower(),
-                    }
-                )
+                page_dict = {
+                    "id": pid,
+                    "path": str(page_path),
+                    "title": str(post.metadata.get("title", page_path.stem)),
+                    "type": post.metadata.get("type", "unknown"),
+                    "confidence": post.metadata.get("confidence", "unknown"),
+                    "sources": sources,
+                    "created": _date_str(post.metadata.get("created")),
+                    "updated": _date_str(post.metadata.get("updated")),
+                    "content": post.content,
+                }
+                if include_content_lower:
+                    page_dict["content_lower"] = post.content.lower()
+                pages.append(page_dict)
             except (
                 OSError,
                 ValueError,

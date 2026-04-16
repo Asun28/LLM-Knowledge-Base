@@ -866,9 +866,15 @@ def ingest_source(
         key_claims = extraction.get("key_claims") or extraction.get("key_points") or []
         if key_claims and isinstance(key_claims, list):
             try:
+                # Phase 4.5 HIGH D6: exclude pages created in THIS ingest to prevent
+                # noisy self-comparison (new summary vs new entities from same source).
+                pages_created_set = set(pages_created)
+                preexisting_pages = [
+                    p for p in all_wiki_pages if p["id"] not in pages_created_set
+                ]
                 contradiction_warnings = detect_contradictions(
                     [str(c) for c in key_claims if isinstance(c, str)],
-                    all_wiki_pages,
+                    preexisting_pages,
                 )
                 if contradiction_warnings:
                     logger.warning(

@@ -14,7 +14,6 @@ from kb.config import (
     TEMPLATES_DIR,
     WIKI_DIR,
 )
-from kb.ingest.extractors import VALID_SOURCE_TYPES
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.wiki_log import append_wiki_log
@@ -171,7 +170,7 @@ def find_changed_sources(
         if stored_hash != current_hash:
             # Template changed — determine source type from key (_template/<type>)
             source_type = key.split("/", 1)[1]
-            if source_type not in VALID_SOURCE_TYPES:
+            if source_type not in SOURCE_TYPE_DIRS:
                 continue
             type_dir = effective_raw_dir / SOURCE_TYPE_DIRS[source_type].name
             if not type_dir.exists():

@@ -18,7 +18,10 @@ _WIKILINK_OVERLENGTH_PATTERN = re.compile(
 
 # Splits YAML frontmatter from page body. Matches the opening ``---`` fence,
 # captures the entire frontmatter block and the remainder of the file.
-FRONTMATTER_RE = re.compile(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", re.DOTALL)
+# Phase 4.5 HIGH D3: bounded to 10 KB to prevent catastrophic backtracking on
+# pages missing a closing fence. Interior ``---`` on indented lines (YAML block
+# scalars) are correctly skipped because the regex requires ``\n---`` at col 0.
+FRONTMATTER_RE = re.compile(r"\A(---[ \t]*\r?\n.{0,10000}?\r?\n---[ \t]*\r?\n?)(.*)", re.DOTALL)
 
 # Matches raw/ file references that are NOT mid-URL (lookbehind rejects /, \w, and - before raw/)
 _RAW_REF_PATTERN = re.compile(

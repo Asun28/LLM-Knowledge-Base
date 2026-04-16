@@ -1,7 +1,6 @@
 """Semantic lint checks — build contexts for LLM-powered quality evaluation."""
 
 import logging
-import re
 from pathlib import Path
 
 import frontmatter
@@ -16,6 +15,7 @@ from kb.config import (
 )
 from kb.graph.builder import build_graph, page_id, scan_wiki_pages
 from kb.review.context import pair_page_with_sources
+from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import normalize_sources
 
 logger = logging.getLogger(__name__)
@@ -28,17 +28,27 @@ def _truncate_source(content: str, budget: int) -> str:
     return content[:budget] + f"\n\n[... truncated from {len(content):,} to {budget:,} chars]\n"
 
 
+_MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
+
+
 def _render_sources(sources: list[dict], lines: list[str]) -> None:
     """Append source sections to lines with budget-aware truncation.
 
     Mutates `lines` in place. Tracks cumulative size so later sources
     get progressively less budget — prevents LLM context overflow.
+    Phase 4.5 HIGH L6: enforces minimum floor per source so large wiki pages
+    don't starve source context entirely (budget=0 previously passed through).
     """
     used = sum(len(line) for line in lines) + max(0, len(lines) - 1)
     for i, source in enumerate(sources, 1):
+        if used >= QUERY_CONTEXT_MAX_CHARS:
+            break  # PR review fix: prevent MIN_SOURCE_CHARS from overflowing total cap
         header = f"## Source {i}: {source['path']}\n"
         if source.get("content"):
-            remaining = max(0, QUERY_CONTEXT_MAX_CHARS - used - len(header) - 20)
+            remaining = max(
+                _MIN_SOURCE_CHARS,
+                QUERY_CONTEXT_MAX_CHARS - used - len(header) - 20,
+            )
             body = _truncate_source(source["content"], remaining)
         else:
             body = f"*Not available: {source.get('error', 'unknown')}*"
@@ -184,9 +194,11 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
             logger.warning("Skipping unreadable page %s in term overlap: %s", page_path, e)
             continue
         pid = page_id(page_path, wiki_dir)
-        # Strip YAML frontmatter before tokenizing (handle both LF and CRLF line endings)
-        fm_match = re.match(r"\A\s*---\r?\n.*?\r?\n---\r?\n?(.*)", raw, re.DOTALL)
-        body = fm_match.group(1) if fm_match else raw
+        # Phase 4.5 HIGH L7: use shared FRONTMATTER_RE and group(2) for body text.
+        # Previous code used group(1) which captured the frontmatter fence, causing
+        # consistency grouping to tokenize YAML keys instead of body content.
+        fm_match = _FRONTMATTER_RE.match(raw)
+        body = fm_match.group(2) if fm_match else raw
         words = {
             stripped
             for w in body.lower().split()
@@ -194,25 +206,28 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
         } - common_words
         page_terms[pid] = words
 
-    groups = []
-    page_ids_list = list(page_terms.keys())
+    # Phase 4.5 HIGH L2: inverted postings index replaces O(n^2) pairwise loop.
+    # No 500-page wall — this is O(T * avg_pages_per_term) which scales linearly.
+    term_to_pages: dict[str, list[str]] = {}
+    for pid, terms in page_terms.items():
+        for term in terms:
+            if term not in term_to_pages:
+                term_to_pages[term] = []
+            term_to_pages[term].append(pid)
 
-    _MAX_OVERLAP_PAGES = 500
-    if len(page_ids_list) > _MAX_OVERLAP_PAGES:
-        logger.info(
-            "Skipping O(n^2) term-overlap grouping for %d pages (limit=%d)",
-            len(page_ids_list),
-            _MAX_OVERLAP_PAGES,
-        )
-        return []
+    # Count shared terms per page pair via the inverted index
+    from collections import Counter
 
-    # j > i loop structure already prevents duplicates — no seen_pairs set needed
-    for i, pid_a in enumerate(page_ids_list):
-        for pid_b in page_ids_list[i + 1 :]:
-            shared = page_terms[pid_a] & page_terms[pid_b]
-            if len(shared) >= MIN_SHARED_TERMS:
-                groups.append(sorted([pid_a, pid_b]))
+    pair_counts: Counter[tuple[str, str]] = Counter()
+    for term, pids in term_to_pages.items():
+        if len(pids) > 200:
+            continue  # Skip extremely common terms (noise)
+        for i, a in enumerate(pids):
+            for b in pids[i + 1 :]:
+                pair = (a, b) if a < b else (b, a)
+                pair_counts[pair] += 1
 
+    groups = [sorted(list(pair)) for pair, count in pair_counts.items() if count >= MIN_SHARED_TERMS]
     return groups
 
 

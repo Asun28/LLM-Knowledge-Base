@@ -287,15 +287,23 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         total += len(section)
         return True
 
-    # Tier 1: summaries — capped by CONTEXT_TIER1_BUDGET
+    # Phase 4.5 HIGH Q1: per-addition tier budget. Each summary must fit within
+    # the REMAINING tier-1 budget, not just be checked against the cap as a
+    # stopping rule. Prevents one 30K summary from starving tier 2.
     tier1_used = 0
     for p in summaries:
-        if tier1_used >= CONTEXT_TIER1_BUDGET:
+        tier1_remaining = CONTEXT_TIER1_BUDGET - tier1_used
+        if tier1_remaining <= 0:
+            skipped += 1
+            continue
+        section_estimate = len(p.get("content", "")) + 100  # header overhead
+        if section_estimate > tier1_remaining and sections:
+            # This summary would exceed tier-1 budget and we already have content
             skipped += 1
             continue
         before = total
         if _try_add(p):
-            tier1_used += total - before  # how much _try_add added
+            tier1_used += total - before
 
     # Tier 2: everything else
     for p in others:
