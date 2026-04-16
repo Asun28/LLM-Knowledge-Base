@@ -1,7 +1,5 @@
 """Tests for shared utility modules — text, wiki_log, pages, normalize_sources."""
 
-from unittest.mock import patch
-
 import pytest
 
 from kb.utils.pages import normalize_sources
@@ -98,16 +96,21 @@ def test_append_wiki_log_appends_to_existing(tmp_path):
     assert "| ingest | Ingested foo.md" in content
 
 
-def test_append_wiki_log_uses_default_path(tmp_path):
-    """append_wiki_log falls back to WIKI_LOG config when no path given."""
-    log_path = tmp_path / "log.md"
-    log_path.write_text("# Log\n\n", encoding="utf-8")
+def test_append_wiki_log_requires_log_path(tmp_path):
+    """Regression: Phase 4.5 HIGH item H7 (append_wiki_log had optional log_path default)."""
+    import pytest
 
-    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
+    with pytest.raises(TypeError):
         append_wiki_log("lint", "5 issues found")
 
+
+def test_append_wiki_log_explicit_path_works(tmp_path):
+    """Regression: Phase 4.5 HIGH item H7 — explicit log_path creates and writes log."""
+    log_path = tmp_path / "wiki" / "log.md"
+    append_wiki_log("ingest", "processed file.md", log_path)
+    assert log_path.exists()
     content = log_path.read_text(encoding="utf-8")
-    assert "| lint | 5 issues found" in content
+    assert "| ingest | processed file.md" in content
 
 
 # ── load_all_pages ────────────────────────────────────────────────
@@ -171,13 +174,14 @@ def test_load_all_pages_normalizes_sources(tmp_path):
 # ── create_wiki_page fixture test ─────────────────────────────────
 
 
-def test_create_wiki_page_fixture(create_wiki_page, tmp_path):
+def test_create_wiki_page_fixture(create_wiki_page, tmp_wiki):
     """create_wiki_page fixture creates valid pages."""
     path = create_wiki_page(
         "entities/openai",
         title="OpenAI",
         content="An AI research company.",
         page_type="entity",
+        wiki_dir=tmp_wiki,
     )
     assert path.exists()
     content = path.read_text(encoding="utf-8")

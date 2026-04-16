@@ -56,7 +56,6 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-            patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
             patch("kb.compile.linker.inject_wikilinks", side_effect=mock_inject),
         ):
             ingest_source(source, source_type="article")
@@ -113,7 +112,6 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-            patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
             patch("kb.compile.linker.WIKI_DIR", wiki_dir),
         ):
             ingest_source(source, source_type="article")
@@ -160,7 +158,6 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-            patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
             patch("kb.compile.linker.inject_wikilinks", return_value=["concepts/foo"]),
         ):
             result = ingest_source(source, source_type="article")

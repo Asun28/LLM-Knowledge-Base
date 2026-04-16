@@ -102,8 +102,9 @@ def test_compile_wiki_incremental(mock_ingest, tmp_path):
     log_path = wiki_dir / "log.md"
     log_path.write_text("---\ntitle: Log\nupdated: 2026-04-06\n---\n\n# Log\n")
 
-    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
-        result = compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+    result = compile_wiki(
+        incremental=True, raw_dir=raw_dir, manifest_path=manifest_path, wiki_dir=wiki_dir
+    )
 
     assert result["mode"] == "incremental"
     assert result["sources_processed"] == 1
@@ -139,8 +140,9 @@ def test_compile_wiki_full(mock_ingest, tmp_path):
     log_path = wiki_dir / "log.md"
     log_path.write_text("---\ntitle: Log\nupdated: 2026-04-06\n---\n\n# Log\n")
 
-    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
-        result = compile_wiki(incremental=False, raw_dir=raw_dir, manifest_path=manifest_path)
+    result = compile_wiki(
+        incremental=False, raw_dir=raw_dir, manifest_path=manifest_path, wiki_dir=wiki_dir
+    )
 
     assert result["mode"] == "full"
     assert result["sources_processed"] == 1
@@ -253,13 +255,12 @@ def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
     )
 
     wiki_dir = tmp_project / "wiki"
-    with patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"):
-        compile_wiki(
-            raw_dir=raw_dir,
-            wiki_dir=wiki_dir,
-            manifest_path=manifest_path,
-            incremental=True,
-        )
+    compile_wiki(
+        raw_dir=raw_dir,
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
+        incremental=True,
+    )
 
     assert call_count["save_manifest"] == 1, (
         f"manifest saved {call_count['save_manifest']}x per source; expected 1"

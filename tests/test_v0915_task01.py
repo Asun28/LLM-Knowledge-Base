@@ -589,3 +589,10 @@ class TestConfestCreatedParameter:
         today = date.today().isoformat()
         assert str(post.metadata["created"]) == today
         assert str(post.metadata["updated"]) == today
+
+    def test_h9_create_wiki_page_requires_wiki_dir(self, create_wiki_page):
+        """Regression: Phase 4.5 HIGH item H9 (create_wiki_page had optional wiki_dir default)."""
+        import pytest
+
+        with pytest.raises(TypeError):
+            create_wiki_page("concepts/x", title="X", content="body.")

@@ -60,7 +60,6 @@ def test_cli_ingest(mock_extract, tmp_path):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
     ):
         result = runner.invoke(cli, ["ingest", str(source), "--type", "article"])
 

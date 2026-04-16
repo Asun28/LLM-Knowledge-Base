@@ -60,7 +60,7 @@ def _setup_project(tmp_project, monkeypatch):
     monkeypatch.setattr(kb.lint.semantic, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.feedback.store, "FEEDBACK_PATH", data_dir / "query_feedback.json")
     monkeypatch.setattr(kb.compile.linker, "WIKI_DIR", wiki_dir)
-    monkeypatch.setattr(kb.utils.wiki_log, "WIKI_LOG", wiki_dir / "log.md")
+    # H7: wiki_log.WIKI_LOG no longer exists (log_path now required per call-site)
     monkeypatch.setattr(kb.mcp.app, "WIKI_DIR", wiki_dir)
 
     return wiki_dir, raw_dir

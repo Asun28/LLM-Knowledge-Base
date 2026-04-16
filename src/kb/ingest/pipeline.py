@@ -17,7 +17,6 @@ from kb.config import (
     RAW_DIR,
     SMALL_SOURCE_THRESHOLD,
     SOURCE_TYPE_DIRS,
-    WIKI_CONTRADICTIONS,
     WIKI_DIR,
     WIKI_INDEX,
     WIKI_SOURCES,
@@ -617,7 +616,7 @@ def ingest_source(
 
     # Extract structured data via LLM (or use pre-extracted)
     if extraction is None:
-        extraction = extract_from_source(raw_content, source_type)
+        extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
 
     # Track created/updated pages
     pages_created = []
@@ -748,6 +747,7 @@ def ingest_source(
         "ingest",
         f"Ingested {source_ref} → created {len(pages_created)} pages, "
         f"updated {len(pages_updated)} pages",
+        effective_wiki_dir / "log.md",
     )
 
     # Load all pages once — shared by affected-pages analysis and contradiction detection
@@ -788,21 +788,23 @@ def ingest_source(
                         source_ref,
                     )
                     # Persist contradictions to wiki/contradictions.md (append-only).
+                    # H6 fix: derive path from effective_wiki_dir, not global WIKI_CONTRADICTIONS.
                     try:
+                        contradictions_path = effective_wiki_dir / "contradictions.md"
                         header = (
                             "# Contradictions\n\n"
                             "Append-only log of conflicts detected during ingest.\n\n"
                         )
                         existing = (
-                            WIKI_CONTRADICTIONS.read_text(encoding="utf-8")
-                            if WIKI_CONTRADICTIONS.exists()
+                            contradictions_path.read_text(encoding="utf-8")
+                            if contradictions_path.exists()
                             else header
                         )
                         block = f"\n## {source_ref} — {date.today().isoformat()}\n"
                         for w in contradiction_warnings:
                             claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
                             block += f"- {claim}\n"
-                        atomic_text_write(existing + block, WIKI_CONTRADICTIONS)
+                        atomic_text_write(existing + block, contradictions_path)
                     except Exception as write_err:
                         logger.warning("Failed to write contradictions.md: %s", write_err)
             except Exception as e:

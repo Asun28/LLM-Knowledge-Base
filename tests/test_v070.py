@@ -183,8 +183,8 @@ def test_compile_saves_template_hashes(tmp_path):
     wiki_log.parent.mkdir(parents=True)
     wiki_log.write_text("# Log\n\n")
 
-    with patch("kb.utils.wiki_log.WIKI_LOG", wiki_log):
-        compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+    wiki_dir = wiki_log.parent
+    compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path, wiki_dir=wiki_dir)
 
     manifest = load_manifest(manifest_path)
     template_keys = [k for k in manifest if k.startswith("_template/")]
@@ -341,7 +341,6 @@ def test_kb_create_page(tmp_path):
 
     with (
         patch("kb.mcp.quality.WIKI_DIR", wiki_dir),
-        patch("kb.utils.wiki_log.WIKI_LOG", log_path),
     ):
         result = kb_create_page(
             "comparisons/rag-vs-finetuning",

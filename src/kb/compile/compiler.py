@@ -12,6 +12,7 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     SUPPORTED_SOURCE_EXTENSIONS,
     TEMPLATES_DIR,
+    WIKI_DIR,
 )
 from kb.ingest.extractors import VALID_SOURCE_TYPES
 from kb.ingest.pipeline import ingest_source
@@ -371,7 +372,8 @@ def compile_wiki(
             logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
         save_manifest(current_manifest, manifest_path)
 
-    # Append to log
+    # Append to log — use effective_wiki_dir if provided, else fall back to global WIKI_DIR.
+    effective_log_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
     append_wiki_log(
         "compile",
         f"{results['mode']} compile: {results['sources_processed']} sources, "
@@ -380,6 +382,7 @@ def compile_wiki(
         f"{len(results['pages_skipped'])} skipped, "
         f"{results['duplicates']} duplicate(s), "
         f"{len(results['errors'])} errors",
+        effective_log_dir / "log.md",
     )
 
     return results

@@ -53,8 +53,12 @@ def create_wiki_page(tmp_path: Path):
     """Factory fixture: create a wiki page with proper frontmatter.
 
     Usage:
-        page_path = create_wiki_page("concepts/rag", title="RAG", content="About RAG.")
-        page_path = create_wiki_page("entities/openai", page_type="entity")
+        page_path = create_wiki_page(
+            "concepts/rag", title="RAG", content="About RAG.", wiki_dir=tmp_wiki)
+        page_path = create_wiki_page("entities/openai", page_type="entity", wiki_dir=tmp_wiki)
+
+    H9 fix: wiki_dir is REQUIRED — callers must pass it explicitly to prevent
+    silent writes to tmp_path/wiki (a bare tmp_path, not a real wiki fixture).
     """
 
     def _create(
@@ -67,9 +71,9 @@ def create_wiki_page(tmp_path: Path):
         confidence: str = "stated",
         created: str | None = None,
         updated: str | None = None,
-        wiki_dir: Path | None = None,
+        wiki_dir: Path,
     ) -> Path:
-        wiki_dir_actual = wiki_dir or (tmp_path / "wiki")
+        wiki_dir_actual = wiki_dir
         page_path = wiki_dir_actual / f"{page_id}.md"
         page_path.parent.mkdir(parents=True, exist_ok=True)
         today = date.today().isoformat()

@@ -125,6 +125,57 @@ def test_source_block_re_handles_four_space_indent(tmp_wiki):
     assert m is not None, "_SOURCE_BLOCK_RE did not match 4-space indented source block"
 
 
+def test_h6_persist_contradictions_uses_wiki_dir(tmp_path, monkeypatch):
+    """Regression: Phase 4.5 HIGH item H6 (_persist_contradictions hardcoded global path)."""
+    from unittest.mock import patch
+
+    import kb.ingest.pipeline as pipeline_mod
+    from kb.config import WIKI_CONTRADICTIONS as prod_contradictions
+
+    # Set up isolated wiki
+    wiki_dir = tmp_path / "wiki"
+    for sub in ("entities", "concepts", "summaries", "comparisons", "synthesis"):
+        (wiki_dir / sub).mkdir(parents=True)
+    idx_content = "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+    (wiki_dir / "index.md").write_text(idx_content, encoding="utf-8")
+    (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+    (wiki_dir / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
+    raw_dir = tmp_path / "raw" / "articles"
+    raw_dir.mkdir(parents=True)
+    source = raw_dir / "h6-test.md"
+    source.write_text("# H6 Test\nContent.", encoding="utf-8")
+
+    extraction = {
+        "title": "H6 Test",
+        "entities_mentioned": [],
+        "concepts_mentioned": [],
+        "key_claims": ["The sky is never blue.", "Water is always cold."],
+    }
+
+    prod_mtime_before = (
+        prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
+    )
+
+    with (
+        patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+    ):
+        # Pass wiki_dir explicitly — contradictions.md must go to wiki_dir, not prod.
+        pipeline_mod.ingest_source(
+            source, source_type="article", wiki_dir=wiki_dir, extraction=extraction
+        )
+
+    prod_mtime_after = (
+        prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
+    )
+    assert prod_mtime_before == prod_mtime_after, (
+        "H6: ingest_source mutated production wiki/contradictions.md — "
+        "effective_wiki_dir not used for _persist_contradictions"
+    )
+
+
 def test_contradictions_written_to_file(tmp_wiki, tmp_path, monkeypatch):
     """When contradictions are detected, they must be written to contradictions.md."""
     import kb.config as config_mod

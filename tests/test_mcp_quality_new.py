@@ -25,7 +25,7 @@ def _setup_quality_paths(tmp_path, monkeypatch):
 
     monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.mcp.quality, "WIKI_DIR", wiki_dir)
-    monkeypatch.setattr(kb.utils.wiki_log, "WIKI_LOG", wiki_dir / "log.md")
+    # H7: wiki_log.WIKI_LOG no longer exists (log_path now required per call-site)
     monkeypatch.setattr(kb.lint.verdicts, "VERDICTS_PATH", data_dir / "lint_verdicts.json")
 
     return wiki_dir, data_dir

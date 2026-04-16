@@ -123,18 +123,15 @@ def test_ingest_source(mock_extract, tmp_path):
     # Create contradictions file so the patch target exists
     (wiki_dir / "contradictions.md").touch()
 
-    # Patch config paths to use temp directory
+    # H6 fix: WIKI_CONTRADICTIONS removed from pipeline; path derived from effective_wiki_dir.
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
         patch("kb.utils.paths.RAW_DIR", raw_dir),
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        # fix item 1: sandbox WIKI_CONTRADICTIONS so prod file is not mutated
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
-        result = ingest_source(source, source_type="article")
+        result = ingest_source(source, source_type="article", wiki_dir=wiki_dir)
 
     assert result["source_type"] == "article"
     assert len(result["pages_created"]) > 0
@@ -207,16 +204,16 @@ def test_ingest_source_does_not_mutate_prod_contradictions(mock_extract, tmp_pat
         prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
     )
 
+    # H6 fix: pipeline now derives contradictions path from effective_wiki_dir, not global.
+    # The patch on WIKI_CONTRADICTIONS is no longer needed (removed from pipeline imports).
     with (
         patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
         patch("kb.utils.paths.RAW_DIR", raw_dir),
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", tmp_contradictions),  # fix item 1
     ):
-        ingest_source(source, source_type="article")
+        ingest_source(source, source_type="article", wiki_dir=wiki_dir)
 
     # Production contradictions.md must NOT have been touched
     prod_mtime_after = prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
@@ -260,8 +257,6 @@ def test_ingest_duplicate_branch_returns_all_contract_keys(tmp_path, monkeypatch
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         result = pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction
@@ -333,8 +328,6 @@ def test_ingest_skips_pure_punctuation_entities(tmp_path):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         result = pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction
@@ -401,8 +394,6 @@ def test_ingest_allows_legitimate_untitled_prefix_entities(tmp_project, monkeypa
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction,
@@ -433,8 +424,6 @@ def test_ingest_still_blocks_sentinel_hash_slug(tmp_project, monkeypatch):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir, extraction=extraction,
@@ -457,8 +446,6 @@ def test_summary_page_prefers_filename_stem_over_untitled_sentinel(tmp_project, 
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
-        patch("kb.ingest.pipeline.WIKI_CONTRADICTIONS", wiki_dir / "contradictions.md"),
     ):
         pipeline.ingest_source(
             source_path=source, wiki_dir=wiki_dir,

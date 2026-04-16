@@ -174,20 +174,24 @@ class TestWikiPageContentHashDefault:
 
 
 class TestAppendWikiLogErrorHandling:
-    """append_wiki_log must not propagate OSError to callers."""
+    """append_wiki_log retries once on OSError then raises (H7 behavior)."""
 
-    def test_readonly_log_does_not_raise(self, tmp_path):
+    def test_readonly_log_raises_after_retry(self, tmp_path):
+        """H7: append_wiki_log raises OSError after one retry (no silent swallow)."""
+        import sys
+
         from kb.utils.wiki_log import append_wiki_log
 
         log_path = tmp_path / "log.md"
         log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
-        # Make read-only
+        # Make read-only so both write attempts fail
         log_path.chmod(0o444)
         try:
-            # Should log warning, not raise
-            append_wiki_log("test", "message", log_path)
-        except OSError:
-            pytest.fail("append_wiki_log should not propagate OSError")
+            # On Windows, chmod 0o444 may not prevent writes — skip if so
+            if sys.platform == "win32":
+                pytest.skip("chmod 0o444 does not reliably prevent writes on Windows")
+            with pytest.raises(OSError):
+                append_wiki_log("test", "message", log_path)
         finally:
             log_path.chmod(0o644)
 
@@ -199,8 +203,13 @@ class TestSearchPagesNoMutation:
     """search_pages must not mutate the input page dicts."""
 
     def test_page_dicts_unchanged_after_search(self, tmp_wiki, create_wiki_page, monkeypatch):
-        create_wiki_page("concepts/rag", title="RAG", content="Retrieval augmented generation.")
-        create_wiki_page("concepts/llm", title="LLM", content="Large language model.")
+        create_wiki_page(
+            "concepts/rag", title="RAG", content="Retrieval augmented generation.",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(
+            "concepts/llm", title="LLM", content="Large language model.", wiki_dir=tmp_wiki,
+        )
 
         from kb.query.engine import search_pages
 

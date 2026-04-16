@@ -342,7 +342,6 @@ def test_ingest_creates_entity_with_context(tmp_path):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
         patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
     ):
@@ -380,8 +379,9 @@ def test_compile_processes_all_sources(mock_ingest, tmp_path):
     log_path.write_text("# Log\n\n")
 
     manifest_path = tmp_path / "hashes.json"
-    with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
-        result = compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+    result = compile_wiki(
+        incremental=True, raw_dir=raw_dir, manifest_path=manifest_path, wiki_dir=wiki_dir
+    )
 
     assert result["sources_processed"] == 2
 
@@ -413,7 +413,6 @@ def test_slug_collision_logs_warning(tmp_path, caplog):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
         patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
         caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"),
@@ -448,7 +447,6 @@ def test_symbol_only_entity_gets_untitled_slug(tmp_path, caplog):
         patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
         patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
         patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-        patch("kb.utils.wiki_log.WIKI_LOG", wiki_dir / "log.md"),
         patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
         patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
         caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"),

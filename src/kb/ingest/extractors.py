@@ -227,7 +227,7 @@ SOURCE DOCUMENT:
 """
 
 
-def extract_from_source(content: str, source_type: str) -> dict:
+def extract_from_source(content: str, source_type: str, wiki_dir=None) -> dict:
     """Call the LLM to extract structured data from raw source content.
 
     Uses Claude's tool_use feature for guaranteed valid JSON output,
@@ -236,12 +236,13 @@ def extract_from_source(content: str, source_type: str) -> dict:
     Args:
         content: The raw source text.
         source_type: One of: article, paper, repo, video, podcast, book, dataset, conversation.
+        wiki_dir: Path to wiki directory for loading purpose.md (default: WIKI_DIR from config).
 
     Returns:
         dict with extracted fields matching the template schema.
     """
     template = load_template(source_type)
-    purpose = load_purpose()
+    purpose = load_purpose(wiki_dir)
     prompt = build_extraction_prompt(content, template, purpose=purpose)
     schema = _build_schema_cached(source_type)
     system_msg = "You are a precise information extractor."
