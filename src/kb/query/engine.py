@@ -18,13 +18,13 @@ from kb.config import (
     SEARCH_TITLE_WEIGHT,
     VECTOR_INDEX_PATH_SUFFIX,
 )
-from kb.utils.markdown import FRONTMATTER_RE
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
 from kb.query.hybrid import hybrid_search
 from kb.utils.llm import call_llm
+from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.pages import load_all_pages, load_purpose
 
 logger = logging.getLogger(__name__)
@@ -294,7 +294,9 @@ def search_raw_sources(
                 if size > RAW_SOURCE_MAX_BYTES:
                     logger.info(
                         "search_raw_sources skipped %s: %d bytes > %d cap",
-                        f, size, RAW_SOURCE_MAX_BYTES,
+                        f,
+                        size,
+                        RAW_SOURCE_MAX_BYTES,
                     )
                     continue
                 try:

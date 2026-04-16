@@ -26,8 +26,7 @@ def _check_not_in_wikilink(match: re.Match, body: str, pid: str, replacement: st
     open_count = before.count("[[") - before.count("]]")
     if open_count > 0:
         logger.warning(
-            "inject_wikilinks: skipping replacement in %s "
-            "— unmatched [[ before position %d",
+            "inject_wikilinks: skipping replacement in %s — unmatched [[ before position %d",
             pid,
             start,
         )

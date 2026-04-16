@@ -6,23 +6,19 @@ Item numbers reference `docs/superpowers/specs/2026-04-17-backlog-by-file-cycle2
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import os
-import stat as _stat
-import sys
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-
 # -----------------------------------------------------------------------------
 # utils/hashing.py — item 11: CRLF/CR → LF normalization before hashing
 # -----------------------------------------------------------------------------
+
 
 class TestHashingNewlineNormalization:
     def test_lf_crlf_cr_variants_produce_same_hash(self, tmp_path: Path) -> None:
@@ -54,6 +50,7 @@ class TestHashingNewlineNormalization:
 # -----------------------------------------------------------------------------
 # utils/markdown.py — item 10: fast-path startswith("---") before regex
 # -----------------------------------------------------------------------------
+
 
 class TestMarkdownFrontmatterFastPath:
     def test_no_regex_when_content_missing_opening_fence(self) -> None:
@@ -103,6 +100,7 @@ class TestMarkdownFrontmatterFastPath:
 # -----------------------------------------------------------------------------
 # utils/wiki_log.py — items 8, 9, 29
 # -----------------------------------------------------------------------------
+
 
 class TestWikiLogHardening:
     def test_escapes_leading_markdown_control_tokens(self, tmp_path: Path) -> None:
@@ -160,6 +158,7 @@ class TestWikiLogHardening:
 # utils/io.py — items 1, 2, 3, 4
 # -----------------------------------------------------------------------------
 
+
 class TestIoLockHardening:
     def test_unparseable_lock_content_raises_not_steals(self, tmp_path: Path, monkeypatch) -> None:
         from kb.utils import io as mod
@@ -176,7 +175,7 @@ class TestIoLockHardening:
                 pass
 
     def test_ascii_valid_int_stale_lock_still_steals(self, tmp_path: Path, monkeypatch) -> None:
-        """Legitimate ASCII-int lock for a dead PID is still stolen (cycle-1 behaviour preserved)."""
+        """Legitimate ASCII-int lock for a dead PID is still stolen."""
         from kb.utils import io as mod
 
         target = tmp_path / "guarded.json"
@@ -185,11 +184,17 @@ class TestIoLockHardening:
         monkeypatch.setattr(mod, "LOCK_TIMEOUT_SECONDS", 0.05)
         monkeypatch.setattr(mod, "LOCK_POLL_INTERVAL", 0.01)
         # Force os.kill to report dead — stable mock regardless of platform
-        monkeypatch.setattr(mod.os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
+
+        def _raise_dead(pid, sig):
+            raise ProcessLookupError()
+
+        monkeypatch.setattr(mod.os, "kill", _raise_dead)
         with mod.file_lock(target):
             pass  # ok — stolen
 
-    def test_fsync_called_before_replace_in_atomic_json_write(self, tmp_path: Path, monkeypatch) -> None:
+    def test_fsync_called_before_replace_in_atomic_json_write(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         """Ordering: flush+fsync must precede Path.replace in atomic_json_write."""
         from kb.utils import io as mod
 
@@ -213,15 +218,25 @@ class TestIoLockHardening:
         assert "fsync" in order, "fsync must be invoked"
         assert order.index("fsync") < order.index("replace"), "fsync must precede replace"
 
-    def test_fsync_called_before_replace_in_atomic_text_write(self, tmp_path: Path, monkeypatch) -> None:
+    def test_fsync_called_before_replace_in_atomic_text_write(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         from kb.utils import io as mod
 
         order: list[str] = []
         original_fsync = os.fsync
         original_replace = Path.replace
 
-        monkeypatch.setattr(mod.os, "fsync", lambda fd: order.append("fsync") or original_fsync(fd))
-        monkeypatch.setattr(Path, "replace", lambda self, target: order.append("replace") or original_replace(self, target))
+        def spy_fsync(fd):
+            order.append("fsync")
+            return original_fsync(fd)
+
+        def spy_replace(self, target):
+            order.append("replace")
+            return original_replace(self, target)
+
+        monkeypatch.setattr(mod.os, "fsync", spy_fsync)
+        monkeypatch.setattr(Path, "replace", spy_replace)
 
         target = tmp_path / "d.txt"
         mod.atomic_text_write("hello", target)
@@ -238,7 +253,6 @@ class TestIoLockHardening:
         # cleanup unlink fail too. The original OSError must still propagate
         # and the cleanup WARN must be logged.
         real_unlink = Path.unlink
-        real_replace = Path.replace
 
         def failing_replace(self, _target):
             raise OSError("replace failed")
@@ -259,6 +273,7 @@ class TestIoLockHardening:
 # -----------------------------------------------------------------------------
 # utils/llm.py — items 5, 6, 7
 # -----------------------------------------------------------------------------
+
 
 class TestLLMHardening:
     def test_call_llm_json_multi_tool_use_raises_listing_names(self) -> None:
@@ -281,7 +296,8 @@ class TestLLMHardening:
             with patch.object(mod, "_resolve_model", return_value="test-model"):
                 with pytest.raises(mod.LLMError) as exc_info:
                     mod.call_llm_json(
-                        prompt="q", tier="scan",
+                        prompt="q",
+                        tier="scan",
                         schema={"type": "object", "properties": {}},
                         tool_name="extract_fields",
                     )
@@ -305,7 +321,8 @@ class TestLLMHardening:
             with patch.object(mod, "_resolve_model", return_value="test-model"):
                 with pytest.raises(mod.LLMError) as exc_info:
                     mod.call_llm_json(
-                        prompt="q", tier="scan",
+                        prompt="q",
+                        tier="scan",
                         schema={"type": "object", "properties": {}},
                         tool_name="extract_fields",
                     )
@@ -338,10 +355,14 @@ class TestLLMHardening:
             class messages:
                 @staticmethod
                 def create(**kwargs):
-                    resp = type("R", (), {"status_code": 400})()
+                    resp_cls = type(
+                        "Resp",
+                        (),
+                        {"status_code": 400, "headers": {}, "request": None},
+                    )
                     raise anthropic.BadRequestError(
                         message="x" * 5000,
-                        response=type("Resp", (), {"status_code": 400, "headers": {}, "request": None})(),
+                        response=resp_cls(),
                         body={"error": {"type": "invalid_request_error"}},
                     )
 
@@ -360,6 +381,7 @@ class TestLLMHardening:
 # -----------------------------------------------------------------------------
 # ingest/evidence.py — item 28: backtick-wrap source_ref with pipe
 # -----------------------------------------------------------------------------
+
 
 class TestEvidencePipeEscape:
     def test_source_ref_with_pipe_is_backtick_wrapped(self) -> None:
@@ -390,9 +412,7 @@ class TestEvidencePipeEscape:
         from kb.ingest.evidence import append_evidence_trail
 
         page = tmp_path / "p.md"
-        page.write_text(
-            "---\ntitle: P\n---\n\nbody\n\n## Evidence Trail\n", encoding="utf-8"
-        )
+        page.write_text("---\ntitle: P\n---\n\nbody\n\n## Evidence Trail\n", encoding="utf-8")
         append_evidence_trail(page, "raw/articles/a|b.md", "Summarized", entry_date="2026-04-17")
         written = page.read_text(encoding="utf-8")
         assert "`raw/articles/a|b.md`" in written
@@ -401,6 +421,7 @@ class TestEvidencePipeEscape:
 # -----------------------------------------------------------------------------
 # compile/linker.py — item 26: single fm_match per page
 # -----------------------------------------------------------------------------
+
 
 class TestInjectWikilinksSingleFrontmatterMatch:
     def test_single_frontmatter_match_per_page(self, tmp_path: Path) -> None:
@@ -448,6 +469,7 @@ class TestInjectWikilinksSingleFrontmatterMatch:
 # feedback/store.py — item 24: one-shot migration
 # -----------------------------------------------------------------------------
 
+
 class TestFeedbackStoreMigration:
     def test_legacy_scores_migrated_on_load(self, tmp_path: Path, monkeypatch) -> None:
         """Cycle 2 item 24: load_feedback backfills missing count keys once at
@@ -463,10 +485,12 @@ class TestFeedbackStoreMigration:
         path = tmp_path / "feedback.json"
         # Legacy shape: only `useful` written (before cycle-1 always-write-all path).
         path.write_text(
-            json.dumps({
-                "entries": [],
-                "page_scores": {"entities/foo": {"useful": 2}},
-            }),
+            json.dumps(
+                {
+                    "entries": [],
+                    "page_scores": {"entities/foo": {"useful": 2}},
+                }
+            ),
             encoding="utf-8",
         )
         data = mod.load_feedback(path)
@@ -481,6 +505,7 @@ class TestFeedbackStoreMigration:
 # -----------------------------------------------------------------------------
 # feedback/reliability.py — item 25: coverage gap dedup by longest/newest
 # -----------------------------------------------------------------------------
+
 
 class TestCoverageGapsDedup:
     def test_duplicate_incomplete_keeps_longest_notes(self, tmp_path: Path) -> None:
@@ -520,6 +545,7 @@ class TestCoverageGapsDedup:
 # -----------------------------------------------------------------------------
 # evolve/analyzer.py — items 18, 19, 20
 # -----------------------------------------------------------------------------
+
 
 class TestEvolveAnalyzer:
     def test_numeric_only_tokens_ignored(self, tmp_path: Path) -> None:
@@ -562,7 +588,9 @@ class TestEvolveAnalyzer:
             for bad in ("[[concepts", "concepts/rag]]", "[[concepts/rag]]"):
                 assert bad not in terms
 
-    def test_generate_evolution_report_does_not_swallow_oserror(self, tmp_path, monkeypatch) -> None:
+    def test_generate_evolution_report_does_not_swallow_oserror(
+        self, tmp_path, monkeypatch
+    ) -> None:
         from kb.evolve import analyzer as mod
         from kb.feedback import reliability
 
@@ -581,6 +609,7 @@ class TestEvolveAnalyzer:
 # -----------------------------------------------------------------------------
 # lint/trends.py — items 21, 22
 # -----------------------------------------------------------------------------
+
 
 class TestLintTrends:
     def test_parse_failures_counter_surfaced(self) -> None:
@@ -606,19 +635,23 @@ class TestLintTrends:
 # lint/semantic.py — item 23: shared FRONTMATTER_RE
 # -----------------------------------------------------------------------------
 
+
 class TestLintSemanticSharedFrontmatterRe:
     def test_uses_shared_frontmatter_re(self) -> None:
         from kb.lint import semantic
         from kb.utils import markdown as md
 
         # Assert the module uses the SAME regex object, not a local duplicate
-        assert getattr(semantic, "_FRONTMATTER_RE", None) is md.FRONTMATTER_RE or \
-               getattr(semantic, "FRONTMATTER_RE", None) is md.FRONTMATTER_RE
+        assert (
+            getattr(semantic, "_FRONTMATTER_RE", None) is md.FRONTMATTER_RE
+            or getattr(semantic, "FRONTMATTER_RE", None) is md.FRONTMATTER_RE
+        )
 
 
 # -----------------------------------------------------------------------------
 # graph/export.py — item 27: deterministic tie-break
 # -----------------------------------------------------------------------------
+
 
 class TestGraphExportTieBreak:
     def test_mermaid_prune_deterministic_on_equal_degree(self, tmp_path: Path) -> None:
@@ -641,6 +674,7 @@ class TestGraphExportTieBreak:
 # query/citations.py — item 17: dedup (type, path)
 # -----------------------------------------------------------------------------
 
+
 class TestCitationsDedup:
     def test_duplicates_removed_first_context_preserved(self) -> None:
         from kb.query.citations import extract_citations
@@ -662,6 +696,7 @@ class TestCitationsDedup:
 # -----------------------------------------------------------------------------
 # query/hybrid.py — item 16: wrap bm25/vector in try/except
 # -----------------------------------------------------------------------------
+
 
 class TestHybridBackendIsolation:
     def test_bm25_exception_logged_and_returns_empty(self, caplog) -> None:
@@ -714,13 +749,18 @@ class TestHybridBackendIsolation:
 # query/dedup.py — items 15, 30
 # -----------------------------------------------------------------------------
 
+
 class TestDedupClampAndFallback:
     def test_max_results_clamp_applied(self) -> None:
         from kb.query.dedup import dedup_results
 
         results = [
-            {"id": f"p{i}", "score": 1.0 / (i + 1), "type": "entity",
-             "content_lower": f"unique body for {i}"}
+            {
+                "id": f"p{i}",
+                "score": 1.0 / (i + 1),
+                "type": "entity",
+                "content_lower": f"unique body for {i}",
+            }
             for i in range(20)
         ]
         clamped = dedup_results(results, max_results=5)
@@ -744,6 +784,7 @@ class TestDedupClampAndFallback:
 # query/rewriter.py — item 14: skip WH + proper-noun
 # -----------------------------------------------------------------------------
 
+
 class TestRewriterSkipsWHProperNoun:
     def test_wh_question_with_proper_noun_not_rewritten(self) -> None:
         from kb.query.rewriter import _should_rewrite
@@ -763,18 +804,25 @@ class TestRewriterSkipsWHProperNoun:
 # query/engine.py — items 12, 13
 # -----------------------------------------------------------------------------
 
+
 class TestQueryEngineNormalizations:
     def test_unicode_whitespace_collapsed(self, tmp_path: Path, monkeypatch) -> None:
         from kb.query import engine as mod
 
         # Capture what gets passed to the search layer
         seen: list[str] = []
+
         def spy_search(question, *args, **kwargs):
             seen.append(question)
             return []
+
         monkeypatch.setattr(mod, "search_pages", spy_search)
         monkeypatch.setattr(mod, "search_raw_sources", lambda *a, **k: [])
-        monkeypatch.setattr(mod, "_build_query_context", lambda *a, **k: {"context": "", "context_pages": []})
+        monkeypatch.setattr(
+            mod,
+            "_build_query_context",
+            lambda *a, **k: {"context": "", "context_pages": []},
+        )
 
         # Build a test wiki dir
         for sub in ("entities", "concepts", "summaries", "synthesis", "comparisons"):
@@ -787,8 +835,10 @@ class TestQueryEngineNormalizations:
         assert "  " not in normalized
         assert "\u2028" not in normalized
 
-    def test_search_raw_sources_skips_oversized_files(self, tmp_path: Path, monkeypatch, caplog) -> None:
-        from kb.config import RAW_SOURCE_MAX_BYTES  # raises if constant missing
+    def test_search_raw_sources_skips_oversized_files(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        from kb.config import RAW_SOURCE_MAX_BYTES  # noqa: F401 — raises if constant missing
         from kb.query.engine import search_raw_sources
 
         # Lower cap for test speed
@@ -818,7 +868,7 @@ class TestQueryEngineNormalizations:
         # File with frontmatter. Query matches ONLY frontmatter keywords; body has no match.
         (raw_dir / "foo.md").write_text(
             "---\ntitle: The RAG Masterclass Review\nauthor: Anonymous\ntags: [rag, vector]\n---\n"
-            "\n\nThe content body here contains only unrelated words about apple pie and sunsets.\n",
+            "\n\nThe body contains only unrelated words about apple pie.\n",
             encoding="utf-8",
         )
         results = search_raw_sources("rag vector", tmp_path, max_results=10)

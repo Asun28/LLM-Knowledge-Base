@@ -47,6 +47,7 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
     safe_op = _escape_markdown_prefix(operation)
     safe_msg = _escape_markdown_prefix(message)
     entry = f"- {date.today().isoformat()} | {safe_op} | {safe_msg}\n"
+
     # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
     # On Windows, log_path.open("a") on a directory raises PermissionError
     # (not IsADirectoryError); on POSIX, a FIFO or socket can also mimic

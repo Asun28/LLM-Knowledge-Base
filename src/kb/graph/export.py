@@ -96,11 +96,7 @@ def export_mermaid(
     # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
     # Titles require YAML frontmatter parsing which load_all_pages() handles.
     # Load AFTER pruning and filter to included nodes only to avoid unnecessary disk reads.
-    titles = {
-        p["id"]: p["title"]
-        for p in load_all_pages(wiki_dir)
-        if p["id"] in nodes_to_include
-    }
+    titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir) if p["id"] in nodes_to_include}
 
     # Build Mermaid output
     lines = ["graph LR"]

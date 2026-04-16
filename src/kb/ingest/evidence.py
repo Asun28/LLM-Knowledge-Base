@@ -98,18 +98,17 @@ def append_evidence_trail(
                 # Place sentinel at end of the header line, then insert new entry.
                 insert_pos = trail_match.end()
                 content = (
-                    content[:insert_pos]
-                    + SENTINEL + "\n"
-                    + entry + "\n"
-                    + content[insert_pos:]
+                    content[:insert_pos] + SENTINEL + "\n" + entry + "\n" + content[insert_pos:]
                 )
             else:
                 # No ## Evidence Trail section exists — create one with sentinel.
                 content = (
                     content.rstrip("\n")
                     + "\n\n## Evidence Trail\n"
-                    + SENTINEL + "\n"
-                    + entry + "\n"
+                    + SENTINEL
+                    + "\n"
+                    + entry
+                    + "\n"
                 )
 
         atomic_text_write(content, page_path)

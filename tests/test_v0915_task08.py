@@ -13,7 +13,6 @@ Covers:
 """
 
 import logging
-import os
 
 # ── Fix 8.1 — stale lock recovery ────────────────────────────────────────────
 
@@ -367,9 +366,7 @@ class TestFrontmatterRegex:
             "Frontmatter regex still has \\A\\s*--- prefix; should use shared FRONTMATTER_RE"
         )
         # Should use shared FRONTMATTER_RE (imported, not inlined)
-        assert "FRONTMATTER_RE" in source, (
-            "analyzer should import and use shared FRONTMATTER_RE"
-        )
+        assert "FRONTMATTER_RE" in source, "analyzer should import and use shared FRONTMATTER_RE"
 
 
 # ── Fix 8.9 — analyze_coverage threshold < 3 ─────────────────────────────────

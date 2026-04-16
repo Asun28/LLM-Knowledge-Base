@@ -3,8 +3,6 @@
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from datetime import date as _date
-from datetime import time as _time
 from pathlib import Path
 
 from kb.config import VERDICT_TREND_THRESHOLD
@@ -26,6 +24,7 @@ def _parse_timestamp(ts: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt
+
 
 logger = logging.getLogger(__name__)
 

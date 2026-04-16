@@ -126,8 +126,7 @@ def _make_api_call(kwargs: dict, model: str):
 
                 safe_msg = _truncate(str(e.message), limit=500)
                 raise LLMError(
-                    f"API error from {model} ({e.__class__.__name__}): "
-                    f"{e.status_code} — {safe_msg}"
+                    f"API error from {model} ({e.__class__.__name__}): {e.status_code} — {safe_msg}"
                 ) from e
 
         except anthropic.APIConnectionError as e:
@@ -286,9 +285,7 @@ def call_llm_json(
     # was silently discarded. Multi-block responses are an ambiguity signal:
     # surface them as an error listing every block name so the caller can
     # fix the prompt or tool_choice.
-    tool_use_blocks = [
-        b for b in response.content if getattr(b, "type", None) == "tool_use"
-    ]
+    tool_use_blocks = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
     if len(tool_use_blocks) > 1:
         names = [getattr(b, "name", "?") for b in tool_use_blocks]
         raise LLMError(
@@ -299,8 +296,7 @@ def call_llm_json(
         block = tool_use_blocks[0]
         if block.name != tool_name:
             raise LLMError(
-                f"Wrong tool in response from {model}: "
-                f"expected '{tool_name}', got '{block.name}'"
+                f"Wrong tool in response from {model}: expected '{tool_name}', got '{block.name}'"
             )
         return block.input
     # fix item 17: preserve refusal/diagnostic text in the error for debuggability
