@@ -25,8 +25,27 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
         message: Description of what happened.
         log_path: Path to log file (required — caller must pass the effective wiki_dir / "log.md").
     """
-    safe_op = operation.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    safe_msg = message.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    # Item 8 (cycle 2): the log is pipe-delimited markdown that humans + LLMs both
+    # parse. Leading `#`/`-`/`>`/`!` chars and `[[...]]` wikilinks render as active
+    # headings, lists, callouts, and clickable links when viewed in Obsidian or
+    # displayed back to the LLM — providing a log-injection vector via ingested
+    # source content. Neutralize by prefixing a zero-width space so the text
+    # remains readable but the Markdown parser no longer matches.
+    _ZWSP = "\u200b"
+
+    def _escape_markdown_prefix(field: str) -> str:
+        field = field.replace("|", "/").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+        stripped = field.lstrip(" ")
+        if stripped[:1] in {"#", "-", ">", "!"}:
+            # Preserve the user's leading whitespace, prefix the ZWSP before the marker
+            lead = field[: len(field) - len(stripped)]
+            field = f"{lead}{_ZWSP}{stripped}"
+        # Neutralize wikilinks anywhere in the text (audit log does not need live links)
+        field = field.replace("[[", f"[{_ZWSP}[").replace("]]", f"]{_ZWSP}]")
+        return field
+
+    safe_op = _escape_markdown_prefix(operation)
+    safe_msg = _escape_markdown_prefix(message)
     entry = f"- {date.today().isoformat()} | {safe_op} | {safe_msg}\n"
     # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
     # On Windows, log_path.open("a") on a directory raises PermissionError
@@ -51,7 +70,8 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with log_path.open("x", encoding="utf-8") as f:
+            # Item 29 (cycle 2): also force LF on initial creation.
+            with log_path.open("x", encoding="utf-8", newline="\n") as f:
                 f.write("# Wiki Log\n\n")
         except FileExistsError:
             # Another concurrent call created it first — re-check the target
@@ -59,8 +79,12 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
             _reject_if_not_regular_file(log_path)
 
     def _write() -> None:
+        # Item 29 (cycle 2): force LF on Windows — prevents mixed-EOL files (wiki_log
+        # was the only writer using the default `newline=None` translation while
+        # atomic_*_write already force LF), which breaks content_hash idempotency
+        # and makes `git diff` noisy across Windows/Linux contributors.
         with file_lock(log_path):
-            with log_path.open("a", encoding="utf-8") as f:
+            with log_path.open("a", encoding="utf-8", newline="\n") as f:
                 f.write(entry)
         log_stat = log_path.stat()
         if log_stat.st_size > LOG_SIZE_WARNING_BYTES:
