@@ -79,6 +79,15 @@ Plus Phase 4.5 HIGH cycle 1: 22 HIGH-severity items from the post-v0.10.0 multi-
 - `_check_and_reserve_manifest` replacing `_is_duplicate_content` with lock discipline
 - `tests/fixtures/injection_payloads.py` — attack payload catalog from BACKLOG R1-R4
 
+#### Fixed — Post-PR 2-round adversarial review (2026-04-16)
+
+2-round review (1 Opus + 1 Sonnet) surfaced 1 major + 8 minors; 4 fixed in commit `330db40`:
+
+- `ingest/pipeline.py` + `review/refiner.py` — `append_wiki_log` retry-then-raise crashed callers after successful page writes; now wrapped in try/except OSError with best-effort semantics (MAJOR)
+- `utils/io.py` lock-order doc — corrected to note `refine_page` holds two locks (page_path then history_path)
+- `ingest/pipeline.py` `_persist_contradictions` — space-then-hash source_ref edge case; `.strip()` before `.lstrip("#")`
+- `review/refiner.py` — added missing `logger` import for new OSError warning
+
 ### Phase 4.5 — CRITICAL cycle 1 docs-sync (2026-04-16)
 
 Immediately-following PR after cycle 1 merged. Addresses the 2 items the second-gate Opus review deferred from cycle 1 as preventive-infrastructure drive-by:
