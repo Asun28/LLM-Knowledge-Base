@@ -611,9 +611,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `graph/export.py` `export_mermaid` (~48-71) — backward-compat `isinstance(graph, Path)` shim with no `DeprecationWarning` and no removal target. Comment acknowledges the temporary intent but there's no scheduled cleanup. (R1)
   (fix: emit `DeprecationWarning`; set removal in v0.12.0; or just delete — only two exports in `kb.graph`)
 
-- `utils/hashing.py` `content_hash` (~9-16) — binary-mode hash is not newline-normalized; a Windows clone with `core.autocrlf=true` hashes every source differently from Linux/macOS, forcing a full re-ingest of the corpus on first compile (real $$$ at 5k sources). (R1)
-  (fix: normalize `b"\r\n"` and `b"\r"` → `b"\n"` before hashing; add `* text=auto eol=lf` for `raw/` in `.gitattributes`)
-
 - `evolve/analyzer.py` `find_connection_opportunities` break chain (~112) — truncation uses a three-level break (inner-pair → `for page_b` → `for page_a` → `for term`); functionally correct but convoluted. Future maintainers adjusting the truncation threshold will misread it. (R2)
   (fix: extract pair accumulation into a helper raising `StopIteration`, or unify via `itertools.islice(pairs, MAX_PAIRS)`)
 

@@ -21,6 +21,14 @@ Rules:
 
 ## [Unreleased]
 
+### Phase 4.5 — Backlog-by-file cycle 2 (2026-04-17)
+
+30 mechanical bug fixes across 19 files (HIGH + MEDIUM + LOW) grouped by file, cycle-1 profile. One commit per file; full pipeline (threat model → design gate → plan gate → implementation → regression tests → security verification) gated end-to-end via subagents.
+
+#### Fixed — Backlog-by-file cycle 2 (30 items)
+
+- `utils/hashing.py` `content_hash` / `hash_bytes` — normalize CRLF / lone CR to LF before hashing so Windows clones with `core.autocrlf=true` hash the same as POSIX; prevents full corpus re-ingest on first compile (LOW)
+
 ### Phase 4.5 — Backlog-by-file cycle 1 (2026-04-17)
 
 38 mechanical bug fixes across 18 files (HIGH + MEDIUM + LOW) grouped by file instead of by severity. One commit per file; full pipeline (threat model → design review → plan gate → implementation → regression tests → security verification) gated end-to-end via subagents.
