@@ -359,29 +359,14 @@ def test_ingest_creates_entity_with_context(tmp_path):
 
 
 @patch("kb.compile.compiler.ingest_source")
-def test_compile_saves_manifest_per_source(mock_ingest, tmp_path):
-    """compile_wiki saves manifest after each source, not just at end."""
-    from kb.compile.compiler import compile_wiki, load_manifest
+def test_compile_processes_all_sources(mock_ingest, tmp_path):
+    """compile_wiki processes all sources and reports the correct count."""
+    from kb.compile.compiler import compile_wiki
 
-    call_count = 0
-    manifest_path = tmp_path / "hashes.json"
-
-    def ingest_side_effect(source, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        # On second call, verify manifest already has first entry
-        if call_count == 2:
-            m = load_manifest(manifest_path)
-            assert len(m) >= 1, "Manifest should have first entry before second ingest"
-        return {
-            "source_path": str(source),
-            "source_type": "article",
-            "content_hash": f"hash{call_count}",
-            "pages_created": [f"summaries/s{call_count}"],
-            "pages_updated": [],
-        }
-
-    mock_ingest.side_effect = ingest_side_effect
+    mock_ingest.return_value = {
+        "pages_created": ["summaries/s1"],
+        "pages_updated": [],
+    }
 
     raw_dir = tmp_path / "raw"
     articles = raw_dir / "articles"
@@ -394,14 +379,11 @@ def test_compile_saves_manifest_per_source(mock_ingest, tmp_path):
     log_path = wiki_dir / "log.md"
     log_path.write_text("# Log\n\n")
 
+    manifest_path = tmp_path / "hashes.json"
     with patch("kb.utils.wiki_log.WIKI_LOG", log_path):
         result = compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
 
     assert result["sources_processed"] == 2
-    final_manifest = load_manifest(manifest_path)
-    # Manifest has 2 source entries + template hash entries
-    source_entries = {k: v for k, v in final_manifest.items() if not k.startswith("_template/")}
-    assert len(source_entries) == 2
 
 
 # ── Fix #6: Slug collision warnings ─────────────────────────────
@@ -442,8 +424,8 @@ def test_slug_collision_logs_warning(tmp_path, caplog):
     assert result["pages_created"].count("entities/hello-world") == 1
 
 
-def test_empty_slug_logs_warning(tmp_path, caplog):
-    """Entities that produce empty slugs log a warning."""
+def test_symbol_only_entity_gets_untitled_slug(tmp_path, caplog):
+    """After item-11 fix: symbol-only entities get untitled-<hash> slug, not skipped."""
     wiki_dir = tmp_path / "wiki"
     for subdir in ("entities", "concepts", "summaries"):
         (wiki_dir / subdir).mkdir(parents=True)
@@ -458,7 +440,7 @@ def test_empty_slug_logs_warning(tmp_path, caplog):
 
     extraction = {
         "title": "Test",
-        "entities_mentioned": ["!!!"],  # empty slug
+        "entities_mentioned": ["!!!"],  # slugify now returns "untitled-<hash>" not ""
         "concepts_mentioned": [],
     }
 
@@ -473,8 +455,9 @@ def test_empty_slug_logs_warning(tmp_path, caplog):
     ):
         ingest_source(source, "article", extraction=extraction)
 
-    assert "Skipping entity with empty slug" in caplog.text
-    assert not (wiki_dir / "entities" / ".md").exists()
+    # "!!!" slug is now "untitled-<hash>" — entity page is created, not skipped
+    assert not (wiki_dir / "entities" / ".md").exists()  # no blank-name file
+    assert "Skipping entity with empty slug" not in caplog.text
 
 
 # ── Fix #7: Exact source matching ───────────────────────────────

@@ -33,6 +33,60 @@ Plus Phase 5.0: `kb_lint --augment` reactive gap-fill (modules `kb.lint.fetcher`
 
 Plus backlog cleanup: removed 3 stale assert→RuntimeError items from Phase 5 kb-capture pre-merge section (all fixed and shipped in Phase 5 kb-capture release).
 
+Plus Phase 4.5 CRITICAL cycle 1: 16 CRITICAL items from the post-v0.10.0 multi-agent audit, fixed across 4 themed commits (test-isolation, contract-consistency, data-integrity, error-chain) via an automated feature-dev pipeline with Opus decision gates + adversarial gates + branch-level Codex + security review.
+
+### Phase 4.5 — Multi-agent audit CRITICAL cycle 1 (2026-04-15)
+
+Resolves 16 CRITICAL items from the 2026-04-13 multi-agent post-v0.10.0 audit. 4 theme commits + 1 style fix + 1 post-review fix for `slugify` cross-cut regression. Theme 5 (docs-sync, items 4 + 5) deferred to immediately-following PR. Phase 4.5 HIGH/MEDIUM/LOW deferred to subsequent cycles.
+
+#### Fixed — Phase 4.5 CRITICAL (16 items)
+
+- **`ingest/pipeline.py` duplicate-branch result contract** (item 6) — duplicate re-ingest now returns the same keys (`affected_pages`, `wikilinks_injected`, `contradictions`) as the normal path, eliminating downstream `KeyError`.
+- **`query/engine.py` raw-sandbox leak** (item 7) — `query_wiki(wiki_dir=...)` now threads `raw_dir` through to `search_raw_sources` via `(wiki_dir.parent / "raw").resolve()` derivation; tests no longer leak to production `raw/`.
+- **`lint/checks.py` shared_graph mutation** (item 8) — `check_orphan_pages` operates on a graph copy; sentinel `_index:<name>` nodes no longer leak into downstream cycle checks. `_index:` prefix guard added to orphan warning filters so the sentinel never surfaces as a spurious orphan.
+- **`lint/runner.py` fix-mode consistency** (item 9) — `run_all_checks(fix=True)` re-scans pages and rebuilds the graph after `fix_dead_links`; remaining checks run against post-fix state.
+- **`review/refiner.py` lstrip code-block corruption** (item 10) — body rewrite uses `re.sub(r"\A\n+", "", ...)` to strip only leading blank lines; 4-space-indented code blocks preserved.
+- **`review/refiner.py` audit cross-process lock** (item 13) — review-history RMW uses `file_lock` instead of in-process `threading.Lock`; concurrent refiners no longer silently lose audit entries.
+- **`utils/text.py` slugify CJK** (item 11) — `re.ASCII` removed; CJK/Cyrillic/accented titles produce valid slugs; empty-result titles fall back to `untitled-<hash6>` for filename-needing contexts. Entity/concept extraction paths skip `untitled-*` sentinels so nonsense-punctuation entities (`"!!!"`) no longer create ghost pages (blocker B1 from branch-level Codex review).
+- **`utils/markdown.py` empty wikilink target** (item 12) — `[[   ]]` whitespace-only links rejected; no more phantom empty-target graph nodes.
+- **`utils/llm.py` non-retryable APIStatusError last_error tracking** (item 16) — `_make_api_call` sets `last_error = e` in the non-retryable branch for consistency with other except clauses.
+- **`utils/llm.py` `call_llm_json` no-tool-use diagnostic** (item 17) — leading text-block content (up to 300 chars) preserved in `LLMError` message when the model returns text only (content-moderation refusals no longer look like generic API errors). Defensive `getattr(block, "type", None)` applied consistently.
+- **`utils/io.py` file_lock SIGINT cleanup** (item 15) — lock-file acquisition moved inside the `try:` block with an `acquired` flag; KeyboardInterrupt during `os.write` no longer leaves orphan lock files.
+- **`compile/compiler.py` + `ingest/pipeline.py` double manifest write** (item 14) — redundant per-loop manifest save removed; `ingest_source` already persists. `# TODO(phase-4.5-high)` planted at `_is_duplicate_content` for the next-cycle race-condition fix (manifest RMW is single-writer but unlocked).
+- **`ingest/pipeline.py` UnicodeDecodeError + sandbox-escape `from e`** (item 18) — `raise ValueError(...) from e` on binary-file path; byte-offset diagnostic preserved. Same fix applied to `relative_to` ValueError at line 546 (sandbox-escape diagnostic preserved). `pipeline.py:456` and `extractors.py:74` audited and skipped (no caught exception to chain).
+- **`tests/test_ingest.py` WIKI_CONTRADICTIONS patch** (item 1) — mock patches `kb.ingest.pipeline.WIKI_CONTRADICTIONS` to tmp wiki; production `wiki/contradictions.md` no longer mutated by test runs. Added explicit mtime-comparison regression test.
+- **`tests/test_v0917_contradiction.py` split** (item 2) — dict-shape contract test seeds a provably-caught contradiction and asserts `len(result) >= 1` before the dict-key loop; empty-case split into separate test so the for-loop body never silently skips all assertions.
+- **`tests/test_phase4_audit_security.py` positive assertions** (item 3) — `test_kb_refine_page_accepts_valid_content` now asserts `result["updated"] is True` and reads back the page file body.
+
+#### Changed
+
+- Existing test files updated to reflect behavior changes introduced by items 11 + 14: `test_v4_11_formats_common.py` (slugify `untitled-<hash>` fallback), `test_fixes_v060.py` + `test_v0913_phase394.py` + `test_compiler_mcp_v093.py` (compile-loop single-write manifest contract), `test_capture.py` + `test_utils.py` + `test_fixes_v050.py` + `test_v0914_phase395.py` (CJK slug preservation).
+
+#### Post-PR 2-round adversarial review fixes (commit `4688763`)
+
+Independent 2-round post-PR review (1 Opus architecture + 1 Sonnet edge-cases, dispatched when Codex CLI hit its usage quota) surfaced 1 blocker + 3 majors. All addressed before human merge:
+
+- **`ingest/pipeline.py` `_is_untitled_sentinel` (blocker)** — the post-B1 fix's `slug.startswith("untitled-")` guards false-positived on legitimate entity names like `Untitled-Reports` (slug `untitled-reports`). Tightened to a regex `^untitled-[0-9a-f]{6}$` via new `_is_untitled_sentinel()` helper; all 3 guard sites updated. 2 new regression tests (legit names allowed, sentinel still blocked).
+- **`review/refiner.py` CRLF defense-in-depth** — body regex `r"\A\n+"` → `r"\A[\r\n]+"` so Windows CRLF leading blanks strip even if the upstream `replace("\r\n", "\n")` normalization is bypassed.
+- **`review/refiner.py` history_path wiki_dir derivation** — same test-isolation class as item 7; `refine_page(wiki_dir=tmp)` now derives `resolved_history_path = wiki_dir.parent / ".data" / "review_history.json"` instead of silently falling back to the production global. Regression test asserts prod `.data/review_history.json` mtime unchanged.
+- **`ingest/pipeline.py` summary-page CJK discoverability** — emoji / CJK titles that yield a sentinel slug now fall back to `slugify(source_path.stem)` instead of accepting `untitled-<hash>.md` as the summary filename. Regression test: title `"😀😀😀"` on `readable-stem.md` produces summary `readable-stem.md`.
+
+5 items deferred from review (tracked):
+
+- `utils/io.py` `acquired = True` timing comment misleading (behavior correct, comment-only).
+- `utils/llm.py` `last_error = e` on non-retryable branch dead code (harmless consistency tweak, kept).
+- `review/refiner.py` page-file RMW race (no lock on wiki page file itself; only history JSON locked) — pre-existing, out of scope for item 13 — next HIGH cycle.
+- `ingest/pipeline.py` `_is_duplicate_content` manifest race in single-process MCP — matches C8 TODO comment — Phase 4.5 HIGH cycle.
+- `test_compile_loop_does_not_double_write_manifest` monkeypatch-at-module-level is brittle if `save_manifest` is ever moved — noted.
+
+#### Notes
+
+- **Deferred to follow-up docs-sync PR:** items 4 (version-string drift across `pyproject.toml` / `__init__.py` / README badge) and 5 (CLAUDE.md stats drift + `scripts/verify_docs.py` pre-commit check). Second-gate Opus review moved these out of this cycle as preventive-infrastructure drive-by.
+- **Deferred to Phase 4.5 HIGH cycle:** `_is_duplicate_content` manifest RMW race (TODO planted in `ingest/pipeline.py`), `file_lock` stale-steal-loop Windows infinite-spin edge case, `refine_page` page-file RMW race.
+- **Automated pipeline gates exercised:** Opus scope decomposition gate, adversarial Theme 5 deferral gate, Step 1.6 design gate (11 decisions, 2 overrides), Step 2.5 plan gate (7 amendments applied), security review (4-item checklist, 8/8 PASS), branch-level Codex review (1 blocker fixed, 2 majors triaged), **post-PR 2-round adversarial review (1 Opus + 1 Sonnet, replacing rate-limited Codex — 1 blocker fixed, 3 majors fixed, 5 deferred)**.
+- **Decision trails:** `docs/superpowers/decisions/2026-04-15-backlog-phase4.5-critical-scope.md`, `2026-04-15-phase4.5-critical-design.md`, `2026-04-15-phase4.5-critical-plan.md`.
+- **Test count movement:** 1530 (baseline) → 1546 (after 16 CRITICAL regression tests) → 1551 (after 5 post-PR review regression tests). 1 skipped throughout.
+
 ### Phase 5.0 — kb_lint --augment reactive gap-fill (2026-04-15)
 
 Implements Karpathy Tier 1 #2 from BACKLOG.md: *"impute missing data (with web searchers)"*. When lint flags a stub page, the augment orchestrator proposes authoritative URLs (Wikipedia, arxiv), fetches them with a DNS-rebind-safe transport, pre-extracts at scan tier, and ingests as `confidence: speculative` — with a three-gate execution model that preserves the "human curates sources" contract.

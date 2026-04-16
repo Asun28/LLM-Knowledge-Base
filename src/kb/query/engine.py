@@ -148,9 +148,7 @@ def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
         return {}
 
 
-def _flag_stale_results(
-    results: list[dict], project_root: Path | None = None
-) -> list[dict]:
+def _flag_stale_results(results: list[dict], project_root: Path | None = None) -> list[dict]:
     """Flag results where page updated date is older than newest source mtime.
 
     Adds 'stale': True/False to each result dict. Non-destructive — modifies
@@ -207,12 +205,14 @@ def search_raw_sources(
         for f in subdir.glob("*.md"):
             try:
                 content = f.read_text(encoding="utf-8")
-                sources.append({
-                    "id": f"raw/{subdir.name}/{f.name}",
-                    "path": str(f),
-                    "content": content,
-                    "content_lower": content.lower(),
-                })
+                sources.append(
+                    {
+                        "id": f"raw/{subdir.name}/{f.name}",
+                        "path": str(f),
+                        "content": content,
+                        "content_lower": content.lower(),
+                    }
+                )
             except (OSError, UnicodeDecodeError):
                 continue
 
@@ -304,7 +304,9 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     if skipped:
         logger.info(
             "Query context: included %d pages, skipped %d (limit: %d chars)",
-            len(sections), skipped, effective_max,
+            len(sections),
+            skipped,
+            effective_max,
         )
 
     if not sections and pages:
@@ -331,6 +333,7 @@ def query_wiki(
     conversation_context: str | None = None,
     *,
     output_format: str | None = None,
+    raw_dir: Path | None = None,
 ) -> dict:
     """Query the knowledge base and synthesize an answer.
 
@@ -339,6 +342,11 @@ def query_wiki(
         wiki_dir: Path to wiki directory (uses config default if None).
         max_results: Maximum number of pages to retrieve for context.
         conversation_context: Recent conversation history for follow-up query rewriting.
+        raw_dir: Path to raw/ directory for fallback search (keyword-only). When None
+            and wiki_dir is set, derives raw_dir as wiki_dir.parent / "raw" (sibling
+            directory) with a resolve() check that confirms raw/ has wiki/'s parent as
+            its parent. Does NOT enforce PROJECT_ROOT containment — pass raw_dir
+            explicitly if stricter scoping is needed.
         output_format: If set and non-text, render the result to a file under
             OUTPUTS_DIR. One of: 'text', 'markdown', 'marp', 'html', 'chart',
             'jupyter'. Keyword-only to preserve existing callers.
@@ -356,10 +364,21 @@ def query_wiki(
             output_format: str (only when output_path is present).
             output_error: str (only when the adapter failed — answer still usable).
     """
+    # Derive effective_raw_dir from wiki_dir when not explicitly provided (item 7 fix)
+    effective_raw_dir = raw_dir
+    if effective_raw_dir is None and wiki_dir is not None:
+        candidate = (wiki_dir.parent / "raw").resolve()
+        try:
+            candidate.relative_to(wiki_dir.parent.resolve())
+            effective_raw_dir = candidate
+        except ValueError:
+            effective_raw_dir = None
+
     # Rewrite follow-up queries into standalone queries
     effective_question = question
     if conversation_context:
         from kb.query.rewriter import rewrite_query
+
         effective_question = rewrite_query(question, conversation_context)
 
     # 1. Search for relevant pages
@@ -381,7 +400,9 @@ def query_wiki(
     # Raw-source fallback: supplement thin wiki context with verbatim raw source content
     raw_context = ""
     if len(ctx["context"]) < QUERY_CONTEXT_MAX_CHARS // 2:
-        raw_results = search_raw_sources(effective_question, max_results=3)
+        raw_results = search_raw_sources(
+            effective_question, raw_dir=effective_raw_dir, max_results=3
+        )
         if raw_results:
             raw_sections = []
             budget = QUERY_CONTEXT_MAX_CHARS - len(ctx["context"])
@@ -443,6 +464,7 @@ INSTRUCTIONS:
     # 5. Optional output adapter (Phase 4.11)
     if output_format and output_format.strip().lower() != "text":
         from kb.query.formats import render_output
+
         try:
             path = render_output(output_format, result_dict)
             if path is not None:
@@ -457,9 +479,7 @@ INSTRUCTIONS:
             # optional deps like nbformat, nbformat.ValidationError, etc.) —
             # the synthesized answer is still valid, so surface a scrubbed
             # error message instead of letting the exception abort query_wiki.
-            logger.warning(
-                "Output format '%s' %s: %s", output_format, type(e).__name__, e
-            )
+            logger.warning("Output format '%s' %s: %s", output_format, type(e).__name__, e)
             result_dict["output_error"] = (
                 f"write failed ({type(e).__name__}); see server logs for details"
             )

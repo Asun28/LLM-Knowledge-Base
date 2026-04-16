@@ -136,9 +136,15 @@ def slugify(text: str) -> str:
     text = re.sub(r"(\w)\+\+", r"\1plus", text)
     text = re.sub(r"(\w)#", r"\1sharp", text)
     text = re.sub(r"(?<=\d)\.(?=\d)", "-", text)
-    text = re.sub(r"[^\w\s-]", "", text, flags=re.ASCII)
+    text = re.sub(r"[^\w\s-]", "", text)  # keep CJK/Cyrillic (dropped re.ASCII)
     text = re.sub(r"[\s_]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-")
+    result = re.sub(r"-+", "-", text).strip("-")
+    if not result:
+        import hashlib
+
+        h = hashlib.sha256(text_lower.encode("utf-8")).hexdigest()[:6]
+        return f"untitled-{h}"
+    return result
 
 
 def yaml_sanitize(value: str) -> str:

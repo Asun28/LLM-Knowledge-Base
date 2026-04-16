@@ -151,6 +151,8 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     wiki_dir = wiki_dir or WIKI_DIR
     if graph is None:
         graph = build_graph(wiki_dir)
+    else:
+        graph = graph.copy()  # fix item 8: don't mutate the caller's shared graph
 
     # Augment graph with backlinks from index/log files — these are not wiki pages
     # (not in any subdir) so build_graph skips them, causing false orphan reports.
@@ -166,9 +168,9 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
         for target in extract_wikilinks(text):
             if target in existing_ids:
                 # Add a virtual edge from "_index:<name>" sentinel to the target.
-                # The sentinel node is added on demand; it has no effect on orphan/
-                # isolated detection for real wiki pages since we only inspect
-                # in-degree of existing page nodes.
+                # The sentinel node is added on demand. It has in-degree 0 and
+                # out-degree ≥ 1, so graph_stats() puts it in no_inbound; the
+                # orphan/isolated loops below skip it via the "_index:" prefix guard.
                 sentinel = f"_index:{name}"
                 if not graph.has_node(sentinel):
                     graph.add_node(sentinel)
@@ -181,6 +183,8 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     for orphan in stats["no_inbound"]:
         # Summaries, comparisons, and synthesis are natural entry points, don't flag them
         if orphan.startswith(AUTOGEN_PREFIXES):
+            continue
+        if orphan.startswith("_index:"):  # virtual sentinel nodes from index augmentation
             continue
         issues.append(
             {
@@ -195,6 +199,8 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     for isolated in stats["isolated"]:
         # Summaries, comparisons, and synthesis are natural entry points, don't flag them
         if isolated.startswith(AUTOGEN_PREFIXES):
+            continue
+        if isolated.startswith("_index:"):  # virtual sentinel nodes from index augmentation
             continue
         issues.append(
             {

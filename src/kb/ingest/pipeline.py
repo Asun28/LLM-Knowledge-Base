@@ -42,6 +42,18 @@ logger = logging.getLogger(__name__)
 # produce malformed YAML (mixed-indent source block).
 _SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]*- [^\n]*\n)*)", re.MULTILINE)
 
+# Adversarial-review fix (BLOCKER): tighter sentinel pattern — matches ONLY the
+# untitled-<6 hex chars> fallback emitted by slugify() for pure-symbol/emoji input.
+# The old startswith("untitled-") guard was a false positive for legitimate entity
+# names like "Untitled-Reports" (slug "untitled-reports"). Exact 6-hex suffix ensures
+# only the computed hash sentinel is suppressed.
+_UNTITLED_SENTINEL_RE = re.compile(r"^untitled-[0-9a-f]{6}$")
+
+
+def _is_untitled_sentinel(slug: str) -> bool:
+    """Return True iff slug matches the untitled-<hash6> fallback from slugify()."""
+    return bool(_UNTITLED_SENTINEL_RE.fullmatch(slug))
+
 
 def _find_affected_pages(
     page_ids: list[str],
@@ -98,6 +110,7 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     from different file paths. Skips template entries. Only flags as
     duplicate if the other source file still exists on disk.
     """
+    # TODO(phase-4.5-high): wrap load_manifest→mutate→save_manifest in file_lock(manifest_path); CRITICAL fix removed the double-write, single-writer RMW race remains  # noqa: E501
     try:
         # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
         from kb.compile.compiler import load_manifest
@@ -205,7 +218,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for e in entities:
             slug = slugify(e)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            if slug:
+            # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
+            if slug and not _is_untitled_sentinel(slug):
                 safe_name = e.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[entities/{slug}|{safe_name}]]")
         lines.append("")
@@ -217,7 +231,8 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
         for c in concepts:
             slug = slugify(c)
             # Fix 2.8: skip empty slugs; Fix 2.15: sanitize display name
-            if slug:
+            # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith
+            if slug and not _is_untitled_sentinel(slug):
                 safe_name = c.replace("|", "-").replace("\n", " ").replace("\r", "")
                 lines.append(f"- [[concepts/{slug}|{safe_name}]]")
         lines.append("")
@@ -301,9 +316,7 @@ def _update_existing_page(
     else:
         # Fix 2.9: warn and return early — falling back to full-file treatment risks
         # corrupting body text that contains "updated: ..." patterns.
-        logger.warning(
-            "Could not parse frontmatter block in %s; skipping update", page_path
-        )
+        logger.warning("Could not parse frontmatter block in %s; skipping update", page_path)
         return
 
     # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
@@ -363,9 +376,7 @@ def _update_existing_page(
 
     # Fix 2.1: Use atomic write
     atomic_text_write(content, page_path)
-    append_evidence_trail(
-        page_path, source_ref, f"{verb} in new source — source reference added"
-    )
+    append_evidence_trail(page_path, source_ref, f"{verb} in new source — source reference added")
 
 
 def _update_sources_mapping(
@@ -484,8 +495,12 @@ def _process_item_batch(
         if not item or not item.strip():
             continue
         item_slug = slugify(item)
-        if not item_slug:
-            logger.warning("Skipping %s with empty slug: %r", page_type, item)
+        # B1: treat untitled-<hash> as sentinel for nonsense-punctuation names;
+        # empty slug (pre-item-11) and untitled-hash (post-item-11) both mean "skip".
+        # Adversarial-review BLOCKER: use exact 6-hex sentinel pattern, not startswith,
+        # so legitimate names like "Untitled-Reports" are not falsely filtered.
+        if not item_slug or _is_untitled_sentinel(item_slug):
+            logger.warning("Skipping %s with empty/untitled slug: %r", page_type, item)
             continue
         if item_slug in seen_slugs:
             prev = seen_slugs[item_slug]
@@ -529,11 +544,12 @@ def ingest_source(
             summary-only processing (no entity/concept pages).
 
     Returns:
-        dict with keys:
+        dict with guaranteed keys:
             source_path, source_type, content_hash, pages_created, pages_updated,
-            pages_skipped, affected_pages, wikilinks_injected.
-            Also includes ``duplicate: True`` (and omits affected_pages) when the
-            source has identical content to an already-ingested file.
+            pages_skipped, affected_pages, wikilinks_injected, contradictions.
+            Also includes ``duplicate: True`` when the source has identical content
+            to an already-ingested file (all contract keys still present, as empty
+            lists for affected_pages / wikilinks_injected / contradictions).
     """
     source_path = Path(source_path).resolve()
     if not source_path.exists():
@@ -545,8 +561,8 @@ def ingest_source(
     source_path_nc = Path(os.path.normcase(str(source_path)))
     try:
         source_path_nc.relative_to(raw_dir_nc)
-    except ValueError:
-        raise ValueError(f"Source path must be within raw/ directory: {source_path}")
+    except ValueError as e:
+        raise ValueError(f"Source path must be within raw/ directory: {source_path}") from e
 
     if source_type is None:
         source_type = detect_source_type(source_path)
@@ -555,11 +571,11 @@ def ingest_source(
     raw_bytes = source_path.read_bytes()
     try:
         raw_content = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError:
+    except UnicodeDecodeError as e:
         raise ValueError(
             f"Binary file cannot be ingested: {source_path.name}. "
             "Convert to markdown first (e.g., markitdown or docling)."
-        )
+        ) from e
     source_hash = hash_bytes(raw_bytes)
 
     # Spec §10 — strip leading YAML frontmatter for capture sources only.
@@ -592,6 +608,9 @@ def ingest_source(
             "pages_updated": [],
             "pages_skipped": [],
             "duplicate": True,
+            "affected_pages": [],  # fix item 6: contract key always present
+            "wikilinks_injected": [],  # fix item 6: contract key always present
+            "contradictions": [],  # fix item 6: contract key always present
         }
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
@@ -618,6 +637,19 @@ def ingest_source(
             title,
             summary_slug,
         )
+    elif _is_untitled_sentinel(summary_slug):
+        # Adversarial-review MAJOR: title was pure-symbol/emoji — prefer file stem for
+        # discoverability (e.g. CJK or emoji titles). If stem also yields a sentinel or
+        # empty slug, keep the sentinel (it's the best we can do).
+        stem_slug = slugify(source_path.stem)
+        if stem_slug and not _is_untitled_sentinel(stem_slug):
+            logger.warning(
+                "Title %r produced sentinel slug %r; using source stem slug %r instead",
+                title,
+                summary_slug,
+                stem_slug,
+            )
+            summary_slug = stem_slug
     summary_path = effective_wiki_dir / "summaries" / f"{summary_slug}.md"
     if summary_path.exists():
         _update_existing_page(summary_path, source_ref, verb="Summarized")
@@ -772,9 +804,7 @@ def ingest_source(
                             block += f"- {claim}\n"
                         atomic_text_write(existing + block, WIKI_CONTRADICTIONS)
                     except Exception as write_err:
-                        logger.warning(
-                            "Failed to write contradictions.md: %s", write_err
-                        )
+                        logger.warning("Failed to write contradictions.md: %s", write_err)
             except Exception as e:
                 logger.debug("Contradiction detection failed (non-fatal): %s", e)
 

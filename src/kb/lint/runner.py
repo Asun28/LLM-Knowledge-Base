@@ -77,6 +77,11 @@ def run_all_checks(
                 )
             ]
 
+    if fix and fixes_applied:
+        # Fix item 9: re-scan pages + rebuild graph so subsequent checks see post-fix state
+        shared_pages = scan_wiki_pages(wiki_dir)
+        shared_graph = build_graph(wiki_dir)
+
     orphans = check_orphan_pages(wiki_dir, graph=shared_graph)
     all_issues.extend(orphans)
     checks_run.append({"name": "orphan_pages", "issues": len(orphans)})

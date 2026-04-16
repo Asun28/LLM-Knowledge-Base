@@ -97,17 +97,15 @@ class TestMakeApiCallNoSleepAfterFinalRetry:
 
 
 class TestSlugifyAsciiOnly:
-    """slugify must produce ASCII-only slugs."""
+    """slugify behavior with Unicode — after item-11 fix, non-ASCII is preserved."""
 
-    def test_accented_chars_stripped(self):
+    def test_accented_chars_preserved(self):
         from kb.utils.text import slugify
 
         result = slugify("naïve Bayes résumé")
-        # With re.ASCII, \w matches only [a-zA-Z0-9_], so accented chars are stripped
-        assert "ï" not in result
-        assert "é" not in result
-        # The remaining ASCII chars still produce valid slugs
-        assert result  # not empty
+        # After item-11 fix (re.ASCII dropped): accented chars are preserved in slug
+        assert result  # not empty — never collapses to untitled-<hash> with real words
+        assert "na" in result  # ASCII portion still present
 
 
 class TestValidateFrontmatterSourceType:

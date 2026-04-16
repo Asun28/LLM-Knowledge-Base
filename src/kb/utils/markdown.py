@@ -27,6 +27,8 @@ def extract_wikilinks(text: str) -> list[str]:
         # Reject targets with embedded newlines — they produce broken page IDs
         if "\n" in cleaned or "\r" in cleaned:
             continue
+        if not cleaned:  # fix item 12: drop whitespace-only targets
+            continue
         result.append(cleaned)
     return result
 
