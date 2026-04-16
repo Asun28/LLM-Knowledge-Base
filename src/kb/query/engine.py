@@ -495,18 +495,23 @@ def query_wiki(
     # single space BEFORE any downstream consumer — prior code only replaced
     # `\n`/`\r` in the synthesis prompt line 544, so vertical tab `\v`,
     # `\u2028`, and `\u2029` still reflowed the prompt structure.
-    effective_question = re.sub(r"\s+", " ", question).strip()
+    normalized_question = re.sub(r"\s+", " ", question).strip()
+    effective_question = normalized_question
     if conversation_context:
         from kb.query.rewriter import rewrite_query
 
-        effective_question = rewrite_query(question, conversation_context)
+        # Cycle 2 PR review R1 MAJOR: pass the NORMALIZED question (not the
+        # raw one) so downstream rewriter, BM25, vector search, and
+        # synthesis prompt share a single canonical form; the prior code
+        # silently undid item 12's whitespace-collapse on the rewrite path.
+        effective_question = rewrite_query(normalized_question, conversation_context)
         # I3 (Phase 4.5 R4 HIGH): reject rewrites with LLM prefix leaks.
         # Scan-tier models sometimes emit "Sure! Here's the rewrite: …" or
         # "The standalone question is: …" — these pollute downstream BM25,
         # vector, and synthesis prompts. If detected, fall back to the
         # original question so search quality doesn't silently degrade.
         leaked = False
-        if effective_question != question:
+        if effective_question != normalized_question:
             # PR review round 1 (Opus MINOR I3 + Codex M-NEW-1): only treat
             # embedded newlines and known LLM-scaffolding keywords as leaks.
             # The prior generic `^[A-Z][a-zA-Z ]{0,40}:\s*` rejected legit
@@ -517,10 +522,10 @@ def query_wiki(
                 leaked = True
         if leaked:
             logger.warning(
-                "rewrite_query output rejected as prefix-leak; reverting to original: %r",
+                "rewrite_query output rejected as prefix-leak; reverting to normalized: %r",
                 effective_question[:200],
             )
-            effective_question = question
+            effective_question = normalized_question
 
     # 1. Search for relevant pages
     matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)

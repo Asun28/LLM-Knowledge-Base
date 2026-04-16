@@ -5,6 +5,17 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
+def truncate(msg: str, limit: int = 500) -> str:
+    """Truncate long messages to avoid terminal / log flooding.
+
+    Moved from `kb.cli._truncate` (cycle 2 PR review round 1 MAJOR — utility
+    layer was creating a downward import into the CLI layer, risking circular
+    imports when exercised on the LLM error path).
+    """
+    return msg if len(msg) <= limit else msg[:limit] + "..."
+
+
 # Union of stopwords from kb.query.bm25 and kb.ingest.contradiction.
 # Single source of truth — both modules import from here.
 STOPWORDS: frozenset[str] = frozenset(

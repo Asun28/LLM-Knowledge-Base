@@ -1,6 +1,5 @@
 """Export wiki graph as Mermaid diagram."""
 
-import heapq
 import logging
 import re
 from pathlib import Path
@@ -78,12 +77,13 @@ def export_mermaid(
     # Auto-prune if needed
     nodes_to_include: set[str]
     if max_nodes > 0 and graph.number_of_nodes() > max_nodes:
-        # Keep top N by total degree (most connected); nlargest is O(n log k) vs O(n log n) sort.
-        # Item 27 (cycle 2): deterministic secondary key `(degree desc, id asc)` —
-        # without an explicit tie-break, equal-degree nodes relied on insertion
-        # order, so the same wiki produced different pruned diagrams across runs
-        # and churned the committed architecture PNG.
-        top = heapq.nlargest(max_nodes, graph.degree(), key=lambda x: (x[1], x[0]))
+        # Item 27 (cycle 2) + PR review R1 MAJOR: deterministic tie-break
+        # `(degree desc, id ASC)`. `heapq.nlargest` sorts descending on the
+        # whole key, so `(x[1], x[0])` would pick id DESC on ties. Use a
+        # full sort with `(-degree, id)` and slice to get degree DESC + id
+        # ASC ordering regardless of CPython heap behaviour.
+        ordered = sorted(graph.degree(), key=lambda x: (-x[1], x[0]))
+        top = ordered[:max_nodes]
         nodes_to_include = {n for n, _ in top}
         logger.info(
             "Graph pruned from %d to %d nodes (by degree)",

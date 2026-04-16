@@ -18,11 +18,7 @@ SENTINEL = "<!-- evidence-trail:begin -->"
 
 def _neutralize_pipe(value: str) -> str:
     """Item 28 (cycle 2): backtick-wrap values containing `|` so the pipe is
-    unambiguous inside the evidence-trail table-like row format. Future
-    temporal-claim parsers splitting on `|` used to misalign fields when a
-    legitimate source_ref or action contained a pipe. Backtick-wrap only when
-    the pipe is actually present — unchanged cells keep backwards-compat with
-    existing evidence-trail entries.
+    unambiguous inside the evidence-trail table-like row format.
     """
     if "|" in value:
         return f"`{value}`"
@@ -34,28 +30,32 @@ def build_evidence_entry(
     action: str,
     entry_date: str | None = None,
 ) -> str:
-    """Build a single evidence trail entry line.
+    """Build a single evidence trail entry line (byte-clean stored form).
 
     Format: - YYYY-MM-DD | source_ref | action
 
-    Item 28 (cycle 2): `source_ref` and `action` are backtick-wrapped when
-    they contain `|` so pipe-delimited parsers do not misalign. This IS the
-    persisted form (the entry is rendered-and-stored in one step; there is
-    no separate storage layer).
+    Cycle 2 PR review R1 MAJOR: the stored entry MUST stay byte-for-byte
+    compatible with pre-cycle-2 evidence trails. Backtick-wrapping for
+    pipe-containing values moves to `format_evidence_entry` (RENDER layer),
+    which is now the single consumer used by `append_evidence_trail`.
     """
     d = entry_date or date.today().isoformat()
-    safe_ref = _neutralize_pipe(source_ref)
-    safe_action = _neutralize_pipe(action)
-    return f"- {d} | {safe_ref} | {safe_action}"
+    return f"- {d} | {source_ref} | {action}"
 
 
-def format_evidence_entry(date_str: str, source: str, summary: str) -> str:
-    """Format a single evidence trail entry line (alternative signature).
+def format_evidence_entry(
+    source_ref: str,
+    action: str,
+    entry_date: str | None = None,
+) -> str:
+    """Render an evidence trail line with backtick-escaped pipes (item 28).
 
-    Convenience wrapper around build_evidence_entry for callers that have
-    already computed the date string and prefer named arguments.
+    This is the form `append_evidence_trail` persists. The escape is applied
+    render-time only — callers building the entry purely for logical
+    comparison should use `build_evidence_entry` to preserve the raw string.
     """
-    return build_evidence_entry(source_ref=source, action=summary, entry_date=date_str)
+    d = entry_date or date.today().isoformat()
+    return f"- {d} | {_neutralize_pipe(source_ref)} | {_neutralize_pipe(action)}"
 
 
 def append_evidence_trail(
@@ -81,7 +81,7 @@ def append_evidence_trail(
     # so concurrent append_evidence_trail calls on the same page don't lose entries.
     with file_lock(page_path):
         content = page_path.read_text(encoding="utf-8")
-        entry = build_evidence_entry(source_ref, action, entry_date)
+        entry = format_evidence_entry(source_ref, action, entry_date)
 
         if SENTINEL in content:
             # Sentinel already present — insert new entry right after the sentinel line.

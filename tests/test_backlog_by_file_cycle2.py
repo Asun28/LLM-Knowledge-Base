@@ -384,7 +384,21 @@ class TestLLMHardening:
 
 
 class TestEvidencePipeEscape:
-    def test_source_ref_with_pipe_is_backtick_wrapped(self) -> None:
+    def test_format_evidence_entry_wraps_pipe(self) -> None:
+        """RENDER path (item 28): format_evidence_entry escapes pipes."""
+        from kb.ingest.evidence import format_evidence_entry
+
+        rendered = format_evidence_entry(
+            source_ref="raw/articles/foo|bar.md",
+            action="Summarized",
+            entry_date="2026-04-17",
+        )
+        assert "`raw/articles/foo|bar.md`" in rendered
+        assert rendered.startswith("- 2026-04-17 | ")
+
+    def test_build_evidence_entry_byte_clean(self) -> None:
+        """STORED form (cycle 2 PR review R1 MAJOR): build_evidence_entry
+        must NOT mutate source_ref — raw string preserved."""
         from kb.ingest.evidence import build_evidence_entry
 
         entry = build_evidence_entry(
@@ -392,20 +406,16 @@ class TestEvidencePipeEscape:
             action="Summarized",
             entry_date="2026-04-17",
         )
-        # Rendered cell: pipe must not appear unescaped
-        assert "`raw/articles/foo|bar.md`" in entry
-        # Format still parseable as evidence-trail bullet
-        assert entry.startswith("- 2026-04-17 | ")
+        assert entry == "- 2026-04-17 | raw/articles/foo|bar.md | Summarized"
 
     def test_source_ref_without_pipe_unchanged(self) -> None:
-        from kb.ingest.evidence import build_evidence_entry
+        from kb.ingest.evidence import format_evidence_entry
 
-        entry = build_evidence_entry(
+        entry = format_evidence_entry(
             source_ref="raw/articles/foo.md",
             action="Summarized",
             entry_date="2026-04-17",
         )
-        # No backticks when no escaping needed (keeps backwards compat for existing entries)
         assert entry == "- 2026-04-17 | raw/articles/foo.md | Summarized"
 
     def test_append_evidence_trail_writes_backtick_wrapped(self, tmp_path: Path) -> None:
