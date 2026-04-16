@@ -187,12 +187,20 @@ def _make_api_call(kwargs: dict, model: str):
     elif isinstance(last_error, anthropic.APIConnectionError):
         msg = f"Connection failed after {MAX_RETRIES} retries calling {model}"
     elif isinstance(last_error, anthropic.APIStatusError):
+        # Item 7 (cycle 2): truncate message here as well — the retry-exhausted
+        # path also carries `last_error.message` which may echo prompt content.
+        from kb.cli import _truncate
+
+        safe_msg = _truncate(str(last_error.message), limit=500)
         msg = (
             f"API error {last_error.status_code} after {MAX_RETRIES} retries "
-            f"calling {model}: {last_error.message}"
+            f"calling {model} ({last_error.__class__.__name__}): {safe_msg}"
         )
     else:
-        msg = f"Failed after {MAX_RETRIES} retries calling {model}: {last_error}"
+        from kb.cli import _truncate
+
+        safe_msg = _truncate(str(last_error), limit=500)
+        msg = f"Failed after {MAX_RETRIES} retries calling {model}: {safe_msg}"
     raise LLMError(msg) from last_error
 
 
