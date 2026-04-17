@@ -61,7 +61,7 @@ def test_kb_affected_pages_with_backlinks(monkeypatch):
             "created": "2026-04-06",
             "updated": "2026-04-06",
             "content": "RAG content.",
-            "content_lower": "---\ntitle: RAG\n---\nRAG content.",
+            "content_lower": "rag content.",
         },
         {
             "id": "concepts/llm",
@@ -73,7 +73,7 @@ def test_kb_affected_pages_with_backlinks(monkeypatch):
             "created": "2026-04-06",
             "updated": "2026-04-06",
             "content": "LLM content.",
-            "content_lower": "---\ntitle: LLM\n---\nLLM content.",
+            "content_lower": "llm content.",
         },
         {
             "id": "entities/openai",
@@ -85,7 +85,7 @@ def test_kb_affected_pages_with_backlinks(monkeypatch):
             "created": "2026-04-06",
             "updated": "2026-04-06",
             "content": "OpenAI content.",
-            "content_lower": "---\ntitle: OpenAI\n---\nOpenAI content.",
+            "content_lower": "openai content.",
         },
     ]
 
@@ -130,7 +130,7 @@ def test_kb_affected_pages_no_affected(tmp_path, monkeypatch):
             "created": "2026-04-06",
             "updated": "2026-04-06",
             "content": "Isolated content.",
-            "content_lower": "---\ntitle: Isolated\n---\nIsolated content.",
+            "content_lower": "isolated content.",
         },
     ]
 
