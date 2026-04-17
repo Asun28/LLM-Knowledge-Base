@@ -52,6 +52,17 @@ def _error_exit(exc: BaseException, *, code: int = 1) -> None:
     sys.exit(code)
 
 
+def _setup_logging() -> None:
+    """Idempotent logging setup. Exposed so direct callers (tests, alt entry
+    points) can configure logging without going through Click's context
+    machinery. Cycle 6 factors this out so the legacy
+    ``cli_module.cli.callback()`` test path keeps working despite the new
+    `@click.pass_context` decorator.
+    """
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
+
+
 @click.group()
 @click.version_option(__version__)
 @click.option(
@@ -62,12 +73,12 @@ def _error_exit(exc: BaseException, *, code: int = 1) -> None:
     help="Print full tracebacks on error (same as KB_DEBUG=1).",
 )
 @click.pass_context
-def cli(ctx: click.Context, verbose: bool):
+def cli(ctx: click.Context | None = None, verbose: bool = False):
     """LLM Knowledge Base — compile raw sources into a structured wiki."""
-    ctx.ensure_object(dict)
-    ctx.obj["verbose"] = verbose
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
+    if ctx is not None:
+        ctx.ensure_object(dict)
+        ctx.obj["verbose"] = verbose
+    _setup_logging()
 
 
 @cli.command()
