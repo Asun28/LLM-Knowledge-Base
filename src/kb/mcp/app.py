@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -84,6 +85,7 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
 # subdirectory plus a suffix, so accepting 255 chars for the ID itself is
 # comfortably within any supported filesystem's ceiling.
 _MAX_PAGE_ID_LEN: int = 255
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _is_windows_reserved(page_id: str) -> bool:
@@ -118,10 +120,10 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
         Error message string (caller prepends "Error:" before surfacing to MCP
         client), or None if valid.
     """
+    if _CTRL_CHARS_RE.search(page_id):
+        return "page_id contains control characters."
     if not page_id or not page_id.strip():
         return "page_id cannot be empty."
-    if "\x00" in page_id:
-        return "page_id contains null byte."
     # Cycle 4 item #13 — length cap before filesystem resolve.
     if len(page_id) > _MAX_PAGE_ID_LEN:
         return f"page_id too long ({len(page_id)} chars; max {_MAX_PAGE_ID_LEN})."

@@ -144,3 +144,10 @@ def test_kb_save_source_escapes_source_type_in_hint(monkeypatch, tmp_path):
     output = core.kb_save_source("content", "sample", source_type=source_type)
 
     assert '"article\\" injected: true"' in output
+
+
+def test_validate_page_id_rejects_control_chars_and_accepts_valid_id():
+    from kb.mcp.app import _validate_page_id
+
+    assert _validate_page_id("\x00foo") == "page_id contains control characters."
+    assert _validate_page_id("concepts/rag", check_exists=False) is None
