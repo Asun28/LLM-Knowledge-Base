@@ -170,7 +170,10 @@ def test_cli_configures_logging_when_root_has_no_handlers(monkeypatch):
     root = logging.getLogger()
     monkeypatch.setattr(root, "handlers", [])
 
-    cli_module.cli.callback()
+    # Cycle 6 AC9: the Click group's callback now depends on context state
+    # (`@click.pass_context` for the `--verbose` flag). Call the extracted
+    # `_setup_logging()` helper directly — same invariant, stable surface.
+    cli_module._setup_logging()
 
     assert root.handlers
 
