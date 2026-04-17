@@ -669,30 +669,36 @@ class TestBm25PostingsPrecompute:
     def test_postings_present(self):
         from kb.query.bm25 import BM25Index
 
+        # BM25Index takes pre-tokenized documents (list of token lists).
         docs = [
-            "alpha beta gamma",
-            "alpha delta",
-            "gamma epsilon",
+            ["alpha", "beta", "gamma"],
+            ["alpha", "delta"],
+            ["gamma", "epsilon"],
         ]
-        idx = BM25Index([(str(i), d) for i, d in enumerate(docs)])
-        assert hasattr(idx, "_postings") or hasattr(idx, "postings"), (
-            "BM25Index missing postings attribute after cycle 4"
-        )
-        postings = getattr(idx, "_postings", None) or idx.postings
-        # 'alpha' appears in docs 0 and 1.
-        assert "alpha" in postings
-        docs_with_alpha = set(postings["alpha"])
-        assert {"0", "1"}.issubset(docs_with_alpha) or {0, 1}.issubset(docs_with_alpha)
+        idx = BM25Index(docs)
+        assert hasattr(idx, "_postings")
+        # "alpha" appears in docs 0 and 1.
+        assert "alpha" in idx._postings
+        assert set(idx._postings["alpha"]) == {0, 1}
+        # "gamma" appears in docs 0 and 2.
+        assert set(idx._postings["gamma"]) == {0, 2}
+        # Non-existent term absent.
+        assert "zeta" not in idx._postings
 
     def test_score_correct_with_postings(self):
         from kb.query.bm25 import BM25Index
 
-        docs = [("d1", "alpha beta"), ("d2", "alpha alpha beta"), ("d3", "gamma")]
+        docs = [
+            ["alpha", "beta"],
+            ["alpha", "alpha", "beta"],  # Higher TF for alpha
+            ["gamma"],
+        ]
         idx = BM25Index(docs)
-        # Doc d2 has higher term frequency for "alpha" so should score higher.
-        s1 = idx.score("alpha", "d1")
-        s2 = idx.score("alpha", "d2")
-        assert s2 > s1
+        scores = idx.score(["alpha"])
+        # Doc index 1 has TF=2 for "alpha" so should outscore index 0.
+        assert scores[1] > scores[0]
+        # Doc index 2 has no "alpha" so scores 0.
+        assert scores[2] == 0.0
 
 
 # ---------------------------------------------------------------------------
