@@ -6,14 +6,33 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def truncate(msg: str, limit: int = 500) -> str:
+def truncate(msg: str, limit: int = 600) -> str:
     """Truncate long messages to avoid terminal / log flooding.
 
     Moved from `kb.cli._truncate` (cycle 2 PR review round 1 MAJOR — utility
     layer was creating a downward import into the CLI layer, risking circular
     imports when exercised on the LLM error path).
+
+    Cycle 3 M17: smart head+tail truncation. The prior implementation kept
+    only the first ``limit`` chars with a trailing ``"..."``, which destroyed
+    diagnostic value for tracebacks: exception class and source location
+    typically appear at the head, but the failing frame often lands at the
+    tail. The new behaviour keeps half of the budget at each end with an
+    explicit ``"...N chars elided..."`` marker so both signals survive.
+
+    When the incoming message is LLMError-shaped (containing a secondary
+    ``\\n`` with a traceback), the head captures the exception and the tail
+    captures the failing frame.
     """
-    return msg if len(msg) <= limit else msg[:limit] + "..."
+    if len(msg) <= limit:
+        return msg
+    # Keep equal head + tail, round down so we never exceed `limit` chars
+    # in the head+tail portion. Marker length is variable (digits scale).
+    half = max(40, (limit - 40) // 2)  # reserve ~40 chars for the marker
+    head = msg[:half]
+    tail = msg[-half:]
+    elided = len(msg) - (2 * half)
+    return f"{head}...{elided} chars elided...{tail}"
 
 
 # Union of stopwords from kb.query.bm25 and kb.ingest.contradiction.

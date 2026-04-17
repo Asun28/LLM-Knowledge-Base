@@ -108,7 +108,10 @@ def test_call_llm_non_retryable_error(mock_get_client):
     mock_client.messages.create.side_effect = auth_error
     mock_get_client.return_value = mock_client
 
-    with pytest.raises(LLMError, match="API error"):
+    # Cycle 3 H1: non-retryable 4xx now raises LLMError with a typed kind
+    # attribute and a "Non-retryable <kind> error" prefix instead of the
+    # generic "API error" prefix. Both formats document the failure.
+    with pytest.raises(LLMError, match=r"(Non-retryable auth|API error)"):
         call_llm("test prompt")
 
 
