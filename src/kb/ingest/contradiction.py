@@ -36,11 +36,57 @@ def detect_contradictions(
     3. Flag pairs where overlapping content contains contradictory signals
 
     Returns list of dicts with keys: new_claim, existing_page, existing_text, reason.
-    """
-    if not new_claims or not existing_pages:
-        return []
 
-    if len(new_claims) > max_claims:
+    Cycle 3 M8: each new claim is segmented by sentence before matching, so
+    cross-sentence token co-occurrence (e.g. sentence-A token X + sentence-B
+    token Y) no longer mashes into a single claim-token pool that could
+    manufacture spurious overlaps.
+    """
+    return _detect_contradictions_impl(new_claims, existing_pages, max_claims)["contradictions"]
+
+
+def detect_contradictions_with_metadata(
+    new_claims: list[str],
+    existing_pages: list[dict],
+    max_claims: int = CONTRADICTION_MAX_CLAIMS_TO_CHECK,
+) -> dict:
+    """Detect contradictions AND return coverage metadata in one call.
+
+    Cycle 3 H12: the original `detect_contradictions` surfaces truncation only
+    via `logger.warning`, which nothing parses — operators could not answer
+    "did contradiction detection miss things?" without reading logs. This
+    sibling returns a dict::
+
+        {
+            "contradictions": list[dict],   # same shape as detect_contradictions
+            "claims_total":  int,           # len(new_claims)
+            "claims_checked": int,          # min(total, max_claims)
+            "truncated":      bool,         # total > max_claims
+        }
+
+    ``detect_contradictions`` is NOT modified — existing callers stay on the
+    list-only shape. New callers that want visibility into truncation use
+    this helper.
+    """
+    return _detect_contradictions_impl(new_claims, existing_pages, max_claims)
+
+
+def _detect_contradictions_impl(
+    new_claims: list[str],
+    existing_pages: list[dict],
+    max_claims: int,
+) -> dict:
+    """Shared core; returns the full dict — the list-only public API unpacks it."""
+    if not new_claims or not existing_pages:
+        return {
+            "contradictions": [],
+            "claims_total": len(new_claims),
+            "claims_checked": 0,
+            "truncated": False,
+        }
+
+    truncated = len(new_claims) > max_claims
+    if truncated:
         # Phase 4.5 HIGH D5: promote to WARNING — silent claim truncation hid
         # the fact that the last N claims were never checked for contradictions.
         logger.warning(
@@ -52,35 +98,56 @@ def detect_contradictions(
     claims_to_check = new_claims[:max_claims]
     contradictions = []
 
+    # Cycle 3 M8: segment each claim into sentences so the token pool for
+    # contradiction matching belongs to ONE sentence, not the merged pool of
+    # all sentences in the claim.
+    claim_sentence_re = re.compile(r"(?<=[.!?])\s+")
+
     for claim in claims_to_check:
-        claim_tokens = _extract_significant_tokens(claim)
-        if len(claim_tokens) < 2:
-            continue
-
-        for page in existing_pages:
-            page_content = _strip_markdown_structure(page.get("content", ""))
-            page_tokens = _extract_significant_tokens(page_content)
-
-            # Need substantial overlap to even consider checking
-            overlap = claim_tokens & page_tokens
-            if len(overlap) < 2:
+        claim_sentences = [s.strip() for s in claim_sentence_re.split(claim) if s.strip()] or [
+            claim
+        ]
+        for claim_sentence in claim_sentences:
+            sentence_tokens = _extract_significant_tokens(claim_sentence)
+            if len(sentence_tokens) < 2:
                 continue
 
-            # Look for contradictory signal patterns in overlapping content
-            matching_sentences = _find_overlapping_sentences(claim, page_content, overlap)
-            for sentence in matching_sentences:
-                if _has_contradiction_signal(claim, sentence):
-                    contradictions.append(
-                        {
-                            "new_claim": claim,
-                            "existing_page": page["id"],
-                            "existing_text": sentence[:200],
-                            "reason": "Potential factual conflict detected via keyword overlap",
-                        }
-                    )
-                    break  # One contradiction per page per claim is enough
+            for page in existing_pages:
+                page_content = _strip_markdown_structure(page.get("content", ""))
+                page_tokens = _extract_significant_tokens(page_content)
 
-    return contradictions
+                # Need substantial overlap to even consider checking
+                overlap = sentence_tokens & page_tokens
+                if len(overlap) < 2:
+                    continue
+
+                # Look for contradictory signal patterns in overlapping content
+                matching_sentences = _find_overlapping_sentences(
+                    claim_sentence, page_content, overlap
+                )
+                for sentence in matching_sentences:
+                    if _has_contradiction_signal(claim_sentence, sentence):
+                        contradictions.append(
+                            {
+                                # Retain the FULL claim so callers can preserve the
+                                # context that drove the extraction, while the
+                                # matching sentence scope is tightened internally.
+                                "new_claim": claim,
+                                "existing_page": page["id"],
+                                "existing_text": sentence[:200],
+                                "reason": (
+                                    "Potential factual conflict detected via keyword overlap"
+                                ),
+                            }
+                        )
+                        break  # One contradiction per page per claim-sentence is enough
+
+    return {
+        "contradictions": contradictions,
+        "claims_total": len(new_claims),
+        "claims_checked": len(claims_to_check),
+        "truncated": truncated,
+    }
 
 
 # Contradiction signal words — suggest disagreement when co-occurring with shared entities
