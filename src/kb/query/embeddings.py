@@ -29,6 +29,11 @@ _rebuild_lock = threading.Lock()
 
 _model = None
 _model_lock = threading.Lock()
+# Cycle 7 AC3: bound _index_cache at MAX_INDEX_CACHE_SIZE with FIFO eviction
+# (insertion-ordered dict — CPython 3.7+). Each production process holds ONE
+# wiki path, so 8 keys is ample; per-test cache growth caused the previous
+# unbounded-dict footgun where tmp_wiki entries accumulated indefinitely.
+MAX_INDEX_CACHE_SIZE = 8
 _index_cache: dict[str, "VectorIndex"] = {}
 # Cycle 3 H8: serialize concurrent `get_vector_index` lookups. Without this,
 # two FastMCP worker threads hitting an uncached `vec_path` both instantiate
@@ -117,9 +122,14 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
                 _index_cache.pop(str(vec_path), None)
             return True
 
+        # Cycle 7 AC2: call model.encode() directly (returns numpy 2D array)
+        # and pass each row via buffer protocol to VectorIndex.build ->
+        # sqlite_vec.serialize_float32. Bypasses the list[list[float]] round-
+        # trip previously paid inside embed_texts for the batch path.
         texts = [page.get("content", "") for page in pages]
-        embeddings = embed_texts(texts)
-        entries = [(page["id"], emb) for page, emb in zip(pages, embeddings)]
+        model = _get_model()
+        embeddings_np = model.encode(texts)
+        entries = [(pages[i]["id"], embeddings_np[i]) for i in range(len(pages))]
         VectorIndex(vec_path).build(entries)
         with _index_cache_lock:
             _index_cache.pop(str(vec_path), None)
@@ -134,6 +144,11 @@ def get_vector_index(vec_path: str) -> "VectorIndex":
     skips the lock when the key is already populated; the slow path serializes
     instantiation so concurrent FastMCP threads observe a single shared
     `VectorIndex`.
+
+    Cycle 7 AC3: bound the cache at ``MAX_INDEX_CACHE_SIZE`` with FIFO eviction
+    so long-running processes or heavy test batches don't accumulate stale
+    VectorIndex entries. Eviction happens under ``_index_cache_lock`` so the
+    pop cannot race a concurrent insert.
     """
     key = str(vec_path)
     cached = _index_cache.get(key)
@@ -144,6 +159,11 @@ def get_vector_index(vec_path: str) -> "VectorIndex":
         if cached is None:
             cached = VectorIndex(Path(vec_path))
             _index_cache[key] = cached
+            # FIFO eviction when over cap — insertion-ordered dict means
+            # next(iter(...)) yields the oldest key.
+            while len(_index_cache) > MAX_INDEX_CACHE_SIZE:
+                oldest = next(iter(_index_cache))
+                _index_cache.pop(oldest, None)
         return cached
 
 
