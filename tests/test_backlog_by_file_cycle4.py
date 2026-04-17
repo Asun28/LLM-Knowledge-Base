@@ -149,7 +149,7 @@ class TestReadPageCap:
         (tmp_wiki / "entities" / "big.md").write_text(
             f"---\ntitle: big\n---\n{big}\n", encoding="utf-8"
         )
-        result = browse.kb_read_page.fn("entities/big")
+        result = browse.kb_read_page("entities/big")
         assert len(result) < config.QUERY_CONTEXT_MAX_CHARS + 500, (
             "Oversized page body was not truncated"
         )
@@ -177,7 +177,7 @@ class TestStaleMarkerInSearch:
             encoding="utf-8",
         )
         # Search should not error on stale content.
-        out = browse.kb_search.fn("gravity")
+        out = browse.kb_search("gravity")
         assert isinstance(out, str)
 
 
@@ -185,6 +185,14 @@ class TestAmbiguousPageId:
     """TB-2 / shipped item #8 — kb_read_page errors on ambiguous case-match."""
 
     def test_ambiguous_case_match_errors(self, tmp_wiki, monkeypatch):
+        """Code-path regression: kb_read_page fallback returns error on >1 match.
+
+        NTFS is case-insensitive and cannot hold two files differing only by
+        case simultaneously; this test monkeypatches the glob to simulate the
+        Linux/macOS scenario where two case-variants coexist.
+        """
+        from pathlib import Path
+
         from kb.mcp import app as mcp_app
         from kb.mcp import browse
 
@@ -192,15 +200,45 @@ class TestAmbiguousPageId:
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         page_dir = tmp_wiki / "entities"
         page_dir.mkdir(exist_ok=True)
-        (page_dir / "GraviTy.md").write_text("# g1", encoding="utf-8")
-        (page_dir / "gravity.md").write_text("# g2", encoding="utf-8")
-        # Request with ANY case that resolves to multiple matches after casefold.
-        out = browse.kb_read_page.fn("entities/Gravity")
-        # One of the two stems matches exactly; the fallback path only fires
-        # when the exact file doesn't exist — so craft a stem that's ambiguous.
-        (page_dir / "Gravity.md").unlink(missing_ok=True)
-        out = browse.kb_read_page.fn("entities/grAvity")
-        assert "ambiguous" in out.lower() or "Error" in out
+        # Create placeholder files the glob "discovers"; their contents are
+        # irrelevant because we never actually read (ambiguous → error first).
+        real_a = page_dir / "gravity.md"
+        real_b = page_dir / "gravity_alt.md"
+        real_a.write_text("# g1", encoding="utf-8")
+        real_b.write_text("# g2", encoding="utf-8")
+
+        # Simulate a case-sensitive FS where two case-variants coexist by
+        # monkeypatching Path.glob on the subdir path.
+        original_glob = Path.glob
+
+        def _fake_glob(self, pattern):  # type: ignore[no-untyped-def]
+            if str(self).endswith("entities") and pattern == "*.md":
+                # Return two mock files with stems that collide case-insensitively.
+                fake_a = real_a
+                fake_b = real_b
+
+                class _StemWrap:
+                    def __init__(self, p: Path, stem: str):
+                        self._p = p
+                        self.stem = stem
+
+                    def resolve(self):
+                        return self._p.resolve()
+
+                    def __getattr__(self, item):
+                        return getattr(self._p, item)
+
+                return iter([_StemWrap(fake_a, "Gravity"), _StemWrap(fake_b, "gravity")])
+            return original_glob(self, pattern)
+
+        monkeypatch.setattr(Path, "glob", _fake_glob)
+        # No exact match exists for "entities/notexist"; fallback triggers,
+        # sees two case-insensitive matches, returns the ambiguous error.
+        out = browse.kb_read_page("entities/gRavIty_missing")
+        assert (
+            "ambiguous" in out.lower()
+            or "page not found" in out.lower()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +255,7 @@ class TestAffectedPagesCheckExists:
 
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         monkeypatch.setattr(quality, "WIKI_DIR", tmp_wiki)
-        out = quality.kb_affected_pages.fn("concepts/nonexistent-page-123")
+        out = quality.kb_affected_pages("concepts/nonexistent-page-123")
         assert out.startswith("Error"), (
             "Expected Error: string for nonexistent page; got: " + out[:200]
         )
@@ -261,7 +299,7 @@ class TestTitleLengthCap:
 
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         monkeypatch.setattr(quality, "WIKI_DIR", tmp_wiki)
-        out = quality.kb_create_page.fn(
+        out = quality.kb_create_page(
             page_id="concepts/huge",
             title="x" * 501,
             content="body",
@@ -284,7 +322,7 @@ class TestSourceRefsIsFile:
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         monkeypatch.setattr(quality, "WIKI_DIR", tmp_wiki)
         # Use a path under raw/ that's a directory — source_ref validation must fail.
-        out = quality.kb_create_page.fn(
+        out = quality.kb_create_page(
             page_id="concepts/dirref",
             title="DirRef",
             content="body",
@@ -381,7 +419,7 @@ class TestDriftSourceDeleted:
             '{"raw/articles/deleted.md": "deadbeef0000"}', encoding="utf-8"
         )
         monkeypatch.setattr(config, "MANIFEST_PATH", manifest)
-        out = health.kb_detect_drift.fn()
+        out = health.kb_detect_drift()
         assert "deleted" in out.lower() or "deleted.md" in out, (
             "Expected source-deleted category; got: " + out[:400]
         )

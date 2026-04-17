@@ -6,6 +6,7 @@ import os
 from kb.config import (
     MAX_QUESTION_LEN,
     MAX_SEARCH_RESULTS,
+    QUERY_CONTEXT_MAX_CHARS,
     RAW_DIR,
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
@@ -107,10 +108,24 @@ def kb_read_page(page_id: str) -> str:
     if not page_path.exists():
         return f"Page not found: {page_id}"
     try:
-        return page_path.read_text(encoding="utf-8")
+        body = page_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         logger.error("Error reading page %s: %s", page_id, e)
         return f"Error: Could not read page {page_id}: {e}"
+    # Cycle 4 item #7 — cap response size per MCP transport safety. An
+    # attacker-controlled or runaway wiki page with append-only Evidence
+    # Trail can grow without bound; MCP must not ship multi-megabyte
+    # responses per call. Align the cap with QUERY_CONTEXT_MAX_CHARS since
+    # the same ceiling already governs kb_ingest truncation.
+    if len(body) > QUERY_CONTEXT_MAX_CHARS:
+        omitted = len(body) - QUERY_CONTEXT_MAX_CHARS
+        body = (
+            body[:QUERY_CONTEXT_MAX_CHARS]
+            + f"\n\n[Truncated: {omitted} chars omitted; "
+            f"cap={QUERY_CONTEXT_MAX_CHARS}. Use kb_list_pages + targeted tools for "
+            "very large pages.]"
+        )
+    return body
 
 
 @mcp.tool()
