@@ -177,13 +177,21 @@ class TestAddVerdictThreadingLock:
 
     def test_lock_module_attribute_does_not_use_threading(self):
         """_verdicts_lock (old name) must not exist; _VERDICTS_WRITE_LOCK is the successor."""
+        import threading
+
         import kb.lint.verdicts as verdicts_mod
 
-        # The old per-verdict threading.Lock (_verdicts_lock) was replaced; confirm removal.
-        # _VERDICTS_WRITE_LOCK is the new in-process guard; file_lock is the cross-process guard.
+        # Old name must be absent.
         assert not hasattr(verdicts_mod, "_verdicts_lock") or not hasattr(
             getattr(verdicts_mod, "_verdicts_lock", None), "acquire"
         ), "_verdicts_lock is still present — remove it (use _VERDICTS_WRITE_LOCK + file_lock)"
+        # New in-process guard must be present and be a threading.Lock.
+        assert hasattr(verdicts_mod, "_VERDICTS_WRITE_LOCK"), (
+            "_VERDICTS_WRITE_LOCK missing from verdicts module"
+        )
+        assert isinstance(verdicts_mod._VERDICTS_WRITE_LOCK, type(threading.Lock())), (
+            "_VERDICTS_WRITE_LOCK is not a threading.Lock"
+        )
 
 
 # ── Fix 6.11 — get_page_verdicts KeyError ────────────────────────────────────

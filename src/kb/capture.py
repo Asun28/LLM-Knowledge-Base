@@ -207,10 +207,7 @@ def _normalize_for_scan(content: str) -> str:
             decoded = base64.b64decode(m.group(0), validate=True)
             text = decoded.decode("ascii")
             parts.append(text)
-        except Exception:
-            # Normaliser is best-effort; any decode failure silently skips that
-            # segment. Broad except so future refactors can't regress into
-            # propagating a TypeError through the scan sweep.
+        except (ValueError, binascii.Error, UnicodeDecodeError):
             continue
     # URL-encoded runs: 3+ adjacent percent-encoded triplets.
     # Only decode the matched run (not the whole content) — keeps the normalized
