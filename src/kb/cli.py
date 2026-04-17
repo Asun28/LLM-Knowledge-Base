@@ -1,6 +1,9 @@
 """CLI entry point for knowledge base operations."""
 
 import logging
+import os
+import sys
+import traceback
 from pathlib import Path
 
 import click
@@ -20,10 +23,49 @@ def _truncate(msg: str, limit: int = 600) -> str:
     return _truncate_text(msg, limit=limit)
 
 
+def _is_debug_mode() -> bool:
+    """Cycle 6 AC9 — return True if traceback should be printed to stderr.
+
+    Sources: ``--verbose`` / ``-v`` flag stored on the Click context object,
+    OR ``KB_DEBUG=1`` env var. Default (no env, no flag) preserves the
+    existing user-facing truncated error-line behavior.
+    """
+    try:
+        ctx = click.get_current_context(silent=True)
+    except RuntimeError:
+        ctx = None
+    if ctx is not None and isinstance(ctx.obj, dict) and ctx.obj.get("verbose"):
+        return True
+    return os.environ.get("KB_DEBUG", "").strip() in {"1", "true", "yes", "on"}
+
+
+def _error_exit(exc: BaseException, *, code: int = 1) -> None:
+    """Standard CLI error exit. Prints truncated message, traceback if debug.
+
+    Cycle 6 AC9: when ``KB_DEBUG=1`` or ``--verbose`` is set, prints the full
+    ``traceback.format_exc()`` to stderr BEFORE the user-facing ``Error:``
+    line so operators can diagnose transient failures without re-running.
+    """
+    if _is_debug_mode():
+        click.echo(traceback.format_exc(), err=True)
+    click.echo(f"Error: {_truncate(str(exc))}", err=True)
+    sys.exit(code)
+
+
 @click.group()
 @click.version_option(__version__)
-def cli():
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Print full tracebacks on error (same as KB_DEBUG=1).",
+)
+@click.pass_context
+def cli(ctx: click.Context, verbose: bool):
     """LLM Knowledge Base — compile raw sources into a structured wiki."""
+    ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
 
@@ -61,8 +103,7 @@ def ingest(source_path: str, source_type: str | None):
                 click.echo(f"    ! {page}")
         click.echo("Done.")
     except Exception as e:
-        click.echo(f"Error: {_truncate(str(e))}", err=True)
-        raise SystemExit(1)
+        _error_exit(e)
 
 
 @cli.command()
@@ -86,8 +127,7 @@ def compile(incremental: bool):
             ctx.exit(1)
         click.echo("Done.")
     except Exception as e:
-        click.echo(f"Error: {_truncate(str(e))}", err=True)
-        raise SystemExit(1)
+        _error_exit(e)
 
 
 @cli.command()
@@ -117,8 +157,7 @@ def query(question: str, output_format: str):
         if result.get("output_error"):
             click.echo(f"\n[warn] Output format failed: {result['output_error']}", err=True)
     except Exception as e:
-        click.echo(f"Error: {_truncate(str(e))}", err=True)
-        raise SystemExit(1)
+        _error_exit(e)
 
 
 @cli.command()
@@ -211,8 +250,7 @@ def lint(
     except click.UsageError:
         raise
     except Exception as e:
-        click.echo(f"Error: {_truncate(str(e))}", err=True)
-        raise SystemExit(1)
+        _error_exit(e)
 
 
 @cli.command()
@@ -225,8 +263,7 @@ def evolve():
         report = generate_evolution_report()
         click.echo(format_evolution_report(report))
     except Exception as e:
-        click.echo(f"Error: {_truncate(str(e))}", err=True)
-        raise SystemExit(1)
+        _error_exit(e)
 
 
 @cli.command()
@@ -237,8 +274,12 @@ def mcp():
     try:
         mcp_main()
     except Exception as e:
+        # Match the "MCP server failed to start" prefix for callers grepping
+        # logs, but still surface the traceback when KB_DEBUG=1 / --verbose.
+        if _is_debug_mode():
+            click.echo(traceback.format_exc(), err=True)
         click.echo(f"Error: MCP server failed to start — {e}", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
