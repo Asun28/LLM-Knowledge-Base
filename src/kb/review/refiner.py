@@ -117,6 +117,28 @@ def refine_page(
             return {"error": f"Invalid frontmatter format in {page_id}"}
         frontmatter_text = inner_match.group(1) + "\n"
 
+        # Cycle 7 AC22: validate the frontmatter block with ``yaml.safe_load``
+        # BEFORE rewriting. Without this gate, a page with malformed
+        # frontmatter (e.g. tab-indented keys that regex-match but fail
+        # YAML parsing) would be laundered through a successful write with
+        # fresh valid frontmatter, corrupting the page's original data.
+        import yaml  # noqa: PLC0415 — library-boundary import
+
+        try:
+            yaml.safe_load(frontmatter_text)
+        except yaml.YAMLError as e:
+            logger.warning(
+                "refine_page(%s) rejected: malformed frontmatter YAML: %s",
+                page_id,
+                e,
+            )
+            return {
+                "error": (
+                    f"Malformed frontmatter YAML in {page_id} — "
+                    f"refine rejected to prevent corruption: {e}"
+                )
+            }
+
         # Update the 'updated' date in frontmatter
         today = date.today().isoformat()
         if re.search(r"^updated: \d{4}-\d{2}-\d{2}", frontmatter_text, re.MULTILINE):

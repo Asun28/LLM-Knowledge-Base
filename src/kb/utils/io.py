@@ -1,4 +1,15 @@
-"""Atomic file write utilities."""
+"""Atomic file write utilities.
+
+Lock-ordering convention (Cycle 7 AC17): any caller acquiring more than one
+``file_lock()`` across the concurrency surface MUST acquire them in stable
+alphabetical order by the authoritative path:
+
+    VERDICTS_PATH → FEEDBACK_PATH → REVIEW_HISTORY_PATH
+
+A single out-of-order acquisition can deadlock with any caller honouring the
+convention. Verified by cycle-1/2/6 reviewers; deviating from this ordering is
+a bug, not a style preference.
+"""
 
 import json
 import logging

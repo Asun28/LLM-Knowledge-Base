@@ -85,6 +85,34 @@ VALID_SOURCE_TYPES = frozenset(list(SOURCE_TYPE_DIRS.keys()) + ["comparison", "s
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
 # Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
 # NOTE: Env vars are read once at import time. Process restart required for changes.
+_DEFAULT_MODEL_TIERS: dict[str, str] = {
+    "scan": "claude-haiku-4-5-20251001",
+    "write": "claude-sonnet-4-6",
+    "orchestrate": "claude-opus-4-6",
+}
+
+
+def get_model_tier(tier: str) -> str:
+    """Return the model ID for ``tier`` with fresh env lookup.
+
+    Cycle 7 AC24: previously ``MODEL_TIERS`` captured ``os.environ`` at import
+    time, so tests mutating ``CLAUDE_*_MODEL`` mid-run saw stale values (first
+    test to hit ``kb.config`` pinned the tier table). This helper re-reads env
+    on every call so CLI overrides, test fixtures, and long-lived processes
+    observe the current environment.
+
+    Args:
+        tier: One of ``"scan"``, ``"write"``, ``"orchestrate"``.
+
+    Raises:
+        ValueError: if ``tier`` is not a known tier name.
+    """
+    if tier not in _DEFAULT_MODEL_TIERS:
+        raise ValueError(f"invalid tier: {tier!r}; valid={tuple(_DEFAULT_MODEL_TIERS)}")
+    env_key = f"CLAUDE_{tier.upper()}_MODEL"
+    return os.environ.get(env_key, "").strip() or _DEFAULT_MODEL_TIERS[tier]
+
+
 MODEL_TIERS = {
     "scan": os.environ.get("CLAUDE_SCAN_MODEL", "").strip() or "claude-haiku-4-5-20251001",
     "write": os.environ.get("CLAUDE_WRITE_MODEL", "").strip() or "claude-sonnet-4-6",

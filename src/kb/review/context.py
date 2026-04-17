@@ -13,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 def pair_page_with_sources(
-    page_id: str, wiki_dir: Path | None = None, raw_dir: Path | None = None
+    page_id: str,
+    wiki_dir: Path | None = None,
+    raw_dir: Path | None = None,
+    *,
+    project_root: Path | None = None,
 ) -> dict:
     """Load a wiki page and all its referenced raw sources.
 
@@ -21,6 +25,11 @@ def pair_page_with_sources(
         page_id: Wiki page ID (e.g., 'concepts/rag').
         wiki_dir: Path to wiki directory.
         raw_dir: Path to raw directory.
+        project_root: Explicit traversal ceiling (keyword-only, Cycle 7 AC21).
+            Previously derived from ``raw_dir.parent`` — caller-supplied
+            ``raw_dir`` at any depth widened the traversal surface. Pass the
+            real project root explicitly to pin the ceiling; falls back to
+            ``raw_dir.parent`` when ``None`` for back-compat.
 
     Returns:
         Dict with page_id, page_content, page_metadata, source_contents.
@@ -52,14 +61,15 @@ def pair_page_with_sources(
     sources_meta = normalize_sources(post.metadata.get("source"))
 
     source_contents = []
+    # Cycle 7 AC21: prefer explicit project_root when caller supplied; otherwise
+    # fall back to the legacy raw_dir.parent inference.
+    effective_project_root = project_root if project_root is not None else raw_dir.parent
     for source_ref in sources_meta:
         # Resolve: "raw/articles/foo.md" -> project_root / "raw/articles/foo.md"
-        # source_ref starts with "raw/" so we go to parent of raw_dir (= project root)
-        project_root = raw_dir.parent
-        source_path = (project_root / source_ref).resolve()
+        source_path = (effective_project_root / source_ref).resolve()
         # Guard against path traversal — source must stay within project root
         try:
-            source_path.relative_to(project_root.resolve())
+            source_path.relative_to(effective_project_root.resolve())
         except ValueError:
             logger.warning("Source path escapes project root: %s", source_ref)
             source_contents.append(

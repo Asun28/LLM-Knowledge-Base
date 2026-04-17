@@ -154,6 +154,11 @@ def export_mermaid(
     for page_type, nodes in sorted(type_groups.items()):
         lines.append(f'  subgraph "{page_type}"')
         for node in nodes:
+            # Cycle 7 AC26: fall back to the filename stem directly when
+            # `_sanitize_label` strips the title down to empty; the stem is
+            # already human-readable and preserves `-` (whereas routing the
+            # bare slug through `_safe_node_id` — done only for node IDs —
+            # would replace `-` with `_`, producing a label/filename mismatch).
             title = _sanitize_label(titles.get(node, node.split("/")[-1]))
             if not title:
                 title = node.split("/")[-1]
