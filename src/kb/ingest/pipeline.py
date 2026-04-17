@@ -426,6 +426,16 @@ def _update_existing_page(
     # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
     ref_line = f"- {verb} in {source_ref}"
     if "## References" in body_text:
+        # Cycle 3 L7: the regex requires each matched line to end with `\n`
+        # and the whole References block to terminate with either `\n## ` or
+        # end-of-string. Files saved by editors that strip the trailing
+        # newline (common for VSCode + `files.insertFinalNewline` off)
+        # matched zero characters after the header, so the new reference
+        # appeared BEFORE any existing refs — silently reversing order and
+        # sometimes dropping the new entry entirely. Normalize by ensuring
+        # body_text ends with `\n` before substitution.
+        if not body_text.endswith("\n"):
+            body_text = body_text + "\n"
         # Append new reference at end of References block.
         # Use MULTILINE (not DOTALL) so `.` does not cross line boundaries;
         # match non-empty lines or blank lines until a new section or end-of-string.
