@@ -4,6 +4,8 @@ import logging
 import re
 from pathlib import Path
 
+import frontmatter
+
 from kb.config import WIKI_DIR
 from kb.graph.builder import build_graph
 from kb.utils.pages import load_all_pages
@@ -93,10 +95,36 @@ def export_mermaid(
     else:
         nodes_to_include = set(graph.nodes())
 
-    # Fix 5.3: build_graph() stores only 'path' as a node attribute, not titles.
-    # Titles require YAML frontmatter parsing which load_all_pages() handles.
-    # Load AFTER pruning and filter to included nodes only to avoid unnecessary disk reads.
-    titles = {p["id"]: p["title"] for p in load_all_pages(wiki_dir) if p["id"] in nodes_to_include}
+    # Cycle 3 M11: prune-BEFORE-load. The comment below used to claim the
+    # filter "avoids unnecessary disk reads", but load_all_pages iterates
+    # EVERY wiki file regardless of the filter — on a 5k-page wiki the
+    # Mermaid export did ~80MB of disk I/O even when capped at 30 nodes.
+    # Now we iterate only nodes_to_include and read each page's frontmatter
+    # directly via the graph's stored "path" attribute. When the graph was
+    # supplied by an external caller without per-node path metadata, we fall
+    # back to a single load_all_pages pass (same behaviour as before).
+    missing_paths = [n for n in nodes_to_include if not graph.nodes[n].get("path")]
+    if missing_paths:
+        logger.warning(
+            "Graph export fallback: %d node(s) lack 'path' metadata; "
+            "loading all pages to resolve titles",
+            len(missing_paths),
+        )
+        titles = {
+            p["id"]: p["title"]
+            for p in load_all_pages(wiki_dir)
+            if p["id"] in nodes_to_include
+        }
+    else:
+        titles = {}
+        for node in nodes_to_include:
+            path = graph.nodes[node].get("path")
+            try:
+                post = frontmatter.load(path)
+            except Exception as exc:  # pragma: no cover — any corrupt page is non-fatal
+                logger.debug("Graph export title load failed for %s: %s", node, exc)
+                continue
+            titles[node] = str(post.metadata.get("title", Path(path).stem))
 
     # Build Mermaid output
     lines = ["graph LR"]
