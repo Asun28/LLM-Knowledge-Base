@@ -195,3 +195,16 @@ def test_anthropic_client_sets_package_user_agent(monkeypatch):
     llm.get_client()
 
     assert captured["default_headers"]["User-Agent"].startswith("llm-wiki-flywheel/")
+
+
+def test_pytest_markers_registered():
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    markers = data["tool"]["pytest"]["ini_options"]["markers"]
+
+    assert "slow: marks tests as slow (deselect with '-m not slow')" in markers
+    assert "network: marks tests requiring network access" in markers
+    assert "integration: marks integration tests requiring real filesystem or DB" in markers
+    assert "llm: marks tests that invoke a real LLM API" in markers

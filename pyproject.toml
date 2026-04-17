@@ -35,6 +35,10 @@ pythonpath = ["src"]
 addopts = "-p no:faker -p no:langsmith_plugin"
 markers = [
     "skip_default_robots: opt out of the augment fetcher autouse robots.txt mock",
+    "slow: marks tests as slow (deselect with '-m not slow')",
+    "network: marks tests requiring network access",
+    "integration: marks integration tests requiring real filesystem or DB",
+    "llm: marks tests that invoke a real LLM API",
 ]
 
 [build-system]
