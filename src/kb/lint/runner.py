@@ -24,6 +24,8 @@ def run_all_checks(
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
     fix: bool = False,
+    *,
+    verdicts_path: Path | None = None,
 ) -> dict:
     """Run all lint checks and produce a structured report.
 
@@ -31,6 +33,11 @@ def run_all_checks(
         wiki_dir: Path to wiki directory.
         raw_dir: Path to raw directory.
         fix: If True, auto-fix dead links by replacing with plain text.
+        verdicts_path: Cycle 3 M18 — when set, verdict-summary reads from this
+            path instead of the production ``VERDICTS_PATH``. Keyword-only so
+            the public signature remains additive. Tests supplying a
+            ``tmp_path`` can assert their own verdicts flow through without
+            leaking production audit data into the lint report.
 
     Returns:
         dict with keys: checks_run, total_issues, issues (list), summary (by severity),
@@ -112,10 +119,13 @@ def run_all_checks(
         sev = issue.get("severity", "info")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-    # Include verdict audit trail summary (fail-safe)
+    # Include verdict audit trail summary (fail-safe).
+    # Cycle 3 M18: pass verdicts_path so tests / alternate profiles don't bleed
+    # production .data/lint_verdicts.json into the tmp-run report. The prior
+    # code also aliased `verdict_summary = verdict_history` (dead duplicate)
+    # — collapsed into a single local.
     try:
-        verdict_summary = get_verdict_summary()
-        verdict_history = verdict_summary
+        verdict_history = get_verdict_summary(verdicts_path)
     except Exception as e:
         logger.warning("Failed to load verdict summary: %s", e)
         verdict_history = None
