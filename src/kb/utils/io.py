@@ -211,9 +211,7 @@ def file_lock(path: Path, timeout: float | None = None):
                 # denied read as "PID dead → safe to steal" — silently
                 # corrupting the verdict/feedback RMW chain. Raise immediately
                 # so the operator sees the real bug.
-                raise OSError(
-                    f"Cannot create lock at {lock_path}: {perm_exc}"
-                ) from perm_exc
+                raise OSError(f"Cannot create lock at {lock_path}: {perm_exc}") from perm_exc
             except FileExistsError:
                 if time.monotonic() > deadline:
                     # Item 2 (cycle 2): ASCII-only decode + int-parse. Any

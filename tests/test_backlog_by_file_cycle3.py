@@ -11,19 +11,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sqlite3
-import sys
 import threading
 import time
 import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
-
-from kb import config as kb_config
-
 
 # =====================================================================
 # TASK 1 — utils/llm.py (H1, L1)
@@ -137,9 +131,9 @@ class TestLlmApiErrors:
         src = Path(llm.__file__).read_text(encoding="utf-8")
         # The pre-cycle-3 comment "fix item 16: track non-retryable for consistency"
         # marks the dead assignment. H1/L1 must remove it.
-        assert (
-            "track non-retryable for consistency" not in src
-        ), "L1: dead `last_error = e` assignment (with its justification comment) was not removed"
+        assert "track non-retryable for consistency" not in src, (
+            "L1: dead `last_error = e` assignment (with its justification comment) was not removed"
+        )
 
 
 # =====================================================================
@@ -216,9 +210,10 @@ class TestFeedbackStore:
         doc = reliability.compute_trust_scores.__doc__ or ""
         # Must mention the asymptotic contract so developers don't misread
         # "wrong is 2x" as small-N literal.
-        assert "asymptot" in doc.lower() or "converges" in doc.lower() or "2×" in doc or "2x" in doc.lower(), (
-            "L5: docstring should describe asymptotic 2× behavior"
-        )
+        doc_lower = doc.lower()
+        assert (
+            "asymptot" in doc_lower or "converges" in doc_lower or "2×" in doc or "2x" in doc_lower
+        ), "L5: docstring should describe asymptotic 2× behavior"
 
 
 # =====================================================================
@@ -253,9 +248,7 @@ class TestVectorIndex:
         embeddings._index_cache.clear()
 
         # Ensure _index_cache_lock exists — H8 requirement
-        assert hasattr(embeddings, "_index_cache_lock"), (
-            "H8: module must expose _index_cache_lock"
-        )
+        assert hasattr(embeddings, "_index_cache_lock"), "H8: module must expose _index_cache_lock"
         assert isinstance(embeddings._index_cache_lock, type(threading.Lock())), (
             "H8: _index_cache_lock must be a threading.Lock (or equivalent)"
         )
@@ -349,7 +342,7 @@ class TestQueryEngineCycle3:
         (wiki_dir / "comparisons").mkdir()
         (wiki_dir / "synthesis").mkdir()
 
-        page_md = (wiki_dir / "concepts" / "foo.md")
+        page_md = wiki_dir / "concepts" / "foo.md"
         page_md.write_text(
             "---\ntitle: Foo\ntype: concept\nconfidence: stated\n"
             "source:\n  - raw/articles/foo.md\ncreated: 2026-01-01\n"
@@ -391,7 +384,8 @@ class TestQueryEngineCycle3:
         code_only = "\n".join(
             line for line in body.splitlines() if not line.lstrip().startswith("#")
         )
-        assert re.search(r"^\s*except\s+Exception(\s+as\s|\s*:)", code_only, re.MULTILINE) is None, (
+        broad_except_re = re.compile(r"^\s*except\s+Exception(\s+as\s|\s*:)", re.MULTILINE)
+        assert broad_except_re.search(code_only) is None, (
             "H11: vector_search must narrow exceptions, not catch Exception broadly"
         )
         assert "ImportError" in code_only and (
@@ -529,9 +523,7 @@ class TestContradictionDetection:
 
         claims = [f"claim {i} about testing." for i in range(50)]
         pages = [{"id": "p/1", "content": "unrelated text"}]
-        result = contradiction.detect_contradictions_with_metadata(
-            claims, pages, max_claims=5
-        )
+        result = contradiction.detect_contradictions_with_metadata(claims, pages, max_claims=5)
         assert isinstance(result, dict)
         assert result["claims_total"] == 50
         assert result["claims_checked"] == 5
@@ -585,19 +577,22 @@ class TestPipelineReferencesAppend:
     """L7: References substitution tolerates body_text without trailing newline."""
 
     def test_references_append_when_no_trailing_newline(self):
-        from kb.ingest.pipeline import _update_existing_page  # type: ignore[attr-defined]
 
         # We validate via direct call against a synthetic page path/body
         # handled by the helper. If the helper is private + path-based, we
         # inline-stage a tmp file and invoke; otherwise fall back to grep-level.
-        src = Path(
-            __import__("kb.ingest.pipeline", fromlist=["__file__"]).__file__
-        ).read_text(encoding="utf-8")
+        src = Path(__import__("kb.ingest.pipeline", fromlist=["__file__"]).__file__).read_text(
+            encoding="utf-8"
+        )
         # Confirm the normalization line exists in the code
         assert (
-            "body_text.endswith" in src or 'body_text = body_text + "\\n"' in src or
-            'endswith("\\n")' in src
-        ), "L7: body_text trailing-newline normalization must be present before References substitution"
+            "body_text.endswith" in src
+            or 'body_text = body_text + "\\n"' in src
+            or 'endswith("\\n")' in src
+        ), (
+            "L7: body_text trailing-newline normalization must be present "
+            "before References substitution"
+        )
 
 
 # =====================================================================
@@ -752,8 +747,9 @@ class TestGraphExport:
 
         # With max_nodes=3, only 3 pages should be loaded (post-M11).
         export.export_mermaid(g, max_nodes=3)
-        assert loads["n"] <= 3, (
-            f"M11: prune-before-load should load ≤3 pages with max_nodes=3; loaded {loads['n']}"
+        actual_loads = loads["n"]
+        assert actual_loads <= 3, (
+            f"M11: prune-before-load should load ≤3 pages with max_nodes=3; loaded {actual_loads}"
         )
 
     def test_title_fallback_preserves_hyphens(self):
@@ -763,9 +759,10 @@ class TestGraphExport:
         # The docstring of L4 says fallback MUST NOT swap `-` → `_` in the LABEL.
         # Inspect source to confirm L4 applies to the title fallback branch.
         src = Path(export.__file__).read_text(encoding="utf-8")
-        # The pre-fix code did `.replace("-", "_")` on fallback title; post-L4 it must not.
-        # Find a region near `title = node.split("/")` and assert no `.replace("-", "_")` on title var.
-        assert "title.replace" not in src or ".replace(\"-\", \"_\")" not in src, (
+        # The pre-fix code did `.replace("-", "_")` on fallback title; post-L4
+        # it must not. Find the region near `title = node.split("/")` and
+        # assert no `.replace("-", "_")` on the title variable.
+        assert "title.replace" not in src or '.replace("-", "_")' not in src, (
             "L4: title fallback must not swap - ↔ _"
         )
 
@@ -798,8 +795,7 @@ class TestReviewContext:
 
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert any(
-            "source" in r.message.lower() and "entities/foo" in r.message
-            for r in warnings
+            "source" in r.message.lower() and "entities/foo" in r.message for r in warnings
         ), "M12: missing-source condition must emit a logger.warning"
 
 

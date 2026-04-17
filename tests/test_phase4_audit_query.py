@@ -1,4 +1,5 @@
 """Tests for query engine correctness — Phase 4 audit."""
+
 from kb.config import CONTEXT_TIER1_BUDGET, QUERY_CONTEXT_MAX_CHARS
 from kb.query.engine import _build_query_context
 
@@ -6,8 +7,11 @@ from kb.query.engine import _build_query_context
 def _make_page(pid, ptype, size):
     """Create a minimal page dict for testing."""
     return {
-        "id": pid, "type": ptype, "confidence": "stated",
-        "title": pid, "content": "x" * size,
+        "id": pid,
+        "type": ptype,
+        "confidence": "stated",
+        "title": pid,
+        "content": "x" * size,
     }
 
 
@@ -21,8 +25,7 @@ def test_tier1_budget_prevents_summary_starvation():
     result = _build_query_context(pages, max_chars=QUERY_CONTEXT_MAX_CHARS)
 
     assert "entities/foo" in result["context_pages"], (
-        f"Entity page was starved by oversized summary. "
-        f"Got context_pages={result['context_pages']}"
+        f"Entity page was starved by oversized summary. Got context_pages={result['context_pages']}"
     )
 
 
@@ -47,16 +50,18 @@ def test_raw_fallback_truncates_first_oversized_section(tmp_path, monkeypatch):
 
     # A raw source whose content exceeds the entire query budget
     large_content = "y" * (QUERY_CONTEXT_MAX_CHARS + 1000)
-    monkeypatch.setattr(eng, "search_raw_sources", lambda q, **kw: [
-        {"id": "raw/articles/big.md", "content": large_content}
-    ])
+    monkeypatch.setattr(
+        eng,
+        "search_raw_sources",
+        lambda q, **kw: [{"id": "raw/articles/big.md", "content": large_content}],
+    )
     # A tiny SUMMARY page so the cycle-3 semantic gate (only-summary context)
     # triggers raw fallback without requiring the pre-cycle-3 char-count path.
     tiny_summary = _make_page("summaries/tiny", "summary", 50)
     monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [tiny_summary])
     captured_prompts = []
     monkeypatch.setattr(
-        eng, "call_llm", lambda prompt, **kw: (captured_prompts.append(prompt) or "answer")
+        eng, "call_llm", lambda prompt, **kw: captured_prompts.append(prompt) or "answer"
     )
 
     eng.query_wiki("test question", wiki_dir=tmp_path)
@@ -81,7 +86,7 @@ def test_raw_fallback_skips_when_non_summary_context_present(tmp_path, monkeypat
     import kb.query.engine as eng
 
     raw_called = []
-    monkeypatch.setattr(eng, "search_raw_sources", lambda q, **kw: (raw_called.append(True) or []))
+    monkeypatch.setattr(eng, "search_raw_sources", lambda q, **kw: raw_called.append(True) or [])
 
     # Non-summary context page — cycle 3 semantic gate skips fallback.
     entity_page = _make_page("entities/large", "entity", 500)

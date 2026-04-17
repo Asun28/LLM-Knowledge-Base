@@ -1,4 +1,5 @@
 """Tests for compile, linker, graph, and evolve correctness fixes — Phase 4 audit."""
+
 from unittest.mock import patch
 
 
@@ -16,7 +17,7 @@ def test_manifest_pruning_keeps_unchanged_source(tmp_path):
 
     manifest_before = {
         "raw/articles/kept.md": "abc123",
-        "raw/articles/gone.md": "def456",   # This one doesn't exist on disk
+        "raw/articles/gone.md": "def456",  # This one doesn't exist on disk
         "_template/article": "xyz",
     }
 
@@ -31,6 +32,7 @@ def test_manifest_pruning_keeps_unchanged_source(tmp_path):
             with patch("kb.compile.compiler.save_manifest") as mock_save:
                 with patch("kb.compile.compiler._template_hashes", return_value={}):
                     from kb.compile.compiler import compile_wiki
+
                     compile_wiki(incremental=False, wiki_dir=wiki_dir, raw_dir=raw_dir)
 
     assert mock_save.called, "save_manifest should have been called in full mode"

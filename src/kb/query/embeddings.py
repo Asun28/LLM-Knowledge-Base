@@ -196,9 +196,7 @@ class VectorIndex:
 
         dim = len(entries[0][1])
         if not (isinstance(dim, int) and 1 <= dim <= self._MAX_DIM):
-            raise ValueError(
-                f"Invalid embedding dim={dim!r}; expected int in [1, {self._MAX_DIM}]"
-            )
+            raise ValueError(f"Invalid embedding dim={dim!r}; expected int in [1, {self._MAX_DIM}]")
         conn = sqlite3.connect(str(self.db_path))
         try:
             conn.enable_load_extension(True)

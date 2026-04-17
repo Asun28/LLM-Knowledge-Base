@@ -151,7 +151,8 @@ def _make_api_call(kwargs: dict, model: str):
                 # (so callers can still branch on the structured fields).
                 safe_msg = truncate(str(e.message), limit=500)
                 raise LLMError(
-                    f"API error from {model} ({e.__class__.__name__}): {e.status_code} — {safe_msg}",
+                    f"API error from {model} ({e.__class__.__name__}): "
+                    f"{e.status_code} — {safe_msg}",
                     kind="status_error",
                 ) from e
 

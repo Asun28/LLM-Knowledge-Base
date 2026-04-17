@@ -153,8 +153,7 @@ def kb_list_pages(page_type: str = "", limit: int = 200, offset: int = 0) -> str
         # "Showing Y of N ..." pagination line so operators see the window.
         lines = [
             f"Total: {total} page(s)",
-            f"Showing {len(window)} of {total} page(s) "
-            f"(offset={offset}, limit={limit})\n",
+            f"Showing {len(window)} of {total} page(s) (offset={offset}, limit={limit})\n",
         ]
         current_type = ""
         for p in window:
@@ -228,8 +227,7 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
         lines = [
             "# Raw Sources\n",
             f"**Total:** {total_global} source file(s)",
-            f"Showing {len(window)} of {total_global} file(s) "
-            f"(offset={offset}, limit={limit})\n",
+            f"Showing {len(window)} of {total_global} file(s) (offset={offset}, limit={limit})\n",
         ]
         total_bytes = 0
         truncated_notice = ""
@@ -256,8 +254,7 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
             total_bytes = sum(len(s) for s in lines)
             if total_bytes >= _LIST_SOURCES_TOTAL_CAP_BYTES:
                 truncated_notice = (
-                    "\n\n*(Output truncated at "
-                    f"{_LIST_SOURCES_TOTAL_CAP_BYTES // 1024}KB.)*"
+                    f"\n\n*(Output truncated at {_LIST_SOURCES_TOTAL_CAP_BYTES // 1024}KB.)*"
                 )
                 break
 

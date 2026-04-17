@@ -1,6 +1,5 @@
 """Regression tests for kb.utils.text — slugify and related helpers."""
 
-
 from tests.fixtures.injection_payloads import (
     BENIGN_KEY_CLAIM_WITH_CODE,
     BENIGN_SUMMARY_WITH_DASHES,

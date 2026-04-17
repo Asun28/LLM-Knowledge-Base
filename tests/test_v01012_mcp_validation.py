@@ -1,4 +1,5 @@
 """Tests for Phase 4 MCP validation fixes."""
+
 from __future__ import annotations
 
 

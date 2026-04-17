@@ -1,6 +1,5 @@
 """Tests for embedding wrapper and vector index (Phase 4)."""
 
-
 from kb.query.embeddings import VectorIndex, embed_texts
 
 
@@ -25,11 +24,13 @@ class TestVectorIndex:
     def test_build_and_query(self, tmp_path):
         db_path = tmp_path / "test_vec.db"
         idx = VectorIndex(db_path)
-        idx.build([
-            ("concepts/a", [1.0, 0.0, 0.0]),
-            ("concepts/b", [0.0, 1.0, 0.0]),
-            ("concepts/c", [0.9, 0.1, 0.0]),
-        ])
+        idx.build(
+            [
+                ("concepts/a", [1.0, 0.0, 0.0]),
+                ("concepts/b", [0.0, 1.0, 0.0]),
+                ("concepts/c", [0.9, 0.1, 0.0]),
+            ]
+        )
         results = idx.query([1.0, 0.0, 0.0], limit=2)
         assert len(results) == 2
         # Closest match first

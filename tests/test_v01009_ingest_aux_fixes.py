@@ -1,4 +1,5 @@
 """Tests for Phase 4 ingest aux module fixes."""
+
 from __future__ import annotations
 
 import logging
@@ -48,7 +49,8 @@ def test_contradiction_truncation_logged(caplog):
     # At least one warning message about truncation
     msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
     truncation_msgs = [
-        m for m in msgs
+        m
+        for m in msgs
         if str(CONTRADICTION_MAX_CLAIMS_TO_CHECK) in m
         or "truncat" in m.lower()
         or "first" in m.lower()

@@ -1,4 +1,5 @@
 """Tests for file-locking correctness — Phase 4 audit."""
+
 import os
 import threading
 import time
@@ -32,9 +33,7 @@ def test_file_lock_basic_mutual_exclusion(tmp_path):
         entry = log[i]
         exit_ = log[i + 1]
         n = entry.split("-")[1]
-        assert entry == f"enter-{n}" and exit_ == f"exit-{n}", (
-            f"Interleaved access detected: {log}"
-        )
+        assert entry == f"enter-{n}" and exit_ == f"exit-{n}", f"Interleaved access detected: {log}"
 
 
 def test_file_lock_writes_pid_to_lock_file(tmp_path):

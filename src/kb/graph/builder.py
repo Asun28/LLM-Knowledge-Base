@@ -34,9 +34,7 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
-def build_graph(
-    wiki_dir: Path | None = None, pages: list[dict] | None = None
-) -> nx.DiGraph:
+def build_graph(wiki_dir: Path | None = None, pages: list[dict] | None = None) -> nx.DiGraph:
     """Build a directed graph from wiki pages and their wikilinks.
 
     Nodes are wiki page IDs (e.g., 'concepts/rag', 'entities/openai').
@@ -104,7 +102,9 @@ def build_graph(
                     if resolved:
                         logger.debug(
                             "Resolved bare-slug [[%s]] → %s in %s",
-                            link, resolved, source_id,
+                            link,
+                            resolved,
+                            source_id,
                         )
                         target = resolved
                 # Fix 5.1: guard against self-loops (page linking to itself)
@@ -146,7 +146,8 @@ def graph_stats(graph: nx.DiGraph) -> dict:
     except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError) as e:
         logger.warning(
             "PageRank failed to converge on %d-node graph: %s",
-            graph.number_of_nodes(), e,
+            graph.number_of_nodes(),
+            e,
         )
         pagerank = []
         pagerank_status = "failed"

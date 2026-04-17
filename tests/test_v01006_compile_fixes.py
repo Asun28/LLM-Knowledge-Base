@@ -1,4 +1,5 @@
 """Tests for Phase 4 compile/ fixes."""
+
 from __future__ import annotations
 
 

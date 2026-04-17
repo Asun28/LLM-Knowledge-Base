@@ -19,7 +19,6 @@ from kb.config import (
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _validate_page_id, mcp
-from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 

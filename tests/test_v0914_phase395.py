@@ -204,11 +204,16 @@ class TestSearchPagesNoMutation:
 
     def test_page_dicts_unchanged_after_search(self, tmp_wiki, create_wiki_page, monkeypatch):
         create_wiki_page(
-            "concepts/rag", title="RAG", content="Retrieval augmented generation.",
+            "concepts/rag",
+            title="RAG",
+            content="Retrieval augmented generation.",
             wiki_dir=tmp_wiki,
         )
         create_wiki_page(
-            "concepts/llm", title="LLM", content="Large language model.", wiki_dir=tmp_wiki,
+            "concepts/llm",
+            title="LLM",
+            content="Large language model.",
+            wiki_dir=tmp_wiki,
         )
 
         from kb.query.engine import search_pages

@@ -4,6 +4,7 @@
 def test_hash_bytes_matches_content_hash(tmp_path):
     """hash_bytes(data) must produce the same result as content_hash(path)."""
     from kb.utils.hashing import content_hash, hash_bytes
+
     path = tmp_path / "test.md"
     data = b"hello world content for hashing"
     path.write_bytes(data)
@@ -13,6 +14,7 @@ def test_hash_bytes_matches_content_hash(tmp_path):
 def test_hash_bytes_returns_32_char_hex(tmp_path):
     """hash_bytes must return the same format as content_hash — 32 hex chars."""
     from kb.utils.hashing import hash_bytes
+
     result = hash_bytes(b"some content")
     assert len(result) == 32
     assert all(c in "0123456789abcdef" for c in result)
@@ -62,6 +64,7 @@ def test_sources_mapping_first_ingest_appends(tmp_path):
 def test_extraction_prompt_with_missing_template_keys():
     """build_extraction_prompt must not raise KeyError when name/description are missing."""
     from kb.ingest.extractors import build_extraction_prompt
+
     template_minimal = {"extract": ["key_claims", "entities_mentioned"]}
     # Must not raise KeyError
     prompt = build_extraction_prompt("Some source content.", template_minimal)
@@ -72,25 +75,27 @@ def test_extraction_prompt_with_missing_template_keys():
 def test_contradiction_strips_evidence_trail_header():
     """Evidence Trail section headers must not produce false contradiction signals."""
     from kb.ingest.contradiction import detect_contradictions
+
     new_claims = ["transformers use attention mechanisms for sequence modeling"]
-    existing_pages = [{
-        "id": "entities/transformer",
-        "content": (
-            "## Evidence Trail\n"
-            "2026-01-01 | raw/articles/a.md | Initial extraction\n\n"
-            "## References\n"
-            "- [[raw/articles/a.md]]\n"
-        ),
-    }]
+    existing_pages = [
+        {
+            "id": "entities/transformer",
+            "content": (
+                "## Evidence Trail\n"
+                "2026-01-01 | raw/articles/a.md | Initial extraction\n\n"
+                "## References\n"
+                "- [[raw/articles/a.md]]\n"
+            ),
+        }
+    ]
     result = detect_contradictions(new_claims, existing_pages, max_claims=10)
-    assert result == [], (
-        f"Got spurious contradictions from structural-only page content: {result}"
-    )
+    assert result == [], f"Got spurious contradictions from structural-only page content: {result}"
 
 
 def test_contradiction_strips_wikilinks():
     """Wikilinks in page content must be stripped to their display text before tokenizing."""
     from kb.ingest.contradiction import _strip_markdown_structure
+
     content = "The [[entities/transformer|Transformer]] model is not slow."
     stripped = _strip_markdown_structure(content)
     assert "[[" not in stripped
@@ -136,13 +141,17 @@ def test_load_all_pages_called_at_most_once_per_ingest(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_mod, "load_all_pages", counting_load)
 
     # Patch out the LLM extraction and other side-effectful operations
-    monkeypatch.setattr(pipeline_mod, "extract_from_source", lambda *a, **kw: {
-        "key_claims": ["claim one"],
-        "entities_mentioned": [],
-        "concepts_mentioned": [],
-        "title": "Test",
-        "summary": "A test document.",
-    })
+    monkeypatch.setattr(
+        pipeline_mod,
+        "extract_from_source",
+        lambda *a, **kw: {
+            "key_claims": ["claim one"],
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+            "title": "Test",
+            "summary": "A test document.",
+        },
+    )
     monkeypatch.setattr(pipeline_mod, "_is_duplicate_content", lambda *a: False)
 
     ingest_source(source, wiki_dir=wiki)

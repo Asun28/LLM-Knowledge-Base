@@ -273,7 +273,9 @@ def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) 
                 "check": "wikilink_cycle",
                 "severity": "warning",
                 "cycle": [],
-                "message": f"Cycle detection aborted after {_MAX_CYCLES} cycles — graph may contain more",
+                "message": (
+                    f"Cycle detection aborted after {_MAX_CYCLES} cycles — graph may contain more"
+                ),
             }
         )
 

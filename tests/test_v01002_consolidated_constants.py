@@ -1,4 +1,5 @@
 """Tests for consolidated constants (Phase 4 LOW fixes)."""
+
 from __future__ import annotations
 
 
@@ -28,6 +29,7 @@ def test_stopwords_single_source():
 def test_stopwords_union_of_both_original_sets():
     """The unified STOPWORDS must contain all words from both original sets."""
     from kb.utils.text import STOPWORDS
+
     # Sample words that should be in the set regardless of which file they came from
     common_words = {"the", "a", "an", "is", "are", "of", "in", "to"}
     for w in common_words:

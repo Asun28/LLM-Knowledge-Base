@@ -111,9 +111,7 @@ def export_mermaid(
             len(missing_paths),
         )
         titles = {
-            p["id"]: p["title"]
-            for p in load_all_pages(wiki_dir)
-            if p["id"] in nodes_to_include
+            p["id"]: p["title"] for p in load_all_pages(wiki_dir) if p["id"] in nodes_to_include
         }
     else:
         titles = {}

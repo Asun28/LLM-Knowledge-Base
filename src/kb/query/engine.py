@@ -581,9 +581,7 @@ def query_wiki(
     # ONLY when (a) no pages made it into context, or (b) every context page
     # is a summary (summaries lose detail — raw verbatim has value).
     ctx_ids = ctx.get("context_pages", [])
-    context_types = {
-        p.get("type") for p in matching_pages if p["id"] in ctx_ids
-    }
+    context_types = {p.get("type") for p in matching_pages if p["id"] in ctx_ids}
     raw_fallback_needed = (not ctx_ids) or context_types == {"summary"}
 
     raw_context = ""
@@ -646,9 +644,7 @@ INSTRUCTIONS:
     # whose stale flag is True. We deliberately do NOT use `citations`
     # (LLM-extracted) because those may reference pages outside context.
     ctx_ids_set = set(ctx["context_pages"])
-    stale_citations = [
-        p["id"] for p in matching_pages if p["id"] in ctx_ids_set and p.get("stale")
-    ]
+    stale_citations = [p["id"] for p in matching_pages if p["id"] in ctx_ids_set and p.get("stale")]
 
     result_dict = {
         "question": question,

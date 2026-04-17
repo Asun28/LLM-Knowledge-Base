@@ -174,11 +174,8 @@ def test_query_context_truncation_logging(caplog):
 
     # Should have logged that pages were skipped/excluded
     assert any(
-        "skipped" in r.message.lower() or "excluded" in r.message.lower()
-        for r in caplog.records
-    ), (
-        f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
-    )
+        "skipped" in r.message.lower() or "excluded" in r.message.lower() for r in caplog.records
+    ), f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
 
 
 def test_query_context_exclusion_logging(caplog):
@@ -213,11 +210,8 @@ def test_query_context_exclusion_logging(caplog):
         _build_query_context(pages, max_chars=max_chars)
 
     assert any(
-        "skipped" in r.message.lower() or "excluded" in r.message.lower()
-        for r in caplog.records
-    ), (
-        f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
-    )
+        "skipped" in r.message.lower() or "excluded" in r.message.lower() for r in caplog.records
+    ), f"Expected exclusion/skip log message, got: {[r.message for r in caplog.records]}"
 
 
 # ── Fix 4: BM25 empty corpus avgdl warning ──────────────────────

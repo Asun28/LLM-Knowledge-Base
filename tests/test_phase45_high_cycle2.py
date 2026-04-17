@@ -50,9 +50,9 @@ class TestD3FrontmatterRegex:
         from kb.utils.markdown import FRONTMATTER_RE
 
         text = "---\ntitle: Broken\n" + "x" * 50_000 + "\n"
-        # Should complete quickly (regex bounded), returning None
-        m = FRONTMATTER_RE.match(text)
-        # Either None or a match is OK — the key is it completes fast
+        # Should complete quickly (regex bounded), returning None or match.
+        # Either outcome is OK — the key is it completes fast (no backtrack).
+        _ = FRONTMATTER_RE.match(text)
         assert True  # If we get here, no catastrophic backtracking
 
 
@@ -65,7 +65,9 @@ class TestD1FrontmatterGuard:
         wiki_dir = tmp_path / "wiki"
         (wiki_dir / "concepts").mkdir(parents=True)
         page = wiki_dir / "concepts" / "test.md"
-        page.write_text("---\ntitle: Test\nupdated: 2026-01-01\n---\nOld content\n", encoding="utf-8")
+        page.write_text(
+            "---\ntitle: Test\nupdated: 2026-01-01\n---\nOld content\n", encoding="utf-8"
+        )
 
         # Content with horizontal rules should be accepted
         result = refine_page(
@@ -83,7 +85,9 @@ class TestD1FrontmatterGuard:
         wiki_dir = tmp_path / "wiki"
         (wiki_dir / "concepts").mkdir(parents=True)
         page = wiki_dir / "concepts" / "test.md"
-        page.write_text("---\ntitle: Test\nupdated: 2026-01-01\n---\nOld content\n", encoding="utf-8")
+        page.write_text(
+            "---\ntitle: Test\nupdated: 2026-01-01\n---\nOld content\n", encoding="utf-8"
+        )
 
         # Content that looks like a frontmatter block should be rejected
         result = refine_page(
@@ -141,7 +145,10 @@ class TestL7SemanticGroupIndex:
         concepts.mkdir(parents=True)
 
         # Two pages with same body but different frontmatter
-        for name, body in [("alpha", "quantum computing algorithms research"), ("beta", "quantum computing algorithms research")]:
+        for name, body in [
+            ("alpha", "quantum computing algorithms research"),
+            ("beta", "quantum computing algorithms research"),
+        ]:
             (concepts / f"{name}.md").write_text(
                 f"---\ntitle: {name.title()}\ntype: concept\n---\n{body}\n", encoding="utf-8"
             )
@@ -260,7 +267,9 @@ class TestL5ParseFailureAccounting:
 
         result = compute_verdict_trends(verdicts_path)
         # The INVALID_TIMESTAMP entry should be excluded from overall too
-        total_counted = result["overall"]["pass"] + result["overall"]["fail"] + result["overall"]["warning"]
+        total_counted = (
+            result["overall"]["pass"] + result["overall"]["fail"] + result["overall"]["warning"]
+        )
         assert total_counted == 2, f"Parse failure should not count in overall, got {total_counted}"
 
 
@@ -272,7 +281,9 @@ class TestL6RenderSourcesBudget:
 
         # Lines already consuming most of the budget
         lines = ["x" * 79_000]  # Near the 80K limit
-        sources = [{"path": "raw/test.md", "content": "Important source content that should not vanish"}]
+        sources = [
+            {"path": "raw/test.md", "content": "Important source content that should not vanish"}
+        ]
 
         _render_sources(sources, lines)
         # Source content should still appear (with minimum budget)
@@ -303,8 +314,16 @@ class TestL3BuildGraphAcceptsPages:
 
         # Build with pre-loaded pages (should not need disk reads)
         pages = [
-            {"id": "concepts/a", "path": str(wiki_dir / "concepts/a.md"), "content": "Links to [[concepts/b]]"},
-            {"id": "concepts/b", "path": str(wiki_dir / "concepts/b.md"), "content": "Links to [[entities/c]]"},
+            {
+                "id": "concepts/a",
+                "path": str(wiki_dir / "concepts/a.md"),
+                "content": "Links to [[concepts/b]]",
+            },
+            {
+                "id": "concepts/b",
+                "path": str(wiki_dir / "concepts/b.md"),
+                "content": "Links to [[entities/c]]",
+            },
             {"id": "entities/c", "path": str(wiki_dir / "entities/c.md"), "content": "No links"},
         ]
         g = build_graph(wiki_dir, pages=pages)
@@ -353,8 +372,9 @@ class TestD5ContradictionTruncationWarning:
             detect_contradictions(claims, pages, max_claims=5)
 
         warning_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("truncated" in m.lower() or "first" in m.lower() for m in warning_msgs), \
+        assert any("truncated" in m.lower() or "first" in m.lower() for m in warning_msgs), (
             f"Expected WARNING about truncation, got: {warning_msgs}"
+        )
 
 
 class TestD6ContradictionExcludesCurrentIngest:
@@ -369,13 +389,18 @@ class TestD6ContradictionExcludesCurrentIngest:
             {"id": "summaries/new-source", "content": "Python is slow for numerical computation"},
         ]
         preexisting = [
-            {"id": "concepts/python", "content": "Python excels at numerical computation with NumPy"},
+            {
+                "id": "concepts/python",
+                "content": "Python excels at numerical computation with NumPy",
+            },
         ]
 
-        # With all pages (including current) — might get self-comparison noise
-        all_pages = current_pages + preexisting
-        # The fix should filter current-ingest pages before calling
-        # We test the fix at the pipeline level, but verify the function itself works
+        # With all pages (including current) — might get self-comparison noise.
+        # (Combined list kept as documentation of the pre-fix behaviour; the
+        # fix is verified via the `preexisting`-only call below.)
+        _ = current_pages + preexisting
+        # The fix should filter current-ingest pages before calling.
+        # We test the fix at the pipeline level, but verify the function itself works.
         result = detect_contradictions(claims, preexisting)
         # Should only check against preexisting pages, not the new summary
         # (This test verifies the function works correctly when given filtered input)
@@ -393,17 +418,34 @@ class TestQ1TierBudgetPerAddition:
 
         # One huge summary (25K) and several small non-summaries
         pages = [
-            {"id": "summaries/big", "title": "Big Summary", "type": "summary",
-             "confidence": "stated", "content": "x" * 25_000},
-            {"id": "entities/small1", "title": "Entity 1", "type": "entity",
-             "confidence": "stated", "content": "Important entity content A"},
-            {"id": "entities/small2", "title": "Entity 2", "type": "entity",
-             "confidence": "stated", "content": "Important entity content B"},
+            {
+                "id": "summaries/big",
+                "title": "Big Summary",
+                "type": "summary",
+                "confidence": "stated",
+                "content": "x" * 25_000,
+            },
+            {
+                "id": "entities/small1",
+                "title": "Entity 1",
+                "type": "entity",
+                "confidence": "stated",
+                "content": "Important entity content A",
+            },
+            {
+                "id": "entities/small2",
+                "title": "Entity 2",
+                "type": "entity",
+                "confidence": "stated",
+                "content": "Important entity content B",
+            },
         ]
         result = _build_query_context(pages)
         # Tier 2 pages should still be included even if summary exceeds tier 1 budget
-        assert "entities/small1" in result["context_pages"] or "entities/small2" in result["context_pages"], \
-            "Tier 2 pages must not be starved by oversized tier 1 summary"
+        assert (
+            "entities/small1" in result["context_pages"]
+            or "entities/small2" in result["context_pages"]
+        ), "Tier 2 pages must not be starved by oversized tier 1 summary"
 
 
 class TestQ2RrfMetadataMerge:

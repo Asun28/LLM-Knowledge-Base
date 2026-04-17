@@ -1,4 +1,5 @@
 """Tests for Phase 4 CLI error truncation."""
+
 from __future__ import annotations
 
 from click.testing import CliRunner
