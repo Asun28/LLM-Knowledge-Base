@@ -225,9 +225,7 @@ class VectorIndex:
             conn.enable_load_extension(False)
         except Exception as e:
             if not self._ext_warned:
-                logger.warning(
-                    "sqlite_vec extension load failed — vector search disabled: %s", e
-                )
+                logger.warning("sqlite_vec extension load failed — vector search disabled: %s", e)
                 self._ext_warned = True
             self._disabled = True
             try:

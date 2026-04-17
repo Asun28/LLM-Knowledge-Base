@@ -210,9 +210,7 @@ def _compute_pagerank_scores(
         else:
             pr = nx.pagerank(graph)
             max_pr = max(pr.values()) if pr else 1.0
-            result = (
-                {} if max_pr == 0 else {node: score / max_pr for node, score in pr.items()}
-            )
+            result = {} if max_pr == 0 else {node: score / max_pr for node, score in pr.items()}
     except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError, OSError) as e:
         logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
