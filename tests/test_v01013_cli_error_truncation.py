@@ -97,5 +97,11 @@ def test_truncate_cuts_long_messages():
 
     long = "x" * 1000
     result = _truncate(long)
-    assert len(result) == 503  # 500 + "..."
-    assert result.endswith("...")
+    # Cycle 3 M17: smart head+tail truncation with `...N chars elided...`
+    # marker. Result fits within ~2×half + marker + elided-count digits;
+    # the precise length depends on the marker. Contract: shorter than
+    # input, starts with x, ends with x, contains 'elided' marker.
+    assert len(result) < len(long), "truncated result must be shorter than input"
+    assert result.startswith("x"), "head preserved"
+    assert result.endswith("x"), "tail preserved"
+    assert "elided" in result, "smart-truncate marker must appear"
