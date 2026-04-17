@@ -113,3 +113,34 @@ def test_extract_entity_context_matches_entity_word_boundaries():
 
     assert no_match == ""
     assert "Python is great." in match
+
+
+def test_kb_query_claude_code_instructions_use_wikilinks(monkeypatch):
+    from kb.mcp import core
+
+    page = {
+        "id": "concepts/rag",
+        "title": "RAG",
+        "type": "concept",
+        "confidence": "stated",
+        "score": 1.0,
+        "content": "RAG content.",
+    }
+    monkeypatch.setattr(core, "search_pages", lambda *args, **kwargs: [page])
+    monkeypatch.setattr(core, "compute_trust_scores", lambda: {})
+
+    output = core.kb_query("What is RAG?")
+
+    assert "[[" in output
+    assert "[source:" not in output
+
+
+def test_kb_save_source_escapes_source_type_in_hint(monkeypatch, tmp_path):
+    from kb.mcp import core
+
+    source_type = 'article" injected: true'
+    monkeypatch.setitem(core.SOURCE_TYPE_DIRS, source_type, tmp_path)
+
+    output = core.kb_save_source("content", "sample", source_type=source_type)
+
+    assert '"article\\" injected: true"' in output
