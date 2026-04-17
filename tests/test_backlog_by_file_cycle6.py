@@ -11,9 +11,7 @@ Numbering follows
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
-from pathlib import Path
 
 import pytest
 
@@ -648,19 +646,111 @@ class TestLoadAllPagesReturnErrors:
 
 
 # ---------------------------------------------------------------------------
-# Step 11 condition: sqlite3.connect count stays bounded
+# PR #20 R1 Sonnet BLOCKER: behavioral connection-reuse regression
+# (replaces the prior source-scan `grep sqlite3.connect` test)
 # ---------------------------------------------------------------------------
 
 
-class TestSqlite3ConnectCountBounded:
-    """Step-11 grep condition — exactly 3 raw connects in embeddings.py:
-    1 in _ensure_conn + 2 in build() (empty + main branches)."""
+class TestVectorIndexQueryDoesNotReconnect:
+    """Behavioral regression for AC5 — ``query()`` must NOT open a new
+    sqlite3 connection on every invocation. A per-call reconnect pattern
+    would pass a source-grep test even after revert; this monkeypatches
+    ``sqlite3.connect`` as a spy and asserts at most one call across N
+    sequential ``query()`` invocations."""
 
-    def test_exactly_three_raw_connect_calls(self):
-        path = Path(__file__).parent.parent / "src" / "kb" / "query" / "embeddings.py"
-        source = path.read_text(encoding="utf-8")
-        hits = re.findall(r"sqlite3\.connect\(", source)
-        assert len(hits) == 3, (
-            f"expected 3 sqlite3.connect( call sites (1 in _ensure_conn + 2 in build), "
-            f"found {len(hits)} — regression"
+    def test_sequential_queries_reuse_single_connection(self, tmp_path, monkeypatch):
+        import sys
+
+        from kb.query import embeddings
+
+        db_path = tmp_path / "vec.db"
+        sqlite3.connect(str(db_path)).close()
+
+        class _StubVec:
+            @staticmethod
+            def load(_conn):
+                return None
+
+            @staticmethod
+            def serialize_float32(_vec):
+                return b""
+
+        monkeypatch.setitem(sys.modules, "sqlite_vec", _StubVec)
+
+        call_count = {"n": 0}
+        real_connect = sqlite3.connect
+
+        def _spy_connect(*args, **kwargs):
+            call_count["n"] += 1
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(embeddings.sqlite3, "connect", _spy_connect)
+
+        idx = embeddings.VectorIndex(db_path)
+        idx.query([0.0, 0.0, 0.0])
+        idx.query([0.0, 0.0, 0.0])
+        idx.query([0.0, 0.0, 0.0])
+        assert call_count["n"] <= 1, (
+            f"query() reconnected {call_count['n']} times — must reuse _conn (AC5)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PR #20 R1 Codex NEW-ISSUE: same-batch duplicate NOT cross-type
+# ---------------------------------------------------------------------------
+
+
+class TestSharedSeenSameBatchDuplicateNotCrossType:
+    """R1 Codex NEW-ISSUE — ``entities=["RAG", "RAG"]`` with ``shared_seen``
+    previously hit the cross-type branch because prev==item AND shared_seen
+    was not None. After the (item, page_type) tuple fix, same-type + same-item
+    must silently dedup with NO cross-type WARNING."""
+
+    def test_same_name_in_same_batch_silent_dedup(self, tmp_wiki, caplog):
+        from kb.ingest import pipeline
+
+        shared: dict = {}
+        with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+            result = pipeline._process_item_batch(
+                items_raw=["RAG", "RAG"],
+                field_name="entities_mentioned",
+                max_count=50,
+                page_type="entity",
+                source_ref="raw/articles/x.md",
+                extraction={"title": "X"},
+                wiki_dir=tmp_wiki,
+                shared_seen=shared,
+            )
+        created, _updated, skipped, _new_titles, _valid = result
+        assert created == ["entities/rag"]
+        assert not any("cross-type" in s.lower() for s in skipped), skipped
+        assert not any("cross-type" in r.getMessage().lower() for r in caplog.records), (
+            "same-batch duplicate wrongly classified as cross-type"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PR #20 R1 Sonnet M2: --verbose flag path (separate from KB_DEBUG env)
+# ---------------------------------------------------------------------------
+
+
+class TestCliVerboseFlagPrintsTraceback:
+    """R1 Sonnet M2 — behavioral test for the ``--verbose`` Click-flag path.
+    Both env-var and flag triggers must surface tracebacks; prior test
+    covered only the env-var branch."""
+
+    def test_verbose_flag_prints_traceback(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--verbose", "ingest", "/__nonexistent_cycle6_r1_test__.md"],
+            env={"KB_DEBUG": ""},  # Force env off so only the flag triggers
+        )
+        assert result.exit_code == 1
+        assert "Traceback" in result.output, (
+            f"--verbose flag must surface traceback without KB_DEBUG. output={result.output[:500]}"
         )
