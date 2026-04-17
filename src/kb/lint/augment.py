@@ -29,6 +29,7 @@ from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
+from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,14 @@ def _build_proposer_prompt(stub: dict[str, Any], purpose_text: str) -> str:
         page_type=stub.get("page_type", "concept"),
         existing_sources="[" + ", ".join(existing_repr) + "]",
         allowed_domains=list(AUGMENT_ALLOWED_DOMAINS),
-        purpose=(purpose_text[:1000] if purpose_text else "(no purpose.md provided)"),
+        # Cycle 5 redo Step 11: wrap purpose in <kb_purpose> sentinel for
+        # parity with engine.query_wiki and extractors.build_extraction_prompt.
+        # max_chars=1000 preserves the existing per-prompt budget.
+        purpose=(
+            wrap_purpose(purpose_text, max_chars=1000)
+            if purpose_text
+            else "(no purpose.md provided)"
+        ),
     )
 
 

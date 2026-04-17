@@ -287,6 +287,28 @@ def test_citation_pattern_compiles_after_widening():
 
 
 # Additional pytest markers smoke test — verifies cycle 5 T12 registered them.
+def test_augment_proposer_prompt_wraps_purpose_in_sentinel():
+    """Step 11 security verify caught: lint/augment.py had a third purpose
+    callsite (_build_proposer_prompt) that bypassed wrap_purpose, breaking
+    the invariant that every purpose interpolation into an LLM prompt
+    goes through the sentinel.
+    """
+    from kb.lint.augment import _build_proposer_prompt
+
+    stub = {
+        "page_id": "concepts/foo",
+        "title": "Foo",
+        "frontmatter": {"source": []},
+        "reasons": [],
+    }
+    purpose_text = "Focus on LLM architectures.\nSecondary: trading systems."
+    prompt = _build_proposer_prompt(stub, purpose_text)
+
+    assert "<kb_purpose>" in prompt
+    assert "</kb_purpose>" in prompt
+    assert "Focus on LLM architectures." in prompt
+
+
 @pytest.mark.integration
 def test_pytest_integration_marker_registered():
     """Smoke: the integration marker must be registered in pyproject.toml.
