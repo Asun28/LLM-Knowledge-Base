@@ -91,3 +91,25 @@ def test_build_extraction_prompt_wraps_and_caps_purpose():
     assert "<kb_purpose>" in prompt
     inner = prompt.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
     assert len(inner) <= 4096
+
+
+def test_extract_entity_context_matches_entity_word_boundaries():
+    from kb.ingest.pipeline import _extract_entity_context
+
+    no_match = _extract_entity_context(
+        "Ray",
+        {
+            "description": "A stray cat found an array.",
+            "key_claims": ["The stray cat hid under an array."],
+        },
+    )
+    match = _extract_entity_context(
+        "Python",
+        {
+            "description": "Python is great.",
+            "key_claims": ["Python is widely used."],
+        },
+    )
+
+    assert no_match == ""
+    assert "Python is great." in match
