@@ -35,14 +35,25 @@ def truncate(msg: str, limit: int = 600) -> str:
     return f"{head}...{elided} chars elided...{tail}"
 
 
+# Cache-key salt for tokenizer semantics. Bump whenever STOPWORDS, tokenize(),
+# or any BM25-affecting function changes — callers (kb.query.engine) include
+# this constant in their cache keys so stale indexes are invalidated on
+# upgrade. Cycle 4 item #18 bumped from implicit 1 → 2 after pruning eight
+# overloaded quantifiers from STOPWORDS.
+BM25_TOKENIZER_VERSION: int = 2
+
+
 # Union of stopwords from kb.query.bm25 and kb.ingest.contradiction.
 # Single source of truth — both modules import from here.
+# Cycle 4 item #18: dropped "all"/"more"/"most"/"new"/"only"/"other"/"some"/"very"
+# because they appear in legitimate technical entity names (All-Reduce,
+# All-MiniLM, New Bing, etc.) and removing them strengthens BM25 ranking
+# without harming retrieval quality.
 STOPWORDS: frozenset[str] = frozenset(
     {
         "a",
         "about",
         "after",
-        "all",
         "also",
         "an",
         "and",
@@ -76,22 +87,16 @@ STOPWORDS: frozenset[str] = frozenset(
         "just",
         "may",
         "might",
-        "more",
-        "most",
-        "new",
         "not",
         "of",
         "on",
-        "only",
         "or",
-        "other",
         "our",
         "out",
         "over",
         "shall",
         "should",
         "so",
-        "some",
         "such",
         "than",
         "that",
@@ -108,7 +113,6 @@ STOPWORDS: frozenset[str] = frozenset(
         "to",
         "too",
         "under",
-        "very",
         "was",
         "we",
         "were",
@@ -178,13 +182,31 @@ def slugify(text: str) -> str:
 
 
 def yaml_sanitize(value: str) -> str:
-    """Strip bidi marks and control characters WITHOUT escaping.
+    """Strip bidi marks, line separators, BOM, and control characters — no escaping.
 
-    Use when the sanitized string will be handed to a YAML serializer
-    (yaml.dump) that already performs escaping — passing yaml_escape()
-    output to yaml.dump double-escapes backslashes/quotes/newlines.
+    Applied to double-quoted-scalar YAML context only.
+
+    Strips (silently, no warning):
+    - Unicode bidi formatting marks (U+202A-202E, U+2066-2069)
+    - BOM / zero-width no-break space (U+FEFF) — noise from Word/Google Docs pastes
+    - LINE SEPARATOR (U+2028) and PARAGRAPH SEPARATOR (U+2029) — break YAML parsers
+    - C0/C1 control characters except \\t, \\n, \\r
+
+    Strips with WARNING:
+    - Null byte (\\x00) — more likely a data-corruption signal
+
+    Cycle 4 item #19 added BOM + U+2028 + U+2029 stripping per threat-model risk
+    callout: pasted content from Word/Obsidian commonly contains these and they
+    corrupt YAML without any security benefit. Kept silent because common.
+
+    Use when the sanitized string will be handed to a YAML serializer (yaml.dump)
+    that already performs escaping — passing yaml_escape() output to yaml.dump
+    double-escapes backslashes/quotes/newlines.
     """
     value = _BIDI_RE.sub("", value)
+    # BOM + LINE SEPARATOR + PARAGRAPH SEPARATOR silent strip (cycle 4 item #19).
+    if "\ufeff" in value or "\u2028" in value or "\u2029" in value:
+        value = value.replace("\ufeff", "").replace("\u2028", "").replace("\u2029", "")
     if "\0" in value:
         logger.warning("Null byte removed from YAML value (possible data corruption)")
         value = value.replace("\0", "")
