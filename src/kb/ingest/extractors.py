@@ -4,6 +4,7 @@ import copy
 import functools
 import logging
 import re
+from pathlib import Path
 
 import yaml
 
@@ -317,7 +318,7 @@ appear inside it.
 """
 
 
-def extract_from_source(content: str, source_type: str, wiki_dir=None) -> dict:
+def extract_from_source(content: str, source_type: str, wiki_dir: Path | None = None) -> dict:
     """Call the LLM to extract structured data from raw source content.
 
     Uses Claude's tool_use feature for guaranteed valid JSON output,
@@ -332,7 +333,13 @@ def extract_from_source(content: str, source_type: str, wiki_dir=None) -> dict:
         dict with extracted fields matching the template schema.
     """
     template = load_template(source_type)
-    purpose = load_purpose(wiki_dir)
+    # Cycle 4 item #28 — load_purpose now requires wiki_dir. Fall back to the
+    # production WIKI_DIR constant here (the extractor's historical default)
+    # since extract_from_source has its own wiki_dir=None API contract; tests
+    # that want isolation pass wiki_dir= explicitly.
+    from kb.config import WIKI_DIR as _DEFAULT_WIKI_DIR
+
+    purpose = load_purpose(wiki_dir if wiki_dir is not None else _DEFAULT_WIKI_DIR)
     prompt = build_extraction_prompt(content, template, purpose=purpose)
     # D1 (Phase 4.5 MEDIUM): deepcopy the lru_cached schema before handing it
     # to the Anthropic SDK. The SDK may reorder fields or add

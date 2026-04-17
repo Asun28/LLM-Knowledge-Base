@@ -23,7 +23,10 @@ from kb.config import (
     WIKI_SOURCES,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.ingest.contradiction import detect_contradictions
+from kb.ingest.contradiction import (
+    detect_contradictions,
+    detect_contradictions_with_metadata,
+)
 from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import hash_bytes
@@ -885,9 +888,17 @@ def ingest_source(
         pages=all_wiki_pages,
     )
 
-    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
+    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles.
+    # Cycle 4 item #29 — sort (pid, title) pairs descending by title length so
+    # longer titles inject FIRST. Prevents a shorter already-injected alias
+    # like "[[concepts/rag|RAG]]" from swallowing the body text that the
+    # longer "Retrieval-Augmented Generation" entity would otherwise match.
+    # Tie-break on pid for deterministic ordering.
     wikilinks_injected: list[str] = []
-    for pid, ptitle in new_pages_with_titles:
+    sorted_new_pages = sorted(
+        new_pages_with_titles, key=lambda pt: (-len(pt[1]), pt[0])
+    )
+    for pid, ptitle in sorted_new_pages:
         try:
             from kb.compile.linker import inject_wikilinks
 
@@ -896,7 +907,10 @@ def ingest_source(
         except Exception as e:
             logger.debug("inject_wikilinks failed for %s: %s", pid, e)
 
-    # Auto-contradiction detection
+    # Auto-contradiction detection. Cycle 4 item #22 — migrate to the
+    # sibling `detect_contradictions_with_metadata` so truncation is
+    # observable at WARNING level. The legacy `detect_contradictions`
+    # signature is preserved for other callers (tests, downstream users).
     contradiction_warnings: list[dict] = []
     if extraction:
         key_claims = extraction.get("key_claims") or extraction.get("key_points") or []
@@ -906,10 +920,18 @@ def ingest_source(
                 # noisy self-comparison (new summary vs new entities from same source).
                 pages_created_set = set(pages_created)
                 preexisting_pages = [p for p in all_wiki_pages if p["id"] not in pages_created_set]
-                contradiction_warnings = detect_contradictions(
+                metadata = detect_contradictions_with_metadata(
                     [str(c) for c in key_claims if isinstance(c, str)],
                     preexisting_pages,
                 )
+                contradiction_warnings = metadata.get("contradictions", [])
+                if metadata.get("truncated"):
+                    logger.warning(
+                        "Contradiction detection truncated for %s: checked %d of %d claims",
+                        source_ref,
+                        metadata.get("claims_checked", 0),
+                        metadata.get("claims_total", 0),
+                    )
                 if contradiction_warnings:
                     logger.warning(
                         "Detected %d potential contradiction(s) during ingest of %s",
