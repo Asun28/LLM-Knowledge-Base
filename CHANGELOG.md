@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [Concurrency fix + docs tidy (PR #17)](#concurrency-fix--docs-tidy-pr-17-2026-04-18) | 2026-04-18 | 3 / 3 files | 1810 → 1811 (+1) | verdicts, capture, test_v0915_task06 |
 | [Backlog-by-file cycle 4](#phase-45--backlog-by-file-cycle-4-2026-04-17) | 2026-04-17 | 22 / 16 files | 1754 → 1810 (+56) | mcp/core, browse, quality, app, health, rewriter, engine, dedup, text, wiki_log, pipeline, bm25, compiler, pages, linker |
 | [Backlog-by-file cycle 3](#phase-45--backlog-by-file-cycle-3-2026-04-17) | 2026-04-17 | 24+2 / 16 files | 1727 → 1754 (+27) | llm, io, feedback, embeddings, engine, hybrid, contradiction, extractors, pipeline, checks, runner, export, browse, health |
 | [Backlog-by-file cycle 2](#phase-45--backlog-by-file-cycle-2-2026-04-17) | 2026-04-17 | 30 / 19 files | → 1727 | hashing, markdown, wiki_log, io, llm, text, evidence, linker, feedback, reliability, analyzer, trends, semantic, citations, hybrid, dedup, rewriter, engine |
@@ -47,6 +48,26 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Concurrency fix + docs tidy (PR #17, 2026-04-18)
+
+3 source-file changes. Tests: 1810 → 1811 (+1). 2-round parallel Codex PR review (R1: 1 MAJOR-non-regression, 2 MINORs fixed; R2: pass).
+
+#### Fixed
+
+- `lint/verdicts.py` — `add_verdict` pre-existing concurrency flake (`test_concurrent_add_verdict_no_lost_writes`): added `_VERDICTS_WRITE_LOCK` (threading.Lock) as in-process write serializer. Root cause: Windows PID-liveness heuristic in `file_lock` could steal the lock from a live same-PID thread under heavy suite load, putting two threads in the critical section simultaneously → lost entries. Threads now queue via `_VERDICTS_WRITE_LOCK` before acquiring `file_lock`; lock order documented (`_VERDICTS_WRITE_LOCK → file_lock → _VERDICTS_CACHE_LOCK`); `save_verdicts` scope boundary documented.
+- `capture.py` — `_normalize_for_scan` docstring: cost note now separately documents base64 scan bound `O(n/17)` (16-char minimum) and URL-decode scan bound `O(n/10)` (9-char minimum), both load-bearing on `CAPTURE_MAX_BYTES`. `_check_rate_limit` docstring: per-process scope and cross-process persistence path documented.
+
+#### Added
+
+- `tests/test_v0915_task06.py` — `test_concurrent_writes_trim_at_max_verdicts`: pre-fills store to `MAX_VERDICTS-3`, runs 5 concurrent `add_verdict` threads, asserts final count `≤ MAX_VERDICTS`. Previously the trim branch (`verdicts[-MAX_VERDICTS:]`) was never reached by the concurrency test (10 entries vs 10,000 cap).
+
+#### Docs
+
+- `BACKLOG.md` — cross-reference table added (was HTML comment); 20+ verified-shipped items deleted across Phase 4.5 HIGH and Phase 5 kb-capture sections; `load_verdicts` readers-without-lock item updated to note write-write race is now fixed (remaining: reader PermissionError on Windows mid-rename).
+- `CHANGELOG.md` — split into active (2026-04-16+) and `CHANGELOG-history.md` archive (Phase 4.5 CRITICAL 2026-04-15 and earlier) for multi-LLM scannability.
 
 ---
 
