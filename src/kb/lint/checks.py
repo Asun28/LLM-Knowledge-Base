@@ -161,12 +161,35 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     # Augment graph with backlinks from index/log files — these are not wiki pages
     # (not in any subdir) so build_graph skips them, causing false orphan reports.
     existing_ids = set(graph.nodes())
+    # Cycle 3 H13: track corrupt index files so we can surface them as
+    # error-severity lint issues. The prior `errors="replace"` silently
+    # substituted U+FFFD, letting `extract_wikilinks` drop corrupted targets
+    # and report innocent pages as orphans.
+    _corrupt_index_issues: list[dict] = []
     for name in _INDEX_FILES:
         idx_path = wiki_dir / name
         if not idx_path.exists():
             continue
         try:
-            text = idx_path.read_text(encoding="utf-8", errors="replace")
+            text = idx_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            # H13: the file is on disk but not UTF-8. Emit an explicit error so
+            # the operator sees the corruption instead of guessing why the
+            # orphan list grew. We do NOT abort the full check — other index
+            # files are still processed.
+            _corrupt_index_issues.append(
+                {
+                    "check": "corrupt_index_file",
+                    "severity": "error",
+                    "page": name,
+                    "message": (
+                        f"Index file {name} is not valid UTF-8 — please inspect "
+                        f"and re-save; orphan detection may be inaccurate until fixed "
+                        f"({exc.reason} at byte {exc.start})"
+                    ),
+                }
+            )
+            continue
         except OSError:
             continue
         for target in extract_wikilinks(text):
@@ -181,7 +204,7 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
                 graph.add_edge(sentinel, target)
 
     stats = graph_stats(graph)
-    issues = []
+    issues = list(_corrupt_index_issues)  # H13: surface corrupt indexes first
 
     # Orphans: have outgoing links but no incoming links
     for orphan in stats["no_inbound"]:
@@ -329,6 +352,69 @@ def check_staleness(
         except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Failed to load wiki page %s: %s", page_path, e)
             continue
+
+    return issues
+
+
+def check_frontmatter_staleness(
+    wiki_dir: Path | None = None,
+    pages: list[Path] | None = None,
+) -> list[dict]:
+    """Surface pages whose filesystem mtime is newer than their frontmatter `updated` date.
+
+    Cycle 3 M10: ingest/refine is responsible for bumping `updated:`; when a
+    page is hand-edited without the bump the page silently drifts from its
+    declared freshness. This check compares the MD5-granularity of
+    ``post.metadata['updated']`` (a date) against
+    ``page_path.stat().st_mtime`` (a timestamp) and surfaces an info-severity
+    issue when the mtime's date is strictly newer.
+
+    Known limitation (acknowledged in scope doc, R2 review): same-day edits
+    are NOT detected because frontmatter `updated` is date-granular.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    if pages is None:
+        pages = scan_wiki_pages(wiki_dir)
+    issues: list[dict] = []
+
+    for page_path in pages:
+        try:
+            post = frontmatter.load(str(page_path))
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
+            logger.warning("Failed to load wiki page %s: %s", page_path, e)
+            continue
+
+        updated = post.metadata.get("updated")
+        if isinstance(updated, str):
+            try:
+                updated = date.fromisoformat(updated)
+            except ValueError:
+                continue
+        if isinstance(updated, datetime):
+            updated = updated.date()
+        if not isinstance(updated, date):
+            continue  # check_staleness handles missing/malformed dates
+
+        try:
+            mtime_date = datetime.fromtimestamp(page_path.stat().st_mtime).date()
+        except OSError:
+            continue
+
+        if mtime_date > updated:
+            pid = page_id(page_path, wiki_dir)
+            issues.append(
+                {
+                    "check": "frontmatter_updated_stale",
+                    "severity": "info",
+                    "page": pid,
+                    "last_updated": updated.isoformat(),
+                    "mtime_date": mtime_date.isoformat(),
+                    "message": (
+                        f"Frontmatter updated ({updated}) predates file mtime "
+                        f"({mtime_date}) for {pid} — run kb refine to bump the date"
+                    ),
+                }
+            )
 
     return issues
 
