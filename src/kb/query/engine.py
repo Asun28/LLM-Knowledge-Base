@@ -2,6 +2,7 @@
 
 import logging
 import re
+import sqlite3
 import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -84,6 +85,11 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         return hits[:lim]
 
     def vector_search(query: str, lim: int) -> list[dict]:
+        # Cycle 3 H11: narrow exception handling. The prior `except Exception`
+        # swallowed programming bugs (AttributeError from a future refactor,
+        # KeyError from schema drift) together with the expected failure
+        # modes — silently degrading "hybrid" to BM25-only with no observable
+        # signal. Now we only swallow import/open/type-mismatch failures.
         try:
             from kb.query.embeddings import embed_texts, get_vector_index
 
@@ -101,7 +107,7 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
                 if pid in page_map:
                     results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
             return results
-        except Exception as e:
+        except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
             logger.debug("Vector search unavailable: %s", e)
             return []
 
@@ -371,8 +377,15 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
 
     def _try_add(page: dict) -> bool:
         nonlocal total, skipped
+        # Cycle 3 H9: surface staleness in the LLM prompt so the synthesizer
+        # can caveat or demote stale facts. `stale` is attached by
+        # `_flag_stale_results` in search_pages; when True we prefix [STALE]
+        # to the page header. The `stale_citations` return-dict field
+        # (populated in query_wiki) is derived from the same signal so MCP
+        # callers can expose it without re-parsing prompt text.
+        stale_marker = "[STALE] " if page.get("stale") else ""
         section = (
-            f"--- Page: {page['id']} (type: {page.get('type', 'unknown')}, "
+            f"--- {stale_marker}Page: {page['id']} (type: {page.get('type', 'unknown')}, "
             f"confidence: {page.get('confidence', 'unknown')}) ---\n"
             f"Title: {page['title']}\n\n{page['content']}\n"
         )
@@ -530,6 +543,21 @@ def query_wiki(
     # 1. Search for relevant pages
     matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)
 
+    # Cycle 3 H11: decide search_mode. If the embeddings module is not
+    # importable OR the vector index is absent, we are BM25-only. Otherwise
+    # hybrid. We derive the truth source here (not by peeking at whether
+    # hybrid_search returned vector hits — a legitimately empty vector list
+    # is still "hybrid" for observability purposes).
+    try:
+        from kb.query import embeddings as _embeddings
+
+        _vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
+        search_mode = (
+            "hybrid" if (_embeddings._hybrid_available and _vec_path.exists()) else "bm25_only"
+        )
+    except Exception:
+        search_mode = "bm25_only"
+
     if not matching_pages:
         return {
             "question": question,
@@ -537,15 +565,29 @@ def query_wiki(
             "citations": [],
             "source_pages": [],
             "context_pages": [],
+            "stale_citations": [],
+            "search_mode": search_mode,
         }
 
     # 2. Build context from matching pages
     ctx = _build_query_context(matching_pages)
     context = ctx["context"]
 
-    # Raw-source fallback: supplement thin wiki context with verbatim raw source content
+    # Raw-source fallback: supplement thin wiki context with verbatim raw source content.
+    # Cycle 3 H15: trigger on SEMANTIC signal, not post-truncation char count.
+    # Old gate (`len(context) < QUERY_CONTEXT_MAX_CHARS // 2`) fired for a
+    # perfectly good 39K context AND for "No relevant wiki pages found." (35
+    # chars) — doubling per-query disk I/O and BM25 rebuild. New gate: fire
+    # ONLY when (a) no pages made it into context, or (b) every context page
+    # is a summary (summaries lose detail — raw verbatim has value).
+    ctx_ids = ctx.get("context_pages", [])
+    context_types = {
+        p.get("type") for p in matching_pages if p["id"] in ctx_ids
+    }
+    raw_fallback_needed = (not ctx_ids) or context_types == {"summary"}
+
     raw_context = ""
-    if len(ctx["context"]) < QUERY_CONTEXT_MAX_CHARS // 2:
+    if raw_fallback_needed:
         raw_results = search_raw_sources(
             effective_question, raw_dir=effective_raw_dir, max_results=3
         )
@@ -599,12 +641,23 @@ INSTRUCTIONS:
     # 4. Extract citations from the answer
     citations = extract_citations(answer)
 
+    # Cycle 3 H9: derive stale_citations from the intersection of
+    # context_pages (actually included in the LLM prompt) and matching_pages
+    # whose stale flag is True. We deliberately do NOT use `citations`
+    # (LLM-extracted) because those may reference pages outside context.
+    ctx_ids_set = set(ctx["context_pages"])
+    stale_citations = [
+        p["id"] for p in matching_pages if p["id"] in ctx_ids_set and p.get("stale")
+    ]
+
     result_dict = {
         "question": question,
         "answer": answer,
         "citations": citations,
         "source_pages": [p["id"] for p in matching_pages],
         "context_pages": ctx["context_pages"],
+        "stale_citations": stale_citations,
+        "search_mode": search_mode,
     }
 
     # 5. Optional output adapter (Phase 4.11)

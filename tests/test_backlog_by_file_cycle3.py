@@ -386,12 +386,17 @@ class TestQueryEngineCycle3:
         )
         assert m, "engine.search_pages.vector_search closure not found"
         body = m.group(0)
-        assert "except Exception" not in body, (
+        # Strip comments so commentary mentioning "except Exception" doesn't
+        # trigger a false positive — we only care about actual except lines.
+        code_only = "\n".join(
+            line for line in body.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert re.search(r"^\s*except\s+Exception(\s+as\s|\s*:)", code_only, re.MULTILINE) is None, (
             "H11: vector_search must narrow exceptions, not catch Exception broadly"
         )
-        assert "ImportError" in body and ("sqlite3.OperationalError" in body or "OperationalError" in body), (
-            "H11: narrowed except should include ImportError + sqlite3.OperationalError"
-        )
+        assert "ImportError" in code_only and (
+            "sqlite3.OperationalError" in code_only or "OperationalError" in code_only
+        ), "H11: narrowed except should include ImportError + sqlite3.OperationalError"
 
     def test_raw_fallback_semantic_gate(self, monkeypatch, tmp_path):
         """H15: raw fallback triggered when context_pages empty OR all-summary,

@@ -36,7 +36,13 @@ def test_tier1_budget_allows_multiple_small_summaries():
 
 
 def test_raw_fallback_truncates_first_oversized_section(tmp_path, monkeypatch):
-    """First raw-source section larger than the remaining budget must be truncated, not skipped."""
+    """First raw-source section larger than the remaining budget must be truncated, not skipped.
+
+    Cycle 3 H15: raw fallback is now gated on a SEMANTIC signal (context is
+    empty OR only-summary), not a post-truncation char count. To keep the
+    truncation-behavior regression, we force-trigger fallback by staging a
+    summary-only wiki context.
+    """
     import kb.query.engine as eng
 
     # A raw source whose content exceeds the entire query budget
@@ -44,10 +50,10 @@ def test_raw_fallback_truncates_first_oversized_section(tmp_path, monkeypatch):
     monkeypatch.setattr(eng, "search_raw_sources", lambda q, **kw: [
         {"id": "raw/articles/big.md", "content": large_content}
     ])
-    # A tiny wiki page so matching_pages is non-empty (avoids early-return)
-    # but wiki context stays tiny so raw fallback fires
-    tiny_page = _make_page("entities/tiny", "entity", 50)
-    monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [tiny_page])
+    # A tiny SUMMARY page so the cycle-3 semantic gate (only-summary context)
+    # triggers raw fallback without requiring the pre-cycle-3 char-count path.
+    tiny_summary = _make_page("summaries/tiny", "summary", 50)
+    monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [tiny_summary])
     captured_prompts = []
     monkeypatch.setattr(
         eng, "call_llm", lambda prompt, **kw: (captured_prompts.append(prompt) or "answer")
@@ -62,21 +68,31 @@ def test_raw_fallback_truncates_first_oversized_section(tmp_path, monkeypatch):
     )
 
 
-def test_raw_fallback_skips_when_context_already_full(tmp_path, monkeypatch):
-    """Raw fallback must not fire when wiki context already exceeds the half-budget threshold."""
+def test_raw_fallback_skips_when_non_summary_context_present(tmp_path, monkeypatch):
+    """Cycle 3 H15: raw fallback must not fire when non-summary context pages exist.
+
+    Prior test asserted that a SUMMARY page > half-budget suppresses
+    fallback — that encoded the char-count gate which cycle 3 explicitly
+    replaced because summaries LOSE detail (they are the case where raw
+    fallback IS valuable). The new semantic gate triggers fallback on
+    only-summary or empty contexts; a context containing entities /
+    concepts / comparisons / synthesis pages is sufficient to skip.
+    """
     import kb.query.engine as eng
-    from kb.config import QUERY_CONTEXT_MAX_CHARS
 
     raw_called = []
     monkeypatch.setattr(eng, "search_raw_sources", lambda q, **kw: (raw_called.append(True) or []))
 
-    # Return a page that fills more than half the budget
-    big_page = _make_page("summaries/large", "summary", QUERY_CONTEXT_MAX_CHARS // 2 + 1000)
-    monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [big_page])
+    # Non-summary context page — cycle 3 semantic gate skips fallback.
+    entity_page = _make_page("entities/large", "entity", 500)
+    monkeypatch.setattr(eng, "search_pages", lambda q, wiki_dir=None, **kw: [entity_page])
     monkeypatch.setattr(eng, "call_llm", lambda prompt, **kw: "answer")
 
     eng.query_wiki("test question", wiki_dir=tmp_path)
-    assert not raw_called, "Raw fallback was triggered even though wiki context was already full"
+    assert not raw_called, (
+        "Cycle 3 H15: non-summary context should skip raw fallback under the "
+        "semantic gate (only-summary or empty contexts trigger)."
+    )
 
 
 def test_bm25_limit_independent_of_vector_multiplier():
