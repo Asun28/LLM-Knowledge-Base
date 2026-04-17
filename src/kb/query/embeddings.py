@@ -213,6 +213,15 @@ class VectorIndex:
         disabled (extension unavailable / DB missing). Never retries after a
         failure: the `_disabled` flag is sticky. Thread-safe via
         `_conn_lock` double-checked locking (PR #20 R1 Sonnet M1 fix).
+
+        **Threading contract** (PR #20 R3 nit): the returned connection is
+        opened with ``check_same_thread=False`` and SHARED across all
+        ``query()`` callers. Today ``query()`` is purely READ-only (SELECT +
+        PRAGMA) so concurrent reads are safe under Python sqlite3's
+        serialized threading mode. If a future caller adds writes to the
+        shared connection, it MUST serialize them (per-statement
+        ``threading.Lock``) or open its own connection — do NOT rely on
+        ``_conn_lock``, which only guards first-time initialization.
         """
         # Fast path: lock-free hot-path check (dominant case once connected).
         if self._disabled:
