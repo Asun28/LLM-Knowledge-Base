@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [Backlog-by-file cycle 6](#phase-45--backlog-by-file-cycle-6-2026-04-18) | 2026-04-18 | 15 / 14 files | 1836 → 1868 (+32) | mcp/core, mcp/health, query/rewriter, query/engine, query/embeddings, query/hybrid, query/dedup, ingest/pipeline, cli, evolve/analyzer, graph/builder, utils/pages |
 | [Cycle 5 redo (hardening)](#phase-45--cycle-5-redo-hardening-2026-04-18) | 2026-04-18 | 6 / 6 files | 1821 → 1836 (+15) | query/engine, query/citations, mcp/app, lint/augment, utils/text, tests |
 | [Backlog-by-file cycle 5](#phase-45--backlog-by-file-cycle-5-2026-04-18) | 2026-04-18 | 14 / 13 files | 1811 → 1820 (+9) | config, text, verdicts, engine, extractors, pipeline, mcp/core, mcp/app, cli, mcp_server, llm, pyproject, tests |
 | [Concurrency fix + docs tidy (PR #17)](#concurrency-fix--docs-tidy-pr-17-2026-04-18) | 2026-04-18 | 3 / 3 files | 1810 → 1811 (+1) | verdicts, capture, test_v0915_task06 |
@@ -50,6 +51,62 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Backlog-by-file cycle 6 (2026-04-18)
+
+15 items across 14 source files. Tests: 1836 → 1868 (+32). Full feature-dev pipeline (requirements → threat model + CVE baseline → Opus design decision gate → Codex plan → TDD impl + CI gate → Codex security verify + PR-introduced CVE diff → docs). 0 PR-introduced CVEs.
+
+#### Process artifacts (new)
+
+- `docs/superpowers/decisions/2026-04-18-cycle6-requirements.md` — Step 1 AC1-AC16 (15 backlog items + tests).
+- `docs/superpowers/decisions/2026-04-18-cycle6-threat-model.md` — Step 2 threat table + Step 11 checklist.
+- `docs/superpowers/decisions/2026-04-18-cycle6-design.md` — Step 5 Opus decision gate verdict: APPROVE with 6 conditions.
+
+#### Added
+
+- `src/kb/query/engine.py` — `_PAGERANK_CACHE` process-level cache + `_PAGERANK_CACHE_LOCK` (AC4). Keyed on `(str(wiki_dir.resolve()), max_mtime_ns, page_count)` matching `_WIKI_BM25_CACHE_LOCK` precedent; unbounded per single-user local stance; thread-safe under FastMCP pool via check-under-lock + double-check-store pattern.
+- `src/kb/query/embeddings.py` — `VectorIndex._ensure_conn()` + `self._disabled` + `self._ext_warned` attrs (AC5). sqlite3 connection opened ONCE per VectorIndex instance; on `sqlite_vec.load` failure the instance is marked disabled, a single WARNING is logged, and every subsequent `query()` call returns `[]` without retrying extension load. Connection left open for instance lifetime (process exit closes fd).
+- `src/kb/cli.py` — `_is_debug_mode()` + `_error_exit()` + `_setup_logging()` helpers plus top-level `--verbose` / `-v` flag (AC9). `KB_DEBUG=1` env var OR `--verbose` prints full `traceback.format_exc()` to stderr BEFORE the truncated `Error:` line. Default behavior unchanged.
+- `src/kb/evolve/analyzer.py` — `_iter_connection_pairs` generator helper (AC12). Replaces the three-level `break` + `_pairs_truncated` flag with a single-source-of-truth cap gate that emits one WARNING on truncation.
+- `tests/test_backlog_by_file_cycle6.py` — 31 behavioral regression tests for AC1-AC15 + Step-11 condition (`sqlite3.connect(` count == 3 in embeddings.py). Every test exercises production code paths, not `inspect.getsource` greps (per `feedback_inspect_source_tests` memory).
+
+#### Changed
+
+- `src/kb/mcp/core.py` — `kb_ingest_content` accepts `use_api: bool = False` kwarg (AC1). When `True`, skips the `extraction_json` requirement and falls through to `ingest_source`'s LLM extraction path — mirroring `kb_query` / `kb_ingest`'s existing contract.
+- `src/kb/mcp/health.py` — `kb_detect_drift`, `kb_evolve`, `kb_graph_viz` each accept `wiki_dir: str | None = None` (AC2) and thread it to `detect_source_drift`, `generate_evolution_report`, `export_mermaid` respectively. Matches the Phase 5.0 `kb_lint(wiki_dir=...)` pattern.
+- `src/kb/query/rewriter.py` — `rewrite_query` rejects LLM preamble leaks by reusing `_LEAK_KEYWORD_RE` from `engine.py` (AC3). Patterns include "Sure! Here's…", "The standalone question is:", "Rewritten query:", etc. Previously leaked preambles flowed into BM25 tokenize + vector embed + synthesis prompt, silently degrading retrieval quality.
+- `src/kb/query/engine.py` — `_compute_pagerank_scores(wiki_dir, *, preloaded_pages=None)` now accepts pre-loaded pages and threads them into `build_graph(pages=...)` (AC6). `search_pages` passes its already-loaded `pages` list, eliminating a second disk walk per query.
+- `src/kb/query/hybrid.py` — `rrf_fusion` stores `(accumulated_score, merged_metadata)` tuples in the intermediate dict instead of shallow-copy result dicts (AC10). Defers dict materialization to sort time; preserves late-list-wins metadata merge (Phase 4.5 HIGH Q2).
+- `src/kb/query/dedup.py` — `_dedup_by_text_similarity` skips the Jaccard threshold when comparing results of different `type` (AC11). Summaries quoting an entity's text no longer collapse the entity row under layer-2 similarity pruning.
+- `src/kb/ingest/pipeline.py` — `_update_existing_page` normalizes `content.replace("\r\n", "\n")` after read (AC7) so CRLF-encoded frontmatter matches `_SOURCE_BLOCK_RE` (LF-only). Previously CRLF files fell through to a weak fallback, producing double `source:` keys that crashed the next frontmatter parse.
+- `src/kb/ingest/pipeline.py` — `_process_item_batch` accepts `shared_seen: dict[str, str] | None = None` keyword-only (AC8). When provided, slug collisions are detected across entity+concept batches. Entity batch runs first → concept batch colliding on same slug is skipped with `pages_skipped` entry + WARNING per OQ5 entity-precedence.
+- `src/kb/graph/builder.py` — `graph_stats(graph, *, include_centrality: bool = False)` (AC13). Default `False` skips `nx.betweenness_centrality` (O(V*E) at 5k-node scale dominated every `kb_stats` / `kb_lint` call). `bridge_nodes` returns `[]`, `bridge_nodes_status` returns `"skipped"`. NOT exposed via MCP per OQ11.
+- `src/kb/utils/pages.py` — `load_purpose` decorated with `@functools.lru_cache(maxsize=4)` (AC14). Docstring documents the `load_purpose.cache_clear()` invalidation contract for tests that mutate `purpose.md` mid-run.
+- `src/kb/utils/pages.py` — `load_all_pages` accepts keyword-only `return_errors: bool = False` (AC15). Default returns `list[dict]` (backward-compatible); `True` returns `{"pages": list[dict], "load_errors": int}` so callers can distinguish "fresh install" from "100 permission errors."
+
+#### Docs
+
+- `CHANGELOG.md` — this cycle-6 entry. Test count 1836 → 1868 (+32).
+- `CLAUDE.md` — test count, file count, cycle-6 reference.
+- `BACKLOG.md` — 15 resolved items deleted per BACKLOG lifecycle rule.
+
+#### Security posture (cycle 6)
+
+- **PR-introduced CVE diff:** 0 entries vs Step-2 baseline (`pip-audit` + Dependabot clean).
+- **Class-A existing CVEs (unchanged from cycle 5):** `diskcache==5.6.3` CVE-2025-69872 — no upstream patch; accepted risk. `pip==24.3.1` toolchain CVEs — not runtime.
+- **Threat-model mitigations:** all 15 AC rows grep-verified at Step 11. New trust boundary (process-level PageRank cache, `load_purpose` lru_cache) keyed on `wiki_dir.resolve()` path so multiple tmp wikis in one process do not collide.
+
+#### Legacy test adaptations
+
+- `tests/test_phase45_high_cycle2.py::TestQ4CentralityStatusMetadata::test_bridge_nodes_has_status` — updated to pass `include_centrality=True` (AC13 made it opt-in).
+- `tests/test_v0913_phase394.py::TestKbGraphVizMaxNodes::test_max_nodes_clamped` — mock signature accepts new `wiki_dir` kwarg.
+- `tests/test_v09_cycle5_fixes.py::test_cli_configures_logging_when_root_has_no_handlers` — calls `cli._setup_logging()` directly (Click group callback now requires context).
+
+#### Stats
+
+1868 tests across 130 test files; +32 tests vs cycle 5 redo baseline; 15 items across 14 source files on `feat/backlog-by-file-cycle6`.
 
 ---
 

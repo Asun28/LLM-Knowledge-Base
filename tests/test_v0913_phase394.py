@@ -452,7 +452,9 @@ class TestKbGraphVizMaxNodes:
 
         calls = []
 
-        def mock_export(max_nodes):
+        def mock_export(max_nodes, wiki_dir=None):
+            # Cycle 6 AC2: kb_graph_viz now threads wiki_dir through to
+            # export_mermaid; mock accepts the new kwarg.
             calls.append(max_nodes)
             return "graph LR"
 

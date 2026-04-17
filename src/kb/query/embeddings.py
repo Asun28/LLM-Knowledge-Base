@@ -190,6 +190,88 @@ class VectorIndex:
         # `0` means "empty DB / missing table" (query returns []).
         self._stored_dim: int | None = None
         self._dim_warned: bool = False
+        # Cycle 6 AC5 — persistent sqlite3 connection. Loaded once via
+        # `_ensure_conn()` and reused across every `query()` call. On
+        # extension-load failure `_disabled = True`; a single WARNING is
+        # logged via `_ext_warned`. Subsequent `query()` calls return `[]`
+        # without retrying `sqlite_vec.load`. Connection is left open for
+        # the VectorIndex instance's lifetime per OQ4 (single-user local
+        # tool; process exit closes the sqlite3 fd — `__del__` is unsafe).
+        self._conn: sqlite3.Connection | None = None
+        # PR #20 R1 Sonnet M1: per-instance lock so concurrent threads on the
+        # SAME VectorIndex instance do not both open a sqlite3 connection
+        # and leak one. Mirrors the module-level `_model_lock` /
+        # `_rebuild_lock` double-checked pattern.
+        self._conn_lock: threading.Lock = threading.Lock()
+        self._disabled: bool = False
+        self._ext_warned: bool = False
+
+    def _ensure_conn(self) -> sqlite3.Connection | None:
+        """Lazy-load sqlite3 connection + sqlite_vec extension.
+
+        Returns the persistent connection, or ``None`` when the index is
+        disabled (extension unavailable / DB missing). Never retries after a
+        failure: the `_disabled` flag is sticky. Thread-safe via
+        `_conn_lock` double-checked locking (PR #20 R1 Sonnet M1 fix).
+
+        **Threading contract** (PR #20 R3 nit): the returned connection is
+        opened with ``check_same_thread=False`` and SHARED across all
+        ``query()`` callers. Today ``query()`` is purely READ-only (SELECT +
+        PRAGMA) so concurrent reads are safe under Python sqlite3's
+        serialized threading mode. If a future caller adds writes to the
+        shared connection, it MUST serialize them (per-statement
+        ``threading.Lock``) or open its own connection — do NOT rely on
+        ``_conn_lock``, which only guards first-time initialization.
+        """
+        # Fast path: lock-free hot-path check (dominant case once connected).
+        if self._disabled:
+            return None
+        if self._conn is not None:
+            return self._conn
+        if not self.db_path.exists():
+            # Not disabled — the DB may be created later by ``build()``.
+            # Leave _conn=None so the next query retries only if DB appears.
+            return None
+        with self._conn_lock:
+            # Double-check inside lock — another thread may have won.
+            if self._disabled:
+                return None
+            if self._conn is not None:
+                return self._conn
+            if not self.db_path.exists():
+                return None
+            try:
+                # PR #20 R2 Codex NEW-ISSUE fix: sqlite3 connections are
+                # thread-affine by default. Since this connection is shared
+                # across every subsequent ``query()`` call (potentially from
+                # multiple FastMCP worker threads), set
+                # ``check_same_thread=False``. Python sqlite3 ships in
+                # serialized threading mode, so concurrent READ-only queries
+                # are safe without external serialization. ``build()`` keeps
+                # its own thread-local connection, so the default there is
+                # unaffected.
+                conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+                conn.enable_load_extension(True)
+                import sqlite_vec
+
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            except Exception as e:
+                if not self._ext_warned:
+                    logger.warning(
+                        "sqlite_vec extension load failed — vector search disabled: %s", e
+                    )
+                    self._ext_warned = True
+                self._disabled = True
+                try:
+                    # Close partial connection if one was opened.
+                    if "conn" in locals():
+                        conn.close()  # type: ignore[has-type]
+                except Exception:
+                    pass
+                return None
+            self._conn = conn
+            return conn
 
     def build(self, entries: list[tuple[str, list[float]]]) -> None:
         """Build index from (page_id, embedding) pairs. Replaces existing index.
@@ -262,23 +344,16 @@ class VectorIndex:
         `vec_pages` before running the MATCH query. Dim mismatch returns `[]`
         with a single WARN log (subsequent mismatches are silent — the cache
         remembers we already warned).
+        Cycle 6 AC5: reuses a persistent `sqlite3.connect` via
+        `_ensure_conn()`. Failure once → disabled forever (no retry loop).
         """
-        if not self.db_path.exists():
+        conn = self._ensure_conn()
+        if conn is None:
             return []
 
-        conn = sqlite3.connect(str(self.db_path))
         try:
-            conn.enable_load_extension(True)
             import sqlite_vec
 
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-        except Exception as e:
-            logger.warning("sqlite_vec extension load failed — vector search disabled: %s", e)
-            conn.close()
-            return []
-
-        try:
             if self._stored_dim is None:
                 self._stored_dim = self._read_stored_dim(conn)
             stored_dim = self._stored_dim
@@ -313,5 +388,3 @@ class VectorIndex:
         except Exception as e:
             logger.debug("Vector query failed: %s", e)
             return []
-        finally:
-            conn.close()

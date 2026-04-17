@@ -416,6 +416,11 @@ def _update_existing_page(
     """
     # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
     content = page_path.read_text(encoding="utf-8")
+    # Cycle 6 AC7 — normalize CRLF → LF so `_SOURCE_BLOCK_RE` (LF-only, line 45)
+    # matches CRLF-encoded frontmatter. Without this, CRLF files fall through
+    # to the weak fallback at line ~456 which doesn't match either ending,
+    # producing silent double `source:` keys. `atomic_text_write` writes LF.
+    content = content.replace("\r\n", "\n")
     # Check frontmatter sources specifically, not full content
     try:
         post = frontmatter.loads(content)
@@ -588,6 +593,8 @@ def _process_item_batch(
     source_ref: str,
     extraction: dict,
     wiki_dir: Path | None = None,
+    *,
+    shared_seen: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[tuple[str, str]], list[str]]:
     """Validate, deduplicate, and create/update wiki pages for a list of names.
 
@@ -595,6 +602,13 @@ def _process_item_batch(
     valid_items is the deduplicated list of names that passed all guards
     (empty-name, empty-slug, collision), for both created and updated pages.
     Used by the caller to build index entries.
+
+    Cycle 6 AC8: when ``shared_seen`` is provided, slug collisions are detected
+    across batches (entity + concept). Entity batch runs first in the caller,
+    so a concept slug colliding with an existing entity slug is logged as a
+    cross-type collision and appended to ``skipped`` — the concept page is NOT
+    created or updated. Default ``None`` preserves the per-batch-scoped
+    behavior for any legacy caller.
     """
     if page_type not in _SUBDIR_MAP:
         raise ValueError(f"Unknown page_type: {page_type!r}. Valid: {list(_SUBDIR_MAP)}")
@@ -614,7 +628,13 @@ def _process_item_batch(
     skipped: list[str] = []
     new_with_titles: list[tuple[str, str]] = []
     valid_items: list[str] = []
-    seen_slugs: dict[str, str] = {}
+    # Cycle 6 AC8 (PR #20 R1 Codex NEW-ISSUE fix): store ``(item, page_type)``
+    # tuples so we can differentiate same-batch duplicates (silent dedup)
+    # from cross-type cross-batch collisions (AC8 WARNING). Previously values
+    # were bare ``item`` strings — ``entities_mentioned=["RAG", "RAG"]`` hit
+    # ``prev == item`` with ``shared_seen is not None`` and fired the
+    # cross-type warning on what was actually an intra-batch duplicate.
+    seen_slugs: dict[str, tuple[str, str]] = shared_seen if shared_seen is not None else {}
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
@@ -633,12 +653,28 @@ def _process_item_batch(
             logger.warning("Skipping %s with empty/untitled slug: %r", page_type, item)
             continue
         if item_slug in seen_slugs:
-            prev = seen_slugs[item_slug]
-            if prev != item:
-                logger.warning("Slug collision: %r and %r both slug to %r", prev, item, item_slug)
+            prev_item, prev_type = seen_slugs[item_slug]
+            # Cycle 6 AC8 (revised post-R1): three distinct cases.
+            #   (a) prev_type != page_type → cross-type collision (AC8 case)
+            #   (b) same type, prev_item != item → slug-variant collision
+            #   (c) same type, same item → intra-batch duplicate, silent dedup
+            if prev_type != page_type:
+                logger.warning(
+                    "Cross-type slug collision: %r already present as %s; skipping %s/%s",
+                    item,
+                    prev_type,
+                    subdir,
+                    item_slug,
+                )
+                skipped.append(f"{subdir}/{item_slug} (cross-type collision)")
+            elif prev_item != item:
+                logger.warning(
+                    "Slug collision: %r and %r both slug to %r", prev_item, item, item_slug
+                )
                 skipped.append(f"{subdir}/{item_slug} (collision: {item!r})")
+            # else: same type + same item → silent dedup (legacy behavior)
             continue
-        seen_slugs[item_slug] = item
+        seen_slugs[item_slug] = (item, page_type)
         valid_items.append(item)
         item_path = effective_wiki_dir / subdir / f"{item_slug}.md"
         if item_path.exists():
@@ -828,6 +864,14 @@ def ingest_source(
             SMALL_SOURCE_THRESHOLD,
         )
 
+    # Cycle 6 AC8 — shared slug namespace across entity + concept batches so a
+    # single extraction with overlapping `entities_mentioned` + `concepts_mentioned`
+    # collapses to ONE wiki page (entity-first per OQ5) rather than creating
+    # a pair of identical-content pages (entities/rag.md AND concepts/rag.md).
+    # R1 fix: tuple values (item, page_type) so we can distinguish same-batch
+    # dupes from cross-type collisions.
+    shared_seen: dict[str, tuple[str, str]] = {}
+
     # 2. Create or update entity pages (skip for small sources)
     e_created, e_updated, e_skipped, e_new, e_valid = _process_item_batch(
         [] if is_small_source else (extraction.get("entities_mentioned") or []),
@@ -837,6 +881,7 @@ def ingest_source(
         source_ref,
         extraction,
         wiki_dir=effective_wiki_dir,
+        shared_seen=shared_seen,
     )
     pages_created.extend(e_created)
     pages_updated.extend(e_updated)
@@ -852,6 +897,7 @@ def ingest_source(
         source_ref,
         extraction,
         wiki_dir=effective_wiki_dir,
+        shared_seen=shared_seen,
     )
     pages_created.extend(c_created)
     pages_updated.extend(c_updated)

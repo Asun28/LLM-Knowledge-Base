@@ -90,9 +90,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 
 ### HIGH
 
-- `query/embeddings.py` `VectorIndex` (~24-29, 93-129) — every `query()` opens a new `sqlite3.connect()` and reloads `sqlite_vec`; `_index_cache` insert is un-locked; extension-load failure silently falls back to empty results with only a WARN log (degrading hybrid → BM25-only invisibly). (R1)
-  (fix: load extension once in `__init__`, reuse connection; lock `_index_cache`; promote extension-load failure to a single startup-level error, not per-query)
-
 - `kb/__init__.py` public API — top-level `__init__.py` exposes only `__version__`; `models/__init__.py` is empty. All consumers (CLI, MCP, tests) reach into deep submodules, so every internal move is a breaking change with no refactor seam. (R1)
   (fix: curated top-level re-exports + `__all__` — `ingest_source`, `compile_wiki`, `query_wiki`, `build_graph`, `WikiPage`, `RawSource`, `LLMError` — and same for `models/__init__.py`)
 
@@ -113,17 +110,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 
 - `graph/builder.py` no caching policy — `build_graph()` is on the per-query hot path (`_compute_pagerank_scores` at `engine.py:135`), the per-lint hot path (`runner.py:46`), and the per-evolve hot path (`analyzer.py:82, 215`). No caching layer, no mtime check, no policy doc. Every `kb_query` walks every wiki page from disk twice (BM25 corpus + graph build) and runs `nx.pagerank` before returning a single result. (R2)
   (fix: `kb.graph.cache` keyed on `(wiki_dir, max_mtime_of_wiki_subdirs)`; invalidate at end of `ingest_source` + `refine_page`; document in CLAUDE.md alongside the manifest contract)
-
-- `query/engine.py` `_compute_pagerank_scores` (~111, 135) — called by every `search_pages` when `PAGERANK_SEARCH_WEIGHT > 0` (default 0.5), triggering a full `build_graph(wiki_dir)` disk walk plus `nx.pagerank` power iteration PER QUERY. Not reused across queries. Concrete perf hit behind the architectural finding above. (R2)
-  (fix: process-level cache keyed on `(wiki_dir_mtime_ns, page_count)`; or persist PageRank to `.data/pagerank.json` and refresh only at ingest time)
-
-- `graph/builder.py` `build_graph` disk re-read (~60-69) — independently calls `page_path.read_text(encoding="utf-8")` per page to extract wikilinks, while callers in the same request already called `load_all_pages`. Double disk I/O + double `FRONTMATTER_RE` per page. At 5k pages, query-path + lint-path = 20k+ file opens per run on NTFS (AV-scanned each). (R2)
-  (fix: accept optional `pages: list[dict]` on `build_graph` (matches `lint.runner`'s `shared_pages` pattern); extract wikilinks from the already-loaded `content` field)
-
-
-- `mcp/core.py` `kb_ingest_content` (~268-360) missing `use_api` parameter — `kb_query` and `kb_ingest` both expose `use_api: bool = False`. `kb_ingest_content`'s docstring ("one-shot: saves content + creates wiki pages in one call") implies the same convenience. Currently forces a 2-call workaround (save_source → ingest with use_api=true); silently breaks any agent trying `kb_ingest_content(use_api=True)` on FastMCP unknown-kwarg rejection. (R3)
-  (fix: add `use_api: bool = False`; when true, call `ingest_source(path, source_type)` after the save (mirror `kb_ingest` API branch) instead of requiring `extraction_json`)
-
 
 - `mcp/*` + `config.py` content-size cap inconsistency + duplicated `MAX_NOTES_LEN` — four distinct behaviors for user strings across the MCP surface: (1) `kb_ingest_content`/`kb_save_source`/`kb_refine_page`/`kb_create_page` reject >160K, (2) `kb_ingest` silently truncates file content to `QUERY_CONTEXT_MAX_CHARS=80K` with only a `logger.warning`, (3) `kb_save_lint_verdict` caps `notes` at `MAX_NOTES_LEN=2000`, (4) `kb_refine_page` `revision_notes` and `kb_query_feedback` `notes` are unbounded at MCP. `MAX_NOTES_LEN=2000` is also defined twice — once in `config.py:165`, once in `lint/verdicts.py:15` — same duplication class as the recently-consolidated `FRONTMATTER_RE`/`STOPWORDS`/`VALID_VERDICT_TYPES`. (R3)
   (fix: single `_validate_notes(notes, field_name)` helper in `mcp/app.py` applied uniformly; reject oversized `kb_ingest` source files at MCP boundary instead of silently truncating; delete duplicate `MAX_NOTES_LEN` in `verdicts.py`)
@@ -147,9 +133,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 - `mcp/__init__.py:4` + `mcp_server.py:10` — FastMCP `run()` eagerly imports `core, browse, health, quality`; those pull `kb.query.engine` → `kb.utils.llm` → `anthropic` (548 modules, 0.58s), and `kb.mcp.health` pulls `kb.graph.export` → `networkx` (285 modules, 0.23s). Measured cold MCP boot: 1.83s / +89 MB / 2,433 modules — of which ~0.8s / ~35 MB is unnecessary for sessions using only `kb_read_page`/`kb_list_pages`/`kb_save_source`. (R3)
   (fix: defer `from kb.query.engine import …`, `from kb.ingest.pipeline import …`, `from kb.graph.export import …` into each tool body (pattern already used for feedback, compile); module-level imports in `kb/mcp/*` limited to `kb.config`, `kb.mcp.app`, stdlib)
 
-- `graph/builder.py` `graph_stats` betweenness (~122-137) — `nx.betweenness_centrality` runs on every `kb_stats` / `kb_lint` first call (exact for ≤500 nodes, k=500 sampling above). O(V·(V+E)) exact, O(500·(V+E)) sampled — on 5k pages/50k edges the sampled call = 500 × 55k = ~28 M edge ops. No cache, so every `kb_stats` invocation re-walks; at scale extrapolates to 20-60s. Distinct from the R2 PageRank caching architecture item (different NetworkX routine). (R3)
-  (fix: gate `bridge_nodes` behind `include_centrality=False` default; `kb_stats` exposes an explicit opt-in; or cache alongside PageRank in `.data/graph_scores.json`)
-
 - `query/embeddings.py` `_get_model` (~32-41) cold load — measured 0.81s + 67 MB RSS delta for `potion-base-8M` on first `kb_query` that touches vector search. `engine.py:87` gates on `vec_path.exists()` — per R2, vector index is almost always stale/absent so the model load is skipped AND hybrid silently degrades to BM25. Either outcome hurts: if the index exists we pay 0.8s on first user query; if it doesn't, "hybrid" is a lie. (R3)
   (fix: warm-load on MCP startup ONLY IF `vec_path.exists()`, and in a background thread so the user's first query isn't charged; or emit a "first query warm-up: embedding model loading…" progress line if user-facing latency crosses 300ms)
 
@@ -167,9 +150,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 
 - `query/engine.py:327-430` `query_wiki` return dict breaks contract vs MCP handler — docstring enumerates `question/answer/citations/source_pages/context_pages`, omitting the `stale` field `search_pages` emits on every result. `mcp/core.py:79` `use_api=True` branch feeds `result["answer"]` + `result["citations"]` through `format_citations` with no stale signal ever reaching the client. Users asking "is this answer current?" get no hint in api mode. (R4)
   (fix: propagate per-citation stale flags into synthesis prompt (`[STALE]` inline next to each page header in `_build_query_context`) and re-emit in citations list; update docstring to document `stale` on result items)
-
-- `query/engine.py:354` `rewrite_query` failure mode discards original silently — `rewrite_query` catches all exceptions internally and returns `question` on failure; on the happy path it returns the LLM output with only `.strip('"')`. When the scan-tier LLM emits `"The standalone question is: <Q>"` or `"Sure! Here's the rewrite: <Q>"`, the length guard at 66 only rejects when rewritten exceeds 3× input — mid-length prefixes pass through, and the whole downstream pipeline (BM25, vector, raw fallback, synthesis) runs on the polluted query. (R4)
-  (fix: reject rewrites containing `:`, `here`, `standalone`, `question is`, or starting with a capital letter followed by a colon; or demand quoted output `"<Q>"` and require leading quote to parse)
 
 - `compile/compiler.py:367-380` `compile_wiki` full-mode manifest pruning — `stale_keys` filter uses `raw_dir.parent / k` to check `.exists()`, but `raw_dir.parent` is NOT the project root when a caller passes a non-default `raw_dir` — every entry gets pruned. The prune also runs on `current_manifest` AFTER the per-source loop wrote successful hashes; between the two `load_manifest` calls there's no lock, so a concurrent `kb_ingest` adding a manifest entry in the window gets silently deleted on save. (R4)
   (fix: compute prune base once as `raw_dir.resolve().parent` matching `_canonical_rel_path`'s base; wrap "reload + prune + update templates + save" in `file_lock(manifest_path)` matching the per-source reload-save pattern)
@@ -264,9 +244,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `utils/io.py` `file_lock` PID-liveness (~81-94) — after 5 s timeout, waiter calls `os.kill(pid, 0)` on the recorded PID. On Windows PIDs are aggressively recycled, so `os.kill(pid, 0)` succeeds for an unrelated process sharing the PID (AV, shell, service); conversely, a dead holder whose PID got reassigned to a live unrelated process makes the waiter raise `TimeoutError` instead of stealing. Either failure mode corrupts the verdict / feedback RMW chain. (R2)
   (fix: on Windows use `msvcrt.locking` or `CreateFile(FILE_SHARE_NONE)` and hold the handle; POSIX `fcntl.flock`. Do not use PID-liveness heuristics for correctness.)
 
-- `utils/pages.py` `load_all_pages` error handling (~83-92) — broad `except (OSError, ValueError, TypeError, AttributeError, YAMLError, UnicodeDecodeError)` logs a warning per page and continues. If every page is unreadable (permissions, corrupt drive), returns `[]` — indistinguishable from a fresh install. BM25 / hybrid / `export_mermaid` treat it as "no results" with no surfaced error. (R2)
-  (fix: track `load_errors` count; raise or surface `{"pages": [...], "load_errors": N}` when >50 % of entries fail; opt-in warning-only)
-
 - `graph/builder.py` `page_id()` lowercasing (~27-34) — lowercases the node ID while `path` attribute keeps original case. On case-sensitive filesystems (CI Linux), any consumer that reconstructs `wiki_dir / f"{pid}.md"` (e.g. `semantic.build_consistency_context:275`) hits `FileNotFoundError` and the page is silently skipped as `*Page not found*`. Windows dev + Linux CI diverge on the same corpus. (R2)
   (fix: normalize filenames on disk to lowercase at ingest; or stop lowercasing in `page_id()` and route all comparisons through a shared `normalize_id` helper applied only on lookup)
 
@@ -287,9 +264,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `compile/compiler.py` `compile_wiki` (~279-393) — a 50-line `for source in changed: ingest_source(source)` loop + manifest save. CLAUDE.md describes compile as "LLM builds/updates interlinked wiki pages, proposes diffs, not full rewrites" — no second pass, no cross-source reconciliation, no diff proposal exists in code. MCP `kb_compile` and `kb compile` CLI are cosmetic wrappers. Phase 5's two-phase compile / pre-publish gate / cross-source merging would land in the wrong layer because `compile_wiki` has no batch context. (R2)
   (fix: make `compile_wiki` a real two-phase pipeline (collect extractions → reconcile cross-source → write) and document the contract; or rename to `batch_ingest` and stop pretending compile is distinct)
-
-- `query/hybrid.py` RRF new-result insert (~27) — `scores[pid] = {**result, "score": rrf_score}` materializes a shallow dict copy on first insert. Phase 5 chunk indexing (K variants × limit×2) will push this to ~1000 dict copies per query; also tangles with the Round 1 metadata-collision finding. (R2)
-  (fix: store `scores[pid] = (rrf_score, result)`; assemble output list at sort time; eliminates copies on repeat hits)
 
 - `query/embeddings.py` `embed_texts` (~50) — `[vec.tolist() for vec in embeddings]` bounces model2vec's contiguous numpy array into Python float lists; then `sqlite_vec.serialize_float32(vec)` re-converts back to bytes. Double conversion. At 5k pages × 256-dim index build = 1.28 M Python float objects allocated only to be re-serialized. (R2)
   (fix: pass the numpy array directly to `sqlite_vec.serialize_float32` (accepts buffer protocol); drop the `.tolist()` bounce)
@@ -326,21 +300,12 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
   (fix: move `SOURCE_TYPE_DIRS` import inside `ingest()`; or short-circuit `if "--version" in sys.argv: print(__version__); sys.exit(0)` BEFORE Click machinery)
 
 
-- `ingest/extractors.py:12, 18` `load_purpose()` no caching — `extract_from_source` calls `load_purpose()` on every single extraction, opening `wiki/purpose.md` per invocation. No caching, no mtime short-circuit. At 500-source batch compile = 500 extra file reads. Small per call but compounds under Windows NTFS AV scanning. (R3)
-  (fix: `@lru_cache(maxsize=1)` on `load_purpose()` keyed on `wiki_dir`; invalidate in `refine_page` when `purpose.md` is edited)
-
 - `query/embeddings.py:14, 24-29` `_index_cache` unbounded — `dict[str, VectorIndex]` keyed on `str(vec_path)`. Production key is stable today but tests with per-test `wiki_dir=tmp_wiki` accumulate entries each run. No `lru_cache` wrapper, no `_reset_cache` sibling. Will compound with Phase 5 chunk-indexing adding per-chunk VectorIndex instances. (R3)
   (fix: `functools.lru_cache(maxsize=8)` on `get_vector_index`; or document "one wiki per process" and add a startup assertion)
 
 
 - `ingest/pipeline.py:154-222` `_build_summary_content` — comparison/synthesis source types declare extract fields `subjects`, `dimensions`, `findings`, `recommendation` (`templates/comparison.yaml`), but the renderer hardcodes only title/author/core_argument/key_claims/entities/concepts variants. A `comparison` ingest produces a page with only title and dropped fields. Worse, `detect_source_type` at `pipeline.py:116-129` cannot detect `comparison`/`synthesis` because `SOURCE_TYPE_DIRS` omits both directories; they're in `VALID_SOURCE_TYPES` but have no `raw/` subdir. So comparison/synthesis templates exist but cannot be ingested AT ALL via `ingest_source`. Dead feature path. (R4)
   (fix: either remove `comparison.yaml` and `synthesis.yaml` from `templates/` until the pipeline supports them, or add `comparisons/`/`synthesis/` to `SOURCE_TYPE_DIRS` AND extend `_build_summary_content` with type-specific renderers)
-
-- `ingest/pipeline.py:473-494` `_process_item_batch` cross-batch slug collision blindness — `seen_slugs` is scoped to a single batch (entities OR concepts), not across both. An extraction with `entities_mentioned: ["RAG"]` and `concepts_mentioned: ["RAG"]` creates `entities/rag.md` AND `concepts/rag.md` as separate pages with the same slug. `wiki/_sources.md` maps the source to both; `inject_wikilinks` called twice for the same title with different target IDs; existing pages get inconsistent cross-references by ordering. (R4)
-  (fix: share `seen_slugs` across both batches in `ingest_source`; on cross-type collision, skip the second with a collision warning; or require canonical type (entity takes precedence over concept))
-
-- `ingest/pipeline.py:294-304` `_update_existing_page` frontmatter regex does not handle `\r\n` in fm body — `r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)"` permits `\r?\n` at boundaries, but `_SOURCE_BLOCK_RE` at line 40 (`re.MULTILINE` + `[ \t]+ - [^\n]*\n`) assumes LF. A page whose interior frontmatter uses `\r\n` falls through to the weak fallback at 320-321 (`fm_text.replace("source:\n", ...)` also LF-assumes). Result: `source:` list silently duplicated or not updated. Same fragility class as R2 `FRONTMATTER_RE`/`utils/markdown.py` but on the write path. (R4)
-  (fix: normalize `content = content.replace("\r\n", "\n")` after read; write back with consistent line ending; or swap `_SOURCE_BLOCK_RE` to `\r?\n`-aware pattern)
 
 - `ingest/pipeline.py:330-344` `_update_existing_page` references regex boundary — `r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)"` is lazy and terminates at `\n## ` or `\Z`. References as LAST section with no trailing newline → lazy `*?` returns the header line alone, then `m.group(1).rstrip("\n") + "\n" + ref_line + "\n"` appends the new ref IMMEDIATELY AFTER the header — before any existing refs. References order silently reversed on no-trailing-newline pages. (R4)
   (fix: normalize `body_text = body_text if body_text.endswith("\n") else body_text + "\n"` before substitution; or match `(## References\n(?:.*\n)*?)(?=^## |\Z)` with MULTILINE)
@@ -368,8 +333,8 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `mcp/quality.py:141-167` `kb_lint_consistency` auto-select mode — when invoked without `page_ids`, `build_consistency_context` takes shared-sources groups + wikilink components + term-overlap groups, deduplicates, chunks each to `MAX_CONSISTENCY_GROUP_SIZE=5`, and inlines the FULL body of each page in each group. No cap on total groups or total response bytes. On a moderate wiki with many multi-source pages, this can emit a response on the order of megabytes — shoved into the caller's next LLM prompt whole. (R4)
   (fix: add `MAX_CONSISTENCY_GROUPS` (20), truncate per-page content to a fixed slice per group, or emit only page IDs + titles in auto mode and require explicit opt-in for inlined bodies)
 
-- `mcp/health.py:113-145` `kb_detect_drift` — no `wiki_dir`/`raw_dir`/`manifest_path` plumbing to the underlying `detect_source_drift`. Same gap as R2 `wiki_dir plumbing` theme but for this tool. `detect_source_drift()` accepts all three but `kb_detect_drift()` exposes none, forcing tests to either skip or mutate `kb.config` globally. Extends to `kb_evolve`, `kb_stats`, `kb_graph_viz`, `kb_compile_scan`, `kb_verdict_trends` — none accept `wiki_dir`. (`kb_lint` now accepts `wiki_dir` as of Phase 5.0.) (R4)
-  (fix: when the R2 plumbing fix lands, extend across every health/browse tool that calls into modules accepting `wiki_dir`; at minimum `kb_detect_drift`, `kb_evolve`, `kb_stats`, `kb_graph_viz`)
+- `mcp/health.py:113-145` `kb_stats` / `kb_compile_scan` / `kb_verdict_trends` — no `wiki_dir` plumbing. (Cycle 6 AC2 closed `kb_detect_drift`, `kb_evolve`, `kb_graph_viz`; these three still accept no override.)
+  (fix: extend the Cycle-6 pattern — `wiki_dir: str | None = None` converted to `Path` and forwarded to the library function; mirror `kb_lint`'s Phase 5.0 plumbing)
 
 - `review/context.py:58-62` `project_root = raw_dir.parent` fragile derivation — computes project root by assuming `raw_dir` is exactly one level below. If a caller passes `raw_dir=/tmp/sandbox/raw/articles` or `raw_dir=/some/raw` with no parent constraint, `project_root` is not the real project root; `relative_to` guard validates against the wrong ceiling — a symlink traversal gains a wider attack surface the deeper `raw_dir` nests. R1 flagged the guard scopes to `project_root` not `RAW_DIR`; this is the structural reason. (R4)
   (fix: take `project_root` as a required parameter on `pair_page_with_sources`, or resolve via `kb.config.PROJECT_ROOT` directly; stop inferring from `raw_dir.parent`)
@@ -408,9 +373,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `utils/llm.py:179-209` `call_llm` no logging of attempt success / final cost — `_make_api_call` logs warnings on retries, but a successful first-try response emits NOTHING. There's no DEBUG/INFO log of `(model, prompt_tokens, completion_tokens, latency, attempt)` for any LLM call. Every other production LLM library emits at INFO so operators can answer "which model handled this query? how many tokens? how many retries?" Without it, the cost-aware-LLM-pipeline (env-overridable model tiers in CLAUDE.md) cannot be audited or budgeted. Attached to every `kb_query`, `kb_ingest`, `rewrite_query`, `extract_from_source`. (R5)
   (fix: after `_make_api_call`, log `logger.info("LLM ok: model=%s tier=%s tokens_in=%d tokens_out=%d retries=%d latency=%.2fs", ...)`; expose `last_call_metrics` via context-local for callers to thread into `result["telemetry"]`)
 
-- `cli.py:36-149` ALL CLI commands discard traceback before exit — every `except Exception as e: click.echo(...); raise SystemExit(1)` discards traceback. A user reporting "kb compile crashed" provides only `Error: ...` from `_truncate(str(e), limit=500)` — no stack frame, no module, no line. Without `--verbose` flag (R4 flagged) AND without basicConfig (R3 flagged), the user CANNOT recover the traceback even by re-running. Compare to `kb_query` MCP which calls `logger.exception()` first then returns the error string — the CLI doesn't even do the `logger.exception` call. (R5)
-  (fix: add `import traceback; traceback.print_exc(file=sys.stderr)` before `raise SystemExit(1)`, gated on `--verbose` flag or env var `KB_DEBUG=1`; or `click.echo(traceback.format_exc(), err=True)` consistently after the user-facing message)
-
 ### LOW
 
 - `tests/test_compile.py` `test_compile_loop_does_not_double_write_manifest` monkeypatch at module level — the CRITICAL cycle 1 item 14 regression test uses `monkeypatch.setattr(pipeline, "save_manifest", ...)` AND `monkeypatch.setattr(compiler_mod, "save_manifest", ...)` to count calls. If `save_manifest` is ever relocated or renamed in the future, the test passes silently with call_count=0 instead of failing loudly. Surfaced by the 2026-04-15 post-PR 2-round review (Sonnet round 2). (R6)
@@ -421,9 +383,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `tests/` missing coverage — no focused test for `_build_query_context` tier-budget logic (`engine.py:235-324`) or `_flag_stale_results` edge cases (missing `sources`, non-ISO `updated`, mtime-eq-page-date). (R1)
   (fix: parametric test asserting per-tier byte budgets given sized summaries; stale-flag edge cases)
-
-- `evolve/analyzer.py` `find_connection_opportunities` break chain (~112) — truncation uses a three-level break (inner-pair → `for page_b` → `for page_a` → `for term`); functionally correct but convoluted. Future maintainers adjusting the truncation threshold will misread it. (R2)
-  (fix: extract pair accumulation into a helper raising `StopIteration`, or unify via `itertools.islice(pairs, MAX_PAIRS)`)
 
 - `mcp/quality.py:437-444` `kb_create_page` `source_refs` validator — rejects `..`, absolute paths, and non-`raw/` prefixes but never checks `(PROJECT_ROOT / src).exists()`. A caller can create a page with `source: "raw/articles/hallucinated-paper.md"` — `wiki/_sources.md` gets a bogus traceability entry; `check_source_coverage` iterates pages checking their refs, not the reverse, so the fake never surfaces. (R3)
   (fix: after prefix validation, `if not (PROJECT_ROOT / src).is_file(): return f"Error: source_ref '{src}' does not exist."`)
@@ -448,10 +407,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 - `ingest/__init__.py` empty package — `__init__.py` is only a docstring/header; no `__all__`, no public-API curation. Every caller reaches into `kb.ingest.pipeline`/`kb.ingest.extractors`/`kb.ingest.contradiction`/`kb.ingest.evidence` directly. R1 flagged top-level package; the pattern recurs inside `kb.ingest`. Phase 5 additions (kb_capture, URL adapters, chunk-indexing hooks) will keep reaching into ever-deeper submodules unless a seam is created now. (R4)
   (fix: add `from kb.ingest.pipeline import ingest_source; __all__ = ["ingest_source"]` — single public entry point)
-
-- `query/dedup.py:62` `_dedup_by_text_similarity` threshold applied to all page types uniformly — 0.85 Jaccard over bodies compares summaries (dense prose, high overlap with entity pages quoting them) against entity pages (sparse, list-heavy); summaries get pruned against their own source entities. `max_type_ratio` layer is the stated countermeasure but runs AFTER similarity dedup; summaries can all be gone before diversity enforcement. (R4)
-  (fix: skip layer-2 similarity when `r.get("type") != k.get("type")`; or lower threshold to 0.92 for cross-type pairs; document the asymmetric ordering)
-
 
 - `mcp/browse.py:48-73` `kb_read_page` case-insensitive fallback — the `subdir.glob("*.md")` loop iterates every file for every miss, lowercase-compares stems, picks first match. On collision (two files differing only in case) the fallback is insertion-order-dependent: first file `glob` returns wins. Two pages with canonical IDs differing only in case shadow each other. Logger warning notes the match but doesn't mention the ambiguity. (R4)
   (fix: if >1 case-insensitive match exists, return `Error: ambiguous page_id — multiple files match {page_id} case-insensitively: {matches}`; or lowercase all page IDs at slug time and drop the fallback)

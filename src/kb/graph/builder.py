@@ -114,13 +114,20 @@ def build_graph(wiki_dir: Path | None = None, pages: list[dict] | None = None) -
     return graph
 
 
-def graph_stats(graph: nx.DiGraph) -> dict:
+def graph_stats(graph: nx.DiGraph, *, include_centrality: bool = False) -> dict:
     """Compute basic graph statistics.
 
     Returns:
         dict with keys: nodes, edges, components, no_inbound (0 in-degree),
         isolated (0 degree), most_linked (highest in-degree nodes),
         pagerank (top 10 by PageRank), bridge_nodes (top 10 by betweenness centrality).
+
+    Cycle 6 AC13: ``include_centrality`` (default ``False``) gates the
+    ``nx.betweenness_centrality`` computation. Betweenness is O(V*E) and at
+    5k-node scale dominates every ``kb_stats`` / ``kb_lint`` call. By default
+    we skip it and return ``bridge_nodes=[]`` with ``bridge_nodes_status="skipped"``.
+    Opt-in via ``include_centrality=True`` (reserved for a future
+    ``kb_stats --detail`` path; not exposed via MCP per OQ11).
     """
     in_degrees = dict(graph.in_degree())
     out_degrees = dict(graph.out_degree())
@@ -152,26 +159,29 @@ def graph_stats(graph: nx.DiGraph) -> dict:
         pagerank = []
         pagerank_status = "failed"
 
-    # Top 10 pages by betweenness centrality (bridge nodes)
+    # Top 10 pages by betweenness centrality (bridge nodes) — gated.
     # Use sampling approximation for large graphs to avoid O(V·E) stall.
     # Fix 5.4: seed=0 makes approximation deterministic across calls.
-    bridge_status = "ok"
-    try:
-        if graph.number_of_nodes() > 500:
-            bc = nx.betweenness_centrality(graph, k=500, seed=0)
-        else:
-            bc = nx.betweenness_centrality(graph, seed=0)
-        bridge_nodes = sorted(
-            ((n, c) for n, c in bc.items() if c > 0),
-            key=lambda x: x[1],
-            reverse=True,
-        )[:10]
-        if not bridge_nodes:
-            bridge_status = "degenerate"
-    except (nx.NetworkXError, ValueError, RuntimeError) as e:
-        logger.warning("betweenness_centrality failed: %s", e)
-        bridge_nodes = []
-        bridge_status = "failed"
+    bridge_nodes: list = []
+    bridge_status = "skipped"
+    if include_centrality:
+        bridge_status = "ok"
+        try:
+            if graph.number_of_nodes() > 500:
+                bc = nx.betweenness_centrality(graph, k=500, seed=0)
+            else:
+                bc = nx.betweenness_centrality(graph, seed=0)
+            bridge_nodes = sorted(
+                ((n, c) for n, c in bc.items() if c > 0),
+                key=lambda x: x[1],
+                reverse=True,
+            )[:10]
+            if not bridge_nodes:
+                bridge_status = "degenerate"
+        except (nx.NetworkXError, ValueError, RuntimeError) as e:
+            logger.warning("betweenness_centrality failed: %s", e)
+            bridge_nodes = []
+            bridge_status = "failed"
 
     return {
         "nodes": graph.number_of_nodes(),

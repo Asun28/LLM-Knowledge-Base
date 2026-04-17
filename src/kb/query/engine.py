@@ -157,9 +157,11 @@ def search_pages(
     scored = dedup_results(scored)
 
     # Blend PageRank into scores if weight > 0
+    # Cycle 6 AC6 — pass pre-loaded `pages` to avoid a second disk walk;
+    # `build_graph(pages=...)` already supports the kwarg (builder.py:37).
     pagerank_scores: dict[str, float] = {}
     if PAGERANK_SEARCH_WEIGHT > 0:
-        pagerank_scores = _compute_pagerank_scores(wiki_dir)
+        pagerank_scores = _compute_pagerank_scores(wiki_dir, preloaded_pages=pages)
 
     if pagerank_scores:
         blended = []
@@ -174,29 +176,53 @@ def search_pages(
     return scored
 
 
-def _compute_pagerank_scores(wiki_dir: Path | None = None) -> dict[str, float]:
+def _compute_pagerank_scores(
+    wiki_dir: Path | None = None,
+    *,
+    preloaded_pages: list[dict] | None = None,
+) -> dict[str, float]:
     """Compute normalized PageRank scores for all wiki pages.
 
     Returns a dict mapping page_id to normalized PageRank (0.0 to 1.0).
     Normalized so the maximum PageRank in the graph maps to 1.0.
+
+    Cycle 6 AC4 — cached on (resolved wiki_dir, max_mtime_ns, page_count).
+    Thread-safe under FastMCP's thread pool via `_PAGERANK_CACHE_LOCK`.
+    Cycle 6 AC6 — accepts `preloaded_pages` to avoid a second disk walk
+    when the caller has already invoked `load_all_pages`.
     """
+    cache_key = _pagerank_cache_key(wiki_dir)
+    if cache_key is not None:
+        with _PAGERANK_CACHE_LOCK:
+            cached = _PAGERANK_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
     try:
         import networkx as nx
 
-        graph = build_graph(wiki_dir)
+        graph = build_graph(wiki_dir, pages=preloaded_pages)
         if graph.number_of_nodes() == 0:
-            return {}
-        if graph.number_of_edges() == 0:
+            result: dict[str, float] = {}
+        elif graph.number_of_edges() == 0:
             logger.debug("No wikilink edges — PageRank blending skipped")
-            return {}
-        pr = nx.pagerank(graph)
-        max_pr = max(pr.values()) if pr else 1.0
-        if max_pr == 0:
-            return {}
-        return {node: score / max_pr for node, score in pr.items()}
+            result = {}
+        else:
+            pr = nx.pagerank(graph)
+            max_pr = max(pr.values()) if pr else 1.0
+            result = {} if max_pr == 0 else {node: score / max_pr for node, score in pr.items()}
     except (nx.PowerIterationFailedConvergence, nx.NetworkXError, ValueError, OSError) as e:
         logger.debug("Failed to compute PageRank for search blending: %s", e)
         return {}
+
+    if cache_key is not None:
+        with _PAGERANK_CACHE_LOCK:
+            # Double-check: another thread may have populated the same key.
+            existing = _PAGERANK_CACHE.get(cache_key)
+            if existing is not None:
+                return existing
+            _PAGERANK_CACHE[cache_key] = result
+    return result
 
 
 def _flag_stale_results(results: list[dict], project_root: Path | None = None) -> list[dict]:
@@ -256,6 +282,40 @@ _WIKI_BM25_CACHE: dict[
     tuple[str, int, int, int], tuple[list[dict], list[list[str]], "BM25Index"]
 ] = {}
 _WIKI_BM25_CACHE_LOCK = threading.Lock()
+
+# Cycle 6 AC4 — PageRank process-level cache. Keyed on
+# (str(wiki_dir.resolve()), max_mtime_ns, page_count) per Condition OQ1 so
+# mtime-invariant file adds (test fixtures copied in via shutil.copy) still
+# invalidate when page count changes. Unbounded per OQ2: mirrors the
+# _WIKI_BM25_CACHE + _RAW_BM25_CACHE precedent — growth is bounded by
+# distinct (wiki_dir, mtime_ns, count) snapshots per process, which is
+# a handful in practice. FastMCP thread-pool safe via the paired lock.
+_PAGERANK_CACHE: dict[tuple[str, int, int], dict[str, float]] = {}
+_PAGERANK_CACHE_LOCK = threading.Lock()
+
+
+def _pagerank_cache_key(wiki_dir: Path | None) -> tuple[str, int, int] | None:
+    """Return cache key (wiki_dir, max_mtime_ns, page_count) or None on error."""
+    if wiki_dir is None:
+        wiki_dir = WIKI_DIR
+    try:
+        resolved = str(wiki_dir.resolve())
+    except OSError:
+        return None
+    count = 0
+    max_mtime = 0
+    for subdir in wiki_dir.iterdir() if wiki_dir.exists() else ():
+        if not subdir.is_dir() or subdir.name.startswith("."):
+            continue
+        for f in subdir.glob("*.md"):
+            try:
+                count += 1
+                mt = f.stat().st_mtime_ns
+                if mt > max_mtime:
+                    max_mtime = mt
+            except OSError:
+                continue
+    return (resolved, max_mtime, count)
 
 
 def _wiki_bm25_cache_key(wiki_dir: Path | None) -> tuple[str, int, int, int] | None:

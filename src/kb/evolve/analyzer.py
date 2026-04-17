@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
@@ -64,6 +65,34 @@ def analyze_coverage(wiki_dir: Path | None = None, pages: list | None = None) ->
 MAX_CONNECTION_PAIRS = 50_000
 
 
+def _iter_connection_pairs(
+    term_index: dict[str, list[str]], *, cap: int
+) -> Iterator[tuple[tuple[str, str], str]]:
+    """Yield ``((page_a, page_b), term)`` pairs up to ``cap`` distinct pairs.
+
+    Cycle 6 AC12 replacement for the former three-level ``break`` chain.
+    Distinct pairs (not tuple-term emissions) are what count toward the cap,
+    so a pair can receive many term additions without advancing the counter.
+    Emits a single WARNING when the cap is first hit.
+    """
+    seen_pairs: set[tuple[str, str]] = set()
+    for term, page_ids in term_index.items():
+        if len(page_ids) < MIN_PAGES_FOR_TERM or len(page_ids) > MAX_PAGES_FOR_TERM:
+            continue
+        for i, page_a in enumerate(page_ids):
+            for page_b in page_ids[i + 1 :]:
+                pair = tuple(sorted([page_a, page_b]))
+                if pair not in seen_pairs:
+                    if len(seen_pairs) >= cap:
+                        logger.warning(
+                            "pair_shared_terms exceeded %d pairs; connection analysis truncated",
+                            cap,
+                        )
+                        return
+                    seen_pairs.add(pair)
+                yield pair, term
+
+
 def find_connection_opportunities(
     wiki_dir: Path | None = None, pages: list | None = None
 ) -> list[dict]:
@@ -119,30 +148,14 @@ def find_connection_opportunities(
                 term_index[word] = []
             term_index[word].append(pid)
 
-    # Accumulate shared terms per pair incrementally (avoids O(V×T) re-scan)
+    # Accumulate shared terms per pair incrementally (avoids O(V×T) re-scan).
+    # Cycle 6 AC12: replaced the three-level `break` chain + `_pairs_truncated`
+    # flag with an explicit helper that yields (pair, term) up to the cap.
+    # The truncation threshold now lives in ONE place (`_iter_connection_pairs`),
+    # preserving the prior WARNING contract when the cap is hit.
     pair_shared_terms: dict[tuple, list[str]] = {}
-    _pairs_truncated = False
-
-    for term, page_ids in term_index.items():
-        if _pairs_truncated:
-            break
-        if len(page_ids) < MIN_PAGES_FOR_TERM or len(page_ids) > MAX_PAGES_FOR_TERM:
-            continue
-        for i, page_a in enumerate(page_ids):
-            if _pairs_truncated:
-                break
-            for page_b in page_ids[i + 1 :]:
-                pair = tuple(sorted([page_a, page_b]))
-                if pair not in pair_shared_terms:
-                    if len(pair_shared_terms) >= MAX_CONNECTION_PAIRS:
-                        logger.warning(
-                            "pair_shared_terms exceeded %d pairs; connection analysis truncated",
-                            MAX_CONNECTION_PAIRS,
-                        )
-                        _pairs_truncated = True
-                        break
-                    pair_shared_terms[pair] = []
-                pair_shared_terms[pair].append(term)
+    for pair, term in _iter_connection_pairs(term_index, cap=MAX_CONNECTION_PAIRS):
+        pair_shared_terms.setdefault(pair, []).append(term)
 
     opportunities = []
     for pair, shared in pair_shared_terms.items():

@@ -74,8 +74,15 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
     Previously the inner loop recomputed tokens for every already-kept entry
     on every candidate — O(n·k) wasted work on unchanging content at
     ``max_results*2`` candidates × ``k`` kept.
+
+    Cycle 6 AC11: skip the threshold comparison when the two results belong
+    to different page types (summary vs. entity vs. concept, etc.). Summaries
+    legitimately quote entity text — treating them as near-duplicates prunes
+    the summary before the diversity layer runs. Same-type comparison is
+    unchanged. Missing `type` is treated as same-type for backward compat.
     """
-    kept: list[tuple[dict, set[str]]] = []
+    # Each entry: (result_dict, content_tokens, type_str)
+    kept: list[tuple[dict, set[str], str]] = []
     for r in results:
         # Item 30 (cycle 2): MCP-provided citations and Phase 5 chunk-indexed
         # results may land here without the pre-lowered `content_lower` field.
@@ -85,8 +92,13 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
         if source_text is None:
             source_text = r.get("content", "").lower()
         r_words = _content_tokens(source_text)
+        r_type = r.get("type", "")
         too_similar = False
-        for _, k_words in kept:
+        for _, k_words, k_type in kept:
+            # Cross-type pair: skip layer-2 pruning. Summaries quoting an
+            # entity's text should not collapse that entity row.
+            if r_type and k_type and r_type != k_type:
+                continue
             intersection = r_words & k_words
             union = r_words | k_words
             jaccard = len(intersection) / len(union) if union else 0.0
@@ -94,8 +106,8 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
                 too_similar = True
                 break
         if not too_similar:
-            kept.append((r, r_words))
-    return [r for r, _ in kept]
+            kept.append((r, r_words, r_type))
+    return [r for r, _, _ in kept]
 
 
 def _enforce_type_diversity(results: list[dict], max_ratio: float) -> list[dict]:

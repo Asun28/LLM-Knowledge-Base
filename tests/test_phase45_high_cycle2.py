@@ -506,7 +506,10 @@ class TestQ4CentralityStatusMetadata:
 
         g = nx.DiGraph()
         g.add_edges_from([("a", "b"), ("b", "c")])
-        stats = graph_stats(g)
+        # Cycle 6 AC13: betweenness is opt-in (default "skipped"). Pass
+        # include_centrality=True to exercise the legacy status-metadata
+        # contract this test was written for.
+        stats = graph_stats(g, include_centrality=True)
         assert "bridge_nodes_status" in stats
         assert stats["bridge_nodes_status"] in ("ok", "failed", "degenerate")
 

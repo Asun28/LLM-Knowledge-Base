@@ -134,6 +134,21 @@ def rewrite_query(
         )
         rewritten = call_llm(prompt, tier="scan", max_tokens=200)
         rewritten = rewritten.strip().strip(_QUOTE_CHARS)
+        # Cycle 6 AC3: reject LLM-preamble-leaked rewrites ("Sure! Here's…",
+        # "The standalone question is:", etc.) by reusing the battle-hardened
+        # _LEAK_KEYWORD_RE from engine.py (two rounds of false-positive
+        # hardening behind it — see engine.py:287-307). Without this gate,
+        # preamble text gets tokenized into BM25, embedded for vector search,
+        # AND threaded into the synthesis prompt — silently polluting every
+        # downstream stage.
+        from kb.query.engine import _LEAK_KEYWORD_RE
+
+        if _LEAK_KEYWORD_RE.match(rewritten):
+            logger.warning(
+                "rewrite_query output rejected as preamble-leak; reverting to original: %r",
+                rewritten[:80],
+            )
+            return question
         # J1 (Phase 4.5 MEDIUM): absolute cap + floor. Previous bound
         # `3 * len(question)` was too tight for short reference questions
         # ("what about it?" → 46-char expansion exceeded 3×) and too loose

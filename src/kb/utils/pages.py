@@ -1,6 +1,7 @@
 """Wiki page loading utilities — shared by query engine and MCP server."""
 
 import datetime as _dt
+import functools
 import logging
 from pathlib import Path
 
@@ -50,8 +51,11 @@ def normalize_sources(sources: str | list | None) -> list[str]:
 
 
 def load_all_pages(
-    wiki_dir: Path | None = None, *, include_content_lower: bool = True
-) -> list[dict]:
+    wiki_dir: Path | None = None,
+    *,
+    include_content_lower: bool = True,
+    return_errors: bool = False,
+) -> list[dict] | dict:
     """Load all wiki pages with metadata and content.
 
     Returns a list of dicts with keys: id, path, title, type, confidence,
@@ -62,9 +66,15 @@ def load_all_pages(
         include_content_lower: If True (default), includes pre-lowercased content.
             Phase 4.5 HIGH P2: callers that don't need content_lower (kb_list_pages,
             build_graph, lint, export, evolve) can pass False to save ~40MB at 5k pages.
+        return_errors: Cycle 6 AC15. If False (default), returns a plain
+            ``list[dict]`` for backward compatibility with every existing
+            caller. If True, returns ``{"pages": list[dict], "load_errors": int}``
+            so callers can distinguish "0 pages found (fresh install)" from
+            "0 pages found (100 permission errors)".
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = []
+    load_errors = 0
     for subdir in WIKI_SUBDIRS:
         subdir_path = wiki_dir / subdir
         if not subdir_path.exists():
@@ -96,11 +106,15 @@ def load_all_pages(
                 yaml.YAMLError,
                 UnicodeDecodeError,
             ) as e:
+                load_errors += 1
                 logger.warning("Skipping page %s: %s", page_path, e)
                 continue
+    if return_errors:
+        return {"pages": pages, "load_errors": load_errors}
     return pages
 
 
+@functools.lru_cache(maxsize=4)
 def load_purpose(wiki_dir: Path) -> str | None:
     """Load the KB focus document ``<wiki_dir>/purpose.md`` if it exists.
 
@@ -110,6 +124,14 @@ def load_purpose(wiki_dir: Path) -> str | None:
     ``kb.query.engine`` and ``kb.ingest.extractors`` already passes
     ``wiki_dir`` explicitly; removing the fallback eliminates a whole class
     of test/prod cross-talk bugs.
+
+    Cycle 6 AC14 — cached via ``functools.lru_cache(maxsize=4)`` so the file
+    is not re-read on every extraction (previously a 500-source batch compile
+    opened ``wiki/purpose.md`` 500 times).
+
+    Tests that mutate ``purpose.md`` after first read must call
+    ``load_purpose.cache_clear()`` to see the updated content. Otherwise the
+    original-read value persists for the remainder of the process life.
 
     Args:
         wiki_dir: Path to the wiki directory (required).
