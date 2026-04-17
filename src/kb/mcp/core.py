@@ -384,6 +384,7 @@ def kb_ingest_content(
     source_type: str,
     extraction_json: str,
     url: str = "",
+    use_api: bool = False,
 ) -> str:
     """One-shot ingest: save raw content + create wiki pages in a single call.
 
@@ -397,7 +398,13 @@ def kb_ingest_content(
                      conversation, capture.
         extraction_json: JSON string with extracted fields. Required keys:
             title (str), entities_mentioned (list[str]), concepts_mentioned (list[str]).
+            Ignored when ``use_api=True`` — the Anthropic API performs extraction.
         url: Optional source URL for metadata.
+        use_api: Cycle 6 AC1. If True, call the Anthropic API for extraction
+            instead of requiring ``extraction_json``. Defaults to False to
+            preserve the Claude-Code-mode contract where the client supplies
+            the extraction dict. Mirrors the ``use_api`` parameter already on
+            ``kb_query`` and ``kb_ingest``.
     """
     err = _validate_file_inputs(filename, content)
     if err:
@@ -413,19 +420,21 @@ def kb_ingest_content(
     type_dir.mkdir(parents=True, exist_ok=True)
     file_path = type_dir / f"{slug}.md"
 
-    # Validate extraction JSON BEFORE writing file to avoid orphaned files
-    try:
-        extraction = json.loads(extraction_json)
-    except json.JSONDecodeError as e:
-        return f"Error: Invalid extraction JSON — {e}"
+    extraction: dict | None = None
+    if not use_api:
+        # Validate extraction JSON BEFORE writing file to avoid orphaned files
+        try:
+            extraction = json.loads(extraction_json)
+        except json.JSONDecodeError as e:
+            return f"Error: Invalid extraction JSON — {e}"
 
-    if not isinstance(extraction, dict):
-        return "Error: extraction_json must be a JSON object."
-    if not extraction.get("title") and not extraction.get("name"):
-        return (
-            "Error: extraction_json must contain 'title' (or 'name'). "
-            "Required keys: title, entities_mentioned, concepts_mentioned."
-        )
+        if not isinstance(extraction, dict):
+            return "Error: extraction_json must be a JSON object."
+        if not extraction.get("title") and not extraction.get("name"):
+            return (
+                "Error: extraction_json must contain 'title' (or 'name'). "
+                "Required keys: title, entities_mentioned, concepts_mentioned."
+            )
 
     save_content = content
     if url:
@@ -478,7 +487,13 @@ def kb_ingest_content(
         )
 
     try:
-        result = ingest_source(file_path, source_type, extraction=extraction)
+        # Cycle 6 AC1 — when use_api=True, ``extraction`` is None so
+        # ingest_source falls through to its LLM extraction path. Claude
+        # Code mode stays default (explicit extraction dict).
+        if extraction is None:
+            result = ingest_source(file_path, source_type)
+        else:
+            result = ingest_source(file_path, source_type, extraction=extraction)
     except Exception as e:
         # Clean up orphaned file before returning error
         try:
