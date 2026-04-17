@@ -305,7 +305,7 @@ def kb_ingest(
             )
         except Exception as e:
             logger.exception("Error ingesting %s (API mode)", source_path)
-            return f"Error ingesting source: {e}"
+            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
 
     # ── Detect source type ──
     if not source_type:
@@ -352,7 +352,7 @@ def kb_ingest(
     try:
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        return f"Error reading source file: {e}"
+        return f"Error reading source file: {_sanitize_error_str(e, path)}"
 
     if len(content) > QUERY_CONTEXT_MAX_CHARS:
         logger.warning(
@@ -652,7 +652,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
                 "then call kb_ingest(source_path, extraction_json=...) with your extraction."
             )
     except Exception as e:
-        return f"Error scanning sources: {e}"
+        return f"Error scanning sources: {_sanitize_error_str(e)}"
 
     return "\n".join(lines)
 
@@ -677,7 +677,7 @@ def kb_compile(incremental: bool = True) -> str:
         result = compile_wiki(incremental=incremental)
     except Exception as e:
         logger.exception("Error running compile")
-        return f"Error running compile: {e}"
+        return f"Error running compile: {_sanitize_error_str(e)}"
 
     mode = result["mode"]
     lines = [

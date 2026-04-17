@@ -56,10 +56,22 @@ mcp = FastMCP(
 )
 
 
-def _rel(path: Path) -> str:
-    """Return path relative to project root with forward slashes."""
+def _rel(path: "Path | None") -> str:
+    """Return path relative to project root with forward slashes.
+
+    Cycle 7 AC12/13 defence-in-depth — handles ``None`` and non-``Path`` inputs
+    without raising so ``_sanitize_error_str`` (which may pass the attribute
+    from an arbitrary exception type) never hits an ``AttributeError`` on the
+    path-sanitisation hot path.
+    """
+    if path is None:
+        return "<path>"
     try:
         return str(path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except (AttributeError, TypeError):
+        # Non-Path input — stringify and return verbatim (regex sweep in
+        # _sanitize_error_str will still scrub absolute-path literals).
+        return str(path).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
 
