@@ -93,6 +93,31 @@ def _make_api_call(kwargs: dict, model: str):
                     MAX_RETRIES + 1,
                 )
 
+        except (
+            anthropic.BadRequestError,
+            anthropic.AuthenticationError,
+            anthropic.PermissionDeniedError,
+        ) as e:
+            # Cycle 3 H1: 4xx caller-bug classes are NEVER retried. Prior code
+            # routed these through the generic `except APIStatusError` non-retry
+            # branch but surfaced a generic `LLMError(f"API error from {model}...")`
+            # that discarded the error-type classification. Surface a typed
+            # `LLMError(kind=...)` so callers can branch: invalid_request (prompt
+            # too long, invalid tool_choice), auth (bad key), permission (RBAC).
+            # Raise immediately without incrementing `last_error` (cycle 3 L1).
+            safe_msg = truncate(str(e.message), limit=500)
+            if isinstance(e, anthropic.BadRequestError):
+                kind = "invalid_request"
+            elif isinstance(e, anthropic.AuthenticationError):
+                kind = "auth"
+            else:
+                kind = "permission"
+            raise LLMError(
+                f"Non-retryable {kind} error from {model} "
+                f"({e.__class__.__name__}): {e.status_code} — {safe_msg}",
+                kind=kind,
+            ) from e
+
         except anthropic.APIStatusError as e:
             if e.status_code in (500, 502, 503, 529):
                 last_error = e
@@ -118,14 +143,16 @@ def _make_api_call(kwargs: dict, model: str):
                         MAX_RETRIES + 1,
                     )
             else:
-                last_error = e  # fix item 16: track non-retryable for consistency
+                # Cycle 3 L1: dead `last_error = e` removed — the branch raises
+                # immediately, so the assignment had no consumer.
                 # Item 7 (cycle 2): truncate e.message — Anthropic error bodies may
                 # contain tens of KB of echoed prompt content (including sensitive
                 # text). Preserve verbatim: exception class name, model, status code
                 # (so callers can still branch on the structured fields).
                 safe_msg = truncate(str(e.message), limit=500)
                 raise LLMError(
-                    f"API error from {model} ({e.__class__.__name__}): {e.status_code} — {safe_msg}"
+                    f"API error from {model} ({e.__class__.__name__}): {e.status_code} — {safe_msg}",
+                    kind="status_error",
                 ) from e
 
         except anthropic.APIConnectionError as e:
@@ -314,4 +341,18 @@ def call_llm_json(
 
 
 class LLMError(Exception):
-    """Raised when LLM calls fail after retries or with non-retryable errors."""
+    """Raised when LLM calls fail after retries or with non-retryable errors.
+
+    Cycle 3 H1: carries an optional `kind` attribute that classifies the cause
+    so callers can branch without string-matching the message:
+
+      - ``"invalid_request"`` — 400, prompt too long / invalid tool_choice.
+      - ``"auth"`` — 401, bad or missing API key.
+      - ``"permission"`` — 403, RBAC / disabled model.
+      - ``"status_error"`` — other non-retryable 4xx.
+      - ``None`` (default) — retry-exhausted / connection / timeout / generic.
+    """
+
+    def __init__(self, message: str, *, kind: str | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
