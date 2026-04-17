@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-from kb.config import PROJECT_ROOT, WIKI_DIR
+from kb.config import MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +81,10 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
     }
 )
 
-# Cap: NTFS / ext4 / APFS filename limit is 255 bytes; page IDs traverse a
-# subdirectory plus a suffix, so accepting 255 chars for the ID itself is
-# comfortably within any supported filesystem's ceiling.
-_MAX_PAGE_ID_LEN: int = 255
+# Cycle 5 redo T3: cap reconciled to config.MAX_PAGE_ID_LEN (200). Previously a
+# local 255-char cap diverged from the feedback/verdict-store cap, producing a
+# double-gate where page IDs of 201-255 chars passed MCP validation but later
+# tripped the persistence layer. Single source of truth now in kb.config.
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -125,8 +125,8 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
     if not page_id or not page_id.strip():
         return "page_id cannot be empty."
     # Cycle 4 item #13 — length cap before filesystem resolve.
-    if len(page_id) > _MAX_PAGE_ID_LEN:
-        return f"page_id too long ({len(page_id)} chars; max {_MAX_PAGE_ID_LEN})."
+    if len(page_id) > MAX_PAGE_ID_LEN:
+        return f"page_id too long ({len(page_id)} chars; max {MAX_PAGE_ID_LEN})."
     if (
         ".." in page_id
         or page_id.startswith("/")
