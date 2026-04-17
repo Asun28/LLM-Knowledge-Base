@@ -32,6 +32,15 @@ def test_wrap_purpose_empty_input_returns_empty_string():
     assert wrap_purpose("   ") == ""
 
 
+def test_wrap_purpose_preserves_newlines_in_multiline_text():
+    """Regression: wrap_purpose must NOT strip \\n/\\t — only non-whitespace C0 controls."""
+    from kb.utils.text import wrap_purpose
+
+    text = "Focus on LLM architectures.\nSecondary: trading systems.\n"
+    wrapped = wrap_purpose(text)
+    assert "Focus on LLM architectures.\nSecondary: trading systems." in wrapped
+
+
 def test_load_verdicts_returns_empty_when_read_text_raises_oserror(tmp_path, monkeypatch):
     from pathlib import Path
 
