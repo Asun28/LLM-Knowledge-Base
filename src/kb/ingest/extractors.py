@@ -237,13 +237,29 @@ def build_extraction_schema(template: dict) -> dict:
     }
 
 
+import threading as _threading  # noqa: E402 — module-local private alias
+
+# Cycle 7 AC28: guard cache-clear + in-flight reader interactions. CPython's
+# ``functools.lru_cache`` is thread-safe for its own get/set, but a
+# ``cache_clear()`` racing with ``_load_template_cached(source_type)`` /
+# ``_build_schema_cached(source_type)`` readers can observe a window where
+# the cache was cleared mid-read, yielding a fresh (uncached) deepcopy+build
+# path. The lock serializes clear vs. reader entry so stress tests hitting
+# the FastMCP 40-thread pool cannot see ``dictionary changed size during
+# iteration`` or similar transient footguns.
+_template_cache_lock = _threading.Lock()
+
+
 def clear_template_cache() -> None:
     """Clear the LRU caches for template loading and schema building.
 
     Useful during long-running processes or interactive template development.
+    Cycle 7 AC28: serialized via ``_template_cache_lock`` so concurrent
+    clears + readers cannot observe intermediate cache states.
     """
-    _load_template_cached.cache_clear()
-    _build_schema_cached.cache_clear()
+    with _template_cache_lock:
+        _load_template_cached.cache_clear()
+        _build_schema_cached.cache_clear()
 
 
 @functools.lru_cache(maxsize=16)
