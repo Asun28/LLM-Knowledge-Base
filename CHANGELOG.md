@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [Cycle 5 redo (hardening)](#phase-45--cycle-5-redo-hardening-2026-04-18) | 2026-04-18 | 6 / 6 files | 1821 → 1836 (+15) | query/engine, query/citations, mcp/app, lint/augment, utils/text, tests |
 | [Backlog-by-file cycle 5](#phase-45--backlog-by-file-cycle-5-2026-04-18) | 2026-04-18 | 14 / 13 files | 1811 → 1820 (+9) | config, text, verdicts, engine, extractors, pipeline, mcp/core, mcp/app, cli, mcp_server, llm, pyproject, tests |
 | [Concurrency fix + docs tidy (PR #17)](#concurrency-fix--docs-tidy-pr-17-2026-04-18) | 2026-04-18 | 3 / 3 files | 1810 → 1811 (+1) | verdicts, capture, test_v0915_task06 |
 | [Backlog-by-file cycle 4](#phase-45--backlog-by-file-cycle-4-2026-04-17) | 2026-04-17 | 22 / 16 files | 1754 → 1810 (+56) | mcp/core, browse, quality, app, health, rewriter, engine, dedup, text, wiki_log, pipeline, bm25, compiler, pages, linker |
@@ -49,6 +50,33 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Cycle 5 redo (hardening, 2026-04-18)
+
+6 items across 6 files. Tests: 1821 → 1836 (+15). Cycle 5 shipped 14 items but shortcut the feature-dev pipeline (no Step 2 threat model artifact, no Step 5 decision gate doc, only 1 PR review round). This redo ran the full pipeline retroactively and surfaced concrete gaps the missing process would have caught.
+
+#### Process artifacts (new)
+
+- `docs/superpowers/decisions/2026-04-18-cycle5-redo-requirements.md` — Step 1 AC1-AC8.
+- `docs/superpowers/decisions/2026-04-18-cycle5-redo-threat-model.md` — Step 2 threat table + Step 11 verification checklist.
+- `docs/superpowers/decisions/2026-04-18-cycle5-redo-design.md` — Step 5 Opus decision gate verdict: CONDITIONAL-APPROVE with 6 conditions.
+
+#### Fixed
+
+- `query/engine.py` + `query/citations.py` — **T1 citation-format symmetry.** API-mode synthesis prompt at line 733 said `[source: page_id]` while MCP-mode instructions at `mcp/core.py:208` said `[[page_id]]`. Asymmetric → API-mode answers produced zero extractable citations because `extract_citations`' regex only matched the legacy form. Fixed by coordinating both: prompt now instructs `[[page_id]]`; `_CITATION_PATTERN` widened with alternation to accept both legacy and canonical forms (backward compat preserved).
+- `mcp/app.py` — **T3 page-id length single source of truth.** Local `_MAX_PAGE_ID_LEN=255` diverged from `config.MAX_PAGE_ID_LEN=200`. Removed the local constant; `_validate_page_id` now imports from config. Pre-change grep confirmed no existing page IDs exceed 200 chars.
+- `lint/augment.py` — **Step 11 verify finding.** Third purpose callsite (`_build_proposer_prompt`) bypassed `wrap_purpose`, breaking the "every purpose interpolation goes through the sentinel" invariant. Now wraps via `wrap_purpose(purpose_text, max_chars=1000)`.
+- `tests/test_v0913_phase394.py` — updated legacy negative-assert for T1b regex widening (nested `[source: [[X]]]` now extracts the inner wikilink correctly).
+
+#### Added (tests)
+
+- `tests/test_cycle5_hardening.py` — 15 tests covering: T1 prompt + regex coordination, T1 backward compat, T2 CJK entity boundary (pins Python `re` Unicode-aware `\b` behavior), T3 page-id length at boundary (200 accept, 201 reject), T4 wrap_purpose sentinel-forgery pinning (textual-only defense documented), T4 byte-exact newline preservation, T5 verdict + feedback `logger.warning` on corrupted UTF-8 via `caplog`, augment proposer sentinel wrapping, pytest integration marker smoke test.
+
+#### Changed
+
+- `utils/text.py` — one-line trust-model comment on `wrap_purpose`: *"Defense is textual-only: wiki/purpose.md is human-curated (trusted). The helper strips non-whitespace C0 controls and caps length, but does NOT escape an attacker-supplied `</kb_purpose>` closer inside the input — sentinel semantics are an LLM-trust boundary, not a hard parse."*
 
 ---
 

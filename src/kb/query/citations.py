@@ -3,7 +3,11 @@
 import html as _html
 import re
 
-_CITATION_PATTERN = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]")
+# Matches both legacy `[source: X]` / `[ref: X]` and canonical `[[X]]` formats.
+# Cycle 5 redo T1: prompt at engine.py instructs the new wikilink form; the
+# extractor accepts both so legacy LLM outputs and persisted answers continue
+# to parse.
+_CITATION_PATTERN = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]|\[\[([\w/_.-]+)\]\]")
 
 _VALID_FORMAT_MODES = frozenset({"markdown", "html", "marp"})
 
@@ -25,7 +29,10 @@ def extract_citations(text: str) -> list[dict]:
     citations = []
     seen: set[tuple[str, str]] = set()
     for match in _CITATION_PATTERN.finditer(text):
-        path = match.group(2)
+        # Group 2 = legacy `[source|ref: X]` path; group 3 = canonical `[[X]]` path.
+        # Exactly one will be non-None per match.
+        legacy_kind = match.group(1)
+        path = match.group(2) if legacy_kind is not None else match.group(3)
         if ".." in path or path.startswith("/"):
             continue
         # Q_K_a fix (Phase 4.5 HIGH): reject per-segment leading-dot (e.g. raw/articles/.env)
@@ -33,7 +40,12 @@ def extract_citations(text: str) -> list[dict]:
         # The old path.startswith(".") check was too broad — it only caught top-level dotfiles.
         if any(not part or part.startswith(".") for part in path.split("/")):
             continue
-        cite_type = "wiki" if match.group(1) == "source" else "raw"
+        if legacy_kind == "ref":
+            cite_type = "raw"
+        else:
+            # legacy `[source: X]` and canonical `[[X]]` both default to wiki;
+            # path-prefix check below promotes raw/ paths.
+            cite_type = "wiki"
         # Override type based on path prefix
         if path.startswith("raw/"):
             cite_type = "raw"

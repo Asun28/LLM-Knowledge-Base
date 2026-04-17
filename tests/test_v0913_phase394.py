@@ -103,19 +103,28 @@ class TestCitationsWikilinkNormalization:
         paths = [c["path"] for c in citations]
         assert "concepts/rag" in paths, f"Expected 'concepts/rag' in {paths}"
 
-    def test_wikilink_inside_citation_brackets_not_extracted(self):
-        r"""[[path]] nested inside [source: ...] is not extractable without normalization.
+    def test_wikilink_inside_citation_brackets_extracted_post_t1_widen(self):
+        r"""Cycle 5 redo T1b updated this behavior.
 
-        After Fix 4.2 removed the dead re.sub, [source: [[concepts/rag]]] is not
-        parseable — the regex requires [\w/_.-]+ and '[' is not in that set.
-        LLMs should emit plain [source: concepts/rag] not [source: [[...]]] format.
+        Before T1b: regex ``\[(source|ref):\s*([\w/_.-]+)\]`` couldn't match
+        the inner ``[[concepts/rag]]`` because ``[`` wasn't in ``[\w/_.-]+``
+        — the whole ``[source: [[concepts/rag]]]`` construct yielded zero
+        citations.
+
+        After T1b: regex alternation ``... | \[\[([\w/_.-]+)\]\]`` matches
+        the inner ``[[concepts/rag]]``. LLMs that accidentally emit the
+        malformed nested form now still produce a working citation rather
+        than silently dropping it. Updated from a negative-assert pin to a
+        positive behavior check per the cycle 5 redo design decision
+        (docs/superpowers/decisions/2026-04-18-cycle5-redo-design.md).
         """
         from kb.query.citations import extract_citations
 
         text = "See [source: [[concepts/rag]]] for details."
         citations = extract_citations(text)
-        # The nested wikilink format is not parseable; no citations extracted
-        assert citations == []
+        assert len(citations) == 1
+        assert citations[0]["path"] == "concepts/rag"
+        assert citations[0]["type"] == "wiki"
 
     def test_plain_path_still_extracted(self):
         from kb.query.citations import extract_citations
