@@ -34,7 +34,7 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
-def build_graph(wiki_dir: Path | None = None, pages: list[dict] | None = None) -> nx.DiGraph:
+def build_graph(wiki_dir: Path | None = None, *, pages: list[dict] | None = None) -> nx.DiGraph:
     """Build a directed graph from wiki pages and their wikilinks.
 
     Nodes are wiki page IDs (e.g., 'concepts/rag', 'entities/openai').

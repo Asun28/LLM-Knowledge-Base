@@ -22,12 +22,20 @@ from kb.utils.pages import WIKI_SUBDIRS
 logger = logging.getLogger(__name__)
 
 
-def analyze_coverage(wiki_dir: Path | None = None, pages: list | None = None) -> dict:
+def analyze_coverage(
+    wiki_dir: Path | None = None,
+    pages: list | None = None,
+    *,
+    pages_dicts: list[dict] | None = None,
+) -> dict:
     """Analyze wiki coverage by page type and identify gaps.
 
     Args:
         wiki_dir: Path to wiki directory.
         pages: Pre-scanned page list from scan_wiki_pages(). If None, scans internally.
+        pages_dicts: Optional pre-loaded page dicts (from load_all_pages).
+            When provided, ``build_backlinks`` reuses the bundle instead of
+            re-scanning disk (Cycle 7 AC9).
 
     Returns:
         dict with keys: total_pages, by_type (dict), under_covered_types,
@@ -36,7 +44,7 @@ def analyze_coverage(wiki_dir: Path | None = None, pages: list | None = None) ->
     wiki_dir = wiki_dir or WIKI_DIR
     if pages is None:
         pages = scan_wiki_pages(wiki_dir)
-    backlinks = build_backlinks(wiki_dir)
+    backlinks = build_backlinks(wiki_dir, pages=pages_dicts)
 
     by_type = {subdir: 0 for subdir in WIKI_SUBDIRS}
     for page_path in pages:
@@ -243,9 +251,15 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
     """
     wiki_dir = wiki_dir or WIKI_DIR
     pages = scan_wiki_pages(wiki_dir)
-    graph = build_graph(wiki_dir)
+    # Cycle 7 AC9: load full page dicts once and thread them into every
+    # subgraph-loading callee so the evolution report re-uses one filesystem
+    # walk instead of three (graph + backlinks + term index).
+    from kb.utils.pages import load_all_pages
 
-    coverage = analyze_coverage(wiki_dir, pages=pages)
+    pages_dicts = load_all_pages(wiki_dir=wiki_dir)
+    graph = build_graph(wiki_dir, pages=pages_dicts)
+
+    coverage = analyze_coverage(wiki_dir, pages=pages, pages_dicts=pages_dicts)
     connections = find_connection_opportunities(wiki_dir, pages=pages)
     new_pages = suggest_new_pages(wiki_dir, pages=pages)
     stats = graph_stats(graph)
