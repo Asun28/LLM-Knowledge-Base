@@ -142,6 +142,65 @@ def check_src_py_count(errors: list[str]) -> None:
     print(f"  src/kb/ Python files   = {count}")
 
 
+def _count_diff_lines(file_relpath: str, base_ref: str, prefix: str) -> int:
+    """Count lines in `git diff <base>...HEAD -- <file>` starting with prefix.
+
+    `prefix` is "-" (deletions) or "+" (additions). Ignores diff-header lines
+    (`---`, `+++`, `-- `, `++ `). Returns 0 if the base ref is unreachable
+    (first run, shallow clone, etc.) so the check degrades gracefully.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", f"{base_ref}...HEAD", "--", file_relpath],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return 0
+    count = 0
+    for line in result.stdout.splitlines():
+        if not line.startswith(prefix):
+            continue
+        # Skip headers like `--- a/BACKLOG.md`, `+++ b/CHANGELOG.md`.
+        if line.startswith(prefix * 3):
+            continue
+        # Skip pure whitespace deletions/additions — they're not semantic.
+        if not line[1:].strip():
+            continue
+        count += 1
+    return count
+
+
+def check_backlog_changelog_sync(errors: list[str], base_ref: str = "origin/main") -> None:
+    """Gate: BACKLOG deletions on this branch require CHANGELOG additions.
+
+    Project convention (CLAUDE.md): resolved items are DELETED from BACKLOG,
+    with the fix recorded in CHANGELOG under [Unreleased]. Enforces that any
+    branch deleting BACKLOG lines also adds CHANGELOG lines — prevents
+    audit-trail holes where a backlog item vanishes without a changelog
+    entry explaining why or when.
+
+    Semantic coverage is not verified (each deleted bullet matched to an
+    added bullet by file/symbol); this is a presence check only. If BACKLOG
+    shrinks, CHANGELOG must grow.
+
+    Degrades gracefully: if `base_ref` is unreachable, skips the check and
+    notes the skip in output. Run after fetching origin/main for best results.
+    """
+    backlog_deletions = _count_diff_lines("BACKLOG.md", base_ref, "-")
+    changelog_additions = _count_diff_lines("CHANGELOG.md", base_ref, "+")
+    print(f"  BACKLOG deletions vs {base_ref:<20} = {backlog_deletions}")
+    print(f"  CHANGELOG additions vs {base_ref:<20} = {changelog_additions}")
+    if backlog_deletions > 0 and changelog_additions == 0:
+        errors.append(
+            f"BACKLOG.md has {backlog_deletions} deletion(s) but CHANGELOG.md "
+            f"has zero additions vs {base_ref}. Per CLAUDE.md convention, each "
+            f"resolved BACKLOG item must have a matching CHANGELOG entry."
+        )
+
+
 def main() -> int:
     errors: list[str] = []
     print("\n== Version alignment ==")
@@ -150,6 +209,8 @@ def main() -> int:
     check_test_count(errors)
     print("\n== Source file count ==")
     check_src_py_count(errors)
+    print("\n== BACKLOG <-> CHANGELOG sync ==")
+    check_backlog_changelog_sync(errors)
     print()
     if errors:
         print("FAIL — docs-drift detected:")
