@@ -21,6 +21,50 @@ Rules:
 
 ## [Unreleased]
 
+### Phase 4.5 — Backlog-by-file cycle 4 (2026-04-17)
+
+22 mechanical bug fixes across 16 source files (HIGH + MEDIUM + LOW) shipped as file-grouped commits continuing the cycles 1–3 cadence. Full feature-dev pipeline executed (requirements → threat model + CVE baseline → brainstorm → parallel R1 Opus + R2 Codex design review → Opus decision gate → Codex plan + gate → TDD impl → CI hard gate → security verify + CVE diff → docs). Test count 1754 → 1801 (+47).
+
+**Scope shifts from decision gate** (cycle 3 R1 lesson applied up-front, per cycle 3 CHANGELOG): the initial 30-candidate list was narrowed to 22 after R1 Opus + R2 Codex source verification flagged **7 items already shipped** (confirmed by grep — #4 source_type whitelist, #6 MAX_QUESTION_LEN + stale marker, #8 ambiguous page_id match, #9 title cap 500, #10 source_refs is_file, #21 frontmatter_missing_fence, #30 FRONTMATTER_RE) and **1 item deferred as too architecturally deep** (#3 `[source: X]` → `[[X]]` citation migration — requires atomic update of 15+ test callsites plus `extract_citations()` + `engine.py` — tracked as dedicated Phase 4.5 backlog item).
+
+#### Fixed — Backlog-by-file cycle 4 (22 items)
+
+- `mcp/core.py` — `_rel()` sweep on error-string `Path` interpolations; `kb_ingest` 'source file not found' no longer leaks absolute filesystem paths (item #1)
+- `mcp/core.py` + `utils/text.py` — `_sanitize_conversation_context` strips `<prior_turn>` / `</prior_turn>` fences (case-insensitive, with optional attributes) AND fullwidth angle-bracket variants (U+FF1C / U+FF1E) limited to fence-match region AND control characters via `yaml_sanitize`, before passing context to the rewriter LLM. Prevents fence-escape prompt injection via attacker-controlled conversation context (item #2)
+- `mcp/core.py` — `kb_ingest_content` and `kb_save_source` post-create OSError paths now return `Error[partial]: ...` string with `overwrite=true` retry hint + `logger.warning` for operator audit. Previous `except BaseException: ... raise` violated the MCP "tools return strings, never raise" contract (item #5)
+- `mcp/browse.py` — `kb_read_page` caps response body at `QUERY_CONTEXT_MAX_CHARS` with explicit `[Truncated: N chars omitted]` footer. Prevents MCP transport DoS from a runaway wiki page whose append-only Evidence Trail grew unbounded (item #7)
+- `mcp/quality.py` — `kb_affected_pages` tightened to `_validate_page_id(check_exists=True)`; a typo'd page_id now returns `Error: Page not found: ...` instead of silently reporting 'No pages are affected' (false-negative). Legacy `test_kb_affected_pages_no_affected` test updated in the same commit per cycle 3 `feedback_migration_breaks_negatives` memory (item #11)
+- `lint/verdicts.py` — `add_verdict` caps per-issue `description` at `MAX_ISSUE_DESCRIPTION_LEN=4000` inside the library function. Prevents a direct-library caller passing `issues=[{'description': 1_000_000*'x'}] × 100` from inflating a single verdict entry to ~100MB and thrashing the mtime-keyed verdict cache (item #12)
+- `mcp/app.py` — `_validate_page_id` rejects Windows reserved basenames cross-platform (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) AND enforces `len(page_id) <= 255`. Reject happens on basename stem (before first dot), so `CON.backup` also fails matching Windows CreateFile semantics. Rationale: cross-platform corpus portability — a wiki file named `NUL.md` created on Linux would brick the whole Windows sync path (item #13)
+- `compile/compiler.py` + `mcp/health.py` — `kb_detect_drift` surfaces deleted raw sources as distinct 'source-deleted' category + companion 'Pages Referencing Deleted Sources' section. `detect_source_drift()` return dict gains `deleted_sources` + `deleted_affected_pages` keys. Previously the drift case most likely to corrupt lint fidelity (wiki page still cites a deleted source) was silently pruned from the manifest without surfacing (item #14)
+- `query/rewriter.py` — `_should_rewrite` adds `_is_cjk_dominant` + universal short-query gate (`len(question.strip()) < 15`) so CJK follow-ups like `什么是RAG` / `它是什么` skip the scan-tier LLM rewrite call. Prior heuristic used `question.split()` which returns `[question]` for CJK (no whitespace separators), causing every CJK query to ALWAYS trigger rewrite (item #15)
+- `query/engine.py` + `utils/text.py` — new `_WIKI_BM25_CACHE` mirrors cycle 3's `_RAW_BM25_CACHE`. Both keys now include `BM25_TOKENIZER_VERSION` so tokenizer-semantic changes (STOPWORDS prune, new sanitize) invalidate stale indexes without requiring a file touch (items #16 + #18 invalidation path)
+- `query/dedup.py` — `_enforce_type_diversity` uses running quota (`tentative_kept * max_ratio` recomputed each iteration) instead of fixed cap based on input length. Ensures 'no type exceeds X%' contract holds regardless of input-to-output compression ratio from prior dedup layers (item #17)
+- `utils/text.py` — STOPWORDS pruned by 8 overloaded quantifiers (`new`, `all`, `more`, `most`, `some`, `only`, `other`, `very`) that appear in legitimate technical entity names (All-Reduce, All-MiniLM, New Bing). `BM25_TOKENIZER_VERSION = 2` added as cache-key salt so cycle 4 deploys invalidate stale on-disk / in-memory BM25 indexes (item #18)
+- `utils/text.py` — `yaml_sanitize` silently strips BOM (U+FEFF), LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029). Common noise from Word / Google Docs / Obsidian pastes that corrupt YAML with no security benefit from rejection (item #19)
+- `utils/wiki_log.py` — monthly rotation with ordinal collision. When `log.md` exceeds `LOG_SIZE_WARNING_BYTES` (500KB), append rotates to `log.YYYY-MM.md` (or `log.YYYY-MM.2.md`, `.3.md` on mid-month overflow). Rotation event logs at INFO before rename to preserve audit chain. Replaces the warn-only path that let `wiki/log.md` grow unbounded (item #20)
+- `ingest/pipeline.py` — migrated contradiction-detection caller from list-returning `detect_contradictions` to `detect_contradictions_with_metadata` sibling. When `truncated=True`, pipeline now emits `logger.warning` naming the source_ref + checked/total counts so operators can detect coverage gaps. Legacy `detect_contradictions` signature preserved for non-pipeline callers (item #22)
+- `graph/export.py` — `export_mermaid(graph=<Path>)` positional-form shim emits `DeprecationWarning` with v0.12.0 removal target. Behaviour preserved so no existing caller breaks this cycle (item #23)
+- `query/bm25.py` — `BM25Index.__init__` precomputes `_postings: dict[str, list[int]]` inverted index; `score()` iterates only docs that contain a query term instead of walking every doc per term. ~25× speedup on sparse queries at 5k-page scale. Memory profile documented as ~150 MB (item #24)
+- `compile/compiler.py` — `_template_hashes` filters by `VALID_SOURCE_TYPES` instead of just excluding tilde/dotfile prefixes. Prevents editor backup files (`article.yaml.bak`, `*.yaml.swp`) from entering the manifest and triggering a full re-ingest when they change (item #25)
+- `.env.example` — added commented `CLAUDE_SCAN_MODEL` / `CLAUDE_WRITE_MODEL` / `CLAUDE_ORCHESTRATE_MODEL` env-override vars to close drift vs `config.py:65-69` + CLAUDE.md model tier table (item #26)
+- `CLAUDE.md` — documented `query_wiki` return-dict `stale` + Phase 4.11 output-adapter `output_format` / `output_path` / `output_error` keys (item #27)
+- `utils/pages.py` — `load_purpose` signature tightened: `wiki_dir` is now REQUIRED. Previous `wiki_dir: Path | None = None` fallback silently leaked production `WIKI_DIR` into tests that forgot to pass `tmp_wiki`. All current callers (`query/engine.py:653`, `ingest/extractors.py:335`) already pass explicit `wiki_dir`; `extract_from_source` gains a local default via `from kb.config import WIKI_DIR` for its own `wiki_dir=None` back-compat (item #28)
+- `ingest/pipeline.py` — retroactive wikilink injection loop sorts `(pid, title)` pairs descending by title length before iterating `inject_wikilinks`. Prevents short titles like `RAG` from swallowing body text that longer entities like `Retrieval-Augmented Generation` should own; tie-break on pid for deterministic ordering (item #29)
+
+#### Test-backfill (already-shipped items #6, #8, #9, #10)
+
+- `tests/test_backlog_by_file_cycle4.py::TestStaleMarkerInSearch` — shipped `[STALE]` surfacing in `kb_search` output
+- `tests/test_backlog_by_file_cycle4.py::TestAmbiguousPageId` — shipped ambiguous case-insensitive match rejection in `kb_read_page` (NTFS-safe via mocked glob since NTFS can't hold two case-variants simultaneously)
+- `tests/test_backlog_by_file_cycle4.py::TestTitleLengthCap` — shipped 500-char title cap in `kb_create_page`
+- `tests/test_backlog_by_file_cycle4.py::TestSourceRefsIsFile` — shipped `is_file()` check on `source_refs` in `kb_create_page`
+
+#### Security posture (cycle 4)
+
+- **PR-introduced CVE diff:** 0 entries vs Step-2 baseline (`pip-audit` clean).
+- **Class-A existing CVEs patched at Step 12.5:** `langsmith` 0.7.25 → 0.7.32 (GHSA-rr7j-v2q5-chgv resolved), `python-multipart` 0.0.22 → 0.0.26 (CVE-2026-40347 resolved). `requirements.txt` already pinned the patched versions — cycle 4 only synced the stale local venv.
+- **Accepted risk:** `diskcache==5.6.3` CVE-2025-69872 — no patched release published; tracked in BACKLOG for next-cycle watchlist. `pip==24.3.1` toolchain CVEs — not runtime code.
+
 ### Phase 4.5 — Backlog-by-file cycle 3 (2026-04-17)
 
 24 mechanical bug fixes across 16 source files (HIGH + MEDIUM + LOW) plus 2 security-verify follow-ups. One commit per file; full feature-dev pipeline (threat model → parallel design review → Opus decision gate → Codex plan + gate → TDD impl → CI hard gate → Codex security verify → docs → PR → review rounds) gated via subagents. Test count 1727 → 1754 (+27).
