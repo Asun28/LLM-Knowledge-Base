@@ -6,11 +6,17 @@ import click
 
 from kb import __version__
 from kb.config import SOURCE_TYPE_DIRS
+from kb.utils.text import truncate as _truncate_text
 
 
-def _truncate(msg: str, limit: int = 500) -> str:
-    """Truncate long error messages to avoid terminal flooding."""
-    return msg if len(msg) <= limit else msg[:limit] + "..."
+def _truncate(msg: str, limit: int = 600) -> str:
+    """Truncate long error messages to avoid terminal flooding.
+
+    Cycle 3 M17: delegate to `kb.utils.text.truncate` so CLI errors use the
+    same head+tail smart-truncate as every other error surface. Default
+    limit raised from 500 to 600 to match the utils helper.
+    """
+    return _truncate_text(msg, limit=limit)
 
 
 @click.group()

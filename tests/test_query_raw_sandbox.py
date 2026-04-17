@@ -30,13 +30,18 @@ def test_query_raw_fallback_respects_wiki_dir_sandbox(tmp_project, monkeypatch):
     # Stub out LLM so the test doesn't require an API key
     monkeypatch.setattr(eng, "call_llm", lambda prompt, **kw: "synthesized answer")
 
-    (wiki_dir / "concepts").mkdir(parents=True, exist_ok=True)
+    # Cycle 3 H15: raw-source fallback now fires on a SEMANTIC signal —
+    # empty context OR context consisting entirely of summary-type pages.
+    # Use a SUMMARY page so the gate fires (previously a concept page +
+    # tiny wiki context would trigger the old char-count gate; after H15
+    # that path is skipped, so use the gate that still activates fallback).
+    (wiki_dir / "summaries").mkdir(parents=True, exist_ok=True)
     fm = (
-        "---\ntitle: Dummy\nsource: []\ntype: concept\n"
+        "---\ntitle: Dummy\nsource: []\ntype: summary\n"
         "confidence: stated\ncreated: 2026-04-15\nupdated: 2026-04-15\n"
         "---\n\nbody zqxv42\n"
     )
-    (wiki_dir / "concepts" / "dummy.md").write_text(fm, encoding="utf-8")
+    (wiki_dir / "summaries" / "dummy.md").write_text(fm, encoding="utf-8")
 
     _ = query_wiki("zqxv42", wiki_dir=wiki_dir)
     assert calls, "search_raw_sources was never invoked"

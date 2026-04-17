@@ -3,6 +3,7 @@
 
 def test_autogen_prefixes_is_in_config():
     from kb.config import AUTOGEN_PREFIXES
+
     assert AUTOGEN_PREFIXES == ("summaries/", "comparisons/", "synthesis/")
 
 

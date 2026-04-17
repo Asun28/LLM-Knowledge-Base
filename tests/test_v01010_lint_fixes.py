@@ -1,4 +1,5 @@
 """Tests for Phase 4 lint/ fixes."""
+
 from __future__ import annotations
 
 
@@ -11,9 +12,7 @@ def test_orphan_check_respects_index_links(tmp_wiki):
         "---\ntitle: foo\ntype: concept\nconfidence: stated\n---\nbody\n",
         encoding="utf-8",
     )
-    (tmp_wiki / "index.md").write_text(
-        "# Index\n\n- [[concepts/foo]]\n", encoding="utf-8"
-    )
+    (tmp_wiki / "index.md").write_text("# Index\n\n- [[concepts/foo]]\n", encoding="utf-8")
     # check_orphan_pages returns a list of orphaned page IDs or a report string
     result = check_orphan_pages(wiki_dir=tmp_wiki)
     # Normalise: if it's a string, split; if it's a list, use directly
@@ -56,8 +55,13 @@ def test_trends_accepts_date_only_timestamp(tmp_path, monkeypatch):
 
     verdicts_data = {
         "entries": [
-            {"type": "fidelity", "verdict": "pass", "page_id": "p1",
-             "timestamp": "2024-01-01", "issues": []},
+            {
+                "type": "fidelity",
+                "verdict": "pass",
+                "page_id": "p1",
+                "timestamp": "2024-01-01",
+                "issues": [],
+            },
         ]
     }
     vpath = tmp_path / "verdicts.json"

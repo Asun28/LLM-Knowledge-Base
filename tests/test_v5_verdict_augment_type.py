@@ -1,4 +1,5 @@
 """Regression: VALID_VERDICT_TYPES includes 'augment' for kb_lint --augment verdicts."""
+
 import json
 
 from kb.lint.verdicts import VALID_VERDICT_TYPES, add_verdict
@@ -27,6 +28,7 @@ def test_add_verdict_accepts_augment_type(tmp_path, monkeypatch):
 
 def test_add_verdict_rejects_unknown_type(tmp_path, monkeypatch):
     import pytest
+
     verdicts_path = tmp_path / "verdicts.json"
     monkeypatch.setattr("kb.lint.verdicts.VERDICTS_PATH", verdicts_path)
     atomic_json_write([], verdicts_path)

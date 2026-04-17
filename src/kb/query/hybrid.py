@@ -2,7 +2,12 @@
 
 import logging
 
-from kb.config import BM25_SEARCH_LIMIT_MULTIPLIER, RRF_K, VECTOR_SEARCH_LIMIT_MULTIPLIER
+from kb.config import (
+    BM25_SEARCH_LIMIT_MULTIPLIER,
+    MAX_QUERY_EXPANSIONS,
+    RRF_K,
+    VECTOR_SEARCH_LIMIT_MULTIPLIER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +61,16 @@ def hybrid_search(
     if expand_fn:
         try:
             expanded = expand_fn(question)
-            queries = [question, *expanded][:3]
+            # Cycle 3 L6: cap comes from config — previously hardcoded `[:3]`
+            # silently dropped a fourth+ expansion with no operator visibility.
+            cap = 1 + MAX_QUERY_EXPANSIONS
+            if len(expanded) > MAX_QUERY_EXPANSIONS:
+                logger.debug(
+                    "Query expansion truncated: %d variants requested, cap=%d",
+                    len(expanded),
+                    MAX_QUERY_EXPANSIONS,
+                )
+            queries = [question, *expanded][:cap]
         except Exception as e:
             logger.debug("Query expansion failed (non-fatal): %s", e)
 

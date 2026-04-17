@@ -515,7 +515,8 @@ def test_qkb_overlength_triggers_warning(caplog):
         extract_wikilinks(text)
     # A warning must be emitted for the overlength target
     warning_records = [
-        rec for rec in caplog.records
+        rec
+        for rec in caplog.records
         if rec.levelno >= logging.WARNING and rec.name == "kb.utils.markdown"
     ]
     assert warning_records, "No warning logged for >500-char wikilink target"

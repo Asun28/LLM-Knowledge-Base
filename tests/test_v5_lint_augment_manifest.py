@@ -1,4 +1,5 @@
 """Manifest state machine per-gap: pending → proposed → fetched → saved → ingested → done."""
+
 import json
 import uuid
 
@@ -6,6 +7,7 @@ import uuid
 def _make_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
     from kb.lint._augment_manifest import Manifest
+
     run_id = str(uuid.uuid4())
     stubs = [
         {"page_id": "concepts/foo", "title": "Foo"},
@@ -59,10 +61,15 @@ def test_close_writes_ended_at(tmp_path, monkeypatch):
 def test_resume_finds_incomplete_run(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
     from kb.lint._augment_manifest import Manifest
+
     run_id = "abcd1234-5678-90ab-cdef-1234567890ab"
     initial = {
-        "schema": 1, "run_id": run_id, "started_at": "2026-04-15T14:00:00Z",
-        "ended_at": None, "mode": "auto_ingest", "max_gaps": 5,
+        "schema": 1,
+        "run_id": run_id,
+        "started_at": "2026-04-15T14:00:00Z",
+        "ended_at": None,
+        "mode": "auto_ingest",
+        "max_gaps": 5,
         "gaps": [
             {"page_id": "concepts/x", "state": "ingested", "transitions": []},
             {"page_id": "concepts/y", "state": "fetched", "transitions": []},
@@ -79,6 +86,7 @@ def test_resume_finds_incomplete_run(tmp_path, monkeypatch):
 def test_resume_returns_none_for_unknown_run(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
     from kb.lint._augment_manifest import Manifest
+
     assert Manifest.resume(run_id_prefix="zzzzzzzz") is None
 
 

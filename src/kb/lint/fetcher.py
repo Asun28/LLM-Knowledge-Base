@@ -205,8 +205,7 @@ def build_client(version: str) -> httpx.Client:
         ),
         headers={
             "User-Agent": (
-                f"LLM-WikiFlywheel/{version} "
-                "(+https://github.com/Asun28/llm-wiki-flywheel)"
+                f"LLM-WikiFlywheel/{version} (+https://github.com/Asun28/llm-wiki-flywheel)"
             )
         },
         # follow_redirects=False is load-bearing for SSRF defense:
@@ -311,10 +310,7 @@ class AugmentFetcher:
         self.max_bytes = AUGMENT_FETCH_MAX_BYTES
         self._client = build_client(version)
         self._robots_cache: dict[str, RobotFileParser | None] = {}
-        self._ua = (
-            f"LLM-WikiFlywheel/{version} "
-            "(+https://github.com/Asun28/llm-wiki-flywheel)"
-        )
+        self._ua = f"LLM-WikiFlywheel/{version} (+https://github.com/Asun28/llm-wiki-flywheel)"
 
     def __enter__(self):
         return self
@@ -412,10 +408,7 @@ class AugmentFetcher:
                             extracted_markdown=None,
                             content_type="",
                             bytes=0,
-                            reason=(
-                                f"redirect to disallowed scheme: "
-                                f"{hop_parsed.scheme}"
-                            ),
+                            reason=(f"redirect to disallowed scheme: {hop_parsed.scheme}"),
                             url=current_url,
                         )
                     if not _url_is_allowed(current_url, self.allowed_domains):

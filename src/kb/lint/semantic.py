@@ -227,7 +227,9 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
                 pair = (a, b) if a < b else (b, a)
                 pair_counts[pair] += 1
 
-    groups = [sorted(list(pair)) for pair, count in pair_counts.items() if count >= MIN_SHARED_TERMS]
+    groups = [
+        sorted(list(pair)) for pair, count in pair_counts.items() if count >= MIN_SHARED_TERMS
+    ]
     return groups
 
 

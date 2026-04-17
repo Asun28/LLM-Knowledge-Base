@@ -1,4 +1,5 @@
 """Tests for Phase 4 ingest/pipeline.py fixes."""
+
 from __future__ import annotations
 
 import pytest
@@ -11,8 +12,12 @@ def test_subdir_map_raises_valueerror_on_unknown_type():
     with pytest.raises((ValueError, KeyError)):
         # Pass minimal args — we just want the type guard to fire
         _process_item_batch(
-            items_raw=[], field_name="x", max_count=10,
-            page_type="not_a_real_type", source_ref="x", extraction={},
+            items_raw=[],
+            field_name="x",
+            max_count=10,
+            page_type="not_a_real_type",
+            source_ref="x",
+            extraction={},
         )
 
 
@@ -55,6 +60,7 @@ def test_frontmatter_missing_logs_warning_returns_early(tmp_wiki, caplog):
 def test_wiki_contradictions_file_exists_in_config():
     """WIKI_CONTRADICTIONS must be defined in config."""
     from kb import config
+
     assert hasattr(config, "WIKI_CONTRADICTIONS"), "WIKI_CONTRADICTIONS missing from config"
 
 
@@ -167,9 +173,7 @@ def test_h6_persist_contradictions_uses_wiki_dir(tmp_path, monkeypatch):
             source, source_type="article", wiki_dir=wiki_dir, extraction=extraction
         )
 
-    prod_mtime_after = (
-        prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
-    )
+    prod_mtime_after = prod_contradictions.stat().st_mtime if prod_contradictions.exists() else None
     assert prod_mtime_before == prod_mtime_after, (
         "H6: ingest_source mutated production wiki/contradictions.md — "
         "effective_wiki_dir not used for _persist_contradictions"
@@ -191,12 +195,14 @@ def test_contradictions_written_to_file(tmp_wiki, tmp_path, monkeypatch):
     # Simulate the write block from pipeline
     if warnings:
         from datetime import date
+
         header = "# Contradictions\n\nAppend-only log of conflicts detected during ingest.\n\n"
         existing = contra_path.read_text(encoding="utf-8") if contra_path.exists() else header
         block = f"\n## raw/articles/test.md — {date.today().isoformat()}\n"
         for w in warnings:
             block += f"- {w}\n"
         from kb.utils.io import atomic_text_write
+
         atomic_text_write(existing + block, contra_path)
 
     assert contra_path.exists(), "contradictions.md was not created"

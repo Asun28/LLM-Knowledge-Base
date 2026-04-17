@@ -1,4 +1,5 @@
 """Tests for observability fixes — Phase 4 audit."""
+
 import logging
 from unittest.mock import MagicMock, patch
 
@@ -99,6 +100,7 @@ def test_vector_search_failure_logs_warning(caplog, tmp_path):
             mock_connect.return_value = mock_conn
 
             import builtins
+
             real_import = builtins.__import__
 
             def fake_import(name, *args, **kwargs):

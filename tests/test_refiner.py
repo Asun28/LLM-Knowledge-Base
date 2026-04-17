@@ -3,9 +3,7 @@
 from contextlib import contextmanager
 
 
-def test_refine_page_preserves_leading_code_block_indent(
-    tmp_wiki, create_wiki_page, monkeypatch
-):
+def test_refine_page_preserves_leading_code_block_indent(tmp_wiki, create_wiki_page, monkeypatch):
     """Regression: Phase 4.5 CRITICAL item 10 (lstrip() stripped 4-space code-block indent)."""
     page_id = "concepts/code-sample"
     create_wiki_page(
@@ -74,8 +72,10 @@ def test_refine_page_strips_leading_crlf_on_windows_input(tmp_wiki, create_wiki_
     # defense-in-depth regex fix too (no leading blanks after frontmatter).
     new_body = "\r\n\r\n\r\nActual content.\n"
     result = refiner.refine_page(
-        page_id=page_id, updated_content=new_body,
-        revision_notes="crlf-strip", wiki_dir=tmp_wiki,
+        page_id=page_id,
+        updated_content=new_body,
+        revision_notes="crlf-strip",
+        wiki_dir=tmp_wiki,
     )
     assert result.get("updated") is True
     page_text = (tmp_wiki / f"{page_id}.md").read_text(encoding="utf-8")
@@ -106,8 +106,10 @@ def test_refine_page_derives_history_path_from_wiki_dir(tmp_wiki, tmp_path, crea
     prod_history = refiner.REVIEW_HISTORY_PATH
     ts_before = prod_history.stat().st_mtime if prod_history.exists() else None
     refiner.refine_page(
-        page_id=page_id, updated_content="updated.",
-        revision_notes="n", wiki_dir=tmp_wiki,
+        page_id=page_id,
+        updated_content="updated.",
+        revision_notes="n",
+        wiki_dir=tmp_wiki,
     )
     ts_after = prod_history.stat().st_mtime if prod_history.exists() else None
     assert ts_before == ts_after, (

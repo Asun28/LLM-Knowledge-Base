@@ -138,10 +138,19 @@ def kb_graph_viz(max_nodes: int = 30) -> str:
     in some tools. Use max_nodes to limit output size.
 
     Args:
-        max_nodes: Maximum nodes to include (default 30). Set 0 for all nodes.
+        max_nodes: Maximum nodes to include (1–500; default 30).
+
+    Cycle 3 M16: rejects ``max_nodes=0`` with an explicit error instead of
+    silently remapping to 30. The prior silent-remap docstring advertised 0
+    as "all nodes" while the code quietly returned a 30-node slice — agents
+    following the docstring got an incomplete graph with no signal.
     """
     if max_nodes == 0:
-        max_nodes = 30
+        return (
+            "Error: max_nodes=0 is not allowed; use a positive integer (1–500). "
+            "Previously this silently remapped to 30 — cycle 3 M16 surfaces the "
+            "inconsistency so callers can choose a valid cap explicitly."
+        )
     max_nodes = max(1, min(max_nodes, 500))
     try:
         return export_mermaid(max_nodes=max_nodes)

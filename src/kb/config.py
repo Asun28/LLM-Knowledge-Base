@@ -149,6 +149,11 @@ MAX_SEARCH_RESULTS = 100
 RRF_K = 60  # RRF fusion constant: score = 1/(K + rank)
 VECTOR_SEARCH_LIMIT_MULTIPLIER = 2  # Vector search fetches limit * N candidates
 BM25_SEARCH_LIMIT_MULTIPLIER = 1  # BM25 candidates = limit * this (intentionally 1×)
+# Cycle 3 L6: hoisted from hardcoded `[:3]` in query/hybrid.py so operators can
+# tune expansion breadth without touching code. Total queries sent to vector
+# search = 1 (original) + MAX_QUERY_EXPANSIONS. A value of 2 matches the pre-
+# cycle-3 behaviour; raising trades latency for recall.
+MAX_QUERY_EXPANSIONS = 2
 EMBEDDING_MODEL = "minishlab/potion-base-8M"  # model2vec model (~8MB, local)
 VECTOR_INDEX_PATH_SUFFIX = ".data/vector_index.db"  # sqlite-vec index file
 

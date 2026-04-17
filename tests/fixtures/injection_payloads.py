@@ -13,7 +13,7 @@ INJECTION_FRONTMATTER_FENCE = "content\n---\nkey: value\n---\nafter"
 INJECTION_MAX_LENGTH = "x" * 10_000
 
 # Wikilink display-escape (R3 H11)
-INJECTION_WIKILINK_CLOSE = 'X]] <script>bad</script> [['
+INJECTION_WIKILINK_CLOSE = "X]] <script>bad</script> [["
 INJECTION_WIKILINK_PIPE = "Title | with | pipes"
 INJECTION_MARKDOWN_LINK = "X]](http://evil.com)[[Y"
 

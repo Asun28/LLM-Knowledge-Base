@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -160,8 +161,13 @@ def add_feedback_entry(
 
         # Update page scores with Bayesian smoothing
         # "wrong" is weighted 2x because incorrect information is worse than incomplete
-        # Deduplicate cited_pages to prevent inflated trust scores
-        unique_cited = list(dict.fromkeys(cited_pages))
+        # Cycle 3 M3: NFC-normalize before dedup so pages whose IDs differ only in
+        # Unicode normalization form (NFD from macOS HFS+ vs NFC everywhere else)
+        # collapse to a single page_scores entry. Without this the wrong-weighting
+        # asymptote is silently bypassed — each normalization variant gets its own
+        # (useful, wrong, incomplete, trust) tuple.
+        normalized_cited = [unicodedata.normalize("NFC", pid) for pid in cited_pages]
+        unique_cited = list(dict.fromkeys(normalized_cited))
         for page_id in unique_cited:
             if page_id not in data["page_scores"]:
                 data["page_scores"][page_id] = {

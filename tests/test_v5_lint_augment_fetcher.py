@@ -1,4 +1,5 @@
 """SafeTransport DNS-rebinding tests + basic FetchResult shape + fetch behavior."""
+
 import socket
 from unittest.mock import patch
 
@@ -52,6 +53,7 @@ def test_safe_transport_version_guard_accepts_current_httpx():
 
 def test_safe_backend_blocks_loopback():
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     fake_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]
     with patch("socket.getaddrinfo", return_value=fake_infos):
@@ -61,6 +63,7 @@ def test_safe_backend_blocks_loopback():
 
 def test_safe_backend_blocks_aws_metadata():
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     fake_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))]
     with patch("socket.getaddrinfo", return_value=fake_infos):
@@ -70,6 +73,7 @@ def test_safe_backend_blocks_aws_metadata():
 
 def test_safe_backend_blocks_private_ranges():
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     for private_ip in ("10.0.0.1", "172.16.5.5", "192.168.1.1"):
         fake_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (private_ip, 80))]
@@ -82,6 +86,7 @@ def test_safe_backend_blocks_unspecified_ipv4():
     """0.0.0.0 is unspecified (not covered by is_private/is_loopback/is_reserved
     on all Python versions). Must still be rejected."""
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     fake_infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("0.0.0.0", 80))]
     with patch("socket.getaddrinfo", return_value=fake_infos):
@@ -92,6 +97,7 @@ def test_safe_backend_blocks_unspecified_ipv4():
 def test_safe_backend_blocks_unspecified_ipv6():
     """:: is unspecified IPv6. Must still be rejected."""
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     fake_infos = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::", 80, 0, 0))]
     with patch("socket.getaddrinfo", return_value=fake_infos):
@@ -102,9 +108,10 @@ def test_safe_backend_blocks_unspecified_ipv6():
 def test_safe_backend_rejects_when_any_resolved_ip_is_private():
     """DNS-rebinding defense: even one private IP in the RR-set is enough to reject."""
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     fake_infos = [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80)),       # public
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80)),  # public
         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80)),  # PRIVATE
     ]
     with patch("socket.getaddrinfo", return_value=fake_infos):
@@ -114,6 +121,7 @@ def test_safe_backend_rejects_when_any_resolved_ip_is_private():
 
 def test_safe_backend_dns_failure_raises_connect_error():
     from kb.lint.fetcher import SafeBackend
+
     backend = SafeBackend()
     with patch("socket.getaddrinfo", side_effect=socket.gaierror("nodename nor servname provided")):
         with pytest.raises(httpcore.ConnectError, match="DNS resolution failed"):
@@ -174,15 +182,14 @@ def test_safe_backend_connects_by_ip_closes_dns_rebind_window():
     # have returned the private IP.
     assert len(created_with) == 1
     address = created_with[0]
-    assert address[0] == "8.8.8.8", (
-        f"expected connect-by-IP '8.8.8.8', got {address[0]!r}"
-    )
+    assert address[0] == "8.8.8.8", f"expected connect-by-IP '8.8.8.8', got {address[0]!r}"
     # Exactly one resolution — no second lookup the attacker could flip.
     assert len(getaddrinfo_calls) == 1
 
 
 def test_fetch_result_dataclass_shape():
     from kb.lint.fetcher import FetchResult
+
     r = FetchResult(
         status="ok",
         content="hi",
@@ -211,6 +218,7 @@ def test_fetch_result_dataclass_shape():
 
 def _build_fetcher(allowed: tuple[str, ...] = ("example.com",)):
     from kb.lint.fetcher import AugmentFetcher
+
     return AugmentFetcher(allowed_domains=allowed, version="0.10.0")
 
 
@@ -258,6 +266,7 @@ def test_fetch_accepts_subdomain_allowlist_entry(httpx_mock):
 
 def test_fetch_rejects_oversize_via_content_length(httpx_mock):
     from kb.config import AUGMENT_FETCH_MAX_BYTES
+
     httpx_mock.add_response(
         url="https://example.com/big",
         headers={
@@ -398,10 +407,7 @@ def test_fetch_redirect_without_location_header_fails(httpx_mock):
 
 
 def test_fetch_happy_path_html(httpx_mock):
-    html = (
-        b"<html><body><article><h1>Title</h1>"
-        b"<p>Real content here.</p></article></body></html>"
-    )
+    html = b"<html><body><article><h1>Title</h1><p>Real content here.</p></article></body></html>"
     httpx_mock.add_response(
         url="https://example.com/page",
         headers={"content-type": "text/html; charset=utf-8"},

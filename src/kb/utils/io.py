@@ -201,7 +201,18 @@ def file_lock(path: Path, timeout: float | None = None):
                                 "Failed to unlink orphan lock %s after write failure",
                                 lock_path,
                             )
-            except (FileExistsError, PermissionError):
+            except PermissionError as perm_exc:
+                # Cycle 3 H2: a PermissionError from os.open(O_CREAT|O_EXCL) is
+                # NOT evidence that the lock is held by another process — it
+                # means the directory itself cannot be written (read-only mount,
+                # AV-locked parent, EACCES from tightened ACLs). Retrying the
+                # same create would spin the same permission error until the
+                # deadline, then enter the stale-lock path that re-raises the
+                # denied read as "PID dead → safe to steal" — silently
+                # corrupting the verdict/feedback RMW chain. Raise immediately
+                # so the operator sees the real bug.
+                raise OSError(f"Cannot create lock at {lock_path}: {perm_exc}") from perm_exc
+            except FileExistsError:
                 if time.monotonic() > deadline:
                     # Item 2 (cycle 2): ASCII-only decode + int-parse. Any
                     # failure is a corruption signal, not proof of death —

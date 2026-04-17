@@ -41,9 +41,7 @@ class TestAppendEvidenceTrail:
             "# Test\n\nSome content.\n",
             encoding="utf-8",
         )
-        append_evidence_trail(
-            page, "raw/articles/a.md", "Initial extraction: definition"
-        )
+        append_evidence_trail(page, "raw/articles/a.md", "Initial extraction: definition")
         text = page.read_text(encoding="utf-8")
         assert "## Evidence Trail" in text
         assert "raw/articles/a.md" in text
@@ -62,9 +60,7 @@ class TestAppendEvidenceTrail:
             "- 2026-04-10 | raw/articles/a.md | First entry\n",
             encoding="utf-8",
         )
-        append_evidence_trail(
-            page, "raw/articles/b.md", "Updated: new info"
-        )
+        append_evidence_trail(page, "raw/articles/b.md", "Updated: new info")
         text = page.read_text(encoding="utf-8")
         # New entry at top (reverse chronological)
         trail_idx = text.index("## Evidence Trail")

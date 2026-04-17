@@ -1,8 +1,6 @@
 """Phase 3.97 Task 04 — Compile / linker fixes."""
 
 
-
-
 class TestInjectWikilinksTitleSanitization:
     """inject_wikilinks must sanitize pipe and newline in titles."""
 

@@ -1,14 +1,17 @@
 """Tests for Phase 4 query/ perf and doc fixes."""
+
 from __future__ import annotations
 
 
 def test_get_vector_index_function_exists():
     from kb.query import embeddings as _em
+
     assert callable(getattr(_em, "get_vector_index", None)), "get_vector_index must exist"
 
 
 def test_reset_model_function_exists():
     from kb.query import embeddings as _em
+
     assert callable(getattr(_em, "_reset_model", None)), "_reset_model must exist"
 
 
@@ -21,6 +24,7 @@ def test_get_vector_index_caches_instance(monkeypatch, tmp_path):
     class _FakeIdx:
         def __init__(self, path):
             build_count["n"] += 1
+
         def query(self, vec, top_k=10):
             return []
 

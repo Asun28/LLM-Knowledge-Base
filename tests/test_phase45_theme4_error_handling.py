@@ -94,10 +94,7 @@ def test_h15_rewrite_query_does_not_emit_debug_only_on_llm_error(monkeypatch, ca
         r
         for r in caplog.records
         if r.levelno == logging.DEBUG
-        and (
-            "failed" in r.getMessage().lower()
-            or "error" in r.getMessage().lower()
-        )
+        and ("failed" in r.getMessage().lower() or "error" in r.getMessage().lower())
     ]
     assert not debug_only_errors, (
         "LLMError should emit WARNING, not DEBUG — "
@@ -159,9 +156,7 @@ def test_h16_rate_limit_error_returns_rate_limit_tag(monkeypatch):
 
     result = core_mod.kb_query("some question", use_api=True)
 
-    assert "Error[rate_limit]" in result, (
-        f"Expected Error[rate_limit] in result, got: {result!r}"
-    )
+    assert "Error[rate_limit]" in result, f"Expected Error[rate_limit] in result, got: {result!r}"
 
 
 def test_h16_llm_error_returns_internal_tag(monkeypatch):
@@ -175,9 +170,7 @@ def test_h16_llm_error_returns_internal_tag(monkeypatch):
 
     result = core_mod.kb_query("some question", use_api=True)
 
-    assert "Error[internal]" in result, (
-        f"Expected Error[internal] in result, got: {result!r}"
-    )
+    assert "Error[internal]" in result, f"Expected Error[internal] in result, got: {result!r}"
     assert "LLM call failed" in result or "retry exhausted" in result, (
         f"Expected LLM failure detail in result, got: {result!r}"
     )
@@ -194,9 +187,7 @@ def test_h16_unexpected_exception_returns_internal_tag(monkeypatch):
 
     result = core_mod.kb_query("some question", use_api=True)
 
-    assert "Error[internal]" in result, (
-        f"Expected Error[internal] in result, got: {result!r}"
-    )
+    assert "Error[internal]" in result, f"Expected Error[internal] in result, got: {result!r}"
 
 
 # ---------------------------------------------------------------------------

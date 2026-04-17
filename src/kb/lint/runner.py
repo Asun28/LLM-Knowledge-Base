@@ -9,6 +9,7 @@ from kb.lint.checks import (
     check_cycles,
     check_dead_links,
     check_frontmatter,
+    check_frontmatter_staleness,
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
@@ -24,6 +25,8 @@ def run_all_checks(
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
     fix: bool = False,
+    *,
+    verdicts_path: Path | None = None,
 ) -> dict:
     """Run all lint checks and produce a structured report.
 
@@ -31,6 +34,11 @@ def run_all_checks(
         wiki_dir: Path to wiki directory.
         raw_dir: Path to raw directory.
         fix: If True, auto-fix dead links by replacing with plain text.
+        verdicts_path: Cycle 3 M18 — when set, verdict-summary reads from this
+            path instead of the production ``VERDICTS_PATH``. Keyword-only so
+            the public signature remains additive. Tests supplying a
+            ``tmp_path`` can assert their own verdicts flow through without
+            leaking production audit data into the lint report.
 
     Returns:
         dict with keys: checks_run, total_issues, issues (list), summary (by severity),
@@ -90,6 +98,14 @@ def run_all_checks(
     all_issues.extend(stale)
     checks_run.append({"name": "staleness", "issues": len(stale)})
 
+    # Cycle 3 M10 (PR review R1 Codex MAJOR): wire the new
+    # `check_frontmatter_staleness` check into `run_all_checks` so the
+    # `frontmatter_updated_stale` info issue actually surfaces from
+    # `kb lint`. Without this call the helper existed only as orphan code.
+    fm_stale = check_frontmatter_staleness(wiki_dir, pages=shared_pages)
+    all_issues.extend(fm_stale)
+    checks_run.append({"name": "frontmatter_staleness", "issues": len(fm_stale)})
+
     fm = check_frontmatter(wiki_dir, pages=shared_pages)
     all_issues.extend(fm)
     checks_run.append({"name": "frontmatter", "issues": len(fm)})
@@ -112,10 +128,13 @@ def run_all_checks(
         sev = issue.get("severity", "info")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-    # Include verdict audit trail summary (fail-safe)
+    # Include verdict audit trail summary (fail-safe).
+    # Cycle 3 M18: pass verdicts_path so tests / alternate profiles don't bleed
+    # production .data/lint_verdicts.json into the tmp-run report. The prior
+    # code also aliased `verdict_summary = verdict_history` (dead duplicate)
+    # — collapsed into a single local.
     try:
-        verdict_summary = get_verdict_summary()
-        verdict_history = verdict_summary
+        verdict_history = get_verdict_summary(verdicts_path)
     except Exception as e:
         logger.warning("Failed to load verdict summary: %s", e)
         verdict_history = None

@@ -3,6 +3,7 @@
 
 def test_augment_constants_exist_with_correct_types():
     from kb import config
+
     assert config.AUGMENT_FETCH_MAX_BYTES == 5_000_000
     assert config.AUGMENT_FETCH_CONNECT_TIMEOUT == 5.0
     assert config.AUGMENT_FETCH_READ_TIMEOUT == 30.0

@@ -5,6 +5,7 @@ from kb.utils.pages import load_purpose
 
 # ── load_purpose() ──────────────────────────────────────────────────────────
 
+
 def test_load_purpose_missing(tmp_path):
     """Returns None when purpose.md does not exist."""
     wiki_dir = tmp_path / "wiki"
@@ -52,6 +53,7 @@ def test_h8_load_purpose_reads_from_wiki_dir_not_production(tmp_path):
 
 
 # ── build_extraction_prompt() ───────────────────────────────────────────────
+
 
 def test_extraction_prompt_includes_purpose():
     """Purpose text is injected into extraction prompt when provided."""
