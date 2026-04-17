@@ -232,7 +232,16 @@ class VectorIndex:
             if not self.db_path.exists():
                 return None
             try:
-                conn = sqlite3.connect(str(self.db_path))
+                # PR #20 R2 Codex NEW-ISSUE fix: sqlite3 connections are
+                # thread-affine by default. Since this connection is shared
+                # across every subsequent ``query()`` call (potentially from
+                # multiple FastMCP worker threads), set
+                # ``check_same_thread=False``. Python sqlite3 ships in
+                # serialized threading mode, so concurrent READ-only queries
+                # are safe without external serialization. ``build()`` keeps
+                # its own thread-local connection, so the default there is
+                # unaffected.
+                conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
                 conn.enable_load_extension(True)
                 import sqlite_vec
 

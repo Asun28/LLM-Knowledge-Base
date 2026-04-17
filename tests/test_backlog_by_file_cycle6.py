@@ -734,6 +734,53 @@ class TestSharedSeenSameBatchDuplicateNotCrossType:
 # ---------------------------------------------------------------------------
 
 
+class TestVectorIndexCrossThreadQuery:
+    """R2 Codex NEW-ISSUE — sqlite3 connections are thread-affine by default.
+    The shared-connection AC5 model must set ``check_same_thread=False`` so
+    a query() call from a worker thread doesn't raise ``ProgrammingError:
+    SQLite objects created in a thread can only be used in that same thread.``"""
+
+    def test_query_from_worker_thread_does_not_raise(self, tmp_path, monkeypatch):
+        import sys
+        import threading
+
+        from kb.query import embeddings
+
+        db_path = tmp_path / "vec.db"
+        sqlite3.connect(str(db_path)).close()
+
+        class _StubVec:
+            @staticmethod
+            def load(_conn):
+                return None
+
+            @staticmethod
+            def serialize_float32(_vec):
+                return b""
+
+        monkeypatch.setitem(sys.modules, "sqlite_vec", _StubVec)
+
+        idx = embeddings.VectorIndex(db_path)
+        # Prime the connection on the main thread (triggers _ensure_conn).
+        idx.query([0.0, 0.0, 0.0])
+
+        errors: list[BaseException] = []
+
+        def _run():
+            try:
+                idx.query([0.0, 0.0, 0.0])
+            except BaseException as e:  # noqa: BLE001 — capturing all for assertion
+                errors.append(e)
+
+        t = threading.Thread(target=_run)
+        t.start()
+        t.join(timeout=5.0)
+        assert not t.is_alive(), "worker thread did not complete"
+        assert not errors, (
+            f"cross-thread query raised {errors[0]!r}; check_same_thread=False missing"
+        )
+
+
 class TestCliVerboseFlagPrintsTraceback:
     """R1 Sonnet M2 — behavioral test for the ``--verbose`` Click-flag path.
     Both env-var and flag triggers must surface tracebacks; prior test
