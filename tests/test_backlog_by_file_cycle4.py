@@ -412,20 +412,21 @@ class TestDriftSourceDeleted:
 
     def test_deleted_source_surfaces_in_drift(self, tmp_project, monkeypatch):
         from kb import config
+        from kb.compile import compiler
         from kb.mcp import health
 
         monkeypatch.setattr(config, "WIKI_DIR", tmp_project / "wiki")
         monkeypatch.setattr(config, "RAW_DIR", tmp_project / "raw")
         monkeypatch.setattr(config, "PROJECT_ROOT", tmp_project)
-        monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
+        monkeypatch.setattr(compiler, "RAW_DIR", tmp_project / "raw")
         # Seed a manifest with an entry whose raw file does not exist.
         data_dir = tmp_project / ".data"
         data_dir.mkdir(exist_ok=True)
-        manifest = data_dir / "hashes.json"
-        manifest.write_text(
+        manifest_path = data_dir / "hashes.json"
+        manifest_path.write_text(
             '{"raw/articles/deleted.md": "deadbeef0000"}', encoding="utf-8"
         )
-        monkeypatch.setattr(config, "MANIFEST_PATH", manifest)
+        monkeypatch.setattr(compiler, "HASH_MANIFEST", manifest_path)
         out = health.kb_detect_drift()
         assert "deleted" in out.lower() or "deleted.md" in out, (
             "Expected source-deleted category; got: " + out[:400]

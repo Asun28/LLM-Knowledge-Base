@@ -18,6 +18,7 @@ from kb.config import (
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
     VECTOR_INDEX_PATH_SUFFIX,
+    WIKI_DIR,
 )
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize

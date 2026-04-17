@@ -200,6 +200,17 @@ def kb_detect_drift() -> str:
             lines.append(f"- {src}")
         lines.append("")
 
+    # Cycle 4 item #14 — source-deleted category. Wiki pages whose source:
+    # frontmatter points at a now-deleted raw file are the drift case most
+    # likely to corrupt lint fidelity (the page still cites a source that
+    # no longer exists). Surface them distinctly so operators can either
+    # delete the page or re-point the source ref.
+    if result.get("deleted_sources"):
+        lines.append(f"## Deleted Sources ({len(result['deleted_sources'])})\n")
+        for src in result["deleted_sources"]:
+            lines.append(f"- {src} (source-deleted)")
+        lines.append("")
+
     if result["affected_pages"]:
         lines.append(f"## Affected Wiki Pages ({len(result['affected_pages'])})\n")
         for ap in result["affected_pages"]:
@@ -207,5 +218,18 @@ def kb_detect_drift() -> str:
             lines.append(f"- **{ap['page_id']}** ← {sources_str}")
         lines.append("")
         lines.append("Run `kb_review_page(page_id)` on affected pages to check for stale content.")
+
+    if result.get("deleted_affected_pages"):
+        lines.append(
+            f"## Pages Referencing Deleted Sources ({len(result['deleted_affected_pages'])})\n"
+        )
+        for ap in result["deleted_affected_pages"]:
+            sources_str = ", ".join(ap.get("deleted_sources") or [])
+            lines.append(f"- **{ap['page_id']}** ← deleted: {sources_str}")
+        lines.append("")
+        lines.append(
+            "These pages cite sources that no longer exist. Consider deleting the pages "
+            "or updating their source refs."
+        )
 
     return "\n".join(lines)
