@@ -211,9 +211,9 @@ class TestFeedbackStore:
         assert cafe_keys[0] == nfc
 
     def test_compute_trust_scores_docstring_asymptote(self):
-        from kb.feedback import store
+        from kb.feedback import reliability
 
-        doc = store.compute_trust_scores.__doc__ or ""
+        doc = reliability.compute_trust_scores.__doc__ or ""
         # Must mention the asymptotic contract so developers don't misread
         # "wrong is 2x" as small-N literal.
         assert "asymptot" in doc.lower() or "converges" in doc.lower() or "2×" in doc or "2x" in doc.lower(), (

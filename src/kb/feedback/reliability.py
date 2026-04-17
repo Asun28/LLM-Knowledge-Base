@@ -9,6 +9,13 @@ from kb.feedback.store import load_feedback
 def compute_trust_scores(path: Path | None = None) -> dict[str, dict]:
     """Compute trust scores for all pages with feedback.
 
+    Cycle 3 L5: the Bayesian-smoothed formula is
+    ``(useful + 1) / (useful + 2 * wrong + incomplete + 2)``. The denominator
+    weights ``wrong`` 2× vs ``incomplete``. The EFFECTIVE penalty ratio is
+    ~1.5× at small N (1–5 ratings) and converges asymptotically to 2× at
+    high N — do NOT write tests asserting ``wrong is literally 2× worse``
+    at small sample counts; assert on the asymptote or on exact scores.
+
     Returns:
         Dict mapping page_id to score dict {useful, wrong, incomplete, trust}.
     """
