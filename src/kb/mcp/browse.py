@@ -114,14 +114,25 @@ def kb_read_page(page_id: str) -> str:
 
 
 @mcp.tool()
-def kb_list_pages(page_type: str = "") -> str:
+def kb_list_pages(page_type: str = "", limit: int = 200, offset: int = 0) -> str:
     """List all wiki pages, optionally filtered by type.
 
     Args:
         page_type: Filter: 'entities', 'concepts', 'comparisons', 'summaries',
                    'synthesis'. Empty returns all.
+        limit: Maximum pages to return (clamped to [1, 1000]). Default 200.
+        offset: Skip this many pages before returning (default 0).
+
+    Cycle 3 M13: added pagination so a large wiki does not force the full
+    serialized list through the MCP transport in a single response. Pages
+    are deterministically sorted by ``load_all_pages`` (directory-then-slug).
+    Header reports the window: ``Showing <shown> of <total> page(s)
+    (offset=<offset>, limit=<limit>)``.
     """
     try:
+        # Clamp pagination params defensively — untrusted MCP input.
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
         pages = load_all_pages(wiki_dir=WIKI_DIR)
         if page_type:
             # Accept both singular ("concept") and plural ("concepts") subdir names
@@ -131,11 +142,22 @@ def kb_list_pages(page_type: str = "") -> str:
                 return f"Error: Unknown page_type '{page_type}'. Valid: {valid}"
             page_type = resolved_type
             pages = [p for p in pages if p["id"].startswith(f"{page_type}/")]
-        if not pages:
+        total = len(pages)
+        if total == 0:
             return "No pages found."
-        lines = [f"Total: {len(pages)} page(s)\n"]
+        window = pages[offset : offset + limit]
+        if not window:
+            return f"No pages in window (offset={offset}, limit={limit}, total={total})."
+        # Cycle 3 M13: emit BOTH the legacy "Total: N page(s)" line (so
+        # existing callers/test assertions remain valid) and the new
+        # "Showing Y of N ..." pagination line so operators see the window.
+        lines = [
+            f"Total: {total} page(s)",
+            f"Showing {len(window)} of {total} page(s) "
+            f"(offset={offset}, limit={limit})\n",
+        ]
         current_type = ""
-        for p in pages:
+        for p in window:
             ptype = p["id"].split("/")[0]
             if ptype != current_type:
                 current_type = ptype
@@ -148,26 +170,36 @@ def kb_list_pages(page_type: str = "") -> str:
 
 
 @mcp.tool()
-def kb_list_sources() -> str:
+def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
     """List all raw source files in the knowledge base.
 
     G1 (Phase 4.5 MEDIUM): per-subdir cap (500 files) + total response size
     cap (64KB) + os.scandir (streaming) + skip dotfiles. Prevents a
     million-file subdir from OOMing the MCP process or blowing the
     transport buffer.
+
+    Cycle 3 M13: ``limit`` and ``offset`` apply AFTER the per-subdir caps
+    above, operating on the flattened list of entries sorted within each
+    subdir. ``limit`` is clamped to [1, 1000]; ``offset`` clamped to [0, ∞).
+    Subdir iteration order is ``sorted(RAW_DIR.iterdir())`` so pagination is
+    deterministic across runs on the same filesystem.
     """
+    # Clamp pagination params defensively — untrusted MCP input.
+    limit = max(1, min(int(limit), 1000))
+    offset = max(0, int(offset))
     if not RAW_DIR.exists():
         return "No raw directory found."
 
     try:
-        lines = ["# Raw Sources\n"]
-        total = 0
-        total_bytes = 0
-        truncated_notice = ""
+        # Cycle 3 M13: flatten (subdir, entry) pairs in deterministic order
+        # so limit/offset windowing is stable across runs. The per-subdir
+        # cap (G1) still applies to each subdir's local scan.
+        flat_entries: list[tuple[str, os.DirEntry, bool]] = []
+        per_subdir_counts: dict[str, tuple[int, bool]] = {}
         for subdir in sorted(RAW_DIR.iterdir()):
             if not subdir.is_dir() or subdir.name.startswith("."):
                 continue
-            entries = []
+            entries: list[os.DirEntry] = []
             truncated_subdir = False
             with os.scandir(subdir) as it:
                 for entry in it:
@@ -184,33 +216,51 @@ def kb_list_sources() -> str:
                         truncated_subdir = True
                         break
             entries.sort(key=lambda e: e.name)
-            if entries:
+            per_subdir_counts[subdir.name] = (len(entries), truncated_subdir)
+            for e in entries:
+                flat_entries.append((subdir.name, e, truncated_subdir))
+
+        total_global = len(flat_entries)
+        window = flat_entries[offset : offset + limit]
+        # Cycle 3 M13: retain the legacy "Total: N source file(s)" line so
+        # existing test assertions (test_mcp_browse_health, etc.) continue
+        # to match; append pagination line below it.
+        lines = [
+            "# Raw Sources\n",
+            f"**Total:** {total_global} source file(s)",
+            f"Showing {len(window)} of {total_global} file(s) "
+            f"(offset={offset}, limit={limit})\n",
+        ]
+        total_bytes = 0
+        truncated_notice = ""
+        current_subdir = ""
+        total = 0
+        for subdir_name, entry, truncated_subdir in window:
+            if subdir_name != current_subdir:
+                current_subdir = subdir_name
+                count, sub_trunc = per_subdir_counts[subdir_name]
                 header = (
-                    f"\n## {subdir.name}/ ({len(entries)} file(s)"
-                    + (" — truncated" if truncated_subdir else "")
+                    f"\n## {subdir_name}/ ({count} file(s)"
+                    + (" — truncated" if sub_trunc else "")
                     + ")"
                 )
                 lines.append(header)
-                for entry in entries:
-                    try:
-                        size_kb = entry.stat().st_size / 1024
-                        lines.append(f"  - {entry.name} ({size_kb:.1f} KB)")
-                    except OSError as e:
-                        logger.warning("Could not stat %s: %s", entry.name, e)
-                        lines.append(f"  - {entry.name} (size unknown)")
-                    # Estimate output size — break once cap approached.
-                    total_bytes = sum(len(s) for s in lines)
-                    if total_bytes >= _LIST_SOURCES_TOTAL_CAP_BYTES:
-                        truncated_notice = (
-                            "\n\n*(Output truncated at "
-                            f"{_LIST_SOURCES_TOTAL_CAP_BYTES // 1024}KB.)*"
-                        )
-                        break
-                total += len(entries)
-                if truncated_notice:
-                    break
+            try:
+                size_kb = entry.stat().st_size / 1024
+                lines.append(f"  - {entry.name} ({size_kb:.1f} KB)")
+            except OSError as e:
+                logger.warning("Could not stat %s: %s", entry.name, e)
+                lines.append(f"  - {entry.name} (size unknown)")
+            total += 1
+            # Estimate output size — break once cap approached.
+            total_bytes = sum(len(s) for s in lines)
+            if total_bytes >= _LIST_SOURCES_TOTAL_CAP_BYTES:
+                truncated_notice = (
+                    "\n\n*(Output truncated at "
+                    f"{_LIST_SOURCES_TOTAL_CAP_BYTES // 1024}KB.)*"
+                )
+                break
 
-        lines.insert(1, f"**Total:** {total} source file(s)")
         if truncated_notice:
             lines.append(truncated_notice)
         return "\n".join(lines)
