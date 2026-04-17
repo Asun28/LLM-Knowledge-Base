@@ -21,7 +21,7 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
-from kb.mcp.app import _format_ingest_result, _rel, error_tag, mcp
+from kb.mcp.app import _format_ingest_result, _rel, _sanitize_error_str, error_tag, mcp
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
@@ -180,7 +180,7 @@ def kb_query(
         results = search_pages(question, max_results=max_results)
     except Exception as e:
         logger.exception("Error in kb_query search for: %s", question)
-        return f"Error: Search failed — {e}"
+        return f"Error: Search failed — {_sanitize_error_str(e)}"
 
     if not results:
         return (
@@ -339,7 +339,7 @@ def kb_ingest(
             )
         except Exception as e:
             logger.exception("Error ingesting %s", source_path)
-            return f"Error ingesting source: {e}"
+            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
 
     # ── Claude Code mode: without extraction → return prompt ──
     from kb.ingest.extractors import build_extraction_prompt, load_template
@@ -347,7 +347,7 @@ def kb_ingest(
     try:
         template = load_template(source_type)
     except FileNotFoundError as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize_error_str(e)}"
 
     try:
         content = path.read_text(encoding="utf-8")
@@ -501,7 +501,7 @@ def kb_ingest_content(
         except OSError:
             pass
         logger.exception("Error ingesting %s after write", filename)
-        return f"Error: Ingest failed — {e}"
+        return f"Error: Ingest failed — {_sanitize_error_str(e, file_path)}"
 
     source_ref = _rel(file_path)
     return f"Saved source: {source_ref} ({len(save_content)} chars)\n" + _format_ingest_result(
@@ -550,7 +550,7 @@ def kb_save_source(
         try:
             atomic_text_write(content, file_path)
         except OSError as e:
-            return f"Error: Failed to write source file: {e}"
+            return f"Error: Failed to write source file: {_sanitize_error_str(e, file_path)}"
     else:
         # Atomic exclusive create — avoid TOCTOU race between existence check and write
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -729,7 +729,7 @@ def kb_capture(content: str, provenance: str | None = None) -> str:
     try:
         result = capture_items(content, provenance=provenance)
     except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+        return f"Error: {type(e).__name__}: {_sanitize_error_str(e)}"
     return _format_capture_result(result)
 
 

@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 
 from kb.graph.export import export_mermaid
-from kb.mcp.app import mcp
+from kb.lint._safe_call import _safe_call
+from kb.mcp.app import _sanitize_error_str, mcp
 
 logger = logging.getLogger(__name__)
 
@@ -59,22 +60,27 @@ def kb_lint(
         result = format_report(report)
     except Exception as e:
         logger.error("Error running lint checks: %s", e)
-        return f"Error: kb_lint failed: {type(e).__name__}: {e}"
+        return f"Error: kb_lint failed: {type(e).__name__}: {_sanitize_error_str(e)}"
 
-    # Append feedback-flagged pages (fail-safe)
-    try:
-        from kb.feedback.reliability import get_flagged_pages
-
-        flagged = get_flagged_pages()
-        if flagged:
-            result += (
-                "\n## Low-Trust Pages (from query feedback)\n\n"
-                f"{len(flagged)} page(s) with trust score below threshold:\n"
-            )
-            for p in flagged:
-                result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
-    except Exception as e:
-        logger.warning("Failed to load feedback data for lint: %s", e)
+    # Append feedback-flagged pages (Cycle 7 AC27: route through _safe_call so
+    # failures surface in the report label instead of silently degrading).
+    flagged, flag_err = _safe_call(
+        lambda: __import__(
+            "kb.feedback.reliability", fromlist=["get_flagged_pages"]
+        ).get_flagged_pages(),
+        fallback=None,
+        label="feedback_flagged_pages",
+        log=logger,
+    )
+    if flagged:
+        result += (
+            "\n## Low-Trust Pages (from query feedback)\n\n"
+            f"{len(flagged)} page(s) with trust score below threshold:\n"
+        )
+        for p in flagged:
+            result += f'- {p} — run `kb_lint_deep("{p}")` for fidelity check\n'
+    elif flag_err:
+        result += f"\n<!-- {flag_err} -->\n"
 
     if augment:
         try:
@@ -90,7 +96,7 @@ def kb_lint(
             result += "\n\n" + augment_result["summary"]
         except Exception as e:
             logger.error("Error running augment: %s", e)
-            return f"Error: kb_lint failed: {type(e).__name__}: {e}"
+            return f"Error: kb_lint failed: {type(e).__name__}: {_sanitize_error_str(e)}"
 
     return result
 
@@ -110,7 +116,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
         result = format_evolution_report(report)
     except Exception as e:
         logger.error("Error running evolution analysis: %s", e)
-        return f"Error: Evolution analysis failed — {e}"
+        return f"Error: Evolution analysis failed — {_sanitize_error_str(e)}"
 
     # Append coverage gaps from query feedback (fail-safe)
     try:
@@ -163,7 +169,7 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         return export_mermaid(max_nodes=max_nodes, wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)
-        return f"Error: Graph export failed — {e}"
+        return f"Error: Graph export failed — {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -180,7 +186,7 @@ def kb_verdict_trends() -> str:
         return format_verdict_trends(trends)
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
-        return f"Error: Verdict trends failed — {e}"
+        return f"Error: Verdict trends failed — {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -201,7 +207,7 @@ def kb_detect_drift(wiki_dir: str | None = None) -> str:
         result = detect_source_drift(wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error detecting source drift: %s", e)
-        return f"Error: Source drift detection failed — {e}"
+        return f"Error: Source drift detection failed — {_sanitize_error_str(e)}"
 
     lines = ["# Source Drift Detection\n", result["summary"], ""]
 

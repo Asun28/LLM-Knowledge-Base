@@ -3,6 +3,7 @@
 import json
 import logging
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -65,30 +66,48 @@ def load_verdicts(path: Path | None = None) -> list[dict]:
     runner.py) skip re-parsing when the file hasn't changed on disk. The
     cache is thread-safe and returns a shallow copy so callers mutating the
     result cannot poison subsequent reads.
+
+    Cycle 7 AC20: adds a single retry (50 ms sleep) when either ``stat``,
+    ``read_text``, or ``json.loads`` raises a transient ``OSError`` /
+    ``JSONDecodeError`` — most commonly triggered on Windows when a writer
+    is mid-``atomic_text_write`` rename. The cache invalidation and final
+    give-up behaviour are unchanged.
     """
     path = path or VERDICTS_PATH
     if not path.exists():
         return []
-    try:
-        stat = path.stat()
-    except OSError as e:
-        logger.warning("Could not stat verdicts file %s: %s", path, e)
-        return []
     key = str(path)
-    with _VERDICTS_CACHE_LOCK:
-        cached = _VERDICTS_CACHE.get(key)
-        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
-            return list(cached[2])
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-        logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
-        return []
-    if not isinstance(data, list):
-        return []
-    with _VERDICTS_CACHE_LOCK:
-        _VERDICTS_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data)
-    return list(data)
+
+    _TRANSIENT = (OSError, json.JSONDecodeError, UnicodeDecodeError)
+
+    for attempt in (0, 1):
+        try:
+            stat = path.stat()
+        except OSError as e:
+            logger.warning("Could not stat verdicts file %s (attempt %d): %s", path, attempt + 1, e)
+            if attempt == 0:
+                time.sleep(0.05)
+                continue
+            return []
+        with _VERDICTS_CACHE_LOCK:
+            cached = _VERDICTS_CACHE.get(key)
+            if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+                return list(cached[2])
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except _TRANSIENT as e:
+            logger.warning("Corrupt verdicts read for %s (attempt %d): %s", path, attempt + 1, e)
+            if attempt == 0:
+                time.sleep(0.05)
+                continue
+            return []
+        if not isinstance(data, list):
+            return []
+        with _VERDICTS_CACHE_LOCK:
+            _VERDICTS_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data)
+        return list(data)
+    # Unreachable — loop exhausts via returns; keep for type-checker sanity.
+    return []
 
 
 def save_verdicts(verdicts: list[dict], path: Path | None = None) -> None:
