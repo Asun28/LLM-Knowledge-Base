@@ -730,7 +730,7 @@ WIKI CONTEXT:
 
 INSTRUCTIONS:
 - Answer the question based ONLY on the wiki context provided.
-- Cite your sources using [source: page_id] format (e.g., [source: concepts/rag]).
+- Cite your sources using [[page_id]] format (e.g., [[concepts/rag]]).
 - If the wiki doesn't contain enough information, say so clearly.
 - Be concise but thorough.
 - Distinguish between stated facts and inferences.
