@@ -298,3 +298,11 @@ def wikilink_display_escape(title: str) -> str:
         .replace("\n", " ")
         .replace("\r", " ")
     )
+
+
+def wrap_purpose(text: str, max_chars: int = 4096) -> str:
+    """Wrap purpose text in a sentinel with a hard char cap."""
+    if not text or not text.strip():
+        return ""
+    stripped = re.sub(r"[\x00-\x1f]", "", text)[:max_chars]
+    return f"<kb_purpose>\n{stripped}\n</kb_purpose>"
