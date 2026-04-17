@@ -23,6 +23,60 @@ logger = logging.getLogger(__name__)
 # Used as fallback when template specs lack explicit type annotations.
 _ANNOTATED_FIELD_RE = re.compile(r"^(\w+)\s*\(([^)]+)\)\s*:\s*(.+)$")
 
+# M9 fence-escape regex (PR review R2 Codex NEW-ISSUE fix): match
+# `<source_document>` / `</source_document>` tolerating case variants AND
+# optional zero-width / BIDI formatting characters between any letters
+# (homoglyph-evasion defense). The ZW allowance is SCOPED to the fence
+# match only — legitimate ZW/BIDI marks elsewhere in content (e.g.
+# Persian/Arabic RTL body text) are preserved unchanged.
+#
+# The `_` in the middle is optional because an attacker can also smuggle
+# a ZW-only separator there: `source\u200bdocument` with no underscore.
+# We therefore accept EITHER `_` OR just ZW chars at that position via
+# `[_\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]*` after `source`.
+_ZW = "\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff"
+_ZW_BETWEEN = rf"[{_ZW}]*"
+# Build pattern letter-by-letter but replace the `_` position with an
+# inclusive "underscore or ZW" class so underscore is truly optional.
+_LETTERS = "source_document"
+
+
+def _build_letter_pattern() -> str:
+    parts: list[str] = []
+    for idx, c in enumerate(_LETTERS):
+        if c == "_":
+            # Allow the `_` position to match underscore OR any ZW chars.
+            parts.append(rf"[_{_ZW}]*")
+        else:
+            if idx > 0 and _LETTERS[idx - 1] != "_":
+                # Between letters that aren't the `_` position, allow ZW only.
+                parts.append(_ZW_BETWEEN)
+            parts.append(re.escape(c))
+    return "".join(parts)
+
+
+_FENCE_LETTERS = _build_letter_pattern()
+_FENCE_CLOSE_RE = re.compile(
+    rf"<{_ZW_BETWEEN}/{_ZW_BETWEEN}{_FENCE_LETTERS}{_ZW_BETWEEN}>",
+    re.IGNORECASE,
+)
+_FENCE_OPEN_RE = re.compile(
+    rf"<{_ZW_BETWEEN}{_FENCE_LETTERS}{_ZW_BETWEEN}>",
+    re.IGNORECASE,
+)
+
+
+def _escape_source_document_fences(content: str) -> str:
+    """Replace any <source_document> / </source_document> tag (tolerating
+    case variants and interior zero-width chars) with a hyphen-form that
+    cannot match the outer fence. Does NOT strip ZW chars outside fence
+    matches, preserving legitimate RTL/BIDI content.
+    """
+    content = _FENCE_CLOSE_RE.sub("</source-document>", content)
+    content = _FENCE_OPEN_RE.sub("<source-document>", content)
+    return content
+
+
 KNOWN_LIST_FIELDS = frozenset(
     {
         # Common across all templates
@@ -230,27 +284,14 @@ def build_extraction_prompt(content: str, template: dict, purpose: str | None = 
     # fence. Both the opening and closing tags in raw markdown are escaped to
     # a hyphen form that never matches our fence pattern.
     #
-    # PR review R1 Sonnet MAJOR: case-insensitive matching AND zero-width
-    # character strip. The prior ASCII lowercase-only replace let
-    # `</Source_Document>` and `</source\u200bdocument>` (zero-width joiner
-    # inserted mid-tag) survive into the prompt as literal fence closers,
-    # enabling a prompt-injection break. `re.sub(..., IGNORECASE)` handles
-    # case variants; zero-width / format characters (ZWJ/ZWSP/BOM/LRM) are
-    # stripped pre-escape so homoglyph-style evasion is blocked.
-    _ZW_FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
-    fenced_content = _ZW_FORMAT_RE.sub("", content)
-    fenced_content = re.sub(
-        r"</source_document>",
-        "</source-document>",
-        fenced_content,
-        flags=re.IGNORECASE,
-    )
-    fenced_content = re.sub(
-        r"<source_document>",
-        "<source-document>",
-        fenced_content,
-        flags=re.IGNORECASE,
-    )
+    # PR review R1 Sonnet MAJOR: allow ZW/format chars between letters via
+    # regex inline, case-insensitive matching. PR review R2 Codex NEW-ISSUE:
+    # the prior fix stripped ZW chars from the ENTIRE source body, which
+    # silently deleted legitimate Persian/Arabic BIDI marks from RTL content.
+    # Narrow the strip to fence-tag matching by embedding an optional
+    # ZW/format character class between each letter of the tag — no ZW chars
+    # in legitimate content are touched.
+    fenced_content = _escape_source_document_fences(content)
 
     return f"""Extract structured information from the following source document.
 {purpose_section}
