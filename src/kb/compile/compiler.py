@@ -242,9 +242,7 @@ def detect_source_drift(
     current_sources = scan_raw_sources(raw_dir)
     existing_rel = {_canonical_rel_path(s, raw_dir) for s in current_sources}
     deleted_refs = sorted(
-        k
-        for k in pre_prune_manifest
-        if not k.startswith("_template/") and k not in existing_rel
+        k for k in pre_prune_manifest if not k.startswith("_template/") and k not in existing_rel
     )
 
     new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path, save_hashes=False)

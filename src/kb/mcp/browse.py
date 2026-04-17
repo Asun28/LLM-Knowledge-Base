@@ -120,8 +120,7 @@ def kb_read_page(page_id: str) -> str:
     if len(body) > QUERY_CONTEXT_MAX_CHARS:
         omitted = len(body) - QUERY_CONTEXT_MAX_CHARS
         body = (
-            body[:QUERY_CONTEXT_MAX_CHARS]
-            + f"\n\n[Truncated: {omitted} chars omitted; "
+            body[:QUERY_CONTEXT_MAX_CHARS] + f"\n\n[Truncated: {omitted} chars omitted; "
             f"cap={QUERY_CONTEXT_MAX_CHARS}. Use kb_list_pages + targeted tools for "
             "very large pages.]"
         )
@@ -250,10 +249,7 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
         # of silently emitting the header with no body. Lets callers
         # detect "past end" without string-matching the pagination header.
         if not window and total_global > 0:
-            return (
-                f"No sources in window (offset={offset}, limit={limit}, "
-                f"total={total_global})."
-            )
+            return f"No sources in window (offset={offset}, limit={limit}, total={total_global})."
         # Cycle 3 M13: retain the legacy "Total: N source file(s)" line so
         # existing test assertions (test_mcp_browse_health, etc.) continue
         # to match; append pagination line below it.

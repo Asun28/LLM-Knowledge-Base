@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # TASK 9 — utils/text.py: STOPWORDS prune + BM25_TOKENIZER_VERSION + sanitize
 # ---------------------------------------------------------------------------
@@ -95,9 +94,7 @@ class TestPriorTurnStrip:
     def test_strip_opening_and_closing(self):
         from kb.mcp.core import _sanitize_conversation_context
 
-        out = _sanitize_conversation_context(
-            "before <prior_turn>injected</prior_turn> after"
-        )
+        out = _sanitize_conversation_context("before <prior_turn>injected</prior_turn> after")
         assert "<prior_turn>" not in out.lower()
         assert "</prior_turn>" not in out.lower()
         assert "before" in out
@@ -235,10 +232,7 @@ class TestAmbiguousPageId:
         # No exact match exists for "entities/notexist"; fallback triggers,
         # sees two case-insensitive matches, returns the ambiguous error.
         out = browse.kb_read_page("entities/gRavIty_missing")
-        assert (
-            "ambiguous" in out.lower()
-            or "page not found" in out.lower()
-        )
+        assert "ambiguous" in out.lower() or "page not found" in out.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -291,9 +285,7 @@ class TestVerdictDescriptionCap:
         stored = verdicts.load_verdicts(path=v_path)
         assert stored, "add_verdict silently dropped entry"
         stored_desc = stored[0]["issues"][0]["description"]
-        assert len(stored_desc) < len(huge), (
-            "add_verdict did not cap huge description"
-        )
+        assert len(stored_desc) < len(huge), "add_verdict did not cap huge description"
 
 
 class TestTitleLengthCap:
@@ -319,9 +311,7 @@ class TestTitleLengthCap:
 class TestSourceRefsIsFile:
     """TB-4 / shipped item #10 — source_refs rejects non-files."""
 
-    def test_source_ref_pointing_to_directory_rejected(
-        self, tmp_wiki, raw_dir, monkeypatch
-    ):
+    def test_source_ref_pointing_to_directory_rejected(self, tmp_wiki, raw_dir, monkeypatch):
         from kb.mcp import app as mcp_app
         from kb.mcp import quality
 
@@ -423,9 +413,7 @@ class TestDriftSourceDeleted:
         data_dir = tmp_project / ".data"
         data_dir.mkdir(exist_ok=True)
         manifest_path = data_dir / "hashes.json"
-        manifest_path.write_text(
-            '{"raw/articles/deleted.md": "deadbeef0000"}', encoding="utf-8"
-        )
+        manifest_path.write_text('{"raw/articles/deleted.md": "deadbeef0000"}', encoding="utf-8")
         monkeypatch.setattr(compiler, "HASH_MANIFEST", manifest_path)
         out = health.kb_detect_drift()
         assert "deleted" in out.lower() or "deleted.md" in out, (
@@ -453,9 +441,7 @@ class TestRewriteCjkShortQuery:
 
         monkeypatch.setattr(rewriter, "call_llm", _fake_call_llm)
         out = rewriter.rewrite_query("什么是RAG", "prior chat context here")
-        assert call_count["n"] == 0, (
-            "Short CJK query triggered scan-LLM; it should be gated out"
-        )
+        assert call_count["n"] == 0, "Short CJK query triggered scan-LLM; it should be gated out"
         assert out == "什么是RAG"
 
 
@@ -492,9 +478,7 @@ class TestWikiBm25Cache:
         first = build_count["n"]
         engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
         second = build_count["n"]
-        assert second == first, (
-            f"BM25Index rebuilt on repeat query: {first} → {second}"
-        )
+        assert second == first, f"BM25Index rebuilt on repeat query: {first} → {second}"
 
     def test_cache_invalidates_on_tokenizer_version_bump(self, tmp_wiki, monkeypatch):
         from kb.query import engine
@@ -522,9 +506,7 @@ class TestWikiBm25Cache:
         monkeypatch.setattr(engine, "BM25Index", _TrackingBM25)
         monkeypatch.setattr(utext, "BM25_TOKENIZER_VERSION", original + 100)
         engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
-        assert build_count["n"] >= 1, (
-            "Cache did not invalidate after BM25_TOKENIZER_VERSION change"
-        )
+        assert build_count["n"] >= 1, "Cache did not invalidate after BM25_TOKENIZER_VERSION change"
 
 
 # ---------------------------------------------------------------------------
@@ -540,8 +522,7 @@ class TestDedupRunningQuota:
 
         # 10 results, 9 of type "entity" and 1 of type "concept".
         results = [
-            {"id": f"entities/e{i}", "type": "entity", "score": 1.0 - i * 0.01}
-            for i in range(9)
+            {"id": f"entities/e{i}", "type": "entity", "score": 1.0 - i * 0.01} for i in range(9)
         ]
         results.append({"id": "concepts/c0", "type": "concept", "score": 0.5})
         # With max_type_ratio=0.5, entity cap should floor at half the final
@@ -584,8 +565,9 @@ class TestLogRotation:
         assert len(new_log) < 200
 
     def test_rotation_collision_uses_ordinal(self, tmp_path, monkeypatch):
-        import kb.utils.wiki_log as wiki_log
         from datetime import datetime
+
+        import kb.utils.wiki_log as wiki_log
 
         log_path = tmp_path / "log.md"
         monkeypatch.setattr(wiki_log, "LOG_SIZE_WARNING_BYTES", 100)
@@ -597,8 +579,7 @@ class TestLogRotation:
         # Expect ordinal suffix .2 to be used.
         ordinal = tmp_path / f"{stem}.2.md"
         assert ordinal.exists() or any(
-            p.name.startswith(stem) and p.name.endswith(".md")
-            for p in tmp_path.iterdir()
+            p.name.startswith(stem) and p.name.endswith(".md") for p in tmp_path.iterdir()
         )
 
 
@@ -621,9 +602,7 @@ class TestContradictionMetadataMigration:
                 "truncated": True,
             }
 
-        monkeypatch.setattr(
-            contradiction, "detect_contradictions_with_metadata", _fake_metadata
-        )
+        monkeypatch.setattr(contradiction, "detect_contradictions_with_metadata", _fake_metadata)
         # Force pipeline import path to rebind if it did `from x import y`.
         monkeypatch.setattr(
             pipeline, "detect_contradictions_with_metadata", _fake_metadata, raising=False
@@ -650,9 +629,7 @@ class TestExportMermaidDeprecationWarning:
 
         # Seed wiki.
         (tmp_wiki / "entities").mkdir(exist_ok=True)
-        (tmp_wiki / "entities" / "x.md").write_text(
-            "---\ntitle: X\n---\n", encoding="utf-8"
-        )
+        (tmp_wiki / "entities" / "x.md").write_text("---\ntitle: X\n---\n", encoding="utf-8")
         with pytest.warns(DeprecationWarning):
             out = export_mermaid(tmp_wiki)
         # Still returns Mermaid-shaped output.
@@ -718,9 +695,7 @@ class TestTemplateHashesWhitelist:
         templates_dir.mkdir()
         (templates_dir / "article.yaml").write_text("extract: {}", encoding="utf-8")
         (templates_dir / "bogus.yaml").write_text("extract: {}", encoding="utf-8")
-        (templates_dir / "article.yaml.bak").write_text(
-            "extract: {}", encoding="utf-8"
-        )
+        (templates_dir / "article.yaml.bak").write_text("extract: {}", encoding="utf-8")
         monkeypatch.setattr(config, "TEMPLATES_DIR", templates_dir)
         monkeypatch.setattr(compiler, "TEMPLATES_DIR", templates_dir)
         hashes = compiler._template_hashes()
@@ -753,8 +728,7 @@ class TestSortedWikilinkInjection:
 
         src = inspect.getsource(pipeline)
         assert "sorted(" in src, (
-            "pipeline.py must call sorted() on title batches for deterministic "
-            "wikilink injection"
+            "pipeline.py must call sorted() on title batches for deterministic wikilink injection"
         )
 
 

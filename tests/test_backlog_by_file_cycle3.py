@@ -150,9 +150,7 @@ class TestLlmApiErrors:
         class _FakeMessages:
             def create(self, **kwargs):
                 calls["n"] += 1
-                response = SimpleNamespace(
-                    status_code=418, request=SimpleNamespace(), headers={}
-                )
+                response = SimpleNamespace(status_code=418, request=SimpleNamespace(), headers={})
                 raise anthropic.APIStatusError(
                     message="I'm a teapot",
                     response=response,
@@ -661,8 +659,7 @@ class TestExtractionPrompt:
 
         template = {"name": "article", "description": "generic", "extract": ["title"]}
         rtl_body = (
-            "Persian article body.\n"
-            "\u200f RTL isolate start \u202e override \u200e LRM end.\n"
+            "Persian article body.\n\u200f RTL isolate start \u202e override \u200e LRM end.\n"
         )
         prompt = build_extraction_prompt(rtl_body, template)
         # Every BIDI mark in the body must survive into the prompt verbatim.
@@ -719,9 +716,9 @@ class TestPipelineReferencesAppend:
             "L7: new reference must be appended even when body had no trailing newline"
         )
         # Order check: new ref comes AFTER old ref (not silently reversed).
-        assert result.index("raw/articles/old.md") < result.index(
-            "raw/articles/new.md"
-        ), "L7: new ref must follow old ref (no order-reversal regression)"
+        assert result.index("raw/articles/old.md") < result.index("raw/articles/new.md"), (
+            "L7: new ref must follow old ref (no order-reversal regression)"
+        )
 
 
 # =====================================================================
@@ -814,9 +811,7 @@ class TestLintRunner:
         (wiki_dir / "log.md").write_text("log\n", encoding="utf-8")
 
         custom_verdicts = tmp_path / "custom_verdicts.json"
-        custom_verdicts.write_text(
-            '{"entries": [], "page_scores": {}}', encoding="utf-8"
-        )
+        custom_verdicts.write_text('{"entries": [], "page_scores": {}}', encoding="utf-8")
         raw_dir = tmp_path / "raw"
         raw_dir.mkdir()
 
@@ -838,12 +833,9 @@ class TestLintRunner:
             return original(path)
 
         monkeypatch.setattr(runner, "get_verdict_summary", _spy)
-        runner.run_all_checks(
-            wiki_dir=wiki_dir, raw_dir=raw_dir, verdicts_path=custom_verdicts
-        )
+        runner.run_all_checks(wiki_dir=wiki_dir, raw_dir=raw_dir, verdicts_path=custom_verdicts)
         assert observed and observed[-1] == custom_verdicts, (
-            f"M18: get_verdict_summary must be called with custom path; "
-            f"observed={observed}"
+            f"M18: get_verdict_summary must be called with custom path; observed={observed}"
         )
 
     def test_no_duplicate_verdict_summary_local(self):

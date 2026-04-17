@@ -163,9 +163,7 @@ def add_verdict(
                     MAX_ISSUE_DESCRIPTION_LEN,
                     page_id,
                 )
-                issue["description"] = (
-                    desc[:MAX_ISSUE_DESCRIPTION_LEN] + "... [truncated]"
-                )
+                issue["description"] = desc[:MAX_ISSUE_DESCRIPTION_LEN] + "... [truncated]"
 
     path = path or VERDICTS_PATH
     with file_lock(path):

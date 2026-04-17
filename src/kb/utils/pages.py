@@ -7,7 +7,7 @@ from pathlib import Path
 import frontmatter
 import yaml
 
-from kb.config import WIKI_DIR, WIKI_PURPOSE, WIKI_SUBDIR_TO_TYPE
+from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
 
 logger = logging.getLogger(__name__)
 

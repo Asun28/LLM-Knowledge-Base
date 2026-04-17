@@ -4,10 +4,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import kb.config
-import kb.lint.verdicts
-import kb.mcp.quality
-import kb.utils.wiki_log
 from kb.mcp.quality import kb_affected_pages, kb_create_page, kb_save_lint_verdict
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -119,8 +115,7 @@ def test_kb_affected_pages_no_affected(tmp_path, monkeypatch):
     wiki_dir, _ = _setup_quality_paths(tmp_path, monkeypatch)
     # Seed the isolated page so _validate_page_id(check_exists=True) passes.
     (wiki_dir / "concepts" / "isolated.md").write_text(
-        "---\ntitle: Isolated\nsource:\n  - raw/articles/unique.md\n---\n"
-        "Isolated content.\n",
+        "---\ntitle: Isolated\nsource:\n  - raw/articles/unique.md\n---\nIsolated content.\n",
         encoding="utf-8",
     )
     mock_backlinks: dict[str, list[str]] = {}

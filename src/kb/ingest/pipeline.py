@@ -24,7 +24,6 @@ from kb.config import (
     WIKI_SUBDIR_TO_TYPE,
 )
 from kb.ingest.contradiction import (
-    detect_contradictions,
     detect_contradictions_with_metadata,
 )
 from kb.ingest.evidence import append_evidence_trail
@@ -895,9 +894,7 @@ def ingest_source(
     # longer "Retrieval-Augmented Generation" entity would otherwise match.
     # Tie-break on pid for deterministic ordering.
     wikilinks_injected: list[str] = []
-    sorted_new_pages = sorted(
-        new_pages_with_titles, key=lambda pt: (-len(pt[1]), pt[0])
-    )
+    sorted_new_pages = sorted(new_pages_with_titles, key=lambda pt: (-len(pt[1]), pt[0]))
     for pid, ptitle in sorted_new_pages:
         try:
             from kb.compile.linker import inject_wikilinks

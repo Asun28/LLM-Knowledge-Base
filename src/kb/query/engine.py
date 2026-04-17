@@ -117,9 +117,7 @@ def search_pages(
         # modes — silently degrading "hybrid" to BM25-only with no observable
         # signal. Now we only swallow import/open/type-mismatch failures.
         if search_telemetry is not None:
-            search_telemetry["vector_attempts"] = (
-                search_telemetry.get("vector_attempts", 0) + 1
-            )
+            search_telemetry["vector_attempts"] = search_telemetry.get("vector_attempts", 0) + 1
         try:
             from kb.query.embeddings import embed_texts, get_vector_index
 
@@ -137,8 +135,8 @@ def search_pages(
                 if pid in page_map:
                     results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
             if search_telemetry is not None:
-                search_telemetry["vector_hits"] = (
-                    search_telemetry.get("vector_hits", 0) + len(results)
+                search_telemetry["vector_hits"] = search_telemetry.get("vector_hits", 0) + len(
+                    results
                 )
             return results
         except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
@@ -277,6 +275,7 @@ def _wiki_bm25_cache_key(wiki_dir: Path | None) -> tuple[str, int, int, int] | N
             except OSError:
                 continue
     return (resolved, count, max_mtime, BM25_TOKENIZER_VERSION)
+
 
 # I3 (Phase 4.5 R4 HIGH): rewrite-leak detection. PR review round 1
 # (Opus MINOR I3 + Codex M-NEW-1): the original `^[A-Z][a-zA-Z ]{0,40}:\s*`
