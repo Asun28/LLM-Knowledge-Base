@@ -25,11 +25,22 @@
 | 15 Merge + cleanup | yes | yes | Squash-merged; main at 1837 tests post-merge |
 | 16 Self-review + skill patch | **this doc** | yes | Skill patched in-place; skills dir isn't a git repo on this host so recording the change here for audit trail |
 
-## Skill patch recorded
+## Skill patches recorded
 
-Added to `C:\Users\Admin\.claude\skills\feature-dev\feature-dev-Opus4.6.md` Red Flags table:
+Three patches landed in `C:\Users\Admin\.claude\skills\feature-dev\feature-dev-Opus4.6.md`:
+
+### Patch 1 — Red Flags table addition
 
 > **"Step 7 plan grep'd every caller of `load_X` — coverage complete"** → **Parallel implementations bypass canonical loader greps.** Lesson from 2026-04-18 cycle 5 redo Step 11: threat model said "wrap_purpose must be called from every caller of `load_purpose`"; the Step 7 plan and all 15 hardening tests cleared that check. Step 11 security verify grep surfaced `lint/augment.py:_load_purpose_text` — a SEPARATE loader that reads `wiki/purpose.md` directly, bypassing `load_purpose` AND the `wrap_purpose` hardening. Rule: when the threat model protects an input-sanitization helper (`wrap_purpose`, `yaml_escape`, `_strip_control_chars`, etc.), Step 11's grep must use the DATA SOURCE (`wiki/purpose.md`, `raw/articles/`, etc.) as the search key, NOT just the canonical loader. Parallel file-reads to the same data source are the actual gap — the canonical loader is just one of them.
+
+### Patch 2 — Scope-adaptive step collapse (new section below Pipeline table)
+
+Added three-row table defining when each step collapses vs. stays separate (1-3 tasks → collapse 4+5, inline 7+8, skip 6 if no new lib; 4-10 tasks single subsystem → R1+R2 optional but Step 5 required; 10+ tasks or new public API or new dep → every step separate). Mandates recording the collapse explicitly in the Step 5 decision doc's Meta section so silent skipping stops.
+
+### Patch 3 — Step 16 fallback for non-git skill dirs + local cleanup checklist
+
+- If the skills dir isn't a git repo on this host, the `git commit -m "skill(feature-dev): <lesson>"` line fails. Fallback: write a project-side artifact `docs/superpowers/decisions/<date>-<feature>-step16-self-review.md` containing the scorecard + verbatim new skill text + meta-lesson, and commit THAT. Both edits required — skill file is the functional change, artifact is the audit trail.
+- Added a local cleanup checklist: `git status --short` untracked check, `git branch` stale-branch check, `git log origin/main..main` sync check, repo-root `*.tmp`/`*.log`/`*.bak` audit. Caught this session's lingering `findings.md`/`progress.md`/`task_plan.md` Codex scratchpads.
 
 ## Meta-lesson about this redo
 
