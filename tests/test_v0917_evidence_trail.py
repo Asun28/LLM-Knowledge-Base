@@ -1,7 +1,5 @@
 """Tests for evidence trail sections in wiki pages (Phase 4)."""
 
-from datetime import date
-
 from kb.ingest.evidence import append_evidence_trail, build_evidence_entry
 
 

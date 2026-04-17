@@ -6,7 +6,13 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kb.config import MAX_NOTES_LEN, MAX_VERDICTS, VALID_SEVERITIES, VALID_VERDICT_TYPES, VERDICTS_PATH
+from kb.config import (
+    MAX_NOTES_LEN,
+    MAX_VERDICTS,
+    VALID_SEVERITIES,
+    VALID_VERDICT_TYPES,
+    VERDICTS_PATH,
+)
 from kb.utils.io import file_lock
 
 # Re-exported for backward compatibility — canonical source is kb.config
