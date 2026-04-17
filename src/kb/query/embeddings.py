@@ -1,6 +1,7 @@
 """Embedding wrapper (model2vec) and vector index (sqlite-vec)."""
 
 import logging
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -29,6 +30,12 @@ _rebuild_lock = threading.Lock()
 _model = None
 _model_lock = threading.Lock()
 _index_cache: dict[str, "VectorIndex"] = {}
+# Cycle 3 H8: serialize concurrent `get_vector_index` lookups. Without this,
+# two FastMCP worker threads hitting an uncached `vec_path` both instantiate
+# a `VectorIndex` and both write into `_index_cache`; future `__init__`
+# side-effects (DB schema validation, file lock) would race. Matches the
+# `_model_lock` / `_rebuild_lock` double-checked pattern.
+_index_cache_lock = threading.Lock()
 
 
 def _reset_model() -> None:
@@ -109,11 +116,23 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
 
 
 def get_vector_index(vec_path: str) -> "VectorIndex":
-    """Return a cached VectorIndex keyed by path. Avoids re-instantiation per query."""
+    """Return a cached VectorIndex keyed by path. Avoids re-instantiation per query.
+
+    Cycle 3 H8: double-checked locking around `_index_cache` — the fast path
+    skips the lock when the key is already populated; the slow path serializes
+    instantiation so concurrent FastMCP threads observe a single shared
+    `VectorIndex`.
+    """
     key = str(vec_path)
-    if key not in _index_cache:
-        _index_cache[key] = VectorIndex(Path(vec_path))
-    return _index_cache[key]
+    cached = _index_cache.get(key)
+    if cached is not None:
+        return cached
+    with _index_cache_lock:
+        cached = _index_cache.get(key)
+        if cached is None:
+            cached = VectorIndex(Path(vec_path))
+            _index_cache[key] = cached
+        return cached
 
 
 def _get_model():
@@ -138,20 +157,48 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 class VectorIndex:
-    """sqlite-vec backed vector index for wiki page embeddings."""
+    """sqlite-vec backed vector index for wiki page embeddings.
+
+    Cycle 3 H7 + L2: the class now self-validates the embedding dimension on
+    both build AND query paths so a caller feeding a zero-length or oversized
+    embedding vector is rejected early (L2), and a query whose vector length
+    disagrees with the stored table schema returns `[]` with a WARN log (H7)
+    instead of silently falling back to BM25-only after a cryptic vec0 error.
+    """
+
+    # L2: accept dims roughly matching known embedding models (model2vec
+    # potion-base-8M defaults to 256). 4096 is a conservative upper bound
+    # covering all production OpenAI/Anthropic/Cohere embedding sizes.
+    _MAX_DIM = 4096
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        # H7: cache stored dim on first query so we avoid running
+        # `PRAGMA table_info` on the hot path. `None` means "not yet probed".
+        # `0` means "empty DB / missing table" (query returns []).
+        self._stored_dim: int | None = None
+        self._dim_warned: bool = False
 
     def build(self, entries: list[tuple[str, list[float]]]) -> None:
-        """Build index from (page_id, embedding) pairs. Replaces existing index."""
+        """Build index from (page_id, embedding) pairs. Replaces existing index.
+
+        Cycle 3 L2: the dim used in the f-string `CREATE VIRTUAL TABLE ...
+        vec0(embedding float[{dim}])` is validated to be a sane positive
+        integer. An attacker-controlled or bug-introduced non-int dim would
+        otherwise be interpolated verbatim into SQL.
+        """
         if not entries:
-            # Create empty DB
+            # Create empty DB and reset dim cache.
             conn = sqlite3.connect(str(self.db_path))
             conn.close()
+            self._stored_dim = 0
             return
 
         dim = len(entries[0][1])
+        if not (isinstance(dim, int) and 1 <= dim <= self._MAX_DIM):
+            raise ValueError(
+                f"Invalid embedding dim={dim!r}; expected int in [1, {self._MAX_DIM}]"
+            )
         conn = sqlite3.connect(str(self.db_path))
         try:
             conn.enable_load_extension(True)
@@ -174,11 +221,38 @@ class VectorIndex:
                 )
 
             conn.commit()
+            self._stored_dim = dim
         finally:
             conn.close()
 
+    def _read_stored_dim(self, conn: sqlite3.Connection) -> int:
+        """Return the embedding dim declared by the `vec_pages` table, or 0
+        when the table does not exist / has no dim metadata.
+
+        sqlite-vec declares the virtual table as `vec0(embedding float[N])`;
+        the declared schema surfaces via `PRAGMA table_info` as a column with
+        type `float[N]`. We parse N out of the type string.
+        """
+        try:
+            rows = conn.execute("PRAGMA table_info(vec_pages)").fetchall()
+        except sqlite3.OperationalError:
+            return 0
+        for row in rows:
+            # row layout: (cid, name, type, notnull, dflt_value, pk)
+            col_type = row[2] or ""
+            match = re.search(r"float\[(\d+)\]", col_type, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+        return 0
+
     def query(self, query_vec: list[float], limit: int = 10) -> list[tuple[str, float]]:
-        """Query for nearest neighbors. Returns [(page_id, distance), ...]."""
+        """Query for nearest neighbors. Returns [(page_id, distance), ...].
+
+        Cycle 3 H7: validates `len(query_vec)` against the stored dim from
+        `vec_pages` before running the MATCH query. Dim mismatch returns `[]`
+        with a single WARN log (subsequent mismatches are silent — the cache
+        remembers we already warned).
+        """
         if not self.db_path.exists():
             return []
 
@@ -195,6 +269,25 @@ class VectorIndex:
             return []
 
         try:
+            if self._stored_dim is None:
+                self._stored_dim = self._read_stored_dim(conn)
+            stored_dim = self._stored_dim
+            # stored_dim == 0 indicates an empty DB / missing table — not a
+            # mismatch; just an empty index. Return without warning.
+            if stored_dim == 0:
+                return []
+            if len(query_vec) != stored_dim:
+                if not self._dim_warned:
+                    logger.warning(
+                        "Vector index dim mismatch: query=%d vs stored=%d at %s; "
+                        "returning empty (rebuild index to align)",
+                        len(query_vec),
+                        stored_dim,
+                        self.db_path,
+                    )
+                    self._dim_warned = True
+                return []
+
             rows = conn.execute(
                 """
                 SELECT p.page_id, v.distance
