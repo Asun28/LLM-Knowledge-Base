@@ -175,14 +175,63 @@ class TestAddVerdictThreadingLock:
         result = load_verdicts(path)
         assert len(result) == n_threads
 
+    def test_concurrent_writes_trim_at_max_verdicts(self, tmp_path):
+        """Concurrent writes near MAX_VERDICTS cap should trim correctly, not overflow."""
+        import json
+
+        from kb.config import MAX_VERDICTS
+        from kb.lint.verdicts import add_verdict, load_verdicts
+
+        path = tmp_path / "verdicts.json"
+        # Pre-fill to (MAX_VERDICTS - 3) entries so the cap is hit during the test.
+        pre = [
+            {
+                "page_id": f"concepts/pre-{i}",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "issues": [],
+                "notes": "",
+            }
+            for i in range(MAX_VERDICTS - 3)
+        ]
+        path.write_text(json.dumps(pre), encoding="utf-8")
+
+        errors = []
+
+        def add_one(i):
+            try:
+                add_verdict(f"concepts/new-{i}", "review", "pass", path=path)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_one, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors during trim-path concurrent write: {errors}"
+        result = load_verdicts(path)
+        assert len(result) <= MAX_VERDICTS, f"Trim failed: {len(result)} > {MAX_VERDICTS}"
+
     def test_lock_module_attribute_does_not_use_threading(self):
-        """add_verdict must not use threading.Lock — file_lock is the cross-process guard."""
+        """_verdicts_lock (old name) must not exist; _VERDICTS_WRITE_LOCK is the successor."""
+        import threading
+
         import kb.lint.verdicts as verdicts_mod
 
-        # _verdicts_lock was replaced by file_lock; no threading.Lock at module level
+        # Old name must be absent.
         assert not hasattr(verdicts_mod, "_verdicts_lock") or not hasattr(
             getattr(verdicts_mod, "_verdicts_lock", None), "acquire"
-        ), "_verdicts_lock is still a threading.Lock — replace with file_lock"
+        ), "_verdicts_lock is still present — remove it (use _VERDICTS_WRITE_LOCK + file_lock)"
+        # New in-process guard must be present and be a threading.Lock.
+        assert hasattr(verdicts_mod, "_VERDICTS_WRITE_LOCK"), (
+            "_VERDICTS_WRITE_LOCK missing from verdicts module"
+        )
+        assert isinstance(verdicts_mod._VERDICTS_WRITE_LOCK, type(threading.Lock())), (
+            "_VERDICTS_WRITE_LOCK is not a threading.Lock"
+        )
 
 
 # ── Fix 6.11 — get_page_verdicts KeyError ────────────────────────────────────
