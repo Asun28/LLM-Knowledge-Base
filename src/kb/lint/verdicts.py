@@ -45,6 +45,12 @@ MAX_ISSUE_DESCRIPTION_LEN = 4000
 _VERDICTS_CACHE: dict[str, tuple[int, int, list[dict]]] = {}
 _VERDICTS_CACHE_LOCK = threading.Lock()
 
+# In-process write serializer for add_verdict. file_lock handles cross-process
+# mutual exclusion, but PID-liveness heuristics are unreliable for threads
+# sharing the same PID on Windows (BACKLOG: utils/io.py file_lock PID-liveness).
+# This lock prevents the file_lock timeout+steal race between threads.
+_VERDICTS_WRITE_LOCK = threading.Lock()
+
 
 def _invalidate_verdicts_cache(path: Path) -> None:
     """Drop the cache entry for `path` (called after every save)."""
@@ -166,23 +172,24 @@ def add_verdict(
                 issue["description"] = desc[:MAX_ISSUE_DESCRIPTION_LEN] + "... [truncated]"
 
     path = path or VERDICTS_PATH
-    with file_lock(path):
-        verdicts = load_verdicts(path)
-        entry = {
-            # Phase 4.5 HIGH L4: write UTC-aware timestamps so trend bucketing
-            # is consistent across machines (completes the read-side fix in trends.py).
-            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-            "page_id": page_id,
-            "verdict_type": verdict_type,
-            "verdict": verdict,
-            "issues": issues or [],
-            "notes": notes,
-        }
-        verdicts.append(entry)
-        # Retain only the most recent verdicts to prevent unbounded growth
-        if len(verdicts) > MAX_VERDICTS:
-            verdicts = verdicts[-MAX_VERDICTS:]
-        save_verdicts(verdicts, path)
+    with _VERDICTS_WRITE_LOCK:
+        with file_lock(path):
+            verdicts = load_verdicts(path)
+            entry = {
+                # Phase 4.5 HIGH L4: write UTC-aware timestamps so trend bucketing
+                # is consistent across machines (completes the read-side fix in trends.py).
+                "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+                "page_id": page_id,
+                "verdict_type": verdict_type,
+                "verdict": verdict,
+                "issues": issues or [],
+                "notes": notes,
+            }
+            verdicts.append(entry)
+            # Retain only the most recent verdicts to prevent unbounded growth
+            if len(verdicts) > MAX_VERDICTS:
+                verdicts = verdicts[-MAX_VERDICTS:]
+            save_verdicts(verdicts, path)
     return entry
 
 

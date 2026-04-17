@@ -50,6 +50,11 @@ def _check_rate_limit() -> tuple[bool, int]:
 
     Sliding 1-hour window of timestamps. Trims expired entries on each call.
     On overflow, returns (False, seconds-until-oldest-expires).
+
+    Per-process only. Separate MCP server and CLI processes each enforce the
+    limit independently; total across processes can exceed CAPTURE_MAX_CALLS_PER_HOUR.
+    For a true system-wide limit, persist the deque via
+    `.data/capture_rate.json` + `atomic_json_write` under a `file_lock`.
     """
     with _rate_limit_lock:
         now = time.time()
@@ -190,6 +195,10 @@ def _normalize_for_scan(content: str) -> str:
     The original content is kept; this function returns a SUPERSET that's only used for
     secret-pattern matching. The decoded fragments give the regex sweep a chance to
     catch trivially-encoded secrets without losing the original content.
+
+    Cost note: the superset peaks at ~1.76× input size (~88KB at the 50KB cap) and
+    finditer runs O(input_size / 17) ≈ 2,941 candidates max at the cap. Bound is
+    load-bearing on CAPTURE_MAX_BYTES — review this function before raising that.
     """
     parts: list[str] = [content]
     # Base64 candidates: at least 16 chars of [A-Za-z0-9+/=].
@@ -198,7 +207,10 @@ def _normalize_for_scan(content: str) -> str:
             decoded = base64.b64decode(m.group(0), validate=True)
             text = decoded.decode("ascii")
             parts.append(text)
-        except (ValueError, binascii.Error, UnicodeDecodeError):
+        except Exception:
+            # Normaliser is best-effort; any decode failure silently skips that
+            # segment. Broad except so future refactors can't regress into
+            # propagating a TypeError through the scan sweep.
             continue
     # URL-encoded runs: 3+ adjacent percent-encoded triplets.
     # Only decode the matched run (not the whole content) — keeps the normalized
