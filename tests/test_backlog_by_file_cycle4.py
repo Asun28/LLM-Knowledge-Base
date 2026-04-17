@@ -267,22 +267,28 @@ class TestVerdictDescriptionCap:
     def test_huge_description_rejected_or_truncated(self, tmp_path, monkeypatch):
         from kb.lint import verdicts
 
-        monkeypatch.setattr(verdicts, "VERDICTS_PATH", tmp_path / "v.json")
+        v_path = tmp_path / "v.json"
+        monkeypatch.setattr(verdicts, "VERDICTS_PATH", v_path)
         huge = "x" * 10_000
         issues = [{"severity": "error", "description": huge}]
         # Library should either truncate or reject — not silently persist 10KB.
+        # Signature: add_verdict(page_id, verdict_type, verdict, issues, notes).
+        # We accept either behaviour: truncation (library layer acts silently)
+        # or raise with an informative message mentioning description/size.
         try:
             verdicts.add_verdict(
                 page_id="concepts/test",
-                verdict_type="lint",
-                status="warning",
+                verdict_type="review",
+                verdict="warning",
                 issues=issues,
+                notes="",
+                path=v_path,
             )
         except (ValueError, TypeError) as exc:
             assert "description" in str(exc).lower() or "size" in str(exc).lower()
             return
         # If it succeeded, verify the stored description was truncated.
-        stored = verdicts.load_verdicts()
+        stored = verdicts.load_verdicts(path=v_path)
         assert stored, "add_verdict silently dropped entry"
         stored_desc = stored[0]["issues"][0]["description"]
         assert len(stored_desc) < len(huge), (
@@ -303,7 +309,7 @@ class TestTitleLengthCap:
             page_id="concepts/huge",
             title="x" * 501,
             content="body",
-            source_refs=[],
+            source_refs="",
             page_type="concept",
             confidence="stated",
         )
@@ -322,11 +328,12 @@ class TestSourceRefsIsFile:
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         monkeypatch.setattr(quality, "WIKI_DIR", tmp_wiki)
         # Use a path under raw/ that's a directory — source_ref validation must fail.
+        # source_refs is a comma-separated string per MCP tool signature.
         out = quality.kb_create_page(
             page_id="concepts/dirref",
             title="DirRef",
             content="body",
-            source_refs=["raw/articles"],  # directory, not a file
+            source_refs="raw/articles",  # directory, not a file
             page_type="concept",
             confidence="stated",
         )

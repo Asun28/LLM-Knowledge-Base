@@ -32,10 +32,16 @@ def _setup_quality_paths(tmp_path, monkeypatch):
     data_dir = tmp_path / ".data"
     data_dir.mkdir(exist_ok=True)
 
+    import kb.mcp.app
+
     monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(kb.mcp.quality, "WIKI_DIR", wiki_dir)
     monkeypatch.setattr(kb.mcp.quality, "PROJECT_ROOT", tmp_path)
+    # Cycle 4 item #11 — kb_affected_pages now calls _validate_page_id(
+    # check_exists=True), which reads kb.mcp.app.WIKI_DIR. Patch it too so
+    # the existence gate resolves against the tmp wiki, not the real repo.
+    monkeypatch.setattr(kb.mcp.app, "WIKI_DIR", wiki_dir)
     # H7: wiki_log.WIKI_LOG no longer exists (log_path now required per call-site)
     monkeypatch.setattr(kb.lint.verdicts, "VERDICTS_PATH", data_dir / "lint_verdicts.json")
 
@@ -101,15 +107,29 @@ def test_kb_affected_pages_with_backlinks(monkeypatch):
     assert "Shared Sources" in result
 
 
-def test_kb_affected_pages_no_affected(monkeypatch):
-    """Page with no backlinks or shared sources returns 'No pages' message."""
+def test_kb_affected_pages_no_affected(tmp_path, monkeypatch):
+    """Page with no backlinks or shared sources returns 'No pages' message.
+
+    Cycle 4 item #11 tightened `kb_affected_pages` to validate page existence
+    before computing affected-pages output (previously a typo silently
+    returned "No pages are affected..." — a false-negative). This test now
+    seeds the real page file so the existence gate passes and the no-
+    backlinks path is exercised as originally intended.
+    """
+    wiki_dir, _ = _setup_quality_paths(tmp_path, monkeypatch)
+    # Seed the isolated page so _validate_page_id(check_exists=True) passes.
+    (wiki_dir / "concepts" / "isolated.md").write_text(
+        "---\ntitle: Isolated\nsource:\n  - raw/articles/unique.md\n---\n"
+        "Isolated content.\n",
+        encoding="utf-8",
+    )
     mock_backlinks: dict[str, list[str]] = {}
     mock_pages = [
         {
             "id": "concepts/isolated",
             "sources": ["raw/articles/unique.md"],
             "title": "Isolated",
-            "path": Path("wiki/concepts/isolated.md"),
+            "path": wiki_dir / "concepts" / "isolated.md",
             "type": "concept",
             "confidence": "stated",
             "created": "2026-04-06",
