@@ -58,9 +58,26 @@ class TestQueryStopwordFallbackLogging:
 class TestAffectedPagesLogLevel:
     """kb_affected_pages should use debug, not warning, for expected failures."""
 
-    def test_shared_sources_failure_logs_debug(self, caplog):
-        """When shared sources computation fails, it's logged at debug level."""
+    def test_shared_sources_failure_logs_debug(self, tmp_path, monkeypatch, caplog):
+        """When shared sources computation fails, it's logged at debug level.
+
+        Cycle 4 item #11 tightened kb_affected_pages to validate page existence
+        before rendering output. Seed the page file so the existence gate
+        passes and the shared-sources-failure branch is actually exercised.
+        """
+        import kb.config
+        import kb.mcp.app
+        import kb.mcp.quality
         from kb.mcp.quality import kb_affected_pages
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        (wiki_dir / "concepts" / "test.md").write_text(
+            "---\ntitle: Test\n---\nTest.\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(kb.config, "WIKI_DIR", wiki_dir)
+        monkeypatch.setattr(kb.mcp.quality, "WIKI_DIR", wiki_dir)
+        monkeypatch.setattr(kb.mcp.app, "WIKI_DIR", wiki_dir)
 
         with (
             patch("kb.mcp.quality.load_all_pages", side_effect=RuntimeError("no data")),
