@@ -301,7 +301,13 @@ def wikilink_display_escape(title: str) -> str:
 
 
 def wrap_purpose(text: str, max_chars: int = 4096) -> str:
-    """Wrap purpose text in a sentinel with a hard char cap."""
+    """Wrap purpose text in a sentinel with a hard char cap.
+
+    Defense is textual-only: wiki/purpose.md is human-curated (trusted). The
+    helper strips non-whitespace C0 controls and caps length, but does NOT
+    escape an attacker-supplied ``</kb_purpose>`` closer inside the input —
+    sentinel semantics are an LLM-trust boundary, not a hard parse.
+    """
     if not text or not text.strip():
         return ""
     stripped = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)[:max_chars]
