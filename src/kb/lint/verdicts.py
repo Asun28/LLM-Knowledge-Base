@@ -48,6 +48,9 @@ _VERDICTS_CACHE_LOCK = threading.Lock()
 # In-process write serializer for add_verdict. file_lock handles cross-process
 # mutual exclusion, but PID-liveness heuristics are unreliable for threads
 # sharing the same PID on Windows (BACKLOG: utils/io.py file_lock PID-liveness).
+# Lock order: _VERDICTS_WRITE_LOCK → file_lock → _VERDICTS_CACHE_LOCK (never invert).
+# Scope: guards only add_verdict's RMW; save_verdicts callers that bypass
+# add_verdict must coordinate their own mutual exclusion.
 _VERDICTS_WRITE_LOCK = threading.Lock()
 
 

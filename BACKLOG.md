@@ -37,7 +37,7 @@ Rules:
 |------|------|-------------|
 | **BACKLOG.md** ← you are here | Open work only, ranked by severity | Add on discovery; **delete** on resolve |
 | [CHANGELOG.md](CHANGELOG.md) | Every shipped change, newest first (2026-04-16+) | Every merge to main |
-| [CHANGELOG-history.md](CHANGELOG-history.md) | Archive: Phase 4.5 CRITICAL (2026-04-15) and older releases | Append-only |
+| [CHANGELOG-history.md](CHANGELOG-history.md) | Archive: Phase 4.5 CRITICAL (2026-04-15) and older releases | Read-only after initial split; new archive entries require explicit split from CHANGELOG.md |
 
 **Resolve lifecycle:** Delete item here → record fix in `CHANGELOG.md [Unreleased]` → done.
 
