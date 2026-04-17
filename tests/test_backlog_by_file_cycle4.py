@@ -487,9 +487,9 @@ class TestWikiBm25Cache:
                 super().__init__(*a, **kw)
 
         monkeypatch.setattr(engine, "BM25Index", _TrackingBM25)
-        engine.search_pages("rag", wiki_dir=tmp_wiki, limit=5)
+        engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
         first = build_count["n"]
-        engine.search_pages("rag", wiki_dir=tmp_wiki, limit=5)
+        engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
         second = build_count["n"]
         assert second == first, (
             f"BM25Index rebuilt on repeat query: {first} → {second}"
@@ -507,7 +507,7 @@ class TestWikiBm25Cache:
         )
         if hasattr(engine, "_WIKI_BM25_CACHE"):
             engine._WIKI_BM25_CACHE.clear()
-        engine.search_pages("rag", wiki_dir=tmp_wiki, limit=5)
+        engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
         # Bump tokenizer version; next call should rebuild.
         original = utext.BM25_TOKENIZER_VERSION
         build_count = {"n": 0}
@@ -520,7 +520,7 @@ class TestWikiBm25Cache:
 
         monkeypatch.setattr(engine, "BM25Index", _TrackingBM25)
         monkeypatch.setattr(utext, "BM25_TOKENIZER_VERSION", original + 100)
-        engine.search_pages("rag", wiki_dir=tmp_wiki, limit=5)
+        engine.search_pages("rag", wiki_dir=tmp_wiki, max_results=5)
         assert build_count["n"] >= 1, (
             "Cache did not invalidate after BM25_TOKENIZER_VERSION change"
         )
