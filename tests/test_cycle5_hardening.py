@@ -19,7 +19,6 @@ Covers gaps surfaced by the Step 2 threat model that cycle 5 shipped without:
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 
 import pytest

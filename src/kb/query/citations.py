@@ -7,9 +7,7 @@ import re
 # Cycle 5 redo T1: prompt at engine.py instructs the new wikilink form; the
 # extractor accepts both so legacy LLM outputs and persisted answers continue
 # to parse.
-_CITATION_PATTERN = re.compile(
-    r"\[(source|ref):\s*([\w/_.-]+)\]|\[\[([\w/_.-]+)\]\]"
-)
+_CITATION_PATTERN = re.compile(r"\[(source|ref):\s*([\w/_.-]+)\]|\[\[([\w/_.-]+)\]\]")
 
 _VALID_FORMAT_MODES = frozenset({"markdown", "html", "marp"})
 
