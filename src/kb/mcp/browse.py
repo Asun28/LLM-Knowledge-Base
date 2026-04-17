@@ -130,9 +130,13 @@ def kb_list_pages(page_type: str = "", limit: int = 200, offset: int = 0) -> str
     (offset=<offset>, limit=<limit>)``.
     """
     try:
-        # Clamp pagination params defensively — untrusted MCP input.
-        limit = max(1, min(int(limit), 1000))
-        offset = max(0, int(offset))
+        # Clamp pagination params defensively — untrusted MCP input. Coercion
+        # errors (e.g. limit='x') surface as an Error string, not a raise.
+        try:
+            limit = max(1, min(int(limit), 1000))
+            offset = max(0, int(offset))
+        except (TypeError, ValueError) as exc:
+            return f"Error: invalid limit/offset: {exc}"
         pages = load_all_pages(wiki_dir=WIKI_DIR)
         if page_type:
             # Accept both singular ("concept") and plural ("concepts") subdir names
@@ -183,9 +187,14 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
     Subdir iteration order is ``sorted(RAW_DIR.iterdir())`` so pagination is
     deterministic across runs on the same filesystem.
     """
-    # Clamp pagination params defensively — untrusted MCP input.
-    limit = max(1, min(int(limit), 1000))
-    offset = max(0, int(offset))
+    try:
+        # Clamp pagination params defensively — untrusted MCP input. Coercion
+        # errors (e.g. limit='x') must surface as an Error string, not raise
+        # through to the MCP framework (contract: MCP tools never raise).
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+    except (TypeError, ValueError) as exc:
+        return f"Error: invalid limit/offset: {exc}"
     if not RAW_DIR.exists():
         return "No raw directory found."
 
