@@ -99,22 +99,26 @@ def _dedup_by_text_similarity(results: list[dict], threshold: float) -> list[dic
 
 
 def _enforce_type_diversity(results: list[dict], max_ratio: float) -> list[dict]:
-    """Layer 3: No page type exceeds max_ratio of total results.
+    """Layer 3: No page type exceeds max_ratio of total kept results.
 
-    Note: ``max_per_type`` is computed against the INPUT length, not the output.
-    After filtering, the ratio for a dominant type may slightly exceed ``max_ratio``
-    when other types are scarce. This is an intentional approximation — exact
-    enforcement would require an expensive second pass over the filtered list.
+    Cycle 4 item #17 — prior implementation capped per-type count against the
+    INPUT length. Under heavy prior dedup layers (layer-1 page-grouping +
+    layer-2 similarity prune), a dominant type whose input quota allowed
+    100 entries could end up at 100% of the 10-result output. The fix:
+    use a running quota — a result is kept only if admitting it keeps its
+    type below ``max_ratio`` of the *running output* (kept plus the new
+    row). This matches the documented "no type exceeds X%" contract
+    regardless of input-to-output compression ratio.
     """
-    max_per_type = max(1, math.ceil(len(results) * max_ratio))
     type_counts: dict[str, int] = {}
     kept: list[dict] = []
     for r in results:
         t = r.get("type", "unknown")
-        count = type_counts.get(t, 0)
-        if count < max_per_type:
+        tentative_kept = len(kept) + 1
+        max_for_type = max(1, math.ceil(tentative_kept * max_ratio))
+        if type_counts.get(t, 0) < max_for_type:
             kept.append(r)
-            type_counts[t] = count + 1
+            type_counts[t] = type_counts.get(t, 0) + 1
     return kept
 
 
