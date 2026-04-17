@@ -196,9 +196,10 @@ def _normalize_for_scan(content: str) -> str:
     secret-pattern matching. The decoded fragments give the regex sweep a chance to
     catch trivially-encoded secrets without losing the original content.
 
-    Cost note: the superset peaks at ~1.76× input size (~88KB at the 50KB cap) and
-    finditer runs O(input_size / 17) ≈ 2,941 candidates max at the cap. Bound is
-    load-bearing on CAPTURE_MAX_BYTES — review this function before raising that.
+    Cost note: the superset peaks at ~1.76× input size (~88KB at the 50KB cap).
+    Base64 scan: O(input_size / 17) ≈ 2,941 candidates max (16-char minimum match).
+    URL-decode scan: O(input_size / 10) ≈ 5,000 candidates max (9-char minimum: %XX×3).
+    Both bounds are load-bearing on CAPTURE_MAX_BYTES — review before raising that.
     """
     parts: list[str] = [content]
     # Base64 candidates: at least 16 chars of [A-Za-z0-9+/=].
