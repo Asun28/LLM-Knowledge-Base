@@ -101,16 +101,23 @@ def load_all_pages(
     return pages
 
 
-def load_purpose(wiki_dir: Path | None = None) -> str | None:
-    """Load the KB focus document (wiki/purpose.md) if it exists.
+def load_purpose(wiki_dir: Path) -> str | None:
+    """Load the KB focus document ``<wiki_dir>/purpose.md`` if it exists.
 
-    Returns the file content as a string, or None if the file does not exist.
-    Used to bias LLM extraction and query synthesis toward the KB's goals.
+    Cycle 4 item #28 — ``wiki_dir`` is now REQUIRED (previously defaulted to
+    the production ``WIKI_DIR`` constant, silently leaking production state
+    into tests that forgot to pass the tmp wiki). Every caller in
+    ``kb.query.engine`` and ``kb.ingest.extractors`` already passes
+    ``wiki_dir`` explicitly; removing the fallback eliminates a whole class
+    of test/prod cross-talk bugs.
 
     Args:
-        wiki_dir: Path to wiki directory. Defaults to WIKI_DIR from config.
+        wiki_dir: Path to the wiki directory (required).
+
+    Returns:
+        File content as a string, or None if the file does not exist.
     """
-    purpose_path = (wiki_dir / "purpose.md") if wiki_dir else WIKI_PURPOSE
+    purpose_path = wiki_dir / "purpose.md"
     if not purpose_path.exists():
         return None
     try:
