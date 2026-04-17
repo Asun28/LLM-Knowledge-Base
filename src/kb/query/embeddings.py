@@ -39,10 +39,18 @@ _index_cache_lock = threading.Lock()
 
 
 def _reset_model() -> None:
-    """Reset cached model and index. Call in test teardown."""
+    """Reset cached model and index. Call in test teardown.
+
+    Cycle 3 H8 PR review R1 Sonnet MAJOR: acquire `_index_cache_lock` when
+    clearing so a concurrent `get_vector_index` slow-path cannot re-populate
+    a stale pre-reset instance between our clear and the caller's next
+    lookup. `_model_lock` analogously guards `_model`.
+    """
     global _model
-    _model = None
-    _index_cache.clear()
+    with _model_lock:
+        _model = None
+    with _index_cache_lock:
+        _index_cache.clear()
 
 
 def _vec_db_path(wiki_dir: Path) -> Path:
@@ -102,15 +110,19 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
         if not pages:
             VectorIndex(vec_path).build([])
             logger.info("Vector index rebuilt: %s (0 entries)", vec_path)
-            # Clear any stale cache entry
-            _index_cache.pop(str(vec_path), None)
+            # Cycle 3 H8 PR review R1 Sonnet MAJOR: clear stale cache entry
+            # under the index cache lock so a concurrent `get_vector_index`
+            # caller cannot observe the evicted instance after the pop.
+            with _index_cache_lock:
+                _index_cache.pop(str(vec_path), None)
             return True
 
         texts = [page.get("content", "") for page in pages]
         embeddings = embed_texts(texts)
         entries = [(page["id"], emb) for page, emb in zip(pages, embeddings)]
         VectorIndex(vec_path).build(entries)
-        _index_cache.pop(str(vec_path), None)
+        with _index_cache_lock:
+            _index_cache.pop(str(vec_path), None)
         logger.info("Vector index rebuilt: %s (%d entries)", vec_path, len(entries))
         return True
 

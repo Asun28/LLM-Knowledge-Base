@@ -90,7 +90,10 @@ class TestQueryEngine:
 
         searched_with = []
 
-        def fake_search(question, wiki_dir=None, max_results=10):
+        def fake_search(question, wiki_dir=None, max_results=10, **kwargs):
+            # Cycle 3 H11: search_pages gained a keyword-only `search_telemetry`
+            # kwarg; accept **kwargs so monkey-patched fakes continue to match
+            # future signature evolution.
             searched_with.append(max_results)
             return []
 

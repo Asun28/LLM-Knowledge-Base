@@ -172,7 +172,9 @@ def test_run_all_checks(tmp_wiki, tmp_path):
     assert "checks_run" in report
     assert "total_issues" in report
     assert "summary" in report
-    assert len(report["checks_run"]) == 7
+    # Cycle 3 M10 + PR review R1 Codex MAJOR: wired `check_frontmatter_staleness`
+    # into run_all_checks so count bumped 7 -> 8.
+    assert len(report["checks_run"]) == 8
 
 
 def test_run_all_checks_empty(tmp_wiki, tmp_path):

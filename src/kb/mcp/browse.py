@@ -230,6 +230,15 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
 
         total_global = len(flat_entries)
         window = flat_entries[offset : offset + limit]
+        # PR review R1 Sonnet MAJOR: mirror kb_list_pages' empty-window
+        # guard so offset>=total returns an explicit Error string instead
+        # of silently emitting the header with no body. Lets callers
+        # detect "past end" without string-matching the pagination header.
+        if not window and total_global > 0:
+            return (
+                f"No sources in window (offset={offset}, limit={limit}, "
+                f"total={total_global})."
+            )
         # Cycle 3 M13: retain the legacy "Total: N source file(s)" line so
         # existing test assertions (test_mcp_browse_health, etc.) continue
         # to match; append pagination line below it.

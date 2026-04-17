@@ -31,7 +31,13 @@ from kb.utils.pages import load_all_pages, load_purpose
 logger = logging.getLogger(__name__)
 
 
-def search_pages(question: str, wiki_dir: Path | None = None, max_results: int = 10) -> list[dict]:
+def search_pages(
+    question: str,
+    wiki_dir: Path | None = None,
+    max_results: int = 10,
+    *,
+    search_telemetry: dict | None = None,
+) -> list[dict]:
     """Search wiki pages using hybrid BM25 + vector ranking with RRF fusion.
 
     Builds a BM25 index over all wiki pages (title tokens boosted by
@@ -42,6 +48,11 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         question: The search query.
         wiki_dir: Path to wiki directory.
         max_results: Maximum number of results to return.
+        search_telemetry: Optional mutable dict populated with backend
+            attempt/result counts so callers can distinguish "hybrid
+            attempted, zero hits" from "hybrid disabled" (cycle 3 H11 PR
+            review R1 Codex MAJOR). Keys set: ``vector_attempts``,
+            ``vector_hits``, ``bm25_hits``. Keyword-only — additive.
 
     Returns:
         List of matching page dicts sorted by relevance score (descending).
@@ -90,6 +101,10 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
         # KeyError from schema drift) together with the expected failure
         # modes — silently degrading "hybrid" to BM25-only with no observable
         # signal. Now we only swallow import/open/type-mismatch failures.
+        if search_telemetry is not None:
+            search_telemetry["vector_attempts"] = (
+                search_telemetry.get("vector_attempts", 0) + 1
+            )
         try:
             from kb.query.embeddings import embed_texts, get_vector_index
 
@@ -106,9 +121,15 @@ def search_pages(question: str, wiki_dir: Path | None = None, max_results: int =
             for pid, dist in hits:
                 if pid in page_map:
                     results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
+            if search_telemetry is not None:
+                search_telemetry["vector_hits"] = (
+                    search_telemetry.get("vector_hits", 0) + len(results)
+                )
             return results
         except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
             logger.debug("Vector search unavailable: %s", e)
+            if search_telemetry is not None:
+                search_telemetry["vector_failed"] = True
             return []
 
     # Hybrid search: RRF fusion of BM25 + vector results
@@ -540,22 +561,45 @@ def query_wiki(
             )
             effective_question = normalized_question
 
-    # 1. Search for relevant pages
-    matching_pages = search_pages(effective_question, wiki_dir, max_results=max_results)
+    # Cycle 3 H11 (PR review R1 Codex MAJOR): derive search_mode from actual
+    # vector-search runtime behaviour, not just "index file exists + module
+    # importable". The prior definition reported "hybrid" even when dim
+    # mismatch or sqlite-vec extension load failure caused
+    # `VectorIndex.query` to return [] for every call, defeating the
+    # observability contract. Thread a telemetry dict through `search_pages`;
+    # vector_search records attempts / hits / failures, and we classify:
+    #   - hybrid   → vector_search produced >=1 hit
+    #   - bm25_only → vector_search either never ran (disabled / absent) or
+    #                 attempted but all calls failed / returned 0
+    search_telemetry: dict = {}
+    matching_pages = search_pages(
+        effective_question,
+        wiki_dir,
+        max_results=max_results,
+        search_telemetry=search_telemetry,
+    )
 
-    # Cycle 3 H11: decide search_mode. If the embeddings module is not
-    # importable OR the vector index is absent, we are BM25-only. Otherwise
-    # hybrid. We derive the truth source here (not by peeking at whether
-    # hybrid_search returned vector hits — a legitimately empty vector list
-    # is still "hybrid" for observability purposes).
+    # The static pre-check (import ok AND vec_path exists) is still a useful
+    # filter: without it we'd always report "bm25_only" for the no-vector-
+    # config case. If the static gate is False we stay BM25-only regardless
+    # of telemetry. If True, we require telemetry to prove vector hits.
     try:
         from kb.query import embeddings as _embeddings
 
         _vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
-        search_mode = (
-            "hybrid" if (_embeddings._hybrid_available and _vec_path.exists()) else "bm25_only"
-        )
+        _hybrid_configured = _embeddings._hybrid_available and _vec_path.exists()
     except Exception:
+        _hybrid_configured = False
+
+    if not _hybrid_configured:
+        search_mode = "bm25_only"
+    elif search_telemetry.get("vector_hits", 0) > 0:
+        search_mode = "hybrid"
+    else:
+        # Hybrid was configured but vector_search contributed no results
+        # (dim mismatch, extension load fail, or a legitimate empty index).
+        # Surface as bm25_only so observers can distinguish from the
+        # success case — the H11 observability contract.
         search_mode = "bm25_only"
 
     if not matching_pages:

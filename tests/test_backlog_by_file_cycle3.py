@@ -125,15 +125,59 @@ class TestLlmApiErrors:
         """L1: the non-retryable APIStatusError branch must not contain a
         dead `last_error = e` — after H1 it delegates to specialized raisers,
         so the legacy line has no consumer.
+
+        PR review R1 Sonnet: this test previously only searched source text.
+        We now additionally exercise the production code path by forcing a
+        non-retryable APIStatusError (HTTP 418, not in the retry set) and
+        asserting only ONE call was made (proves the branch raises
+        immediately rather than assigning `last_error` and falling through
+        to the retry loop).
         """
+        import anthropic
+
         from kb.utils import llm
 
+        # Source-level assertion (cheap regression lock).
         src = Path(llm.__file__).read_text(encoding="utf-8")
-        # The pre-cycle-3 comment "fix item 16: track non-retryable for consistency"
-        # marks the dead assignment. H1/L1 must remove it.
         assert "track non-retryable for consistency" not in src, (
             "L1: dead `last_error = e` assignment (with its justification comment) was not removed"
         )
+
+        # Behavioral assertion: a 418 (non-retryable, non-H1-classified)
+        # APIStatusError must raise on the first attempt, not retry.
+        calls = {"n": 0}
+
+        class _FakeMessages:
+            def create(self, **kwargs):
+                calls["n"] += 1
+                response = SimpleNamespace(
+                    status_code=418, request=SimpleNamespace(), headers={}
+                )
+                raise anthropic.APIStatusError(
+                    message="I'm a teapot",
+                    response=response,
+                    body={"error": {"type": "teapot_error"}},
+                )
+
+        class _FakeClient:
+            messages = _FakeMessages()
+
+        import threading as _threading
+
+        llm._client = None  # force re-init path to use our fake
+        # Replace the cached client directly to bypass get_client()'s lock
+        # acquisition ordering (safe here because we're single-threaded).
+        llm._client = _FakeClient()
+        try:
+            with pytest.raises(llm.LLMError):
+                llm._make_api_call({"model": "x", "max_tokens": 1, "messages": []}, "x")
+            # L1 contract: ONE call, not MAX_RETRIES+1.
+            assert calls["n"] == 1, (
+                f"L1: non-retryable 418 should raise immediately; got {calls['n']} attempts"
+            )
+        finally:
+            llm._client = None  # restore
+        _ = _threading  # silence unused-import lint on this branch
 
 
 # =====================================================================
@@ -204,16 +248,33 @@ class TestFeedbackStore:
         assert len(cafe_keys) == 1, f"Expected 1 café key after NFC dedup, got {cafe_keys}"
         assert cafe_keys[0] == nfc
 
-    def test_compute_trust_scores_docstring_asymptote(self):
-        from kb.feedback import reliability
+    def test_compute_trust_scores_docstring_asymptote(self, tmp_path):
+        """L5: docstring documents the asymptote AND behaviour converges.
+
+        PR review R1 Sonnet test-gap: the prior version only grepped the
+        docstring. Now also exercise the production code path to verify
+        that high-N ratings actually converge to the 2× wrong-weight
+        behaviour — proving the docstring tracks real code, not just
+        aspirational text.
+        """
+        from kb.feedback import reliability, store
 
         doc = reliability.compute_trust_scores.__doc__ or ""
-        # Must mention the asymptotic contract so developers don't misread
-        # "wrong is 2x" as small-N literal.
         doc_lower = doc.lower()
         assert (
             "asymptot" in doc_lower or "converges" in doc_lower or "2×" in doc or "2x" in doc_lower
         ), "L5: docstring should describe asymptotic 2× behavior"
+
+        # Behavioral: at N=100 useful + N=100 wrong, trust should converge
+        # toward 101/(100 + 2*100 + 0 + 2) = 101/302 ≈ 0.334.
+        path = tmp_path / "asymptote.json"
+        for _ in range(100):
+            store.add_feedback_entry("q", "useful", ["entities/x"], path=path)
+            store.add_feedback_entry("q", "wrong", ["entities/x"], path=path)
+        scores = reliability.compute_trust_scores(path=path)
+        assert abs(scores["entities/x"]["trust"] - (101 / 302)) < 0.01, (
+            f"L5: expected high-N convergence near 0.334; got {scores['entities/x']['trust']:.3f}"
+        )
 
 
 # =====================================================================
@@ -576,23 +637,48 @@ class TestExtractionPrompt:
 class TestPipelineReferencesAppend:
     """L7: References substitution tolerates body_text without trailing newline."""
 
-    def test_references_append_when_no_trailing_newline(self):
+    def test_references_append_when_no_trailing_newline(self, tmp_path):
+        """L7: exercise the production code path.
 
-        # We validate via direct call against a synthetic page path/body
-        # handled by the helper. If the helper is private + path-based, we
-        # inline-stage a tmp file and invoke; otherwise fall back to grep-level.
-        src = Path(__import__("kb.ingest.pipeline", fromlist=["__file__"]).__file__).read_text(
-            encoding="utf-8"
+        PR review R1 Sonnet test-gap: the prior assertion only grepped for
+        a code pattern. A revert disguised by a reworded line could pass.
+        Now write a real page whose References section lacks a trailing
+        newline, invoke `_update_existing_page`, and assert the new ref
+        was actually appended to the on-disk file.
+        """
+        from kb.ingest.pipeline import _update_existing_page
+
+        page_path = tmp_path / "entities" / "foo.md"
+        page_path.parent.mkdir(parents=True)
+        # Critical: no trailing newline after the last reference —
+        # reproduces the pre-cycle-3 silent-drop bug.
+        page_path.write_text(
+            "---\n"
+            "title: Foo\n"
+            "type: entity\n"
+            "confidence: stated\n"
+            "source:\n  - raw/articles/old.md\n"
+            "created: 2026-01-01\n"
+            "updated: 2026-01-01\n"
+            "---\n"
+            "body\n\n"
+            "## References\n"
+            "- Mentioned in raw/articles/old.md",
+            encoding="utf-8",
         )
-        # Confirm the normalization line exists in the code
-        assert (
-            "body_text.endswith" in src
-            or 'body_text = body_text + "\\n"' in src
-            or 'endswith("\\n")' in src
-        ), (
-            "L7: body_text trailing-newline normalization must be present "
-            "before References substitution"
+
+        _update_existing_page(page_path, "raw/articles/new.md", verb="Mentioned")
+        result = page_path.read_text(encoding="utf-8")
+        assert "Mentioned in raw/articles/old.md" in result, (
+            "L7 regression: pre-existing reference must be preserved"
         )
+        assert "Mentioned in raw/articles/new.md" in result, (
+            "L7: new reference must be appended even when body had no trailing newline"
+        )
+        # Order check: new ref comes AFTER old ref (not silently reversed).
+        assert result.index("raw/articles/old.md") < result.index(
+            "raw/articles/new.md"
+        ), "L7: new ref must follow old ref (no order-reversal regression)"
 
 
 # =====================================================================
@@ -666,7 +752,15 @@ class TestLintRunner:
     """M18: duplicate `verdict_summary` local removed; `verdicts_path` threaded through."""
 
     def test_run_all_checks_accepts_verdicts_path(self, tmp_path, monkeypatch):
+        """M18: exercise the production code path.
+
+        PR review R1 Sonnet test-gap: previously this test only inspected
+        the signature — it never verified the kwarg reached
+        `get_verdict_summary`. Now spy on the verdicts module and assert
+        the custom path actually gets threaded through.
+        """
         from kb.lint import runner
+        from kb.lint import verdicts as verdicts_mod
 
         # Minimal wiki
         wiki_dir = tmp_path / "wiki"
@@ -677,14 +771,36 @@ class TestLintRunner:
         (wiki_dir / "log.md").write_text("log\n", encoding="utf-8")
 
         custom_verdicts = tmp_path / "custom_verdicts.json"
-        custom_verdicts.write_text('{"entries": []}', encoding="utf-8")
+        custom_verdicts.write_text(
+            '{"entries": [], "page_scores": {}}', encoding="utf-8"
+        )
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
 
-        # Assert the parameter exists in the signature
+        # Signature assertion (cheap regression lock).
         import inspect as _inspect
 
         sig = _inspect.signature(runner.run_all_checks)
         assert "verdicts_path" in sig.parameters, (
             "M18: run_all_checks must accept a verdicts_path kwarg"
+        )
+
+        # Behavioral assertion: spy on get_verdict_summary and confirm it
+        # receives our custom path — not the default global.
+        observed: list[object] = []
+        original = verdicts_mod.get_verdict_summary
+
+        def _spy(path=None):
+            observed.append(path)
+            return original(path)
+
+        monkeypatch.setattr(runner, "get_verdict_summary", _spy)
+        runner.run_all_checks(
+            wiki_dir=wiki_dir, raw_dir=raw_dir, verdicts_path=custom_verdicts
+        )
+        assert observed and observed[-1] == custom_verdicts, (
+            f"M18: get_verdict_summary must be called with custom path; "
+            f"observed={observed}"
         )
 
     def test_no_duplicate_verdict_summary_local(self):

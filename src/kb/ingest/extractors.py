@@ -229,8 +229,27 @@ def build_extraction_prompt(content: str, template: dict, purpose: str | None = 
     # M9: fence-escape — content must never close the outer <source_document>
     # fence. Both the opening and closing tags in raw markdown are escaped to
     # a hyphen form that never matches our fence pattern.
-    fenced_content = content.replace("</source_document>", "</source-document>").replace(
-        "<source_document>", "<source-document>"
+    #
+    # PR review R1 Sonnet MAJOR: case-insensitive matching AND zero-width
+    # character strip. The prior ASCII lowercase-only replace let
+    # `</Source_Document>` and `</source\u200bdocument>` (zero-width joiner
+    # inserted mid-tag) survive into the prompt as literal fence closers,
+    # enabling a prompt-injection break. `re.sub(..., IGNORECASE)` handles
+    # case variants; zero-width / format characters (ZWJ/ZWSP/BOM/LRM) are
+    # stripped pre-escape so homoglyph-style evasion is blocked.
+    _ZW_FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
+    fenced_content = _ZW_FORMAT_RE.sub("", content)
+    fenced_content = re.sub(
+        r"</source_document>",
+        "</source-document>",
+        fenced_content,
+        flags=re.IGNORECASE,
+    )
+    fenced_content = re.sub(
+        r"<source_document>",
+        "<source-document>",
+        fenced_content,
+        flags=re.IGNORECASE,
     )
 
     return f"""Extract structured information from the following source document.

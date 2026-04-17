@@ -9,6 +9,7 @@ from kb.lint.checks import (
     check_cycles,
     check_dead_links,
     check_frontmatter,
+    check_frontmatter_staleness,
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
@@ -96,6 +97,14 @@ def run_all_checks(
     stale = check_staleness(wiki_dir, pages=shared_pages)
     all_issues.extend(stale)
     checks_run.append({"name": "staleness", "issues": len(stale)})
+
+    # Cycle 3 M10 (PR review R1 Codex MAJOR): wire the new
+    # `check_frontmatter_staleness` check into `run_all_checks` so the
+    # `frontmatter_updated_stale` info issue actually surfaces from
+    # `kb lint`. Without this call the helper existed only as orphan code.
+    fm_stale = check_frontmatter_staleness(wiki_dir, pages=shared_pages)
+    all_issues.extend(fm_stale)
+    checks_run.append({"name": "frontmatter_staleness", "issues": len(fm_stale)})
 
     fm = check_frontmatter(wiki_dir, pages=shared_pages)
     all_issues.extend(fm)
