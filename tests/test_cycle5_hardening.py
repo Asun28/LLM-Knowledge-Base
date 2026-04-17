@@ -74,6 +74,24 @@ def test_extract_citations_still_parses_legacy_source_format():
     assert paths == {"concepts/rag", "raw/articles/foo.md"}
 
 
+def test_extract_citations_wikilink_unicode_path_pin():
+    """R1 Sonnet LOW: pin behavior for Unicode path inside `[[X]]`.
+
+    Python's default ``re`` flags make ``\\w`` Unicode-aware, so
+    ``[\\w/_.-]+`` matches CJK ideographs. ``[[概念/rag]]`` produces a
+    citation dict with ``path="概念/rag"`` — behavior identical to ASCII
+    paths. Downstream file lookup simply fails if no such page exists;
+    no security impact. This pin documents the behavior.
+    """
+    from kb.query.citations import extract_citations
+
+    text = "参照: [[概念/rag]]."
+    result = extract_citations(text)
+    assert len(result) == 1
+    assert result[0]["path"] == "概念/rag"
+    assert result[0]["type"] == "wiki"
+
+
 def test_extract_citations_wikilink_raw_path_typed_as_raw():
     """`[[raw/...]]` must be typed as `raw`, matching the existing prefix rule."""
     from kb.query.citations import extract_citations
