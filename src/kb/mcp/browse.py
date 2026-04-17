@@ -107,20 +107,38 @@ def kb_read_page(page_id: str) -> str:
                     page_path = matches[0]
     if not page_path.exists():
         return f"Page not found: {page_id}"
+    # Cycle 4 item #7 + PR R1 Codex MAJOR 1 — stat + bounded read so a
+    # runaway wiki page (unbounded Evidence Trail, 100 MB) is capped at the
+    # I/O layer, not after the full read. UTF-8 can encode up to 4 bytes
+    # per character, so cap bytes at QUERY_CONTEXT_MAX_CHARS * 4 + generous
+    # slack for the truncation-footer region. On decode error (mid-char
+    # split at the byte boundary), fall back to latin-1 for the tail.
+    cap_bytes = QUERY_CONTEXT_MAX_CHARS * 4 + 4096
     try:
-        body = page_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
+        file_bytes = page_path.stat().st_size
+        with page_path.open("rb") as f:
+            raw = f.read(cap_bytes + 1)
+    except OSError as e:
         logger.error("Error reading page %s: %s", page_id, e)
         return f"Error: Could not read page {page_id}: {e}"
-    # Cycle 4 item #7 — cap response size per MCP transport safety. An
-    # attacker-controlled or runaway wiki page with append-only Evidence
-    # Trail can grow without bound; MCP must not ship multi-megabyte
-    # responses per call. Align the cap with QUERY_CONTEXT_MAX_CHARS since
-    # the same ceiling already governs kb_ingest truncation.
-    if len(body) > QUERY_CONTEXT_MAX_CHARS:
-        omitted = len(body) - QUERY_CONTEXT_MAX_CHARS
-        body = (
-            body[:QUERY_CONTEXT_MAX_CHARS] + f"\n\n[Truncated: {omitted} chars omitted; "
+    truncated_at_read = len(raw) > cap_bytes
+    if truncated_at_read:
+        raw = raw[:cap_bytes]
+    try:
+        body = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Last incomplete UTF-8 sequence at the read boundary — drop it.
+        body = raw.decode("utf-8", errors="ignore")
+    # Apply character-level cap on top of byte-level cap so the response
+    # is always <= QUERY_CONTEXT_MAX_CHARS regardless of multibyte content.
+    if truncated_at_read or len(body) > QUERY_CONTEXT_MAX_CHARS:
+        omitted = max(
+            file_bytes - len(body.encode("utf-8")),
+            len(body) - QUERY_CONTEXT_MAX_CHARS,
+            0,
+        )
+        body = body[:QUERY_CONTEXT_MAX_CHARS] + (
+            f"\n\n[Truncated: ~{omitted} chars omitted; "
             f"cap={QUERY_CONTEXT_MAX_CHARS}. Use kb_list_pages + targeted tools for "
             "very large pages.]"
         )

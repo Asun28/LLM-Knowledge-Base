@@ -589,31 +589,60 @@ class TestLogRotation:
 
 
 class TestContradictionMetadataMigration:
-    """Item #22 — pipeline calls detect_contradictions_with_metadata and warns on truncation."""
+    """Item #22 — pipeline calls detect_contradictions_with_metadata and warns on truncation.
 
-    def test_warns_on_truncation(self, monkeypatch, caplog):
-        from kb.ingest import contradiction, pipeline
+    PR R1 Sonnet MAJOR 2 rewrite: directly test the helper that ingest_source
+    uses, asserting both the returned contradiction list and the WARNING log
+    message, so reverting the migration fails loudly. The previous version
+    only called a local `_fake_metadata` lambda — never exercised any
+    production code.
+    """
 
-        def _fake_metadata(*args, **kwargs):
-            return {
-                "contradictions": [],
-                "claims_total": 50,
-                "claims_checked": 10,
-                "truncated": True,
-            }
+    def test_truncation_emits_warning(self, caplog):
+        from kb.ingest.pipeline import _emit_contradiction_telemetry
 
-        monkeypatch.setattr(contradiction, "detect_contradictions_with_metadata", _fake_metadata)
-        # Force pipeline import path to rebind if it did `from x import y`.
-        monkeypatch.setattr(
-            pipeline, "detect_contradictions_with_metadata", _fake_metadata, raising=False
-        )
+        metadata = {
+            "contradictions": [{"claim": "x"}],
+            "claims_total": 50,
+            "claims_checked": 10,
+            "truncated": True,
+        }
         with caplog.at_level(logging.WARNING):
-            # The migration exercise: call the helper pipeline uses to dispatch.
-            # We invoke pipeline._run_contradiction_detection (or inline block)
-            # via the public surface used in ingest_source — test is tolerant.
-            # If direct helper doesn't exist, skip; presence of attr proves migration.
-            if hasattr(pipeline, "detect_contradictions_with_metadata"):
-                _fake_metadata(None, None, None)
+            contradictions = _emit_contradiction_telemetry(
+                metadata,
+                "raw/articles/demo.md",
+                logging.getLogger("kb.ingest.pipeline"),
+            )
+        assert contradictions == [{"claim": "x"}]
+        # Telemetry must log at least one WARNING with the counts interpolated.
+        msg = "\n".join(r.message for r in caplog.records if r.levelno >= logging.WARNING)
+        assert "truncated" in msg.lower()
+        assert "10" in msg and "50" in msg
+
+    def test_no_truncation_no_warning(self, caplog):
+        from kb.ingest.pipeline import _emit_contradiction_telemetry
+
+        metadata = {
+            "contradictions": [],
+            "claims_total": 3,
+            "claims_checked": 3,
+            "truncated": False,
+        }
+        with caplog.at_level(logging.WARNING):
+            out = _emit_contradiction_telemetry(
+                metadata,
+                "raw/articles/demo.md",
+                logging.getLogger("kb.ingest.pipeline"),
+            )
+        assert out == []
+        offending = [r for r in caplog.records if "truncated" in r.message.lower()]
+        assert not offending
+
+    def test_pipeline_imports_metadata_sibling(self):
+        """Signature guard: pipeline must import the metadata sibling."""
+        from kb.ingest import pipeline
+
+        assert hasattr(pipeline, "detect_contradictions_with_metadata")
 
 
 # ---------------------------------------------------------------------------
@@ -711,25 +740,41 @@ class TestTemplateHashesWhitelist:
 
 
 class TestSortedWikilinkInjection:
-    """Item #29 — orchestrator loop sorts titles before inject_wikilinks."""
+    """Item #29 — orchestrator sorts (pid, title) batch by title length descending.
 
-    def test_caller_sorts_new_pages(self):
-        """Behavioural check: the orchestrator emits sorted iteration.
+    PR R1 Sonnet MAJOR 1 rewrite: tests call the production helper
+    `_sort_new_pages_by_title_length` directly so any revert of the sort
+    logic (or the caller invoking a different helper) fails here.
+    """
 
-        The injection order is observable in resulting page content when two
-        titles share overlap (e.g., 'RAG' and 'Retrieval-Augmented Generation').
-        Here we check the caller-side sort happens by grep-like inspection of
-        the source; a full behaviour test requires ingest_source scaffolding
-        and is covered by integration tests.
-        """
-        import inspect
+    def test_sort_helper_orders_longest_title_first(self):
+        from kb.ingest.pipeline import _sort_new_pages_by_title_length
 
-        from kb.ingest import pipeline
+        input_pairs = [
+            ("concepts/rag", "RAG"),
+            ("entities/retrieval-augmented-generation", "Retrieval-Augmented Generation"),
+            ("concepts/llm", "LLM"),
+        ]
+        out = _sort_new_pages_by_title_length(input_pairs)
+        # Longest title first; shorter ones follow sorted by pid (alphabetical
+        # tie-break).
+        assert out[0][1] == "Retrieval-Augmented Generation"
+        assert [p[1] for p in out[1:]] == ["LLM", "RAG"]
 
-        src = inspect.getsource(pipeline)
-        assert "sorted(" in src, (
-            "pipeline.py must call sorted() on title batches for deterministic wikilink injection"
-        )
+    def test_sort_helper_tie_break_on_pid(self):
+        from kb.ingest.pipeline import _sort_new_pages_by_title_length
+
+        pairs = [
+            ("concepts/zeta", "Beta"),
+            ("concepts/alpha", "Beta"),
+        ]
+        out = _sort_new_pages_by_title_length(pairs)
+        assert out == [("concepts/alpha", "Beta"), ("concepts/zeta", "Beta")]
+
+    def test_sort_helper_empty_list_ok(self):
+        from kb.ingest.pipeline import _sort_new_pages_by_title_length
+
+        assert _sort_new_pages_by_title_length([]) == []
 
 
 # ---------------------------------------------------------------------------

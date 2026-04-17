@@ -111,6 +111,41 @@ def _find_affected_pages(
     return sorted(affected)
 
 
+def _sort_new_pages_by_title_length(
+    pairs: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Sort ``(page_id, title)`` pairs descending by title length (tie-break on page_id).
+
+    Cycle 4 item #29: longer titles must inject wikilinks FIRST so a shorter
+    overlap like ``RAG`` does not swallow body text that ``Retrieval-Augmented
+    Generation`` should own. Extracted as a helper so the ordering contract
+    is directly unit-testable (PR R1 Sonnet MAJOR 1).
+    """
+    return sorted(pairs, key=lambda pt: (-len(pt[1]), pt[0]))
+
+
+def _emit_contradiction_telemetry(
+    metadata: dict,
+    source_ref: str,
+    logger_: "logging.Logger",
+) -> list[dict]:
+    """Return ``metadata["contradictions"]`` and emit truncation warning when flagged.
+
+    Cycle 4 item #22 + PR R1 Sonnet MAJOR 2 — extracted from ``ingest_source``
+    so the migration contract (truncation produces a WARNING; contradictions
+    list is surfaced) is directly unit-testable without a full ingest setup.
+    """
+    contradictions = metadata.get("contradictions", []) or []
+    if metadata.get("truncated"):
+        logger_.warning(
+            "Contradiction detection truncated for %s: checked %d of %d claims",
+            source_ref,
+            metadata.get("claims_checked", 0),
+            metadata.get("claims_total", 0),
+        )
+    return contradictions
+
+
 def _persist_contradictions(
     contradictions: list[dict],
     source_ref: str,
@@ -888,13 +923,8 @@ def ingest_source(
     )
 
     # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles.
-    # Cycle 4 item #29 — sort (pid, title) pairs descending by title length so
-    # longer titles inject FIRST. Prevents a shorter already-injected alias
-    # like "[[concepts/rag|RAG]]" from swallowing the body text that the
-    # longer "Retrieval-Augmented Generation" entity would otherwise match.
-    # Tie-break on pid for deterministic ordering.
     wikilinks_injected: list[str] = []
-    sorted_new_pages = sorted(new_pages_with_titles, key=lambda pt: (-len(pt[1]), pt[0]))
+    sorted_new_pages = _sort_new_pages_by_title_length(new_pages_with_titles)
     for pid, ptitle in sorted_new_pages:
         try:
             from kb.compile.linker import inject_wikilinks
@@ -921,14 +951,7 @@ def ingest_source(
                     [str(c) for c in key_claims if isinstance(c, str)],
                     preexisting_pages,
                 )
-                contradiction_warnings = metadata.get("contradictions", [])
-                if metadata.get("truncated"):
-                    logger.warning(
-                        "Contradiction detection truncated for %s: checked %d of %d claims",
-                        source_ref,
-                        metadata.get("claims_checked", 0),
-                        metadata.get("claims_total", 0),
-                    )
+                contradiction_warnings = _emit_contradiction_telemetry(metadata, source_ref, logger)
                 if contradiction_warnings:
                     logger.warning(
                         "Detected %d potential contradiction(s) during ingest of %s",

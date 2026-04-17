@@ -277,7 +277,11 @@ def kb_ingest(
     try:
         file_bytes = path.stat().st_size
     except OSError as e:
-        return f"Error: cannot stat source: {e}"
+        # Cycle 4 PR R1 Codex MINOR 4 — strip absolute path from OSError text
+        # so the MCP response does not leak filesystem layout. `e.filename`
+        # may include a D:\... Windows UNC path; substitute with _rel(path).
+        e_msg = str(e).replace(str(path), _rel(path))
+        return f"Error: cannot stat source {_rel(path)}: {e_msg}"
     max_bytes = QUERY_CONTEXT_MAX_CHARS * 4
     if file_bytes > max_bytes:
         return f"Error: Source too large ({file_bytes} bytes; max {max_bytes} bytes)."

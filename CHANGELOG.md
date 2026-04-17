@@ -23,7 +23,7 @@ Rules:
 
 ### Phase 4.5 — Backlog-by-file cycle 4 (2026-04-17)
 
-22 mechanical bug fixes across 16 source files (HIGH + MEDIUM + LOW) shipped as file-grouped commits continuing the cycles 1–3 cadence. Full feature-dev pipeline executed (requirements → threat model + CVE baseline → brainstorm → parallel R1 Opus + R2 Codex design review → Opus decision gate → Codex plan + gate → TDD impl → CI hard gate → security verify + CVE diff → docs). Test count 1754 → 1801 (+47).
+22 mechanical bug fixes across 16 source files (HIGH + MEDIUM + LOW) shipped as file-grouped commits continuing the cycles 1–3 cadence. Full feature-dev pipeline executed (requirements → threat model + CVE baseline → brainstorm → parallel R1 Opus + R2 Codex design review → Opus decision gate → Codex plan + gate → TDD impl → CI hard gate → security verify + CVE diff → docs → PR → 2-round PR review). Test count 1754 → 1810 (+56), including behavioural rewrites of TestSortedWikilinkInjection and TestContradictionMetadataMigration after PR R1 Sonnet flagged them as signature-only.
 
 **Scope shifts from decision gate** (cycle 3 R1 lesson applied up-front, per cycle 3 CHANGELOG): the initial 30-candidate list was narrowed to 22 after R1 Opus + R2 Codex source verification flagged **7 items already shipped** (confirmed by grep — #4 source_type whitelist, #6 MAX_QUESTION_LEN + stale marker, #8 ambiguous page_id match, #9 title cap 500, #10 source_refs is_file, #21 frontmatter_missing_fence, #30 FRONTMATTER_RE) and **1 item deferred as too architecturally deep** (#3 `[source: X]` → `[[X]]` citation migration — requires atomic update of 15+ test callsites plus `extract_citations()` + `engine.py` — tracked as dedicated Phase 4.5 backlog item).
 

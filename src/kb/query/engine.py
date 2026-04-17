@@ -92,10 +92,16 @@ def search_pages(
             documents.append(title_tokens + content_tokens)
         index = BM25Index(documents)
         if cache_key is not None:
+            # PR R1 Codex MAJOR 2 — double-check under the lock before store AND
+            # reuse whichever concurrent-rebuild-won. Mirrors _RAW_BM25_CACHE
+            # single-flight pattern: if another thread finished first, drop
+            # the local build and hand back the winner so both callers
+            # operate on the same cached instance.
             with _WIKI_BM25_CACHE_LOCK:
-                # Double-check before store to respect whichever concurrent
-                # rebuild finished first.
-                if cache_key not in _WIKI_BM25_CACHE:
+                existing = _WIKI_BM25_CACHE.get(cache_key)
+                if existing is not None:
+                    pages, documents, index = existing
+                else:
                     _WIKI_BM25_CACHE[cache_key] = (pages, documents, index)
 
     def bm25_search(query: str, lim: int) -> list[dict]:

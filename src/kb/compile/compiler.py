@@ -199,9 +199,14 @@ def find_changed_sources(
         # Update manifest with current template hashes and save (includes pruned entries)
         manifest.update(current_tpl_hashes)
         save_manifest(manifest, manifest_path)
-    elif deleted_keys:
-        # Even if not saving hashes, persist pruned manifest so deleted sources don't linger
-        save_manifest(manifest, manifest_path)
+    # Cycle 4 PR R1 Codex MAJOR 3 — previously `elif deleted_keys: save_manifest(...)`
+    # ran even when save_hashes=False, which made detect_source_drift (the
+    # documented read-only caller) mutate the manifest. The side effect caused
+    # deleted sources to be reported ONCE then vanish on subsequent drift
+    # checks. Drop the persistence entirely when save_hashes=False — the
+    # compile loop (save_hashes=True) writes the pruned state at its normal
+    # cadence, so deleted entries get cleaned up during the next compile,
+    # not during a drift inspection.
 
     return new_sources, changed_sources
 
