@@ -55,3 +55,9 @@ htmlcov/
 # Session-scratch backups (e.g., claude4.6.md from Opus 4.7 migration)
 claude4.6.md
 feature-dev-Opus4.6.md
+
+# Codex subagent scratchpads at repo root (created by codex:codex-rescue
+# during Step 9 batch implementation — not meant to be committed)
+/findings.md
+/progress.md
+/task_plan.md
