@@ -17,24 +17,38 @@ def rrf_fusion(lists: list[list[dict]], k: int = RRF_K) -> list[dict]:
 
     Each result gets score = sum(1 / (k + rank)) across all lists it appears in.
     Results are identified by their 'id' key.
+
+    Cycle 6 AC10 — store ``(accumulated_score, merged_metadata)`` tuples
+    instead of shallow-copy dicts on first insert. The previous pattern
+    materialised a fresh ``{**result, "score": rrf_score}`` dict on every
+    new result even if it was later overwritten by a duplicate; at Phase-5
+    chunk-indexing scale (~K × limit × 2 per query) this is ~1000 dict
+    copies per call. Tuple form defers dict assembly to sort time.
     """
     if not lists:
         return []
 
-    scores: dict[str, dict] = {}
+    # Each entry: (accumulated_score, merged_metadata_dict)
+    scores: dict[str, tuple[float, dict]] = {}
     for result_list in lists:
         for rank, result in enumerate(result_list):
             pid = result["id"]
             rrf_score = 1.0 / (k + rank)
-            if pid in scores:
+            existing = scores.get(pid)
+            if existing is None:
+                scores[pid] = (rrf_score, result)
+            else:
+                prev_score, prev_meta = existing
                 # Phase 4.5 HIGH Q2: merge ALL metadata fields on collision,
                 # not just score. Later lists take precedence for non-score fields.
-                accumulated_score = scores[pid]["score"] + rrf_score
-                scores[pid] = {**scores[pid], **result, "score": accumulated_score}
-            else:
-                scores[pid] = {**result, "score": rrf_score}
+                merged = {**prev_meta, **result}
+                scores[pid] = (prev_score + rrf_score, merged)
 
-    return sorted(scores.values(), key=lambda r: r["score"], reverse=True)
+    # Assemble output dicts once, in sort order.
+    return [
+        {**meta, "score": score}
+        for score, meta in sorted(scores.values(), key=lambda sm: sm[0], reverse=True)
+    ]
 
 
 def hybrid_search(
