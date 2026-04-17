@@ -2,6 +2,7 @@
 
 import logging
 import re as _re
+import unicodedata
 
 from kb.config import MAX_CONVERSATION_CONTEXT_CHARS, MAX_REWRITE_CHARS
 from kb.utils.llm import LLMError, call_llm
@@ -23,6 +24,43 @@ _WH_LEADING_WORD = _re.compile(r"^(who|what|where|when|why|how)\s+", _re.IGNOREC
 # Matches proper nouns (Andrew) AND acronyms (RAG, LLM, API).
 _PROPER_NOUN_RE = _re.compile(r"\b(?:[A-Z][a-z]+|[A-Z]{2,})")
 
+# Cycle 4 item #15 — CJK-safe short-query gate.
+#
+# The prior heuristic `len(long_words) < 5` used `question.split()`, which
+# returns `[question]` for CJK input because there are no whitespace
+# separators. Result: every CJK question ALWAYS triggered the scan-tier
+# LLM rewrite, wasting a call per query. Universal short-query signal
+# `len(question.strip()) < 15` catches the realistic CJK case (short
+# follow-ups like "什么是RAG" or "它是什么") while leaving English
+# follow-ups unaffected (15 chars is below almost any meaningful English
+# follow-up that would need rewriting).
+
+
+def _is_cjk_dominant(question: str) -> bool:
+    """True when the question is dominated by CJK ideographic characters.
+
+    Uses unicodedata script tags rather than a handcrafted range: any char
+    whose Unicode block name starts with CJK, HIRAGANA, KATAKANA, or HANGUL
+    counts. Dominance threshold: >=50% of stripped chars are CJK.
+    """
+    stripped = question.strip()
+    if not stripped:
+        return False
+    cjk_chars = 0
+    for ch in stripped:
+        try:
+            name = unicodedata.name(ch)
+        except ValueError:
+            continue
+        if (
+            name.startswith("CJK ")
+            or name.startswith("HIRAGANA ")
+            or name.startswith("KATAKANA ")
+            or name.startswith("HANGUL ")
+        ):
+            cjk_chars += 1
+    return cjk_chars / max(len(stripped), 1) >= 0.5
+
 
 def _should_rewrite(question: str) -> bool:
     """Return True if this question likely needs rewriting (has deictic/pronoun refs).
@@ -31,6 +69,11 @@ def _should_rewrite(question: str) -> bool:
     standalone WH-question ending in '?' AND contains a proper-noun-like
     token AFTER the leading WH word (e.g. "Who is Andrew Ng?" → skip;
     "How does it work?" → still rewrite because "it" is deictic).
+
+    Cycle 4 item #15: universal short-query gate — when CJK-dominant AND
+    shorter than 15 chars, skip rewrite. Prevents wasteful scan-tier LLM
+    calls on short CJK follow-ups that `question.split()` misclassifies
+    as needing expansion.
     """
     if _WH_QUESTION_RE.match(question):
         # Strip the leading WH word before scanning for a proper noun so
@@ -38,6 +81,9 @@ def _should_rewrite(question: str) -> bool:
         body = _WH_LEADING_WORD.sub("", question, count=1)
         if _PROPER_NOUN_RE.search(body):
             return False
+    # Cycle 4 item #15 — CJK short-query skip.
+    if _is_cjk_dominant(question) and len(question.strip()) < 15:
+        return False
     if _REFERENCE_WORDS.search(question):
         return True
     words = question.split()
