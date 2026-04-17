@@ -178,3 +178,20 @@ def test_mcp_server_main_configures_logging_when_root_has_no_handlers(monkeypatc
     mcp_server.main()
 
     assert root.handlers
+
+
+def test_anthropic_client_sets_package_user_agent(monkeypatch):
+    from kb.utils import llm
+
+    captured = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(llm, "_client", None)
+    monkeypatch.setattr(llm.anthropic, "Anthropic", FakeAnthropic)
+
+    llm.get_client()
+
+    assert captured["default_headers"]["User-Agent"].startswith("llm-wiki-flywheel/")
