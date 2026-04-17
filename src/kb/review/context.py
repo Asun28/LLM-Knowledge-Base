@@ -192,7 +192,20 @@ def build_review_context(
             lines.append(source["content"])
             lines.append(f"</raw_source_{i}>")
         else:
-            lines.append(f"*Source file not available: {source.get('error', 'unknown')}*")
+            # Cycle 3 M12: surface the missing-source condition at WARNING
+            # so operators see when review contexts are silently degraded.
+            # Prior behaviour only emitted `*Source file not available: ...*`
+            # inside the rendered text — reviewers flagged it in verdicts
+            # but the signal never reached the process logs where a wiki
+            # integrity dashboard could aggregate it.
+            err = source.get("error", "unknown")
+            logger.warning(
+                "Source file not available in review context for page %s: %s (%s)",
+                page_id,
+                source["path"],
+                err,
+            )
+            lines.append(f"*Source file not available: {err}*")
         lines.append("\n---\n")
 
     lines.append(build_review_checklist())
