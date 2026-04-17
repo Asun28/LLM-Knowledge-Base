@@ -322,9 +322,9 @@ class TestValidatePageIdReservedNames:
         (tmp_wiki / "concepts").mkdir(exist_ok=True)
         err = mcp_app._validate_page_id(pid, check_exists=False)
         assert err is not None
-        assert err.startswith("Error")
-        # Per MCP contract, return string (never raise)
+        # Per MCP contract: returns a raw string message (caller prepends "Error:").
         assert isinstance(err, str)
+        assert "reserved" in err.lower() or "windows" in err.lower()
 
     def test_reserved_with_extension_also_rejected(self, tmp_wiki, monkeypatch):
         """CON.backup, aux.something are still reserved per Windows semantics."""
@@ -332,7 +332,8 @@ class TestValidatePageIdReservedNames:
 
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         err = mcp_app._validate_page_id("concepts/CON.backup", check_exists=False)
-        assert err is not None and err.startswith("Error")
+        assert err is not None
+        assert "reserved" in err.lower() or "windows" in err.lower()
 
     def test_normal_page_id_still_accepted(self, tmp_wiki, monkeypatch):
         from kb.mcp import app as mcp_app
@@ -353,7 +354,7 @@ class TestValidatePageIdLengthCap:
         monkeypatch.setattr(mcp_app, "WIKI_DIR", tmp_wiki)
         err = mcp_app._validate_page_id("concepts/" + ("x" * 260), check_exists=False)
         assert err is not None
-        assert err.startswith("Error")
+        assert "too long" in err.lower()
 
 
 # ---------------------------------------------------------------------------
