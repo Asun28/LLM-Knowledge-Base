@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from kb.compile.linker import build_backlinks
@@ -66,7 +67,7 @@ MAX_CONNECTION_PAIRS = 50_000
 
 def _iter_connection_pairs(
     term_index: dict[str, list[str]], *, cap: int
-) -> "Iterator[tuple[tuple[str, str], str]]":
+) -> Iterator[tuple[tuple[str, str], str]]:
     """Yield ``((page_a, page_b), term)`` pairs up to ``cap`` distinct pairs.
 
     Cycle 6 AC12 replacement for the former three-level ``break`` chain.
