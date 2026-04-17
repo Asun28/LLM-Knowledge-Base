@@ -21,6 +21,14 @@ VALID_VERDICT_TYPES: tuple[str, ...] = (
 )
 MAX_NOTES_LEN = 2000
 
+# Cycle 4 item #12 — per-issue description size cap at library boundary.
+# Previously `mcp/quality.py::kb_save_lint_verdict` capped issue COUNT (≤100)
+# but not per-issue DESCRIPTION length, so a library caller passing
+# ``issues=[{"severity":"error","description": 1_000_000*"x"}]`` × 100 could
+# inflate one verdict entry to ~100 MB of disk writes. The mtime-keyed
+# verdict cache would then thrash on every subsequent read.
+MAX_ISSUE_DESCRIPTION_LEN = 4000
+
 
 # M1 (Phase 4.5 MEDIUM): cache keyed on (path_str, mtime_ns, size). A 10k-
 # entry verdict file is 3-5 MB (~50-150 ms per json.loads on Windows); this
@@ -143,6 +151,19 @@ def add_verdict(
                     f"Invalid issue severity '{severity}'. "
                     f"Must be one of: {', '.join(VALID_SEVERITIES)}"
                 )
+            # Cycle 4 item #12 — cap per-issue description at library boundary
+            # so direct library callers (not just MCP) cannot inflate the
+            # verdict store. Truncate in place with a tag so operators can
+            # spot oversized entries in the audit log.
+            desc = issue.get("description", "")
+            if isinstance(desc, str) and len(desc) > MAX_ISSUE_DESCRIPTION_LEN:
+                logger.warning(
+                    "Issue description truncated from %d → %d chars for %s",
+                    len(desc),
+                    MAX_ISSUE_DESCRIPTION_LEN,
+                    page_id,
+                )
+                issue["description"] = desc[:MAX_ISSUE_DESCRIPTION_LEN] + "... [truncated]"
 
     path = path or VERDICTS_PATH
     with file_lock(path):

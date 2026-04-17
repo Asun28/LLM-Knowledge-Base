@@ -25,12 +25,22 @@ HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
 
 
 def _template_hashes() -> dict[str, str]:
-    """Compute content hashes for all extraction templates."""
+    """Compute content hashes for all extraction templates.
+
+    Cycle 4 item #25 — filter by ``VALID_SOURCE_TYPES`` instead of just
+    excluding editor dotfiles/tildes. Prevents stray files like
+    ``article.yaml.bak`` (editor backup) from entering the manifest and
+    forcing a full re-ingest when they change.
+    """
+    from kb.config import VALID_SOURCE_TYPES
+
     hashes = {}
     if not TEMPLATES_DIR.exists():
         return hashes
     for tpl in sorted(TEMPLATES_DIR.glob("*.yaml")):
         if tpl.stem.startswith(("~", ".")):
+            continue
+        if tpl.stem not in VALID_SOURCE_TYPES:
             continue
         hashes[f"_template/{tpl.stem}"] = content_hash(tpl)
     return hashes
@@ -189,9 +199,14 @@ def find_changed_sources(
         # Update manifest with current template hashes and save (includes pruned entries)
         manifest.update(current_tpl_hashes)
         save_manifest(manifest, manifest_path)
-    elif deleted_keys:
-        # Even if not saving hashes, persist pruned manifest so deleted sources don't linger
-        save_manifest(manifest, manifest_path)
+    # Cycle 4 PR R1 Codex MAJOR 3 — previously `elif deleted_keys: save_manifest(...)`
+    # ran even when save_hashes=False, which made detect_source_drift (the
+    # documented read-only caller) mutate the manifest. The side effect caused
+    # deleted sources to be reported ONCE then vanish on subsequent drift
+    # checks. Drop the persistence entirely when save_hashes=False — the
+    # compile loop (save_hashes=True) writes the pruned state at its normal
+    # cadence, so deleted entries get cleaned up during the next compile,
+    # not during a drift inspection.
 
     return new_sources, changed_sources
 
@@ -224,13 +239,26 @@ def detect_source_drift(
     raw_dir = raw_dir or RAW_DIR
     wiki_dir = wiki_dir or DEFAULT_WIKI_DIR
 
+    # Cycle 4 item #14 — capture deleted-source keys BEFORE find_changed_sources
+    # runs its internal prune. These are the manifest entries whose backing
+    # raw file no longer exists on disk — the drift case most likely to
+    # corrupt lint fidelity (wiki pages still reference the deleted source).
+    pre_prune_manifest = load_manifest(manifest_path)
+    current_sources = scan_raw_sources(raw_dir)
+    existing_rel = {_canonical_rel_path(s, raw_dir) for s in current_sources}
+    deleted_refs = sorted(
+        k for k in pre_prune_manifest if not k.startswith("_template/") and k not in existing_rel
+    )
+
     new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path, save_hashes=False)
     all_changed = new_sources + changed_sources
 
-    if not all_changed:
+    if not all_changed and not deleted_refs:
         return {
             "changed_sources": [],
             "affected_pages": [],
+            "deleted_sources": [],
+            "deleted_affected_pages": [],
             "summary": "No source changes detected. Wiki is up to date.",
         }
 
@@ -261,17 +289,47 @@ def detect_source_drift(
             logger.warning("Skipping unreadable page %s during drift detection", page_path)
             continue
 
+    # Cycle 4 item #14 — also compute pages whose source frontmatter points
+    # at a now-deleted raw file (the "source-deleted" category).
+    deleted_affected_pages: list[dict] = []
+    if deleted_refs:
+        deleted_ref_set = set(deleted_refs)
+        wiki_pages = scan_wiki_pages(wiki_dir)
+        for page_path in wiki_pages:
+            try:
+                post = fm.load(str(page_path))
+                page_sources = normalize_sources(post.metadata.get("source"))
+                deleted_matching = [s for s in page_sources if s in deleted_ref_set]
+                if deleted_matching:
+                    pid = get_page_id(page_path, wiki_dir)
+                    deleted_affected_pages.append(
+                        {
+                            "page_id": pid,
+                            "deleted_sources": deleted_matching,
+                        }
+                    )
+            except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError):
+                continue
+
     summary_parts = [
         f"{len(new_sources)} new source(s), {len(changed_sources)} changed source(s).",
     ]
+    if deleted_refs:
+        summary_parts.append(f"{len(deleted_refs)} source(s) deleted from raw/.")
     if affected_pages:
         summary_parts.append(f"{len(affected_pages)} wiki page(s) may need re-review.")
-    else:
+    elif not deleted_refs:
         summary_parts.append("No existing wiki pages reference the changed sources.")
+    if deleted_affected_pages:
+        summary_parts.append(
+            f"{len(deleted_affected_pages)} wiki page(s) reference deleted source(s)."
+        )
 
     return {
         "changed_sources": [_canonical_rel_path(s, raw_dir) for s in all_changed],
         "affected_pages": affected_pages,
+        "deleted_sources": deleted_refs,
+        "deleted_affected_pages": deleted_affected_pages,
         "summary": " ".join(summary_parts),
     }
 

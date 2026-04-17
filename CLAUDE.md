@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-**Phase 4 shipped (v0.10.0) + full audit resolved (HIGH + MEDIUM + LOW, unreleased). Phase 5 `kb_capture` shipped (unreleased). Phase 4.11 `kb_query` output adapters shipped (unreleased). Phase 5.0 `kb_lint --augment` shipped (unreleased). Phase 4.5 CRITICAL cycle 1 (16 items) shipped (PR #9 merged 2026-04-16). Phase 4.5 HIGH cycle 1 (22 items) shipped (unreleased). Phase 4.5 HIGH cycle 2 (22 items) + backlog-by-file cycle 1 (38 items) + backlog-by-file cycle 2 (30 items) + backlog-by-file cycle 3 (24 items + 2 security-verify follow-ups) shipped (unreleased).** 1754 tests across 126 test files, 26 MCP tools (params added to `kb_query`, `kb_lint`, `kb_list_pages`, `kb_list_sources`), 67 Python files in `src/kb/`. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
+**Phase 4 shipped (v0.10.0) + full audit resolved (HIGH + MEDIUM + LOW, unreleased). Phase 5 `kb_capture` shipped (unreleased). Phase 4.11 `kb_query` output adapters shipped (unreleased). Phase 5.0 `kb_lint --augment` shipped (unreleased). Phase 4.5 CRITICAL cycle 1 (16 items) shipped (PR #9 merged 2026-04-16). Phase 4.5 HIGH cycle 1 (22 items) shipped (unreleased). Phase 4.5 HIGH cycle 2 (22 items) + backlog-by-file cycle 1 (38 items) + backlog-by-file cycle 2 (30 items) + backlog-by-file cycle 3 (24 items + 2 security-verify follow-ups) + backlog-by-file cycle 4 (22 items) shipped (unreleased).** 1810 tests across 127 test files, 26 MCP tools (params added to `kb_query`, `kb_lint`, `kb_list_pages`, `kb_list_sources`), 67 Python files in `src/kb/`. Phase 1 core (5 operations + graph + CLI) plus Phase 2 quality system (feedback, review, semantic lint) plus v0.5.0 fixes plus v0.6.0 DRY refactor plus v0.7.0 S+++ upgrade (MCP server split into package, graph PageRank/centrality, entity enrichment on multi-source ingestion, persistent lint verdicts, case-insensitive wikilinks, trust threshold fix, template hash change detection, comparison/synthesis templates, 2 new MCP tools). Plus v0.8.0 BM25 search engine (replaces bag-of-words keyword matching with BM25 ranking — term frequency saturation, inverse document frequency, document length normalization). Plus v0.9.0 hardening release (path traversal protection, citation regex fix, slug collision tracking, JSON fence hardening, MCP error handling, max_results bounds, MCP Phase 2 instructions). Plus v0.10.0 Phase 4 (hybrid search with RRF fusion, 4-layer dedup, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting).
 
 **Phase 1 modules:** `kb.config`, `kb.models`, `kb.utils`, `kb.ingest`, `kb.compile`, `kb.query`, `kb.lint`, `kb.evolve`, `kb.graph`, `kb.mcp_server`, CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`). **MCP server split into `kb.mcp` package** (app, core, browse, health, quality).
 
@@ -118,7 +118,14 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 - `load_all_pages(wiki_dir=None)` — In `kb.utils.pages`. Returns list of dicts. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
 - `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached. Use `_build_schema_cached(source_type)` for cached schema lookups (avoids rebuilding on every extraction call).
-- `query_wiki(question, wiki_dir=None, max_results=10, conversation_context=None, *, output_format=None)` — In `kb.query.engine`. Returns dict with `answer` (str), `citations` (list[dict] with keys `type` ('wiki'|'raw'), `path` (str), `context` (str)), `source_pages` (list[str] page IDs retrieved), `context_pages` (list[str] page IDs in LLM context). `context_pages` is empty list on no-match. When `output_format` is set and non-text, dispatches to `kb.query.formats.render_output` and adds `output_path` + `output_format` to the return dict; `output_error` on failure. `output_format` is keyword-only — additive, zero breakage to existing callers.
+- `query_wiki(question, wiki_dir=None, max_results=10, conversation_context=None, *, output_format=None)` — In `kb.query.engine`. Returns dict with keys:
+  - `answer` (str) — synthesised answer
+  - `citations` (list[dict]) — each with `type` (`'wiki'|'raw'`), `path` (str), `context` (str), and a `stale: bool` flag (cycle 4 item #27 doc-sync: surfaced alongside `search_pages` stale flagging so API callers can render `[STALE]` markers inline)
+  - `source_pages` (list[str]) — page IDs retrieved before budget trimming
+  - `context_pages` (list[str]) — page IDs whose body was packed into the LLM context; empty list on no-match
+  - `output_path` + `output_format` — populated when `output_format` is non-text AND the Phase 4.11 adapter succeeded (cycle 4 item #27 doc-sync)
+  - `output_error` — populated on adapter failure; absent on success or when `output_format` is empty/text
+  `output_format` is keyword-only — additive, zero breakage to existing callers.
 - `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 - `rebuild_vector_index(wiki_dir, force=False)` — In `kb.query.embeddings`. Rebuilds sqlite-vec index from all pages in `wiki_dir`. Gated on (a) module-load-time `_hybrid_available` flag and (b) mtime check (skipped when `force=True`). Called at tail of `ingest_source()`. Batch callers (`compile_wiki`) pass `_skip_vector_rebuild=True` in loop and invoke once at tail.
 
@@ -140,7 +147,17 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 |---|---|---|---|
 | `scan` | `claude-haiku-4-5-20251001` | `CLAUDE_SCAN_MODEL` | Index reads, link checks, file diffs — mechanical, low-reasoning |
 | `write` | `claude-sonnet-4-6` | `CLAUDE_WRITE_MODEL` | Article writing, extraction, summaries — quality at reasonable cost |
-| `orchestrate` | `claude-opus-4-6` | `CLAUDE_ORCHESTRATE_MODEL` | Orchestration, query answering, verification — highest reasoning |
+| `orchestrate` | `claude-opus-4-7` | `CLAUDE_ORCHESTRATE_MODEL` | Orchestration, query answering, verification — highest reasoning |
+
+### Opus 4.7 Behaviour Notes
+
+Applies to orchestrate-tier calls. Added 2026-04-17.
+- **Explicit CoT for reasoning-heavy calls.** `call_llm` (in `kb.utils.llm`) does not pass a `thinking={...}` parameter, so extended thinking is never auto-activated at the orchestrate tier — this is true on 4.6 and 4.7 alike. For query synthesis, contradiction detection, `kb_lint_deep`, and semantic reviewers, include "Think step by step before answering" or a structured `## Analysis` scaffold in the prompt.
+- **Instruction following is literal.** Prefer positive phrasing ("write prose", "emit JSON") over negative ("don't use lists"). 4.x honours each stated constraint individually; long "don't X, don't Y, don't Z" forbid-lists tend to produce tangential hedging — express constraints as positive actions instead.
+- **Minimal formatting remains the default (unchanged from 4.6).** 4.7 avoids bullet-heavy prose, excessive bold/headers, and report-style structure in conversational output. Reserve structure for reference material and lists of ≥4 parallel items.
+- **Parallel tool calls preferred** for independent reads — batch `kb_search` + `kb_list_pages` + multi-page `kb_read_page` in one assistant turn rather than serialising.
+- **Structured output via `call_llm_json()` (forced tool_use).** Keep using the existing helper in `kb.utils.llm`; it is cache-friendly and removes fence-stripping failure modes. Do not switch to assistant-prefill for JSON.
+- **1M-context variant** is available from this runtime (exposed as `claude-opus-4-7[1m]`). For deep multi-source synthesis prefer calling out the capacity in the prompt ("you have ~1M tokens; use the full source text") and handing the subagent raw files directly — routing to the long-context variant is the runtime's job, not the caller's. (Note: `query_wiki`'s 80K-char cap is a library-level constant in `kb.query.engine` that applies to wiki-context assembly, not to direct-prompt pass-through — treat the two as separate concerns.)
 
 ### Extraction Templates (`templates/`)
 
@@ -155,7 +172,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-1754 tests across 126 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v4_11_markdown.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+1810 tests across 127 test files — run `python -m pytest -v` to list all. New tests per phase go in versioned files (e.g., `test_v4_11_markdown.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 

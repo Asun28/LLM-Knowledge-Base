@@ -51,3 +51,7 @@ Desktop.ini
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Session-scratch backups (e.g., claude4.6.md from Opus 4.7 migration)
+claude4.6.md
+feature-dev-Opus4.6.md

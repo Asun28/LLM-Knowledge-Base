@@ -59,6 +59,12 @@ class BM25Index:
     def __init__(self, documents: list[list[str]]) -> None:
         """Build index from pre-tokenized documents.
 
+        Cycle 4 item #24 — also builds a postings dict (``_postings``) mapping
+        each term to the list of doc indices where it appears, so ``score``
+        can skip non-matching docs instead of walking every doc per term.
+        At ~5K pages with hundreds of unique terms the memory cost is ~150 MB;
+        the scoring speedup for sparse queries outweighs the cost.
+
         Args:
             documents: List of token lists (one per document).
         """
@@ -66,13 +72,16 @@ class BM25Index:
         self.doc_freqs: list[Counter[str]] = []
         self.doc_lengths: list[int] = []
         self.df: Counter[str] = Counter()
+        # Cycle 4 item #24: inverted postings for sparse-query scoring.
+        self._postings: dict[str, list[int]] = {}
 
-        for tokens in documents:
+        for i, tokens in enumerate(documents):
             freq = Counter(tokens)
             self.doc_freqs.append(freq)
             self.doc_lengths.append(len(tokens))
             for term in freq:
                 self.df[term] += 1
+                self._postings.setdefault(term, []).append(i)
 
         self.avgdl = sum(self.doc_lengths) / self.n_docs if self.n_docs > 0 else 1.0
         if self.avgdl == 0:
@@ -97,13 +106,16 @@ class BM25Index:
         """
         scores = [0.0] * self.n_docs
 
+        # Cycle 4 item #24 — iterate only docs that contain the term, via the
+        # postings dict. At 5K pages the prior O(N) walk per query term was
+        # the hot path; sparse queries ("rag fine-tuning") would visit
+        # all 5K docs twice. Using postings cuts to the matching subset.
         for term in dict.fromkeys(query_tokens):
             if term not in self.idf:
                 continue
             idf = self.idf[term]
-
-            for i, doc_freq in enumerate(self.doc_freqs):
-                tf = doc_freq.get(term, 0)
+            for i in self._postings.get(term, ()):
+                tf = self.doc_freqs[i].get(term, 0)
                 if tf == 0:
                     continue
                 dl = self.doc_lengths[i]

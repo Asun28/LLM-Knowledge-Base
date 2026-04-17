@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from datetime import date
 from pathlib import Path
 
@@ -25,9 +26,43 @@ from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import LLMError
-from kb.utils.text import slugify, yaml_escape
+from kb.utils.text import slugify, yaml_escape, yaml_sanitize
 
 logger = logging.getLogger(__name__)
+
+
+# Cycle 4 item #2 — conversation_context sanitizer. Strips <prior_turn> /
+# </prior_turn> fences (and their fullwidth and case variants) so an
+# attacker-controlled `conversation_context` cannot smuggle closer fences
+# that escape our wrapping sentinel and inject instructions into the
+# rewriter's scan-tier LLM prompt. Also strips control characters via the
+# shared `yaml_sanitize` helper.
+#
+# The fullwidth angle-bracket fold (U+FF1C → <, U+FF1E → >) is applied
+# ONLY to the match region — we do not NFKC-normalise the whole body,
+# which would corrupt legitimate content (e.g. wiki pages about Unicode
+# fullwidth examples). Pattern matches:
+#   <prior_turn> / </prior_turn>    (ASCII, with optional attributes + ws)
+#   ＜prior_turn＞ / ＜/prior_turn＞ (fullwidth brackets)
+#   <PRIOR_TURN> etc.               (any case)
+_PRIOR_TURN_FENCE_RE = re.compile(
+    r"[<\uFF1C]\s*/?\s*prior_turn(?:\s[^>\uFF1E]*)?\s*[>\uFF1E]",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_conversation_context(ctx: str) -> str:
+    """Strip prior_turn fences + control chars from attacker-controlled context.
+
+    Applied before wrapping the context in our own ``<prior_turn>...</prior_turn>``
+    sentinel for the rewriter prompt (cycle 4 threat-model item #2).
+    """
+    if not ctx:
+        return ctx
+    # Strip fence variants (opening + closing, case-insensitive, fullwidth).
+    stripped = _PRIOR_TURN_FENCE_RE.sub("", ctx)
+    # Strip control characters + BIDI marks via shared helper.
+    return yaml_sanitize(stripped)
 
 
 def _validate_file_inputs(filename: str, content: str) -> str | None:
@@ -79,6 +114,10 @@ def kb_query(
         return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
     if conversation_context and len(conversation_context) > MAX_QUESTION_LEN * 4:
         return f"Error: conversation_context too long (max {MAX_QUESTION_LEN * 4} chars)."
+    # Cycle 4 item #2 — sanitise BEFORE use in either MCP branch so fence
+    # injections never reach the rewriter LLM prompt.
+    if conversation_context:
+        conversation_context = _sanitize_conversation_context(conversation_context)
 
     # Validate output_format at MCP boundary (normalize case/whitespace)
     fmt_n = (output_format or "").strip().lower()
@@ -221,7 +260,9 @@ def kb_ingest(
         return f"Error: Source path must be within raw/ directory: {source_path}"
 
     if not path.exists():
-        return f"Error: Source file not found: {path}"
+        # Cycle 4 item #1 — use _rel() to avoid leaking absolute filesystem
+        # paths in MCP error responses.
+        return f"Error: Source file not found: {_rel(path)}"
 
     # Reject binary file types
     if path.suffix.lower() not in _TEXT_EXTENSIONS:
@@ -236,7 +277,11 @@ def kb_ingest(
     try:
         file_bytes = path.stat().st_size
     except OSError as e:
-        return f"Error: cannot stat source: {e}"
+        # Cycle 4 PR R1 Codex MINOR 4 — strip absolute path from OSError text
+        # so the MCP response does not leak filesystem layout. `e.filename`
+        # may include a D:\... Windows UNC path; substitute with _rel(path).
+        e_msg = str(e).replace(str(path), _rel(path))
+        return f"Error: cannot stat source {_rel(path)}: {e_msg}"
     max_bytes = QUERY_CONTEXT_MAX_CHARS * 4
     if file_bytes > max_bytes:
         return f"Error: Source too large ({file_bytes} bytes; max {max_bytes} bytes)."
@@ -396,12 +441,17 @@ def kb_ingest_content(
             f"Error: Source file already exists: {file_path.name}. "
             "Use kb_save_source with overwrite=true to replace it."
         )
+    # Cycle 4 item #5 — convert post-create OSError into Error[partial]
+    # string per MCP contract (MCP tools return strings, never raise).
+    # The earlier `raise` path violated the docs and prevented the agent
+    # from retrying with overwrite=true on transient write failures.
     fd_transferred = False
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             fd_transferred = True
             f.write(save_content)
-    except BaseException:
+    except (KeyboardInterrupt, SystemExit):
+        # Developer-controlled interruptions: clean up but re-raise per stdlib norms.
         if not fd_transferred:
             try:
                 os.close(fd)
@@ -409,6 +459,23 @@ def kb_ingest_content(
                 pass
         file_path.unlink(missing_ok=True)
         raise
+    except OSError as write_err:
+        # Bytes may have been partially flushed; unlink to avoid partial files.
+        if not fd_transferred:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        file_path.unlink(missing_ok=True)
+        logger.warning(
+            "kb_ingest_content partial write to %s: %s; client must retry",
+            _rel(file_path),
+            write_err,
+        )
+        return (
+            f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+            "retry with kb_save_source(..., overwrite=true) then kb_ingest."
+        )
 
     try:
         result = ingest_source(file_path, source_type, extraction=extraction)
@@ -479,12 +546,14 @@ def kb_save_source(
                 f"Error: Source file already exists: {_rel(file_path)}. "
                 "Use overwrite=true to replace it."
             )
+        # Cycle 4 item #5 — convert post-create OSError into Error[partial]
+        # string per MCP contract.
         fd_transferred = False
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
                 fd_transferred = True
                 f.write(content)
-        except BaseException:
+        except (KeyboardInterrupt, SystemExit):
             if not fd_transferred:
                 try:
                     os.close(fd)
@@ -492,6 +561,22 @@ def kb_save_source(
                     pass
             file_path.unlink(missing_ok=True)
             raise
+        except OSError as write_err:
+            if not fd_transferred:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            file_path.unlink(missing_ok=True)
+            logger.warning(
+                "kb_save_source partial write to %s: %s; client must retry",
+                _rel(file_path),
+                write_err,
+            )
+            return (
+                f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+                "retry with overwrite=true."
+            )
     return (
         f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
         f'To ingest: kb_ingest("{_rel(file_path)}", "{source_type}")'

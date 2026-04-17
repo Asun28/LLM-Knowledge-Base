@@ -54,7 +54,12 @@ class TestMcpBrowseSafety:
     """kb_read_page and kb_list_sources must not let OSError escape to MCP client."""
 
     def test_kb_read_page_ioerror_returns_error_string(self, tmp_path, monkeypatch):
-        """kb_read_page returns 'Error: ...' string when read_text raises OSError."""
+        """kb_read_page returns 'Error: ...' string when the underlying read raises OSError.
+
+        Cycle 4 PR R1 Codex MAJOR 1 refactor switched kb_read_page from
+        `path.read_text()` to `path.open('rb')` + bounded `.read()` so huge
+        pages don't OOM before truncation. Patch Path.open — the new I/O boundary.
+        """
         from unittest.mock import patch
 
         from kb.mcp import browse
@@ -69,7 +74,7 @@ class TestMcpBrowseSafety:
         )
         monkeypatch.setattr(browse, "WIKI_DIR", wiki_dir)
 
-        with patch("pathlib.Path.read_text", side_effect=OSError("disk error")):
+        with patch("pathlib.Path.open", side_effect=OSError("disk error")):
             result = browse.kb_read_page("concepts/test")
 
         assert result.startswith("Error:"), f"Expected error string, got: {result!r}"

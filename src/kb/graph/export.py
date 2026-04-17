@@ -65,8 +65,19 @@ def export_mermaid(
     Returns:
         Mermaid diagram string (graph LR format).
     """
-    # Backwards-compat: callers that did export_mermaid(wiki_dir) pass a Path here
+    # Backwards-compat: callers that did export_mermaid(wiki_dir) pass a Path here.
+    # Cycle 4 item #23 — emit a DeprecationWarning so callers migrate to the
+    # keyword form ``export_mermaid(wiki_dir=...)``. Removal target: v0.12.0.
     if isinstance(graph, Path):
+        import warnings
+
+        warnings.warn(
+            "export_mermaid(graph: Path) positional form is deprecated; "
+            "use export_mermaid(wiki_dir=...) instead. "
+            "Scheduled for removal in kb v0.12.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         wiki_dir = graph
         graph = None
     wiki_dir = wiki_dir or WIKI_DIR

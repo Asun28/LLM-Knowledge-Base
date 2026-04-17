@@ -2,7 +2,7 @@
 
 import logging
 import stat as _stat
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from kb.utils.io import file_lock
@@ -10,7 +10,43 @@ from kb.utils.io import file_lock
 logger = logging.getLogger(__name__)
 
 
-LOG_SIZE_WARNING_BYTES = 500_000  # Warn when log exceeds ~500KB
+LOG_SIZE_WARNING_BYTES = 500_000  # Rotation threshold — see _rotate_log_if_oversized.
+
+
+def _rotate_log_if_oversized(log_path: Path) -> None:
+    """Cycle 4 item #20 — monthly rotation with ordinal collision fallback.
+
+    When ``log_path.stat().st_size`` exceeds ``LOG_SIZE_WARNING_BYTES``, rename
+    the current log to ``log.YYYY-MM.md`` (or ``log.YYYY-MM.2.md`` on collision,
+    etc.) and leave an empty fresh log for the next caller to create. Silent
+    no-op if the file does not exist or is under threshold.
+
+    Rotation event is logged at INFO BEFORE the rename so the audit chain is
+    preserved even if the rename fails partway.
+    """
+    if not log_path.exists():
+        return
+    try:
+        if log_path.stat().st_size <= LOG_SIZE_WARNING_BYTES:
+            return
+    except OSError:
+        return
+    stem = f"log.{datetime.now(UTC).strftime('%Y-%m')}"
+    archive = log_path.parent / f"{stem}.md"
+    ordinal = 2
+    while archive.exists():
+        archive = log_path.parent / f"{stem}.{ordinal}.md"
+        ordinal += 1
+    logger.info(
+        "Rotating %s (%d bytes) → %s",
+        log_path,
+        log_path.stat().st_size,
+        archive,
+    )
+    try:
+        log_path.rename(archive)
+    except OSError as e:
+        logger.warning("Log rotation failed for %s: %s", log_path, e)
 
 
 def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
@@ -68,6 +104,9 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
             )
 
     _reject_if_not_regular_file(log_path)
+    # Cycle 4 item #20 — rotate BEFORE append if already oversized. Runs
+    # outside the file_lock so the rename doesn't contend with readers.
+    _rotate_log_if_oversized(log_path)
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -87,14 +126,6 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
         with file_lock(log_path):
             with log_path.open("a", encoding="utf-8", newline="\n") as f:
                 f.write(entry)
-        log_stat = log_path.stat()
-        if log_stat.st_size > LOG_SIZE_WARNING_BYTES:
-            logger.warning(
-                "Wiki log %s is large (%d bytes > %d threshold). Consider archiving.",
-                log_path,
-                log_stat.st_size,
-                LOG_SIZE_WARNING_BYTES,
-            )
 
     try:
         _write()

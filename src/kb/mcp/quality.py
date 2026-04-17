@@ -260,7 +260,10 @@ def kb_affected_pages(page_id: str) -> str:
         page_id: Page that was changed (e.g., 'concepts/rag').
     """
     page_id = _strip_control_chars(page_id)
-    err = _validate_page_id(page_id, check_exists=False)
+    # Cycle 4 item #11 — validate existence so a typo surfaces as a clear
+    # "Page not found: ..." instead of silently returning "No pages are
+    # affected by changes to {page_id}." (false-negative).
+    err = _validate_page_id(page_id, check_exists=True)
     if err:
         return f"Error: {err}"
 

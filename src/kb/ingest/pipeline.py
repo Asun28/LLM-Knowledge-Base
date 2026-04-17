@@ -23,7 +23,9 @@ from kb.config import (
     WIKI_SOURCES,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.ingest.contradiction import detect_contradictions
+from kb.ingest.contradiction import (
+    detect_contradictions_with_metadata,
+)
 from kb.ingest.evidence import append_evidence_trail
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import hash_bytes
@@ -107,6 +109,41 @@ def _find_affected_pages(
         logger.debug("Failed to compute shared sources for cascade: %s", e)
 
     return sorted(affected)
+
+
+def _sort_new_pages_by_title_length(
+    pairs: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Sort ``(page_id, title)`` pairs descending by title length (tie-break on page_id).
+
+    Cycle 4 item #29: longer titles must inject wikilinks FIRST so a shorter
+    overlap like ``RAG`` does not swallow body text that ``Retrieval-Augmented
+    Generation`` should own. Extracted as a helper so the ordering contract
+    is directly unit-testable (PR R1 Sonnet MAJOR 1).
+    """
+    return sorted(pairs, key=lambda pt: (-len(pt[1]), pt[0]))
+
+
+def _emit_contradiction_telemetry(
+    metadata: dict,
+    source_ref: str,
+    logger_: "logging.Logger",
+) -> list[dict]:
+    """Return ``metadata["contradictions"]`` and emit truncation warning when flagged.
+
+    Cycle 4 item #22 + PR R1 Sonnet MAJOR 2 — extracted from ``ingest_source``
+    so the migration contract (truncation produces a WARNING; contradictions
+    list is surfaced) is directly unit-testable without a full ingest setup.
+    """
+    contradictions = metadata.get("contradictions", []) or []
+    if metadata.get("truncated"):
+        logger_.warning(
+            "Contradiction detection truncated for %s: checked %d of %d claims",
+            source_ref,
+            metadata.get("claims_checked", 0),
+            metadata.get("claims_total", 0),
+        )
+    return contradictions
 
 
 def _persist_contradictions(
@@ -885,9 +922,10 @@ def ingest_source(
         pages=all_wiki_pages,
     )
 
-    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles
+    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles.
     wikilinks_injected: list[str] = []
-    for pid, ptitle in new_pages_with_titles:
+    sorted_new_pages = _sort_new_pages_by_title_length(new_pages_with_titles)
+    for pid, ptitle in sorted_new_pages:
         try:
             from kb.compile.linker import inject_wikilinks
 
@@ -896,7 +934,10 @@ def ingest_source(
         except Exception as e:
             logger.debug("inject_wikilinks failed for %s: %s", pid, e)
 
-    # Auto-contradiction detection
+    # Auto-contradiction detection. Cycle 4 item #22 — migrate to the
+    # sibling `detect_contradictions_with_metadata` so truncation is
+    # observable at WARNING level. The legacy `detect_contradictions`
+    # signature is preserved for other callers (tests, downstream users).
     contradiction_warnings: list[dict] = []
     if extraction:
         key_claims = extraction.get("key_claims") or extraction.get("key_points") or []
@@ -906,10 +947,11 @@ def ingest_source(
                 # noisy self-comparison (new summary vs new entities from same source).
                 pages_created_set = set(pages_created)
                 preexisting_pages = [p for p in all_wiki_pages if p["id"] not in pages_created_set]
-                contradiction_warnings = detect_contradictions(
+                metadata = detect_contradictions_with_metadata(
                     [str(c) for c in key_claims if isinstance(c, str)],
                     preexisting_pages,
                 )
+                contradiction_warnings = _emit_contradiction_telemetry(metadata, source_ref, logger)
                 if contradiction_warnings:
                     logger.warning(
                         "Detected %d potential contradiction(s) during ingest of %s",

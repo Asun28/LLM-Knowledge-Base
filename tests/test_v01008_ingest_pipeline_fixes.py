@@ -100,7 +100,18 @@ def test_build_summary_content_not_called_on_existing_summary(tmp_wiki, monkeypa
     monkeypatch.setattr(pipeline_mod, "append_wiki_log", lambda *a, **kw: None)
     monkeypatch.setattr(pipeline_mod, "load_all_pages", lambda **kw: [])
     monkeypatch.setattr(pipeline_mod, "_find_affected_pages", lambda *a, **kw: [])
-    monkeypatch.setattr(pipeline_mod, "detect_contradictions", lambda *a, **kw: [])
+    # Cycle 4 item #22: pipeline migrated to detect_contradictions_with_metadata
+    # (returns dict). Patch the new sibling to match production dispatch.
+    monkeypatch.setattr(
+        pipeline_mod,
+        "detect_contradictions_with_metadata",
+        lambda *a, **kw: {
+            "contradictions": [],
+            "claims_checked": 0,
+            "claims_total": 0,
+            "truncated": False,
+        },
+    )
 
     # We can't call ingest_source easily without raw/ path setup; test the branching directly
     # by checking the module-level function logic by inspecting source code structure.

@@ -658,13 +658,23 @@ def test_review_history_includes_context(tmp_path):
 
 
 def test_log_size_warning(tmp_path, caplog):
-    """append_wiki_log warns when log exceeds size threshold."""
+    """append_wiki_log rotates log.md to log.YYYY-MM.md when oversized.
+
+    Cycle 4 item #20 replaced the 'Consider archiving' warn-only path with
+    automatic monthly rotation. The rotation event logs at INFO and the
+    archive file appears alongside the now-empty log.md. This test asserts
+    the rotation happens (archive present) rather than the old warning.
+    """
     log_path = tmp_path / "log.md"
-    # Create a log file just under the threshold
-    big_content = "# Log\n\n" + ("- entry\n" * (LOG_SIZE_WARNING_BYTES // 8))
+    # Create a log file just above the threshold
+    big_content = "# Log\n\n" + ("- entry\n" * (LOG_SIZE_WARNING_BYTES // 8 + 100))
     log_path.write_text(big_content, encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="kb.utils.wiki_log"):
-        append_wiki_log("test", "trigger warning", log_path)
+    with caplog.at_level(logging.INFO, logger="kb.utils.wiki_log"):
+        append_wiki_log("test", "trigger rotation", log_path)
 
-    assert "consider archiving" in caplog.text.lower()
+    # Rotation produces a dated archive file alongside log.md.
+    archives = list(tmp_path.glob("log.*.md"))
+    assert archives, "Expected log.YYYY-MM.md archive after rotation"
+    # New log.md contains only header + the new entry (much smaller than archive).
+    assert log_path.read_text(encoding="utf-8").count("\n") < 5

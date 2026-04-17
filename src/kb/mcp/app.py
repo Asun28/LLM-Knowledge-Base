@@ -63,6 +63,49 @@ def _rel(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+# Cycle 4 item #13 — cross-platform reservation of Windows device names.
+# These basenames (with or without extension) are UNABLE to be created as
+# regular files on Windows — NTFS aliases them to DOS devices. A wiki file
+# written on Linux with one of these names breaks the entire Windows sync
+# path. Cross-platform rejection at the MCP boundary is cheap insurance
+# against corpus portability failures.
+_WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+)
+
+# Cap: NTFS / ext4 / APFS filename limit is 255 bytes; page IDs traverse a
+# subdirectory plus a suffix, so accepting 255 chars for the ID itself is
+# comfortably within any supported filesystem's ceiling.
+_MAX_PAGE_ID_LEN: int = 255
+
+
+def _is_windows_reserved(page_id: str) -> bool:
+    """Check each path segment's stem (before final dot) against Windows reserved names.
+
+    `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` with or without an extension
+    all resolve to DOS devices on Windows. Case-insensitive. Strips at most one
+    trailing dot-separated suffix so `CON.backup` is also rejected (matches
+    Windows API semantics — anything matching the pattern `RESERVED(\\.[^.]*)?`
+    that resolves at CreateFile time).
+    """
+    for segment in page_id.replace("\\", "/").split("/"):
+        if not segment:
+            continue
+        # Strip extension(s); per Windows rules, `CON.foo.bar` is reserved too
+        # because the OS only compares the stem before the first dot.
+        stem = segment.split(".", 1)[0].casefold()
+        if stem in _WINDOWS_RESERVED_BASENAMES:
+            return True
+    return False
+
+
 def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
     """Validate a page ID for security and optionally existence.
 
@@ -72,12 +115,16 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
             Set False when the caller handles existence separately.
 
     Returns:
-        Error message string, or None if valid.
+        Error message string (caller prepends "Error:" before surfacing to MCP
+        client), or None if valid.
     """
     if not page_id or not page_id.strip():
         return "page_id cannot be empty."
     if "\x00" in page_id:
         return "page_id contains null byte."
+    # Cycle 4 item #13 — length cap before filesystem resolve.
+    if len(page_id) > _MAX_PAGE_ID_LEN:
+        return f"page_id too long ({len(page_id)} chars; max {_MAX_PAGE_ID_LEN})."
     if (
         ".." in page_id
         or page_id.startswith("/")
@@ -85,6 +132,13 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
         or os.path.isabs(page_id)
     ):
         return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+    # Cycle 4 item #13 — reject Windows reserved basenames cross-platform.
+    if _is_windows_reserved(page_id):
+        return (
+            f"page_id uses a Windows reserved device name "
+            f"(CON, PRN, AUX, NUL, COM1-9, LPT1-9): {page_id}. "
+            "Rename to avoid cross-platform filesystem failures."
+        )
     page_path = WIKI_DIR / f"{page_id}.md"
     try:
         page_path.resolve().relative_to(WIKI_DIR.resolve())

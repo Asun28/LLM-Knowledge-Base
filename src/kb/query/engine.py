@@ -18,6 +18,7 @@ from kb.config import (
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
     VECTOR_INDEX_PATH_SUFFIX,
+    WIKI_DIR,
 )
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
@@ -58,30 +59,50 @@ def search_pages(
         List of matching page dicts sorted by relevance score (descending).
     """
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
-    pages = load_all_pages(wiki_dir)
-    if not pages:
-        return []
 
     # Tokenize query; return empty if all tokens are stopwords (correct behavior)
     query_tokens = tokenize(question)
     if not query_tokens:
         return []
 
-    # Build document corpus: title tokens (boosted) + content tokens
-    # NOTE: Index rebuilt per-query. Acceptable at current wiki size (~200 pages).
-    # Add module-level cache keyed on wiki-dir mtime before Phase 4 corpus growth.
-    documents = []
-    for page in pages:
-        # Title tokens are repeated SEARCH_TITLE_WEIGHT times before indexing.
-        # The muted practical effect is expected: title repetition inflates document
-        # length, which BM25's length normalization (b parameter) partially cancels out.
-        # The net effect is a moderate boost, not a multiplier.
-        title_tokens = tokenize(page["title"]) * SEARCH_TITLE_WEIGHT
-        content_tokens = tokenize(page["content_lower"])
-        documents.append(title_tokens + content_tokens)
-
-    # Build BM25 index once — shared by the bm25_search closure below
-    index = BM25Index(documents)
+    # Cycle 4 item #16 — wiki-side BM25 cache. Keyed on
+    # (wiki_dir, page_count, max_mtime_ns, BM25_TOKENIZER_VERSION) — see
+    # _wiki_bm25_cache_key for invariants. Under FastMCP's thread pool two
+    # concurrent queries may both miss the cache; we check once under the
+    # lock, rebuild OUTSIDE the lock (avoids blocking other queries during
+    # 100ms+ disk walk on large wikis), then double-check INSIDE the lock
+    # before store so whoever finishes first wins.
+    cache_key = _wiki_bm25_cache_key(wiki_dir)
+    with _WIKI_BM25_CACHE_LOCK:
+        cached = _WIKI_BM25_CACHE.get(cache_key) if cache_key is not None else None
+    if cached is not None:
+        pages, documents, index = cached
+    else:
+        pages = load_all_pages(wiki_dir)
+        if not pages:
+            return []
+        documents = []
+        for page in pages:
+            # Title tokens are repeated SEARCH_TITLE_WEIGHT times before indexing.
+            # The muted practical effect is expected: title repetition inflates document
+            # length, which BM25's length normalization (b parameter) partially cancels out.
+            # The net effect is a moderate boost, not a multiplier.
+            title_tokens = tokenize(page["title"]) * SEARCH_TITLE_WEIGHT
+            content_tokens = tokenize(page["content_lower"])
+            documents.append(title_tokens + content_tokens)
+        index = BM25Index(documents)
+        if cache_key is not None:
+            # PR R1 Codex MAJOR 2 — double-check under the lock before store AND
+            # reuse whichever concurrent-rebuild-won. Mirrors _RAW_BM25_CACHE
+            # single-flight pattern: if another thread finished first, drop
+            # the local build and hand back the winner so both callers
+            # operate on the same cached instance.
+            with _WIKI_BM25_CACHE_LOCK:
+                existing = _WIKI_BM25_CACHE.get(cache_key)
+                if existing is not None:
+                    pages, documents, index = existing
+                else:
+                    _WIKI_BM25_CACHE[cache_key] = (pages, documents, index)
 
     def bm25_search(query: str, lim: int) -> list[dict]:
         qtoks = tokenize(query)
@@ -102,9 +123,7 @@ def search_pages(
         # modes — silently degrading "hybrid" to BM25-only with no observable
         # signal. Now we only swallow import/open/type-mismatch failures.
         if search_telemetry is not None:
-            search_telemetry["vector_attempts"] = (
-                search_telemetry.get("vector_attempts", 0) + 1
-            )
+            search_telemetry["vector_attempts"] = search_telemetry.get("vector_attempts", 0) + 1
         try:
             from kb.query.embeddings import embed_texts, get_vector_index
 
@@ -122,8 +141,8 @@ def search_pages(
                 if pid in page_map:
                     results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
             if search_telemetry is not None:
-                search_telemetry["vector_hits"] = (
-                    search_telemetry.get("vector_hits", 0) + len(results)
+                search_telemetry["vector_hits"] = search_telemetry.get("vector_hits", 0) + len(
+                    results
                 )
             return results
         except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
@@ -224,8 +243,45 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
 # PR review round 1 (Codex m-new-1): under FastMCP's thread pool two
 # concurrent queries can both miss the cache and both rebuild. The lock
 # serializes the check-then-set so only the first rebuild runs.
-_RAW_BM25_CACHE: dict[tuple[str, int, int], tuple[list[dict], "BM25Index"]] = {}
+_RAW_BM25_CACHE: dict[tuple[str, int, int, int], tuple[list[dict], "BM25Index"]] = {}
 _RAW_BM25_CACHE_LOCK = threading.Lock()
+
+# Cycle 4 item #16 — wiki-side BM25 cache mirroring _RAW_BM25_CACHE. Keyed
+# on (str(wiki_dir.resolve()), page_count, max_mtime_ns, BM25_TOKENIZER_VERSION)
+# per Condition 10 so both file changes AND tokenizer-semantic edits
+# (STOPWORDS prune, new BIDI stripping) invalidate the cache. Resolves the
+# per-query corpus+index rebuild that dominated the search_pages hot path.
+_WIKI_BM25_CACHE: dict[
+    tuple[str, int, int, int], tuple[list[dict], list[list[str]], "BM25Index"]
+] = {}
+_WIKI_BM25_CACHE_LOCK = threading.Lock()
+
+
+def _wiki_bm25_cache_key(wiki_dir: Path | None) -> tuple[str, int, int, int] | None:
+    """Return cache key (wiki_dir, page_count, max_mtime_ns, tokenizer_version) or None."""
+    if wiki_dir is None:
+        wiki_dir = WIKI_DIR
+    try:
+        resolved = str(wiki_dir.resolve())
+    except OSError:
+        return None
+    from kb.utils.text import BM25_TOKENIZER_VERSION
+
+    count = 0
+    max_mtime = 0
+    for subdir in wiki_dir.iterdir() if wiki_dir.exists() else ():
+        if not subdir.is_dir() or subdir.name.startswith("."):
+            continue
+        for f in subdir.glob("*.md"):
+            try:
+                count += 1
+                mt = f.stat().st_mtime_ns
+                if mt > max_mtime:
+                    max_mtime = mt
+            except OSError:
+                continue
+    return (resolved, count, max_mtime, BM25_TOKENIZER_VERSION)
+
 
 # I3 (Phase 4.5 R4 HIGH): rewrite-leak detection. PR review round 1
 # (Opus MINOR I3 + Codex M-NEW-1): the original `^[A-Z][a-zA-Z ]{0,40}:\s*`
@@ -250,12 +306,19 @@ _LEAK_KEYWORD_RE = re.compile(
 )
 
 
-def _raw_sources_cache_key(raw_dir: Path) -> tuple[str, int, int] | None:
-    """Return cache key for raw_dir or None if it can't be computed."""
+def _raw_sources_cache_key(raw_dir: Path) -> tuple[str, int, int, int] | None:
+    """Return cache key for raw_dir or None if it can't be computed.
+
+    Cycle 4 item #18 — added ``BM25_TOKENIZER_VERSION`` as the 4th tuple
+    component so any change to STOPWORDS or tokenize() semantics invalidates
+    the cache on next query (mtime-based keys miss pure code edits).
+    """
     try:
         resolved = str(raw_dir.resolve())
     except OSError:
         return None
+    from kb.utils.text import BM25_TOKENIZER_VERSION
+
     count = 0
     max_mtime = 0
     for subdir in raw_dir.iterdir():
@@ -269,7 +332,7 @@ def _raw_sources_cache_key(raw_dir: Path) -> tuple[str, int, int] | None:
                     max_mtime = mt
             except OSError:
                 continue
-    return (resolved, count, max_mtime)
+    return (resolved, count, max_mtime, BM25_TOKENIZER_VERSION)
 
 
 def search_raw_sources(
