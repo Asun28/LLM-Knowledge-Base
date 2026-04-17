@@ -43,6 +43,18 @@ def test_manifest_pruning_keeps_unchanged_source(tmp_path):
     assert "raw/articles/gone.md" not in final_manifest, (
         "Source that no longer exists on disk was NOT pruned"
     )
+    # Cycle 7 AC15: assert that the template-sentinel survives manifest pruning
+    # with its hash value intact. Previously the test verified source entries
+    # but never the template hash; a pruning regression that dropped template
+    # keys would force LLM re-extraction of every source on every compile with
+    # no test signal.
+    assert "_template/article" in final_manifest, (
+        "Template sentinel hash was incorrectly pruned from manifest"
+    )
+    assert final_manifest["_template/article"] == "xyz", (
+        "Template hash VALUE changed despite _template_hashes returning {}; "
+        "pruning must preserve pre-existing template entries"
+    )
 
 
 def test_linker_source_id_is_lowercased(tmp_wiki):
