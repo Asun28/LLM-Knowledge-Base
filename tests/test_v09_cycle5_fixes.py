@@ -164,3 +164,17 @@ def test_cli_configures_logging_when_root_has_no_handlers(monkeypatch):
     cli_module.cli.callback()
 
     assert root.handlers
+
+
+def test_mcp_server_main_configures_logging_when_root_has_no_handlers(monkeypatch):
+    import logging
+
+    from kb import mcp_server
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda: None)
+
+    mcp_server.main()
+
+    assert root.handlers

@@ -7,11 +7,15 @@ The actual tools are defined in kb.mcp submodules:
   - kb.mcp.quality: review, refine, lint_deep, consistency, feedback, verdicts, create_page
 """
 
+import logging
+
 from kb.mcp import mcp  # noqa: F401 — triggers tool registration
 
 
 def main():
     """Run the MCP server (stdio transport)."""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
     mcp.run()
 
 
