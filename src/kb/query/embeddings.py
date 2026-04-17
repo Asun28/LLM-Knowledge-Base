@@ -198,6 +198,11 @@ class VectorIndex:
         # the VectorIndex instance's lifetime per OQ4 (single-user local
         # tool; process exit closes the sqlite3 fd — `__del__` is unsafe).
         self._conn: sqlite3.Connection | None = None
+        # PR #20 R1 Sonnet M1: per-instance lock so concurrent threads on the
+        # SAME VectorIndex instance do not both open a sqlite3 connection
+        # and leak one. Mirrors the module-level `_model_lock` /
+        # `_rebuild_lock` double-checked pattern.
+        self._conn_lock: threading.Lock = threading.Lock()
         self._disabled: bool = False
         self._ext_warned: bool = False
 
@@ -206,8 +211,10 @@ class VectorIndex:
 
         Returns the persistent connection, or ``None`` when the index is
         disabled (extension unavailable / DB missing). Never retries after a
-        failure: the `_disabled` flag is sticky.
+        failure: the `_disabled` flag is sticky. Thread-safe via
+        `_conn_lock` double-checked locking (PR #20 R1 Sonnet M1 fix).
         """
+        # Fast path: lock-free hot-path check (dominant case once connected).
         if self._disabled:
             return None
         if self._conn is not None:
@@ -216,27 +223,37 @@ class VectorIndex:
             # Not disabled — the DB may be created later by ``build()``.
             # Leave _conn=None so the next query retries only if DB appears.
             return None
-        try:
-            conn = sqlite3.connect(str(self.db_path))
-            conn.enable_load_extension(True)
-            import sqlite_vec
-
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-        except Exception as e:
-            if not self._ext_warned:
-                logger.warning("sqlite_vec extension load failed — vector search disabled: %s", e)
-                self._ext_warned = True
-            self._disabled = True
+        with self._conn_lock:
+            # Double-check inside lock — another thread may have won.
+            if self._disabled:
+                return None
+            if self._conn is not None:
+                return self._conn
+            if not self.db_path.exists():
+                return None
             try:
-                # Close partial connection if one was opened.
-                if "conn" in locals():
-                    conn.close()  # type: ignore[has-type]
-            except Exception:
-                pass
-            return None
-        self._conn = conn
-        return conn
+                conn = sqlite3.connect(str(self.db_path))
+                conn.enable_load_extension(True)
+                import sqlite_vec
+
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            except Exception as e:
+                if not self._ext_warned:
+                    logger.warning(
+                        "sqlite_vec extension load failed — vector search disabled: %s", e
+                    )
+                    self._ext_warned = True
+                self._disabled = True
+                try:
+                    # Close partial connection if one was opened.
+                    if "conn" in locals():
+                        conn.close()  # type: ignore[has-type]
+                except Exception:
+                    pass
+                return None
+            self._conn = conn
+            return conn
 
     def build(self, entries: list[tuple[str, list[float]]]) -> None:
         """Build index from (page_id, embedding) pairs. Replaces existing index.
