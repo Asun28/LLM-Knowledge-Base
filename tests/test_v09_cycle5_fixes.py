@@ -79,3 +79,15 @@ def test_query_wiki_wraps_and_caps_purpose(monkeypatch, tmp_path):
     assert "<kb_purpose>" in prompt
     inner = prompt.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
     assert len(inner) <= 4096
+
+
+def test_build_extraction_prompt_wraps_and_caps_purpose():
+    from kb.ingest.extractors import build_extraction_prompt
+
+    template = {"extract": ["summary"], "name": "article", "description": "Article"}
+
+    prompt = build_extraction_prompt("content", template, purpose="x" * 5000)
+
+    assert "<kb_purpose>" in prompt
+    inner = prompt.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
+    assert len(inner) <= 4096
