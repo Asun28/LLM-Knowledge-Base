@@ -1,5 +1,6 @@
 """CLI entry point for knowledge base operations."""
 
+import logging
 from pathlib import Path
 
 import click
@@ -23,6 +24,8 @@ def _truncate(msg: str, limit: int = 600) -> str:
 @click.version_option(__version__)
 def cli():
     """LLM Knowledge Base — compile raw sources into a structured wiki."""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
 
 
 @cli.command()

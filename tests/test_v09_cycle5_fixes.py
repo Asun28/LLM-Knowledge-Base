@@ -151,3 +151,16 @@ def test_validate_page_id_rejects_control_chars_and_accepts_valid_id():
 
     assert _validate_page_id("\x00foo") == "page_id contains control characters."
     assert _validate_page_id("concepts/rag", check_exists=False) is None
+
+
+def test_cli_configures_logging_when_root_has_no_handlers(monkeypatch):
+    import logging
+
+    from kb import cli as cli_module
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+
+    cli_module.cli.callback()
+
+    assert root.handlers
