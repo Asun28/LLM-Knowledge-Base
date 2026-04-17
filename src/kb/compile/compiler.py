@@ -25,12 +25,22 @@ HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
 
 
 def _template_hashes() -> dict[str, str]:
-    """Compute content hashes for all extraction templates."""
+    """Compute content hashes for all extraction templates.
+
+    Cycle 4 item #25 — filter by ``VALID_SOURCE_TYPES`` instead of just
+    excluding editor dotfiles/tildes. Prevents stray files like
+    ``article.yaml.bak`` (editor backup) from entering the manifest and
+    forcing a full re-ingest when they change.
+    """
+    from kb.config import VALID_SOURCE_TYPES
+
     hashes = {}
     if not TEMPLATES_DIR.exists():
         return hashes
     for tpl in sorted(TEMPLATES_DIR.glob("*.yaml")):
         if tpl.stem.startswith(("~", ".")):
+            continue
+        if tpl.stem not in VALID_SOURCE_TYPES:
             continue
         hashes[f"_template/{tpl.stem}"] = content_hash(tpl)
     return hashes
