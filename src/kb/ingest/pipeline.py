@@ -416,6 +416,11 @@ def _update_existing_page(
     """
     # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
     content = page_path.read_text(encoding="utf-8")
+    # Cycle 6 AC7 — normalize CRLF → LF so `_SOURCE_BLOCK_RE` (LF-only, line 45)
+    # matches CRLF-encoded frontmatter. Without this, CRLF files fall through
+    # to the weak fallback at line ~456 which doesn't match either ending,
+    # producing silent double `source:` keys. `atomic_text_write` writes LF.
+    content = content.replace("\r\n", "\n")
     # Check frontmatter sources specifically, not full content
     try:
         post = frontmatter.loads(content)
@@ -588,6 +593,8 @@ def _process_item_batch(
     source_ref: str,
     extraction: dict,
     wiki_dir: Path | None = None,
+    *,
+    shared_seen: dict[str, str] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[tuple[str, str]], list[str]]:
     """Validate, deduplicate, and create/update wiki pages for a list of names.
 
@@ -595,6 +602,13 @@ def _process_item_batch(
     valid_items is the deduplicated list of names that passed all guards
     (empty-name, empty-slug, collision), for both created and updated pages.
     Used by the caller to build index entries.
+
+    Cycle 6 AC8: when ``shared_seen`` is provided, slug collisions are detected
+    across batches (entity + concept). Entity batch runs first in the caller,
+    so a concept slug colliding with an existing entity slug is logged as a
+    cross-type collision and appended to ``skipped`` — the concept page is NOT
+    created or updated. Default ``None`` preserves the per-batch-scoped
+    behavior for any legacy caller.
     """
     if page_type not in _SUBDIR_MAP:
         raise ValueError(f"Unknown page_type: {page_type!r}. Valid: {list(_SUBDIR_MAP)}")
@@ -614,7 +628,7 @@ def _process_item_batch(
     skipped: list[str] = []
     new_with_titles: list[tuple[str, str]] = []
     valid_items: list[str] = []
-    seen_slugs: dict[str, str] = {}
+    seen_slugs: dict[str, str] = shared_seen if shared_seen is not None else {}
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
@@ -634,9 +648,22 @@ def _process_item_batch(
             continue
         if item_slug in seen_slugs:
             prev = seen_slugs[item_slug]
+            # Cycle 6 AC8: cross-type collision when shared_seen is used.
+            # Entity batch runs first, so if the concept batch encounters a
+            # slug already present we skip the concept page entirely (entity
+            # precedence per OQ5) and emit a single WARNING per collision.
             if prev != item:
                 logger.warning("Slug collision: %r and %r both slug to %r", prev, item, item_slug)
                 skipped.append(f"{subdir}/{item_slug} (collision: {item!r})")
+            elif shared_seen is not None:
+                logger.warning(
+                    "Cross-type slug collision: %r already present as different type; "
+                    "skipping %s/%s",
+                    item,
+                    subdir,
+                    item_slug,
+                )
+                skipped.append(f"{subdir}/{item_slug} (cross-type collision)")
             continue
         seen_slugs[item_slug] = item
         valid_items.append(item)
@@ -828,6 +855,12 @@ def ingest_source(
             SMALL_SOURCE_THRESHOLD,
         )
 
+    # Cycle 6 AC8 — shared slug namespace across entity + concept batches so a
+    # single extraction with overlapping `entities_mentioned` + `concepts_mentioned`
+    # collapses to ONE wiki page (entity-first per OQ5) rather than creating
+    # a pair of identical-content pages (entities/rag.md AND concepts/rag.md).
+    shared_seen: dict[str, str] = {}
+
     # 2. Create or update entity pages (skip for small sources)
     e_created, e_updated, e_skipped, e_new, e_valid = _process_item_batch(
         [] if is_small_source else (extraction.get("entities_mentioned") or []),
@@ -837,6 +870,7 @@ def ingest_source(
         source_ref,
         extraction,
         wiki_dir=effective_wiki_dir,
+        shared_seen=shared_seen,
     )
     pages_created.extend(e_created)
     pages_updated.extend(e_updated)
@@ -852,6 +886,7 @@ def ingest_source(
         source_ref,
         extraction,
         wiki_dir=effective_wiki_dir,
+        shared_seen=shared_seen,
     )
     pages_created.extend(c_created)
     pages_updated.extend(c_updated)
