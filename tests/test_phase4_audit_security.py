@@ -10,7 +10,7 @@ from kb.review.refiner import refine_page
 def test_validate_page_id_rejects_null_byte():
     err = _validate_page_id("concepts/foo\x00bar", check_exists=False)
     assert err is not None
-    assert "null" in err.lower() or "invalid" in err.lower()
+    assert "null" in err.lower() or "invalid" in err.lower() or "control" in err.lower()
 
 
 def test_validate_page_id_rejects_null_byte_only():

@@ -381,14 +381,16 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
 
     for field in ("core_argument", "abstract", "description", "problem_solved"):
         val = extraction.get(field)
-        if val and name_lower in val.lower():
+        if val and bool(re.search(rf"\b{re.escape(name_lower)}\b", val.lower())):
             relevant.append(val)
             break
 
     key_claims = extraction.get("key_claims")
     key_points = extraction.get("key_points")
     for claim in key_claims if key_claims is not None else key_points or []:
-        if isinstance(claim, str) and name_lower in claim.lower():
+        if isinstance(claim, str) and bool(
+            re.search(rf"\b{re.escape(name_lower)}\b", claim.lower())
+        ):
             relevant.append(claim)
 
     if not relevant:

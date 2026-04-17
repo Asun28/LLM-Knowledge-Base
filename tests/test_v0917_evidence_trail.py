@@ -1,17 +1,17 @@
 """Tests for evidence trail sections in wiki pages (Phase 4)."""
 
-from datetime import date
-
 from kb.ingest.evidence import append_evidence_trail, build_evidence_entry
 
 
 class TestBuildEvidenceEntry:
     def test_basic_entry(self):
+        # Use fixed date to avoid midnight boundary flake (cycle 5 fix).
         entry = build_evidence_entry(
             source_ref="raw/articles/example.md",
             action="Initial extraction: core concept definition",
+            entry_date="2026-01-01",
         )
-        assert entry.startswith(f"- {date.today().isoformat()}")
+        assert entry.startswith("- 2026-01-01")
         assert "raw/articles/example.md" in entry
         assert "Initial extraction" in entry
 

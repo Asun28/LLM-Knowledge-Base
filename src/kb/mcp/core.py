@@ -91,7 +91,7 @@ def kb_query(
 
     Default (Claude Code mode): returns wiki search results with full page
     content. You (Claude Code) synthesize the answer and cite sources with
-    [source: page_id] format.
+    [[page_id]] format.
 
     With use_api=true: calls the Anthropic API to synthesize the answer
     (requires ANTHROPIC_API_KEY).
@@ -205,7 +205,7 @@ def kb_query(
         f"# Query Context for: {question}\n",
         f"Found {len(results)} relevant page(s). "
         "Synthesize an answer using this context. "
-        "Cite sources with [source: page_id] format.\n",
+        "Cite sources with [[page_id]] format.\n",
     ]
     for r in results:
         trust = r.get("trust") or 0.5
@@ -579,7 +579,7 @@ def kb_save_source(
             )
     return (
         f"Saved: {_rel(file_path)} ({len(content)} chars)\n"
-        f'To ingest: kb_ingest("{_rel(file_path)}", "{source_type}")'
+        f'To ingest: kb_ingest("{_rel(file_path)}", "{yaml_escape(source_type)}")'
     )
 
 

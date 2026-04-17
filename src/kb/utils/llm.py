@@ -7,6 +7,7 @@ import time
 
 import anthropic
 
+from kb import __version__
 from kb.config import (
     LLM_MAX_RETRIES,
     LLM_REQUEST_TIMEOUT,
@@ -34,7 +35,11 @@ def get_client() -> anthropic.Anthropic:
     if _client is None:
         with _client_lock:
             if _client is None:  # double-check locking
-                _client = anthropic.Anthropic(timeout=REQUEST_TIMEOUT, max_retries=0)
+                _client = anthropic.Anthropic(
+                    timeout=REQUEST_TIMEOUT,
+                    max_retries=0,
+                    default_headers={"User-Agent": f"llm-wiki-flywheel/{__version__}"},
+                )
     return _client
 
 

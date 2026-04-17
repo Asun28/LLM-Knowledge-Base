@@ -13,7 +13,6 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 # ── Wiki index files ──────────────────────────────────────────
 WIKI_INDEX = WIKI_DIR / "index.md"
 WIKI_SOURCES = WIKI_DIR / "_sources.md"
-WIKI_CATEGORIES = WIKI_DIR / "_categories.md"
 WIKI_LOG = WIKI_DIR / "log.md"
 WIKI_CONTRADICTIONS = WIKI_DIR / "contradictions.md"
 WIKI_PURPOSE = WIKI_DIR / "purpose.md"
@@ -192,6 +191,14 @@ MAX_PAGE_SCORES = 10_000
 # ── Feedback store input limits ────────────────────────────────
 MAX_QUESTION_LEN = 2000
 MAX_NOTES_LEN = 2000
+VALID_SEVERITIES = ("error", "warning", "info")
+VALID_VERDICT_TYPES: tuple[str, ...] = (
+    "fidelity",
+    "consistency",
+    "completeness",
+    "review",
+    "augment",
+)
 MAX_PAGE_ID_LEN = 200
 MAX_CITED_PAGES = 50
 

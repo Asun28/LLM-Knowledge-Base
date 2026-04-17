@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [Backlog-by-file cycle 5](#phase-45--backlog-by-file-cycle-5-2026-04-18) | 2026-04-18 | 14 / 13 files | 1811 → 1820 (+9) | config, text, verdicts, engine, extractors, pipeline, mcp/core, mcp/app, cli, mcp_server, llm, pyproject, tests |
 | [Concurrency fix + docs tidy (PR #17)](#concurrency-fix--docs-tidy-pr-17-2026-04-18) | 2026-04-18 | 3 / 3 files | 1810 → 1811 (+1) | verdicts, capture, test_v0915_task06 |
 | [Backlog-by-file cycle 4](#phase-45--backlog-by-file-cycle-4-2026-04-17) | 2026-04-17 | 22 / 16 files | 1754 → 1810 (+56) | mcp/core, browse, quality, app, health, rewriter, engine, dedup, text, wiki_log, pipeline, bm25, compiler, pages, linker |
 | [Backlog-by-file cycle 3](#phase-45--backlog-by-file-cycle-3-2026-04-17) | 2026-04-17 | 24+2 / 16 files | 1727 → 1754 (+27) | llm, io, feedback, embeddings, engine, hybrid, contradiction, extractors, pipeline, checks, runner, export, browse, health |
@@ -48,6 +49,33 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Backlog-by-file cycle 5 (2026-04-18)
+
+14 items across 13 files. Tests: 1811 → 1820 (+9). 1-round PR review.
+
+#### Added
+
+- `utils/text.py` — `wrap_purpose(text, max_chars=4096)` helper: strips control characters, caps at 4096 chars, wraps in `<kb_purpose>` sentinel tags for safe injection in LLM prompts.
+- `pyproject.toml` — registered `slow`, `network`, `integration`, `llm` pytest markers to eliminate `PytestUnknownMarkWarning`.
+
+#### Changed
+
+- `config.py` — added `VALID_SEVERITIES = ("error", "warning", "info")` and `VALID_VERDICT_TYPES` tuple; deleted orphaned `WIKI_CATEGORIES` constant (zero importers confirmed).
+- `lint/verdicts.py` — migrated `VALID_SEVERITIES`, `VALID_VERDICT_TYPES`, `MAX_NOTES_LEN` to `kb.config`; re-exported for backward compat; widened `load_verdicts` except to `(json.JSONDecodeError, OSError, UnicodeDecodeError)`.
+- `query/engine.py` — replaced raw purpose f-string injection with `wrap_purpose()` sentinel call.
+- `ingest/extractors.py` — replaced raw purpose f-string injection with `wrap_purpose()` sentinel call.
+- `mcp/core.py` — updated citation format in Claude Code mode instructions from `[source: page_id]` to `[[page_id]]` wikilink syntax; applied `yaml_escape(source_type)` in hint string.
+- `utils/llm.py` — added `default_headers={"User-Agent": "llm-wiki-flywheel/<version>"}` to Anthropic client constructor.
+- `cli.py` and `mcp_server.py` — added `logging.basicConfig` with handler guard to prevent duplicate log lines.
+
+#### Fixed
+
+- `ingest/pipeline.py` — `_extract_entity_context()` now uses `\b{name}\b` word-boundary regex instead of `name in string` substring match, preventing false matches (e.g., "Ray" matching "stray").
+- `mcp/app.py` — `_validate_page_id()` now rejects page IDs containing any control character (`\x00`–`\x1f`, `\x7f`) with a clear error; fail-closed posture consistent with existing path-traversal guard.
+- `tests/` — fixed midnight boundary flake in `test_basic_entry` (explicit `entry_date`); replaced false-positive-prone contradiction test vocabulary; corrected `content_lower` mock values to exclude frontmatter.
 
 ---
 

@@ -11,6 +11,7 @@ import yaml
 from kb.config import SOURCE_TYPE_DIRS, TEMPLATES_DIR
 from kb.utils.llm import call_llm_json
 from kb.utils.pages import load_purpose
+from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -270,16 +271,11 @@ def build_extraction_prompt(content: str, template: dict, purpose: str | None = 
     field_descriptions = "\n".join(f"- {f}" for f in fields)
     source_name = template.get("name", "document")
     source_desc = template.get("description", "")
-    # D2a (Phase 4.5 R4 HIGH — cap-only subset): truncate purpose text so an
-    # unbounded wiki/purpose.md cannot bloat every extraction prompt by tens
-    # of KB. 4096 chars keeps "focus goals" role intact while preventing
-    # prompt-cache defeat + making persistent prompt injection via refine a
-    # bounded surface.
-    if purpose and len(purpose) > 4096:
-        purpose = purpose[:4096]
-    purpose_section = (
-        f"\nKB FOCUS (bias extraction toward these goals):\n{purpose}\n" if purpose else ""
-    )
+    if purpose:
+        wrapped = wrap_purpose(purpose)
+        purpose_section = f"\nKB FOCUS (bias extraction toward these goals):\n{wrapped}\n"
+    else:
+        purpose_section = ""
 
     # M9: fence-escape — content must never close the outer <source_document>
     # fence. Both the opening and closing tags in raw markdown are escaped to

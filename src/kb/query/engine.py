@@ -28,6 +28,7 @@ from kb.query.hybrid import hybrid_search
 from kb.utils.llm import call_llm
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.pages import load_all_pages, load_purpose
+from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -714,9 +715,11 @@ def query_wiki(
 
     # 3. Synthesize answer with LLM
     purpose = load_purpose(wiki_dir)
-    purpose_section = (
-        f"\nKB FOCUS (bias answers toward these goals):\n{purpose}\n" if purpose else ""
-    )
+    if purpose:
+        wrapped = wrap_purpose(purpose)
+        purpose_section = f"\nKB FOCUS (bias answers toward these goals):\n{wrapped}\n"
+    else:
+        purpose_section = ""
 
     prompt = f"""You are answering a question using a knowledge wiki as your source.
 {purpose_section}

@@ -6,20 +6,17 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kb.config import MAX_VERDICTS, VERDICTS_PATH
+from kb.config import (
+    MAX_NOTES_LEN,
+    MAX_VERDICTS,
+    VALID_SEVERITIES,
+    VALID_VERDICT_TYPES,
+    VERDICTS_PATH,
+)
 from kb.utils.io import file_lock
 
+# Re-exported for backward compatibility — canonical source is kb.config
 logger = logging.getLogger(__name__)
-
-VALID_SEVERITIES = ("error", "warning", "info")
-VALID_VERDICT_TYPES: tuple[str, ...] = (
-    "fidelity",
-    "consistency",
-    "completeness",
-    "review",
-    "augment",
-)
-MAX_NOTES_LEN = 2000
 
 # Cycle 4 item #12 — per-issue description size cap at library boundary.
 # Previously `mcp/quality.py::kb_save_lint_verdict` capped issue COUNT (≤100)
@@ -84,7 +81,7 @@ def load_verdicts(path: Path | None = None) -> list[dict]:
             return list(cached[2])
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         logger.warning("Corrupt verdicts file %s, returning empty: %s", path, e)
         return []
     if not isinstance(data, list):

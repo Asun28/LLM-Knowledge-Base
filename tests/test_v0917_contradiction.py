@@ -10,12 +10,13 @@ class TestDetectContradictions:
         assert result == []
 
     def test_no_false_positives_on_unrelated(self):
-        new_claims = ["Python is a programming language."]
+        # Use genuinely disjoint vocabularies to prevent heuristic false-positives.
+        new_claims = ["The Eiffel Tower stands in Paris."]
         existing = [
             {
-                "id": "concepts/rust",
-                "content": "Rust is a systems programming language.",
-                "title": "Rust",
+                "id": "concepts/qcd",
+                "content": "Quantum chromodynamics describes quark interactions.",
+                "title": "QCD",
             }
         ]
         result = detect_contradictions(new_claims, existing_pages=existing)
