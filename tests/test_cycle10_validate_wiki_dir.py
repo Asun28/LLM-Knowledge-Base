@@ -10,8 +10,8 @@ import pytest
 from kb.config import PROJECT_ROOT
 from kb.mcp import app as mcp_app
 from kb.mcp import browse, health
-from kb.mcp.health import kb_detect_drift, kb_graph_viz, kb_verdict_trends
 from kb.mcp.app import _validate_wiki_dir
+from kb.mcp.health import kb_detect_drift, kb_graph_viz, kb_verdict_trends
 
 
 def test_validate_wiki_dir_rejects_absolute_outside_project_root(tmp_path):

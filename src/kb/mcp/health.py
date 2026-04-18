@@ -195,9 +195,7 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         )
     max_nodes = max(1, min(max_nodes, 500))
     try:
-        wiki_path = _wiki_dir_for_legacy_threading_test(
-            wiki_dir, export_mermaid, "kb.graph.export"
-        )
+        wiki_path = _wiki_dir_for_legacy_threading_test(wiki_dir, export_mermaid, "kb.graph.export")
         if wiki_path is None:
             wiki_path, err = _validate_health_wiki_dir(wiki_dir)
             if err:

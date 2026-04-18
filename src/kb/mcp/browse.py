@@ -2,7 +2,6 @@
 
 import logging
 import os
-from pathlib import Path
 
 from kb.config import (
     MAX_QUESTION_LEN,

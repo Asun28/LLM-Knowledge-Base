@@ -76,9 +76,7 @@ def _coerce_str_field(extraction: dict, field: str) -> str:
         return ""
     if isinstance(value, str):
         return value
-    raise ValueError(
-        f"extraction field {field!r} must be string, got {type(value).__name__}"
-    )
+    raise ValueError(f"extraction field {field!r} must be string, got {type(value).__name__}")
 
 
 def _pre_validate_extraction(extraction: dict) -> None:
@@ -350,16 +348,16 @@ def _write_wiki_page(
 def _build_summary_content(extraction: dict, source_type: str) -> str:
     """Build summary page content from extracted data."""
     lines = []
-    title = _coerce_str_field(extraction, "title") or _coerce_str_field(
-        extraction, "name"
-    ) or "Untitled"
+    title = (
+        _coerce_str_field(extraction, "title")
+        or _coerce_str_field(extraction, "name")
+        or "Untitled"
+    )
     safe_title = title.replace("\n", " ").replace("\r", "")
     lines.append(f"# {safe_title}\n")
 
     # Author/speaker info
-    author = _coerce_str_field(extraction, "author") or _coerce_str_field(
-        extraction, "speaker"
-    )
+    author = _coerce_str_field(extraction, "author") or _coerce_str_field(extraction, "speaker")
     authors = extraction.get("authors")
     if authors and isinstance(authors, list):
         safe_authors = []
