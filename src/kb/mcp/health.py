@@ -55,7 +55,7 @@ def kb_lint(
 
     wiki_path, err = _validate_wiki_dir(wiki_dir)
     if err:
-        return err
+        return f"Error: {err}"
 
     try:
         from kb.lint.runner import format_report, run_all_checks
@@ -115,7 +115,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     """
     wiki_path, err = _validate_wiki_dir(wiki_dir)
     if err:
-        return err
+        return f"Error: {err}"
 
     try:
         from kb.evolve.analyzer import format_evolution_report, generate_evolution_report

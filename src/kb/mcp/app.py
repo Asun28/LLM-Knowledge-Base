@@ -190,14 +190,21 @@ def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
-        return None, f"Invalid wiki_dir: {_sanitize_error_str(e)}"
+        return None, f"wiki_dir invalid: {_sanitize_error_str(e)}"
     if not path.is_absolute():
-        return None, f"Error: wiki_dir must be an absolute path (got: {wiki_dir})"
+        return None, f"wiki_dir must be an absolute path (got: {wiki_dir})"
     if not path.exists():
-        return None, f"Error: wiki_dir does not exist: {path}"
+        return None, f"wiki_dir does not exist: {_sanitize_error_str(str(path))}"
     if not path.is_dir():
-        return None, f"Error: wiki_dir is not a directory: {path}"
-    return path.resolve(), None
+        return None, f"wiki_dir is not a directory: {_sanitize_error_str(str(path))}"
+    path_resolved = path.resolve()
+    root = PROJECT_ROOT.resolve()
+    if path_resolved != root and not path_resolved.is_relative_to(root):
+        return (
+            None,
+            f"wiki_dir must be inside project root — got {_sanitize_error_str(str(path_resolved))}",
+        )
+    return path_resolved, None
 
 
 # Cycle 4 item #13 — cross-platform reservation of Windows device names.
