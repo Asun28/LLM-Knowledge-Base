@@ -100,3 +100,9 @@ def test_validate_notes_accepts_valid_and_reports_sanitized_length():
     assert error == (
         f"Error: revision_notes too long ({MAX_NOTES_LEN + 1} chars; max {MAX_NOTES_LEN})."
     )
+
+
+def test_validate_notes_strips_control_chars_before_length_check():
+    raw = ("x" * MAX_NOTES_LEN) + "\x00"
+
+    assert _validate_notes(raw, "notes") is None

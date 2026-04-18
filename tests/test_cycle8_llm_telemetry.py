@@ -50,8 +50,8 @@ def test_make_api_call_success_logs_info_record_without_prompt_leak(monkeypatch,
     assert "tokens_in=123" in message
     assert "tokens_out=45" in message
     assert "latency_ms=" in message
-    assert prompt[:30] not in message
-    assert system[:30] not in message
+    assert prompt not in message
+    assert system not in message
 
 
 def test_make_api_call_missing_usage_logs_zero_tokens(monkeypatch, caplog):

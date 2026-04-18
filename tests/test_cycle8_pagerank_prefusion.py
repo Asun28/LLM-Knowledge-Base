@@ -89,6 +89,7 @@ def test_pagerank_enters_rrf_as_rank_list_with_pinned_top_five(monkeypatch):
         key=lambda page_id: (-pagerank_scores[page_id], candidates.index(page_id)),
     )
     assert pagerank_ids == expected_pagerank_ids
+    # RRF_K=60 constant used in scoring; update snapshot if RRF_K changes
     assert fused_top_five == [
         "concepts/delta",
         "concepts/foxtrot",

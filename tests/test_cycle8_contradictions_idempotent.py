@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date
 
 from kb.ingest.pipeline import _persist_contradictions
@@ -53,3 +54,55 @@ def test_source_ref_header_injection_is_stripped_before_persist(tmp_path):
     header = f"## raw/articles/source.md — {date.today().isoformat()}\n"
     assert header in content
     assert "## injected" not in content
+
+
+def test_concurrent_same_day_same_source_distinct_claims_both_persist(tmp_wiki):
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def worker(claim: str) -> None:
+        try:
+            barrier.wait(timeout=5)
+            _persist_contradictions([{"claim": claim}], "raw/a.md", tmp_wiki)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=("claim-alpha",)),
+        threading.Thread(target=worker, args=("claim-beta",)),
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors == []
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert content.count("claim-alpha") == 1
+    assert content.count("claim-beta") == 1
+
+
+def test_concurrent_identical_claim_block_dedups_once(tmp_wiki):
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=5)
+            _persist_contradictions([{"claim": "claim-alpha"}], "raw/a.md", tmp_wiki)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker), threading.Thread(target=worker)]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors == []
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert content.count("claim-alpha") == 1
