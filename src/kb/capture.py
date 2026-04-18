@@ -343,9 +343,22 @@ def _escape_prompt_fences(content: str) -> str:
 
 
 def _extract_items_via_llm(content: str) -> dict:
-    """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion."""
+    """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion.
+
+    AC21 R1 M1: runtime pre-flight on the assembled prompt length. The
+    module-level `assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS` at import
+    time disappears under `python -O`, and a legitimately-sized content
+    combined with a larger-than-expected template could still slip past.
+    An explicit runtime check closes that gap regardless of optimization
+    level.
+    """
     safe_content = _escape_prompt_fences(content)
     prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=safe_content)
+    if len(prompt) > MAX_PROMPT_CHARS:
+        raise CaptureError(
+            f"capture prompt too long ({len(prompt)} chars > {MAX_PROMPT_CHARS} max); "
+            f"CAPTURE_MAX_BYTES={CAPTURE_MAX_BYTES} should prevent this — file a bug"
+        )
     return call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
 
 
