@@ -8,30 +8,10 @@ import networkx as nx
 from kb.config import WIKI_DIR
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
-from kb.utils.pages import WIKI_SUBDIRS
+from kb.utils.pages import page_id, scan_wiki_pages  # noqa: F401 — back-compat re-export
 
+# WIKI_SUBDIRS is consumed by the re-exported kb.utils.pages.scan_wiki_pages.
 logger = logging.getLogger(__name__)
-
-
-def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
-    """Find all markdown files in wiki subdirectories (excluding index files)."""
-    wiki_dir = wiki_dir or WIKI_DIR
-    pages = []
-    for subdir in WIKI_SUBDIRS:
-        subdir_path = wiki_dir / subdir
-        if subdir_path.exists():
-            pages.extend(subdir_path.glob("*.md"))
-    return sorted(pages)
-
-
-def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
-    """Convert a wiki page path to a graph node ID (e.g., 'concepts/rag').
-
-    Note: The returned ID is lowercased for consistent node naming. The ``path``
-    node attribute retains original filesystem case and must be used for all file I/O.
-    """
-    wiki_dir = wiki_dir or WIKI_DIR
-    return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
 def build_graph(wiki_dir: Path | None = None, *, pages: list[dict] | None = None) -> nx.DiGraph:

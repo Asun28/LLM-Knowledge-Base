@@ -8,6 +8,15 @@ def test_import_page_id_and_scan_wiki_pages_succeeds():  # noqa: D103  # placeho
     assert callable(scan_wiki_pages)
 
 
+def test_graph_builder_re_exports_page_helpers_by_identity():  # noqa: D103
+    from kb.graph.builder import page_id as builder_page_id
+    from kb.graph.builder import scan_wiki_pages as builder_scan_wiki_pages
+    from kb.utils.pages import page_id, scan_wiki_pages
+
+    assert builder_page_id is page_id
+    assert builder_scan_wiki_pages is scan_wiki_pages
+
+
 def test_page_id_returns_lowercase_posix_relative_id():  # noqa: D103  # placeholder-for-task9
     from kb.utils.pages import page_id
 
