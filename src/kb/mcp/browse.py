@@ -2,10 +2,12 @@
 
 import logging
 import os
+from pathlib import Path
 
 from kb.config import (
     MAX_QUESTION_LEN,
     MAX_SEARCH_RESULTS,
+    PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
     RAW_DIR,
     WIKI_DIR,
@@ -314,15 +316,22 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
 
 
 @mcp.tool()
-def kb_stats() -> str:
+def kb_stats(wiki_dir: str | None = None) -> str:
     """Get wiki statistics: page counts by type, graph metrics, coverage info."""
     try:
         from kb.evolve.analyzer import analyze_coverage
         from kb.graph.builder import build_graph, graph_stats
 
-        coverage = analyze_coverage()
-        graph = build_graph()
+        wiki_path = None
+        if wiki_dir is not None:
+            wiki_path = Path(wiki_dir).resolve()
+            wiki_path.relative_to(PROJECT_ROOT.resolve())
+
+        coverage = analyze_coverage(wiki_dir=wiki_path)
+        graph = build_graph(wiki_dir=wiki_path)
         stats = graph_stats(graph)
+    except ValueError as e:
+        return f"Error: Invalid wiki_dir — {_sanitize_error_str(e)}"
     except Exception as e:
         logger.exception("Error computing wiki stats")
         return f"Error computing wiki stats: {_sanitize_error_str(e)}"

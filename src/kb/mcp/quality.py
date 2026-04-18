@@ -9,16 +9,16 @@ from datetime import date
 from kb.config import (
     CONFIDENCE_LEVELS,
     MAX_INGEST_CONTENT_CHARS,
-    MAX_NOTES_LEN,
     MAX_QUESTION_LEN,
     PAGE_TYPES,
     PROJECT_ROOT,
+    VALID_VERDICT_TYPES,
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
-from kb.mcp.app import _sanitize_error_str, _validate_page_id, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_notes, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
@@ -76,8 +76,9 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     page_id = _strip_control_chars(page_id)
     if len(page_id) > 200:
         return f"Error: page_id too long ({len(page_id)} chars; max 200)."
-    if len(revision_notes) > MAX_NOTES_LEN:
-        return f"Error: revision_notes too long ({len(revision_notes)} chars; max {MAX_NOTES_LEN})."
+    notes_err = _validate_notes(revision_notes, "revision_notes")
+    if notes_err:
+        return notes_err
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -152,6 +153,9 @@ def kb_lint_consistency(page_ids: str = "") -> str:
 
     Pass comma-separated page IDs, or leave empty to auto-select
     pages most likely to conflict (shared sources, wikilink neighbors).
+    Auto mode chunks large groups, caps total emitted groups, strips
+    frontmatter, and truncates each inlined page body. Explicit page IDs are
+    not truncated.
 
     Args:
         page_ids: Comma-separated page IDs (e.g., 'concepts/rag,concepts/llm').
@@ -188,6 +192,9 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         return "Error: Question cannot be empty."
     if len(question) > MAX_QUESTION_LEN:
         return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
+    notes_err = _validate_notes(notes, "notes")
+    if notes_err:
+        return notes_err
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
     for pid in pages:
@@ -345,8 +352,17 @@ def kb_save_lint_verdict(
     if err:
         return f"Error: {err}"
 
-    if len(notes) > MAX_NOTES_LEN:
-        return f"Error: Notes too long (max {MAX_NOTES_LEN} chars)."
+    if verdict_type not in VALID_VERDICT_TYPES:
+        return (
+            f"Error: Invalid verdict_type: {verdict_type}. "
+            f"Must be one of: {', '.join(repr(t) for t in VALID_VERDICT_TYPES)}"
+        )
+    if verdict not in ("pass", "fail", "warning"):
+        return f"Error: Invalid verdict: {verdict}. Must be 'pass', 'fail', or 'warning'"
+
+    err = _validate_notes(notes, "notes")
+    if err:
+        return err
 
     issue_list = None
     if issues:

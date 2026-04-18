@@ -175,7 +175,7 @@ def _get_model():
             if _model is None:
                 from model2vec import StaticModel
 
-                _model = StaticModel.from_pretrained(EMBEDDING_MODEL)
+                _model = StaticModel.from_pretrained(EMBEDDING_MODEL, force_download=False)
     return _model
 
 

@@ -820,6 +820,7 @@ def run_augment(
                     extraction=extraction,
                     wiki_dir=wiki_dir,
                     raw_dir=raw_dir,  # B1: honor caller's custom raw/
+                    _skip_vector_rebuild=True,
                 )
             except Exception as e:
                 msg = f"ingest_source failed: {type(e).__name__}: {e}"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-from kb.config import MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
+from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,15 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
 # double-gate where page IDs of 201-255 chars passed MCP validation but later
 # tripped the persistence layer. Single source of truth now in kb.config.
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_NOTES_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def _validate_notes(notes: str, field_name: str) -> str | None:
+    """Validate free-text MCP notes after stripping control and bidi characters."""
+    stripped = _NOTES_UNSAFE_RE.sub("", notes or "")
+    if len(stripped) > MAX_NOTES_LEN:
+        return f"Error: {field_name} too long ({len(stripped)} chars; max {MAX_NOTES_LEN})."
+    return None
 
 
 def _is_windows_reserved(page_id: str) -> bool:

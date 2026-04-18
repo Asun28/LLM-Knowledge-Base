@@ -137,6 +137,8 @@ LLM_REQUEST_TIMEOUT = 120.0  # seconds
 # ── Phase 2: Quality thresholds ──────────────────────────────
 LOW_TRUST_THRESHOLD = 0.4
 MAX_CONSISTENCY_GROUP_SIZE = 5
+MAX_CONSISTENCY_GROUPS = 20
+MAX_CONSISTENCY_PAGE_CONTENT_CHARS = 4096
 
 # ── Lint tuning ──────────────────────────────────────────────
 STALENESS_MAX_DAYS = 90

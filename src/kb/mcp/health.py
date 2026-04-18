@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+from kb.config import PROJECT_ROOT
 from kb.graph.export import export_mermaid
 from kb.lint._safe_call import _safe_call
 from kb.mcp.app import _sanitize_error_str, mcp
@@ -173,7 +174,7 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
 
 
 @mcp.tool()
-def kb_verdict_trends() -> str:
+def kb_verdict_trends(wiki_dir: str | None = None) -> str:
     """Show verdict quality trends over time.
 
     Analyzes the verdict history to show pass/fail/warning rates by week
@@ -182,8 +183,16 @@ def kb_verdict_trends() -> str:
     try:
         from kb.lint.trends import compute_verdict_trends, format_verdict_trends
 
-        trends = compute_verdict_trends()
+        verdicts_path = None
+        if wiki_dir is not None:
+            wiki_path = Path(wiki_dir).resolve()
+            wiki_path.relative_to(PROJECT_ROOT.resolve())
+            verdicts_path = wiki_path.parent / ".data" / "verdicts.json"
+
+        trends = compute_verdict_trends(path=verdicts_path)
         return format_verdict_trends(trends)
+    except ValueError as e:
+        return f"Error: Invalid wiki_dir — {_sanitize_error_str(e)}"
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
         return f"Error: Verdict trends failed — {_sanitize_error_str(e)}"

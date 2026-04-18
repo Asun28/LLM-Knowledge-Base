@@ -74,7 +74,21 @@ def _make_api_call(kwargs: dict, model: str):
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            return client.messages.create(**kwargs)
+            start = time.monotonic()
+            response = client.messages.create(**kwargs)
+            usage = getattr(response, "usage", None)
+            tokens_in = getattr(usage, "input_tokens", 0)
+            tokens_out = getattr(usage, "output_tokens", 0)
+            latency_ms = int((time.monotonic() - start) * 1000)
+            logger.info(
+                "llm.call_ok model=%s attempt=%d tokens_in=%s tokens_out=%s latency_ms=%d",
+                model,
+                attempt + 1,
+                tokens_in,
+                tokens_out,
+                latency_ms,
+            )
+            return response
 
         except anthropic.RateLimitError as e:
             last_error = e
