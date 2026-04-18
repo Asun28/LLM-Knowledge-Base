@@ -301,7 +301,11 @@ def _write_wiki_page(
         type=page_type,
         confidence=confidence,
     )
-    atomic_text_write(frontmatter.dumps(post) + "\n", effective_path)
+    # PR #21 R1 Codex MAJOR 3: sort_keys=False preserves insertion order so the
+    # frontmatter fields land as title → source → created → updated → type →
+    # confidence, matching the pre-cycle-7 hand-rolled YAML and every downstream
+    # parser that may depend on that ordering.
+    atomic_text_write(frontmatter.dumps(post, sort_keys=False) + "\n", effective_path)
     append_evidence_trail(
         effective_path, source_ref, f"Initial extraction: {page_type} page created"
     )
@@ -524,15 +528,24 @@ def _update_existing_page(
         # body ends with `\n` before substitution.
         if not masked_body.endswith("\n"):
             masked_body = masked_body + "\n"
-        # Append new reference at end of References block.
-        masked_body = re.sub(
+        # Append new reference at end of References block. PR #21 R1 Codex
+        # MAJOR 2: use ``re.subn`` so we can detect whether the regex
+        # actually matched (header variant like ``## References   `` with
+        # trailing whitespace would otherwise silently no-op, leaving the
+        # frontmatter source updated but the body unchanged).
+        masked_body_new, n_sub = re.subn(
             r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)",
             lambda m: m.group(1).rstrip("\n") + "\n" + ref_line + "\n",
             masked_body,
             count=1,
             flags=re.MULTILINE,
         )
-        body_text = _unmask_code_blocks(masked_body, masked_code, mask_prefix)
+        if n_sub == 0:
+            # Heading present but didn't match the strict regex — append a
+            # fresh References block at the end instead of silently dropping
+            # the new reference.
+            masked_body_new = masked_body.rstrip("\n") + f"\n\n## References\n\n{ref_line}\n"
+        body_text = _unmask_code_blocks(masked_body_new, masked_code, mask_prefix)
         content = fm_text + body_text
     elif "## References" not in masked_body:
         # Preserve the old unmasked body (no need to re-unmask a pure-append).

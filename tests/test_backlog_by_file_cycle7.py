@@ -189,28 +189,42 @@ class TestUpdateExistingPageReferences:
 
 
 class TestIngestContradictionNarrowException:
-    def test_valueerror_propagates(self, tmp_project, monkeypatch):
-        """ValueError from contradiction detection must NOT be silently swallowed."""
+    def test_valueerror_propagates_from_contradiction_detector(self, tmp_project, monkeypatch):
+        """PR #21 R1 Sonnet B1 fix: exercise the EXACT contradiction-detection
+        try/except by (a) patching RAW_DIR so path-traversal validation passes,
+        (b) supplying non-empty key_claims so `detect_contradictions_with_metadata`
+        is actually invoked. Without both, earlier validation raises ValueError
+        240 lines upstream and the narrow-except change is never exercised.
+        """
         from kb.ingest import pipeline
 
+        # (a) Align RAW_DIR so the `source_path must be within raw/` guard passes.
+        monkeypatch.setattr(pipeline, "RAW_DIR", tmp_project / "raw")
+        monkeypatch.setattr(
+            "kb.ingest.pipeline.PROJECT_ROOT",
+            tmp_project,
+        )
+
         def raising_detector(*args, **kwargs):
-            raise ValueError("simulated bug in detector")
+            raise ValueError("simulated bug deep inside contradiction detector")
 
         monkeypatch.setattr(pipeline, "detect_contradictions_with_metadata", raising_detector)
-        # Prepare a minimal raw source.
+
         raw_path = tmp_project / "raw" / "articles" / "test.md"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_path.write_text("# Test\nBody.", encoding="utf-8")
         extraction = {
-            "title": "Test",
-            "core_argument": "none",
-            "key_claims": [],
-            "entities": [],
-            "concepts": [],
+            "title": "TestArticle",
+            "core_argument": "AC6 test — detector must be invoked.",
+            # (b) Non-empty key_claims → gates the inner contradiction-detection
+            # block so our monkeypatched detector is reached.
+            "key_claims": ["claim one", "claim two"],
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
         }
-        # Use the real project's wiki_dir for this (simplest path); AC6 is about
-        # the exception bubble, so we expect either ValueError or a wrapped
-        # exception. Either way — NOT silent success.
-        with pytest.raises((ValueError, RuntimeError)):
+        # AC6 narrows the contradiction-detection except to (KeyError, TypeError,
+        # re.error) — a ValueError from the detector MUST propagate.
+        with pytest.raises(ValueError, match="simulated bug"):
             pipeline.ingest_source(
                 raw_path,
                 source_type="article",
@@ -571,16 +585,23 @@ class TestManifestPruningTemplateSentinelBehavioural:
 
 
 class TestCliExitCodes:
-    def test_cli_module_has_exit_helper_or_uses_sys_exit(self):
-        import kb.cli as cli
+    def test_version_command_exits_zero(self, tmp_path):
+        """AC16 + AC30 behavioural: `kb --version` exits with code 0 and emits
+        the version string. This is the concrete exit-code-0 success path."""
+        import subprocess
+        import sys
 
-        src = inspect.getsource(cli)
-        # Not a source-grep assertion per red-flag — we want behavioural:
-        # instead check that sys is imported (signals sys.exit usage) and no
-        # bare `ctx.exit(` remains (standardized to SystemExit-based path).
-        # This is a module-invariant property that other tests catch via
-        # actual `kb compile` failure exits.
-        assert "sys" in src  # sys module imported → SystemExit-capable
+        proc = subprocess.run(
+            [sys.executable, "-m", "kb.cli", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert proc.returncode == 0, (
+            f"kb --version must exit 0; got {proc.returncode}\n"
+            f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+        )
+        assert "version" in (proc.stdout + proc.stderr).lower()
 
 
 # =============================================================================
@@ -672,16 +693,25 @@ class TestSemanticContextPagesKwarg:
         semantic._group_by_wikilinks(tmp_wiki, pages=pages)
         assert scan_count["n"] == 0
 
-    def test_no_str_format_on_page_bundle(self):
-        """Defensive: build_consistency_context should not str-format page dicts."""
+    def test_pages_bundle_content_passed_through_verbatim(self, tmp_wiki):
+        """Behavioural: a hostile page bundle containing template-format strings
+        in its ``content`` field must not cause KeyError / format substitution —
+        the bundle is read by regex, not by .format(**page). Exercises the
+        actual `_group_by_*` code path with attacker-shaped content.
+        """
         import kb.lint.semantic as semantic
 
-        src = inspect.getsource(semantic)
-        # Defensive anti-pattern grep — if this ever fires, investigate.
-        # NOTE: this is a property-test on the module that warns about format
-        # injection, not a replacement for behavioural tests.
-        assert ".format(**page" not in src
-        assert ".format(page=" not in src
+        hostile_content = (
+            "---\ntitle: Foo\nsource: raw/articles/x.md\n---\n"
+            "Body with {unclosed_format and {{double_braces and %(printf)s\n"
+        )
+        pages = [
+            {"id": "entities/foo", "content": hostile_content},
+            {"id": "entities/bar", "content": hostile_content.replace("Foo", "Bar")},
+        ]
+        # Must NOT raise KeyError/ValueError/IndexError.
+        semantic._group_by_shared_sources(tmp_wiki, pages=pages)
+        semantic._group_by_term_overlap(tmp_wiki, pages=pages)
 
 
 # =============================================================================

@@ -159,17 +159,17 @@ def kb_query(
         except anthropic.BadRequestError as e:
             logger.warning("kb_query API bad-request for %r: %s", question[:80], e)
             if "too long" in str(e).lower() or "context" in str(e).lower():
-                return error_tag("prompt_too_long", str(e))
-            return error_tag("invalid_input", str(e))
+                return error_tag("prompt_too_long", _sanitize_error_str(e))
+            return error_tag("invalid_input", _sanitize_error_str(e))
         except anthropic.RateLimitError as e:
             logger.warning("kb_query API rate-limited for %r: %s", question[:80], e)
-            return error_tag("rate_limit", str(e))
+            return error_tag("rate_limit", _sanitize_error_str(e))
         except LLMError as e:
             logger.error("kb_query API LLM failure for %r: %s", question[:80], e)
-            return error_tag("internal", f"LLM call failed: {e}")
+            return error_tag("internal", f"LLM call failed: {_sanitize_error_str(e)}")
         except Exception as e:
             logger.exception("kb_query API unexpected error for: %s", question)
-            return error_tag("internal", f"unexpected error: {e}")
+            return error_tag("internal", f"unexpected error: {_sanitize_error_str(e)}")
 
     # Default: Claude Code mode — return context for synthesis
     # H18: apply multi-turn query rewriting when conversation context is present
@@ -611,7 +611,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
     try:
         from kb.compile.compiler import find_changed_sources, scan_raw_sources
     except Exception as e:
-        return f"Error loading compile module: {e}"
+        return f"Error loading compile module: {_sanitize_error_str(e)}"
 
     try:
         if incremental:

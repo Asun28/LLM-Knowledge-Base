@@ -122,10 +122,14 @@ def refine_page(
         # frontmatter (e.g. tab-indented keys that regex-match but fail
         # YAML parsing) would be laundered through a successful write with
         # fresh valid frontmatter, corrupting the page's original data.
+        # PR #21 R1 Codex MAJOR 4: also verify the parsed value is a mapping —
+        # well-formed YAML that parses to a scalar/list (e.g. `title: null`
+        # alone at the top) would otherwise pass the syntax gate while
+        # silently indicating a broken page.
         import yaml  # noqa: PLC0415 — library-boundary import
 
         try:
-            yaml.safe_load(frontmatter_text)
+            parsed_fm = yaml.safe_load(frontmatter_text)
         except yaml.YAMLError as e:
             logger.warning(
                 "refine_page(%s) rejected: malformed frontmatter YAML: %s",
@@ -136,6 +140,18 @@ def refine_page(
                 "error": (
                     f"Malformed frontmatter YAML in {page_id} — "
                     f"refine rejected to prevent corruption: {e}"
+                )
+            }
+        if parsed_fm is None or not isinstance(parsed_fm, dict):
+            logger.warning(
+                "refine_page(%s) rejected: frontmatter is not a mapping (%s)",
+                page_id,
+                type(parsed_fm).__name__,
+            )
+            return {
+                "error": (
+                    f"Frontmatter in {page_id} is not a YAML mapping — "
+                    f"refine rejected to prevent corruption."
                 )
             }
 
