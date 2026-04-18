@@ -86,6 +86,7 @@ class TestMcpHealthToolsThreadWikiDir:
     """AC2 — kb_detect_drift / kb_evolve / kb_graph_viz accept ``wiki_dir``."""
 
     def test_kb_detect_drift_passes_wiki_dir(self, tmp_path, monkeypatch):
+        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
@@ -100,25 +101,33 @@ class TestMcpHealthToolsThreadWikiDir:
                 "deleted_affected_pages": [],
             }
 
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr("kb.compile.compiler.detect_source_drift", _fake)
         health.kb_detect_drift(wiki_dir=str(tmp_path))
         assert received["wiki_dir"] == tmp_path
 
-    def test_kb_evolve_passes_wiki_dir(self, tmp_path, monkeypatch):
+    def test_kb_evolve_passes_wiki_dir(self, tmp_project, monkeypatch):
+        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
+        wiki_dir = tmp_project / "wiki"
 
         def _fake(wiki_dir=None):
             received["wiki_dir"] = wiki_dir
             return {"suggestions": []}
 
+        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
+        monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
         monkeypatch.setattr("kb.evolve.analyzer.generate_evolution_report", _fake)
         monkeypatch.setattr("kb.evolve.analyzer.format_evolution_report", lambda r: "report")
-        health.kb_evolve(wiki_dir=str(tmp_path))
-        assert received["wiki_dir"] == tmp_path
+        health.kb_evolve(wiki_dir=str(wiki_dir))
+        assert received["wiki_dir"] == wiki_dir
 
     def test_kb_graph_viz_passes_wiki_dir(self, tmp_path, monkeypatch):
+        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
@@ -127,6 +136,9 @@ class TestMcpHealthToolsThreadWikiDir:
             received["wiki_dir"] = wiki_dir
             return "graph LR\n"
 
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(health, "export_mermaid", _fake)
         health.kb_graph_viz(max_nodes=10, wiki_dir=str(tmp_path))
         assert received["wiki_dir"] == tmp_path

@@ -2,7 +2,6 @@
 
 import logging
 import os
-from pathlib import Path
 
 from kb.config import (
     MAX_QUESTION_LEN,
@@ -13,7 +12,7 @@ from kb.config import (
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.mcp.app import _sanitize_error_str, _validate_page_id, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_page_id, _validate_wiki_dir, mcp
 from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
@@ -322,16 +321,13 @@ def kb_stats(wiki_dir: str | None = None) -> str:
         from kb.evolve.analyzer import analyze_coverage
         from kb.graph.builder import build_graph, graph_stats
 
-        wiki_path = None
-        if wiki_dir is not None:
-            wiki_path = Path(wiki_dir).resolve()
-            wiki_path.relative_to(PROJECT_ROOT.resolve())
+        wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
+        if err:
+            return f"Error: {err}"
 
         coverage = analyze_coverage(wiki_dir=wiki_path)
         graph = build_graph(wiki_dir=wiki_path)
         stats = graph_stats(graph)
-    except ValueError as e:
-        return f"Error: Invalid wiki_dir — {_sanitize_error_str(e)}"
     except Exception as e:
         logger.exception("Error computing wiki stats")
         return f"Error computing wiki stats: {_sanitize_error_str(e)}"

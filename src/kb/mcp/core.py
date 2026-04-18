@@ -623,7 +623,7 @@ def kb_compile_scan(incremental: bool = True, wiki_dir: str | None = None) -> st
     try:
         wiki_path, err = _validate_wiki_dir(wiki_dir)
         if err:
-            return err
+            return f"Error: {err}"
         raw_dir = wiki_path.parent / "raw" if wiki_path else None
         manifest_path = wiki_path.parent / ".data" / "hashes.json" if wiki_path else None
         if incremental:

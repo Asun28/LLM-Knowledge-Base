@@ -8,6 +8,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
+from kb.utils.sanitize import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -130,74 +131,35 @@ def _rel(path: "Path | None") -> str:
         return str(path).replace("\\", "/")
 
 
-# Cycle 7 AC12+AC13: redact filesystem paths in exception strings before they
-# reach the MCP client. Combines (a) known-path substitution [cycle 4 pattern
-# at core.py:283] with (b) regex stripping of Windows drive-letter and POSIX
-# absolute-path literals that may live inside `str(exc)` via `exc.filename`
-# or interpolated error text. Centralizing prevents per-site omissions.
-_ABS_PATH_PATTERNS = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s'\"]+)"  # Windows: D:\foo\bar or D:/foo/bar
-    r"|(?:\\\\\?\\[^\s'\"]+)"  # Windows UNC long-path: \\?\C:\...
-    r"|(?:/(?:home|Users|opt|var|srv|tmp|mnt|root)/[^\s'\"]+)"  # POSIX absolute
-)
-
-
 def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
-    """Render an exception as a string with filesystem paths redacted.
-
-    Replaces each explicit ``paths`` argument with its ``_rel(path)`` form,
-    then sweeps any remaining absolute path literals that may have leaked via
-    ``exc.filename`` / ``exc.filename2`` / interpolated message text.
-
-    Args:
-        exc: The exception whose ``str()`` will be rendered.
-        *paths: Known paths whose absolute form should be rewritten. ``None``
-            entries are ignored so callers can pass optional paths without
-            guarding.
-
-    Returns:
-        Sanitized string safe for the MCP client.
-    """
-    s = str(exc)
-    # Known-path substitution: per-call-site safety.
-    for p in paths:
-        if p is None:
-            continue
-        try:
-            abs_s = str(p)
-        except Exception:  # noqa: BLE001 — defensive for weird Path subclasses
-            continue
-        if abs_s and abs_s in s:
-            s = s.replace(abs_s, _rel(p))
-    # Pull filename attributes off OSError/FileNotFoundError and replace too.
-    for attr in ("filename", "filename2"):
-        fn = getattr(exc, attr, None)
-        if fn and isinstance(fn, (str, os.PathLike)):
-            fn_str = str(fn)
-            if fn_str and fn_str in s:
-                try:
-                    s = s.replace(fn_str, _rel(Path(fn_str)))
-                except (TypeError, ValueError):
-                    s = s.replace(fn_str, "<path>")
-    # Regex sweep for remaining absolute-path literals.
-    s = _ABS_PATH_PATTERNS.sub("<path>", s)
-    return s
+    """Render an exception as a string with filesystem paths redacted."""
+    return sanitize_error_text(exc, *paths)
 
 
-def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+def _validate_wiki_dir(
+    wiki_dir: str | None, *, project_root: Path | None = None
+) -> tuple[Path | None, str | None]:
     if wiki_dir is None:
         return None, None
+    effective_project_root = project_root or PROJECT_ROOT
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
-        return None, f"Invalid wiki_dir: {_sanitize_error_str(e)}"
+        return None, f"wiki_dir invalid: {_sanitize_error_str(e)}"
     if not path.is_absolute():
-        return None, f"Error: wiki_dir must be an absolute path (got: {wiki_dir})"
+        return None, f"wiki_dir must be an absolute path (got: {wiki_dir})"
     if not path.exists():
-        return None, f"Error: wiki_dir does not exist: {path}"
+        return None, f"wiki_dir does not exist: {_sanitize_error_str(str(path))}"
     if not path.is_dir():
-        return None, f"Error: wiki_dir is not a directory: {path}"
-    return path.resolve(), None
+        return None, f"wiki_dir is not a directory: {_sanitize_error_str(str(path))}"
+    path_resolved = path.resolve()
+    root = effective_project_root.resolve()
+    if path_resolved != root and not path_resolved.is_relative_to(root):
+        return (
+            None,
+            f"wiki_dir must be inside project root — got {_sanitize_error_str(str(path_resolved))}",
+        )
+    return path_resolved, None
 
 
 # Cycle 4 item #13 — cross-platform reservation of Windows device names.

@@ -228,6 +228,13 @@ def detect_source_drift(
 
     Returns:
         dict with keys: changed_sources, affected_pages, summary.
+
+    deletion-pruning of manifest entries is always persisted even when
+    save_hashes=False is passed to find_changed_sources, because lingering
+    deleted-source entries would corrupt subsequent find_changed_sources
+    calls. This is the single exception to the read-only contract; callers
+    should NOT assume detect_source_drift is side-effect-free on the
+    manifest when raw sources have been deleted.
     """
     import frontmatter as fm
 

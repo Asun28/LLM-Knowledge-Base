@@ -5,10 +5,13 @@ from pathlib import Path
 
 from kb.config import PROJECT_ROOT
 from kb.graph.export import export_mermaid
-from kb.lint._safe_call import _safe_call
 from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_health_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+    return _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
 
 
 @mcp.tool()
@@ -53,9 +56,9 @@ def kb_lint(
             f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
         )
 
-    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
     if err:
-        return err
+        return f"Error: {err}"
 
     try:
         from kb.lint.runner import format_report, run_all_checks
@@ -69,6 +72,8 @@ def kb_lint(
 
     # Append feedback-flagged pages (Cycle 7 AC27: route through _safe_call so
     # failures surface in the report label instead of silently degrading).
+    from kb.lint._safe_call import _safe_call
+
     flagged, flag_err = _safe_call(
         lambda: __import__(
             "kb.feedback.reliability", fromlist=["get_flagged_pages"]
@@ -113,9 +118,9 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     Args:
         wiki_dir: Cycle 6 AC2. Override wiki directory (default: kb.config.WIKI_DIR).
     """
-    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
     if err:
-        return err
+        return f"Error: {err}"
 
     try:
         from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
@@ -174,7 +179,9 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         )
     max_nodes = max(1, min(max_nodes, 500))
     try:
-        wiki_path = Path(wiki_dir) if wiki_dir else None
+        wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+        if err:
+            return f"Error: {err}"
         return export_mermaid(max_nodes=max_nodes, wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)
@@ -193,14 +200,13 @@ def kb_verdict_trends(wiki_dir: str | None = None) -> str:
 
         verdicts_path = None
         if wiki_dir is not None:
-            wiki_path = Path(wiki_dir).resolve()
-            wiki_path.relative_to(PROJECT_ROOT.resolve())
+            wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+            if err:
+                return f"Error: {err}"
             verdicts_path = wiki_path.parent / ".data" / "verdicts.json"
 
         trends = compute_verdict_trends(path=verdicts_path)
         return format_verdict_trends(trends)
-    except ValueError as e:
-        return f"Error: Invalid wiki_dir — {_sanitize_error_str(e)}"
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
         return f"Error: Verdict trends failed — {_sanitize_error_str(e)}"
@@ -220,7 +226,9 @@ def kb_detect_drift(wiki_dir: str | None = None) -> str:
     try:
         from kb.compile.compiler import detect_source_drift
 
-        wiki_path = Path(wiki_dir) if wiki_dir else None
+        wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+        if err:
+            return f"Error: {err}"
         result = detect_source_drift(wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error detecting source drift: %s", e)

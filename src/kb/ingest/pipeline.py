@@ -57,6 +57,33 @@ _UNTITLED_SENTINEL_RE = re.compile(r"^untitled-[0-9a-f]{6}$")
 # uses SUPPORTED_SOURCE_EXTENSIONS so PDF ingest through compile_wiki still works.
 _TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
 
+_SUMMARY_STRING_FIELDS = (
+    "title",
+    "name",
+    "author",
+    "speaker",
+    "core_argument",
+    "abstract",
+    "description",
+    "problem_solved",
+)
+
+
+def _coerce_str_field(extraction: dict, field: str) -> str:
+    """Return a string extraction field or fail fast on malformed values."""
+    value = extraction.get(field)
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"extraction field {field!r} must be string, got {type(value).__name__}")
+
+
+def _pre_validate_extraction(extraction: dict) -> None:
+    """Validate string fields consumed by summary rendering before reservation."""
+    for field in _SUMMARY_STRING_FIELDS:
+        _coerce_str_field(extraction, field)
+
 
 def _is_untitled_sentinel(slug: str) -> bool:
     """Return True iff slug matches the untitled-<hash6> fallback from slugify()."""
@@ -321,12 +348,16 @@ def _write_wiki_page(
 def _build_summary_content(extraction: dict, source_type: str) -> str:
     """Build summary page content from extracted data."""
     lines = []
-    title = extraction.get("title") or extraction.get("name") or "Untitled"
+    title = (
+        _coerce_str_field(extraction, "title")
+        or _coerce_str_field(extraction, "name")
+        or "Untitled"
+    )
     safe_title = title.replace("\n", " ").replace("\r", "")
     lines.append(f"# {safe_title}\n")
 
     # Author/speaker info
-    author = extraction.get("author") or extraction.get("speaker")
+    author = _coerce_str_field(extraction, "author") or _coerce_str_field(extraction, "speaker")
     authors = extraction.get("authors")
     if authors and isinstance(authors, list):
         safe_authors = []
@@ -344,7 +375,7 @@ def _build_summary_content(extraction: dict, source_type: str) -> str:
 
     # Core argument / abstract / description
     for field in ("core_argument", "abstract", "description", "problem_solved"):
-        val = extraction.get(field)
+        val = _coerce_str_field(extraction, field)
         if val:
             lines.append(f"\n## Overview\n\n{sanitize_extraction_field(val)}\n")
             break
@@ -877,6 +908,15 @@ def ingest_source(
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path, raw_dir=effective_raw_dir)
 
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
+
+    # Validate caller-provided extractions before manifest reservation. In Claude
+    # Code mode, extraction is produced here first, then validated before the
+    # same reservation point.
+    if extraction is None:
+        extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
+    _pre_validate_extraction(extraction)
+
     # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
     # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
     # reserves manifest[source_ref] = source_hash before releasing. This prevents the RMW
@@ -895,12 +935,6 @@ def ingest_source(
             "wikilinks_injected": [],  # fix item 6: contract key always present
             "contradictions": [],  # fix item 6: contract key always present
         }
-
-    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
-
-    # Extract structured data via LLM (or use pre-extracted)
-    if extraction is None:
-        extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
 
     # Track created/updated pages
     pages_created = []
