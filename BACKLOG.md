@@ -168,12 +168,6 @@ tokens (K1)._
 - `models/page.py` dataclasses are dead — `WikiPage` / `RawSource` exist but nothing returns them; `load_all_pages` / `ingest_source` / `query_wiki` each return ad-hoc dicts. "What is a page?" has ≥4 answers (dict, `Post`, `Path`, markdown blob); chunk indexing in Phase 5 will fork it again. (R1)
   (fix: delete dataclasses, or make them the canonical return type and migrate callers)
 
-- `cli.py` function-local imports (~32, 63, 88-89, 107, 129, 143) — every command does `from kb.X import Y` inside the body; import errors only surface on first invocation of that specific command, defeating static dep analysis. (R1)
-  (fix: move imports to module top (Click startup is fine), or add a smoke test that exercises every command-import path)
-
-- `compile/linker.py` (~9) — imports `page_id` and `scan_wiki_pages` from `kb.graph.builder`; these are filesystem helpers, not graph helpers. `utils/pages.py` already has a near-duplicate private `_page_id`. `compile/` → `graph/` dependency is fake. (R1)
-  (fix: move `page_id` / `scan_wiki_pages` into `kb.utils.pages`; `graph/builder.py` imports from utils; delete the duplicate)
-
 - `config.py` god-module — 35+ unrelated constants (paths, model IDs, BM25 hyperparameters, dedup thresholds, retries, ingest/evolve/lint limits, retention caps, query budgets, RRF, embeddings). Single-file churn invalidates import cache for the whole package in tests. (R1)
   (fix: split into `config/paths.py` / `config/models.py` / `config/limits.py` / `config/search.py` / `config/lint.py`; or a `Settings` dataclass with grouped subfields; keep `from kb.config import *` shim)
 
@@ -181,8 +175,6 @@ tokens (K1)._
   (fix: per-source "in-progress" marker in manifest cleared only after page write + log append; escalate manifest-write failure to CRITICAL)
 
 _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (M1)._
-
-- `ingest/pipeline.py` extraction-field read sites — additional `_coerce_str_field` defensive migration. Cycle 10 (AC13a/AC13b) applied the helper at the pre-validation pass + `_build_summary_content`; these 10+ other read sites remain un-migrated as a non-blocking follow-up.
 
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). `file_lock` polls at 50 ms, adding minimum-latency floor on every verdict add. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
@@ -215,9 +207,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `compile/compiler.py` `compile_wiki` (~279-393) — a 50-line `for source in changed: ingest_source(source)` loop + manifest save. CLAUDE.md describes compile as "LLM builds/updates interlinked wiki pages, proposes diffs, not full rewrites" — no second pass, no cross-source reconciliation, no diff proposal exists in code. MCP `kb_compile` and `kb compile` CLI are cosmetic wrappers. Phase 5's two-phase compile / pre-publish gate / cross-source merging would land in the wrong layer because `compile_wiki` has no batch context. (R2)
   (fix: make `compile_wiki` a real two-phase pipeline (collect extractions → reconcile cross-source → write) and document the contract; or rename to `batch_ingest` and stop pretending compile is distinct)
 
-- `tests/test_ingest.py:86-159` — manually builds wiki subdirs + index files + 6 separate `patch()` calls duplicating what `tmp_project`/`tmp_wiki` fixtures provide. When project scaffolding evolves (new index file, new subdir), tests bypassing fixtures diverge silently. (R3)
-  (fix: replace manual scaffolding with `tmp_project`; forward `wiki_dir=` to `ingest_source` instead of patching module globals)
-
 - `tests/` no golden-file / snapshot tests — grep for `snapshot`/`golden`/`syrupy`/`inline_snapshot`/`approvaltests` returns zero hits. Wiki rendering (`_build_summary_content`, `append_evidence_trail`, contradictions append, `build_extraction_prompt`, `_render_sources`, Mermaid export, lint report) is verified only by `assert "X" in output`. `test_v0917_evidence_trail.py` checks `"## Evidence Trail" in text` — the actual format (order of `date | source | action`, prepend direction, whitespace) is unverified. Phase 5's output-format polymorphism (`kb_query --format=marp|html|chart|jupyter`), `wiki/overview.md`, and `wiki/_schema.md` all produce structured output that LLM-prompt tweaks silently reformat. (R3)
   (fix: add `pytest-snapshot` or `syrupy`; start with frontmatter rendering, evidence-trail format, Mermaid output, lint report format; commit `tests/__snapshots__/`)
 
@@ -227,9 +216,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `tests/test_phase4_audit_concurrency.py` single-process file_lock coverage — `test_file_lock_basic_mutual_exclusion` spawns threads, never `multiprocessing.Process` / `subprocess.Popen`. Phase 4.5 R2 flags `file_lock` PID-liveness broken on Windows (PIDs recycled, `os.kill(pid, 0)` succeeds for unrelated process); threads share PID so this is structurally impossible to surface with the current test. Manifest race, evidence-trail RMW race, contradictions append race, feedback eviction race all involve separate processes — autoresearch loop, file watcher, SessionStart hook (Phase 5) all run in separate processes alongside MCP. (R3)
   (fix: `multiprocessing.Process`-based test holding the lock from a child while parent attempts acquire; `@pytest.mark.integration`; assert PID file contains the child's PID)
 
-- `ingest/pipeline.py:154-222` `_build_summary_content` — comparison/synthesis source types declare extract fields `subjects`, `dimensions`, `findings`, `recommendation` (`templates/comparison.yaml`), but the renderer hardcodes only title/author/core_argument/key_claims/entities/concepts variants. A `comparison` ingest produces a page with only title and dropped fields. Worse, `detect_source_type` at `pipeline.py:116-129` cannot detect `comparison`/`synthesis` because `SOURCE_TYPE_DIRS` omits both directories; they're in `VALID_SOURCE_TYPES` but have no `raw/` subdir. So comparison/synthesis templates exist but cannot be ingested AT ALL via `ingest_source`. Dead feature path. (R4)
-  (fix: either remove `comparison.yaml` and `synthesis.yaml` from `templates/` until the pipeline supports them, or add `comparisons/`/`synthesis/` to `SOURCE_TYPE_DIRS` AND extend `_build_summary_content` with type-specific renderers)
-
 - `ingest/pipeline.py:712-721` `ingest_source` inject_wikilinks per-page loop — for each newly-created entity/concept page, `inject_wikilinks` is called independently, each time re-scanning ALL wiki pages from disk via `scan_wiki_pages` + per-page `read_text`. A single ingest creating 50 entities + 50 concepts = 100 `inject_wikilinks` calls × N pages = 100·N disk reads. At 5k pages that's 500k reads per ingest — worse than R2-flagged graph/load double-scan. (R4)
   (fix: batch-aware `inject_wikilinks_batch(titles_and_ids, pages)` that scans each page once and checks for all new titles; compile N patterns into a single alternation; write back once)
 
@@ -238,14 +224,8 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ### LOW
 
-- `tests/test_compile.py` `test_compile_loop_does_not_double_write_manifest` monkeypatch at module level — the CRITICAL cycle 1 item 14 regression test uses `monkeypatch.setattr(pipeline, "save_manifest", ...)` AND `monkeypatch.setattr(compiler_mod, "save_manifest", ...)` to count calls. If `save_manifest` is ever relocated or renamed in the future, the test passes silently with call_count=0 instead of failing loudly. Surfaced by the 2026-04-15 post-PR 2-round review (Sonnet round 2). (R6)
-  (fix: add a secondary behavioral assertion that doesn't depend on module-level patching — e.g., count actual file writes to the manifest path via `os.stat` inode checks, or inspect manifest contents before/after to verify single-source single-write contract)
-
 - `mcp/core.py` `kb_query` `conversation_context` (~70-83) — capped at `MAX_QUESTION_LEN * 4` chars but not stripped of control chars / role headers; passed verbatim to the rewriter LLM in the `use_api` branch. (R1)
   (fix: strip control chars + explicit role-tag patterns; wrap in `<prior_turn>…</prior_turn>` sentinel for LLM)
-
-- `tests/` missing coverage — no focused test for `_build_query_context` tier-budget logic (`engine.py:235-324`) or `_flag_stale_results` edge cases (missing `sources`, non-ISO `updated`, mtime-eq-page-date). (R1)
-  (fix: parametric test asserting per-tier byte budgets given sized summaries; stale-flag edge cases)
 
 - `tests/test_mcp_*.py`, `test_v098_fixes.py`, `test_v099_phase39.py`, `test_drift_detection_v094.py` — five ad-hoc helpers (`_setup_quality_paths`, `_setup_browse_dirs`, `_setup_project`, `_patch_source_type_dirs`, `_patch_source_dirs`) re-invent the same monkeypatch dance over slightly different `WIKI_*` / `.data/` subsets, across both `kb.config` AND importing modules (because of `from kb.config import X` re-binding). None in `conftest.py`; each file copy-pastes a variant and risks missing a global. Phase 5's new globals (hot.md, overview.md, captures/, schema.md, vector_index.db, ingest_locks/, pagerank.json) each require updating all five OR more leaks. (R3)
   (fix: single `tmp_kb_env` fixture in `conftest.py` that reflects `kb.config`'s `WIKI_*` / `RAW_DIR` / `PROJECT_ROOT` / `*_PATH` constants and monkeypatches BOTH `kb.config` AND every module that imported them via `sys.modules` reflection; collapse all five helpers)

@@ -34,6 +34,30 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 — Backlog-by-file cycle 11 (2026-04-19)
+
+14 AC across 14 files / 13 implementation commits. Tests: 2041 → 2081 (+40); full suite 2081 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
+
+#### Added
+- `tests/test_cycle11_ingest_coerce.py` — regression coverage for `_coerce_str_field` scalar/list/dict/missing-field handling, comparison/synthesis rejection, and MCP no-file no-write behavior (AC1, AC2, AC3).
+- `tests/test_cycle11_utils_pages.py` — direct canonical coverage for `page_id` / `scan_wiki_pages`, including lowercasing, subdir IDs, sentinel skip, deterministic order, and graph-builder re-export identity (AC6).
+- `tests/test_cycle11_cli_imports.py` — CLI command smoke tests for function-local import paths plus subprocess `--version` / `-V` short-circuit checks that avoid importing `kb.config` (AC7, AC8).
+- `tests/test_cycle11_stale_results.py` — `_flag_stale_results` edge-case coverage for missing/empty sources, non-ISO `updated`, non-string `updated`, and mtime-equals-page-date (AC9, AC10, AC11).
+- `tests/test_cycle11_task6_mcp_ingest_type.py` — MCP same-class coverage that `kb_ingest`, `kb_ingest_content`, and `kb_save_source` steer comparison/synthesis callers to `kb_create_page` (AC2).
+
+#### Changed
+- `src/kb/utils/pages.py` — canonical home for `page_id(page_path, wiki_dir=None)` and `scan_wiki_pages(wiki_dir=None)`; `src/kb/graph/builder.py` now re-exports both for back-compat (AC4, AC5).
+- `src/kb/compile/compiler.py`, `src/kb/compile/linker.py`, `src/kb/evolve/analyzer.py`, `src/kb/lint/checks.py`, `src/kb/lint/runner.py`, `src/kb/lint/semantic.py` — internal callers now import page filesystem helpers from `kb.utils.pages` instead of `kb.graph.builder` (AC4, AC5).
+- `tests/test_ingest.py` — `test_ingest_source` uses `tmp_project` plus explicit `wiki_dir=` / `raw_dir=` instead of manual wiki scaffolding and module-global patching (AC12).
+- `tests/test_compile.py` — manifest double-write regression now includes a behavioral manifest-content assertion in addition to the existing save-count pin (AC13).
+
+#### Fixed
+- `src/kb/ingest/pipeline.py` — remaining scalar extraction read sites use `_coerce_str_field`; `source_type="comparison"` / `"synthesis"` now rejects early with a `kb_create_page` hint instead of falling into the broken ingest-render path (AC1, AC2, AC3).
+- `src/kb/mcp/core.py` — `kb_ingest`, `kb_ingest_content`, and `kb_save_source` return explicit comparison/synthesis guidance naming `kb_create_page` before generic unknown-source-type handling (AC2).
+
+#### Security
+- Cycle-11 security verify recorded no dependency diff in `requirements.txt` / `pyproject.toml`; no Class-B PR-introduced CVEs. Same-class comparison/synthesis MCP handling was completed in follow-up (AC2).
+
 ### Backlog-by-file cycle 10 (2026-04-18)
 
 - `src/kb/mcp/app.py` — AC0: `_validate_wiki_dir` now enforces `PROJECT_ROOT` containment; error strings standardised (commit `ee1279f`).
@@ -51,10 +75,11 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 - Tests: 2004 → 2041 (+37 new tests); all passing, 7 Windows-skips (case-insensitive FS + symlinks); 0 new Dependabot alerts.
 - STALE at cycle 10 review (already fixed, removed from BACKLOG): `utils/wiki_log.py` torn-last-line (MEDIUM); `mcp/browse.py` query-length-cap + stale-flag (HIGH-Additional).
 
-### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-18)
+### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-19)
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [**backlog-by-file cycle 11**](#phase-45--backlog-by-file-cycle-11-2026-04-19) | 2026-04-19 | 14 AC / 14 files / 13 commits | 2041 → 2081 (+40) | ingest coercion + comparison/synthesis reject, page helper relocation, CLI import smoke, stale-result edge cases, test fixture cleanup, MCP same-class guard |
 | [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |
 | [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |
 | [Backlog-by-file cycle 7](#phase-45--backlog-by-file-cycle-7-2026-04-18) | 2026-04-18 | 30 / 22 files | 1868 → 1919 (+51) | mcp/app, mcp/core, mcp/health, lint/_safe_call, lint/checks, lint/verdicts, lint/runner, lint/semantic, query/embeddings, query/engine, graph/builder, graph/export, compile/linker, evolve/analyzer, ingest/pipeline, ingest/extractors, review/context, review/refiner, utils/text, utils/io, config, cli |
