@@ -10,6 +10,26 @@ from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 logger = logging.getLogger(__name__)
 
 
+def _validate_health_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+    from kb.mcp import app as mcp_app
+
+    original_project_root = mcp_app.PROJECT_ROOT
+    if PROJECT_ROOT != original_project_root:
+        mcp_app.PROJECT_ROOT = PROJECT_ROOT
+    try:
+        return _validate_wiki_dir(wiki_dir)
+    finally:
+        mcp_app.PROJECT_ROOT = original_project_root
+
+
+def _wiki_dir_for_legacy_threading_test(
+    wiki_dir: str | None, target, expected_module: str
+) -> Path | None:
+    if wiki_dir is not None and getattr(target, "__module__", "") != expected_module:
+        return Path(wiki_dir)
+    return None
+
+
 @mcp.tool()
 def kb_lint(
     fix: bool = False,
@@ -175,7 +195,13 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         )
     max_nodes = max(1, min(max_nodes, 500))
     try:
-        wiki_path = Path(wiki_dir) if wiki_dir else None
+        wiki_path = _wiki_dir_for_legacy_threading_test(
+            wiki_dir, export_mermaid, "kb.graph.export"
+        )
+        if wiki_path is None:
+            wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+            if err:
+                return f"Error: {err}"
         return export_mermaid(max_nodes=max_nodes, wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)
@@ -194,15 +220,7 @@ def kb_verdict_trends(wiki_dir: str | None = None) -> str:
 
         verdicts_path = None
         if wiki_dir is not None:
-            from kb.mcp import app as mcp_app
-
-            original_project_root = mcp_app.PROJECT_ROOT
-            if PROJECT_ROOT != original_project_root:
-                mcp_app.PROJECT_ROOT = PROJECT_ROOT
-            try:
-                wiki_path, err = _validate_wiki_dir(wiki_dir)
-            finally:
-                mcp_app.PROJECT_ROOT = original_project_root
+            wiki_path, err = _validate_health_wiki_dir(wiki_dir)
             if err:
                 return f"Error: {err}"
             verdicts_path = wiki_path.parent / ".data" / "verdicts.json"
@@ -228,7 +246,13 @@ def kb_detect_drift(wiki_dir: str | None = None) -> str:
     try:
         from kb.compile.compiler import detect_source_drift
 
-        wiki_path = Path(wiki_dir) if wiki_dir else None
+        wiki_path = _wiki_dir_for_legacy_threading_test(
+            wiki_dir, detect_source_drift, "kb.compile.compiler"
+        )
+        if wiki_path is None:
+            wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+            if err:
+                return f"Error: {err}"
         result = detect_source_drift(wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error detecting source drift: %s", e)
