@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [Backlog-by-file cycle 7](#phase-45--backlog-by-file-cycle-7-2026-04-18) | 2026-04-18 | 30 / 22 files | 1868 → 1919 (+51) | mcp/app, mcp/core, mcp/health, lint/_safe_call, lint/checks, lint/verdicts, lint/runner, lint/semantic, query/embeddings, query/engine, graph/builder, graph/export, compile/linker, evolve/analyzer, ingest/pipeline, ingest/extractors, review/context, review/refiner, utils/text, utils/io, config, cli |
 | [Backlog-by-file cycle 6](#phase-45--backlog-by-file-cycle-6-2026-04-18) | 2026-04-18 | 15 / 14 files | 1836 → 1868 (+32) | mcp/core, mcp/health, query/rewriter, query/engine, query/embeddings, query/hybrid, query/dedup, ingest/pipeline, cli, evolve/analyzer, graph/builder, utils/pages |
 | [Cycle 5 redo (hardening)](#phase-45--cycle-5-redo-hardening-2026-04-18) | 2026-04-18 | 6 / 6 files | 1821 → 1836 (+15) | query/engine, query/citations, mcp/app, lint/augment, utils/text, tests |
 | [Backlog-by-file cycle 5](#phase-45--backlog-by-file-cycle-5-2026-04-18) | 2026-04-18 | 14 / 13 files | 1811 → 1820 (+9) | config, text, verdicts, engine, extractors, pipeline, mcp/core, mcp/app, cli, mcp_server, llm, pyproject, tests |
@@ -51,6 +52,49 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Backlog-by-file cycle 7 (2026-04-18)
+
+30 items across 22 source files. Tests: 1868 → 1919 (+51, including 48 new behavioural tests in `test_backlog_by_file_cycle7.py` + 3 inline template-sentinel + updated cycle-5 wrap_purpose pin). Full feature-dev pipeline (requirements → threat model + CVE baseline → Opus design decision gate → Codex plan + plan-gate → TDD impl + CI gate → Codex security verify + PR-introduced CVE diff → docs). 0 PR-introduced CVEs.
+
+#### Added
+- `src/kb/lint/_safe_call.py` — new module hosting `_safe_call(fn, *, fallback, label)` helper so lint/runner and mcp/health silent-degradation sites surface `<label>_error: …` instead of silent `None` (AC27).
+- `src/kb/mcp/app.py::_sanitize_error_str(exc, *paths)` — helper that strips Windows absolute/UNC paths, POSIX absolute paths, and `OSError.filename`/`filename2` attributes from exception strings before MCP tools return them to the client (AC12/AC13 shared helper).
+- `src/kb/config.py::get_model_tier(tier)` — lazy env-aware alternative to the import-time `MODEL_TIERS` dict so tests and long-lived processes observe `CLAUDE_*_MODEL` env mutations mid-run (AC24).
+- `tests/test_backlog_by_file_cycle7.py` — 48 behavioural regression tests covering every cycle-7 AC. Red-flag self-checks: no `re.findall` source-scans, no `inspect.getsource` grep, no negative-assert patterns.
+- `CLAUDE.md` — new `### Evidence Trail Convention` subsection documenting the reverse-chronological insert-after-sentinel behaviour (AC25).
+
+#### Changed
+- `src/kb/graph/builder.py` `build_graph(wiki_dir, *, pages=None)` — `pages` is now keyword-only; callers supplying preloaded page dicts skip the internal `scan_wiki_pages` walk (AC11).
+- `src/kb/compile/linker.py` `build_backlinks(wiki_dir, *, pages=None)` — same pattern (AC10).
+- `src/kb/lint/semantic.py` — `build_consistency_context` + `_group_by_shared_sources` / `_group_by_wikilinks` / `_group_by_term_overlap` accept optional `pages=` bundle (AC19).
+- `src/kb/evolve/analyzer.py::generate_evolution_report` — loads `pages_dicts` once via `load_all_pages` and threads into `build_graph(pages=…)` + `analyze_coverage(pages_dicts=…)` (AC9).
+- `src/kb/ingest/pipeline.py::_find_affected_pages` — passes preloaded pages into `build_backlinks` so the cascade path no longer does a second disk walk (AC8).
+- `src/kb/ingest/pipeline.py::_update_existing_page` — References regex masks fenced code blocks before substitution + normalises trailing newline (AC5); re-ingest context enrichment now appends `### From {source_ref}` subsection under existing `## Context` header instead of silently dropping the new context (AC7); `ctx=` kwarg added for direct callers; bare contradiction `except` narrowed to `(KeyError, TypeError, re.error)` so bug-indicating `ValueError` / `AttributeError` propagate (AC6).
+- `src/kb/ingest/pipeline.py::_write_wiki_page` — hand-rolled f-string YAML frontmatter replaced with `frontmatter.Post` + `frontmatter.dumps()` so YAML-escaping becomes the library's responsibility; back-compat shim accepts `page_path=` or legacy `path=` (AC29).
+- `src/kb/ingest/extractors.py::clear_template_cache` — serialized via module-level `_template_cache_lock` so concurrent clears vs readers cannot observe mid-clear state (AC28).
+- `src/kb/query/embeddings.py::rebuild_vector_index` — batch path bypasses `embed_texts`, calls `model.encode(texts)` directly and passes each numpy row via buffer protocol to `sqlite_vec.serialize_float32` (AC2). `_index_cache` now bounded at `MAX_INDEX_CACHE_SIZE=8` with FIFO eviction under `_index_cache_lock` (AC3).
+- `src/kb/query/engine.py::query_wiki` — docstring documents the `stale` flag on each citation entry + the `stale_citations` return field (AC4).
+- `src/kb/lint/checks.py::check_dead_links` — skips targets matching root-level `_INDEX_FILES` (`index.md`/`_sources.md`/`log.md`) when the file exists (AC18).
+- `src/kb/lint/verdicts.py::load_verdicts` — adds single 50 ms retry on transient `OSError` / `JSONDecodeError` / `UnicodeDecodeError` for Windows atomic-rename window (AC20).
+- `src/kb/lint/runner.py::run_all_checks` — verdict-summary load routed through `_safe_call(label="verdict_history")`; report dict gains `verdict_history_error` field on failure (AC27).
+- `src/kb/mcp/core.py` — ingest/read/scan/compile/search/capture error-string sites route `{e}` through `_sanitize_error_str(e, <path>)`; R1 security verify caught 4 residual sites (API-mode ingest, `read_text`, `kb_compile_scan`, `kb_compile`) patched in follow-up commit (AC12).
+- `src/kb/mcp/health.py` — 5 error-string sites (`kb_lint`, `kb_evolve`, `kb_graph_viz`, `kb_verdict_trends`, `kb_detect_drift`) piped through `_sanitize_error_str`; feedback-flagged-pages block in `kb_lint` routed through `_safe_call` (AC13 + AC27 wiring).
+- `src/kb/mcp/app.py::_rel()` — defensive guard for `None` / non-`Path` inputs so `_sanitize_error_str` can safely scan `exc.filename` without `AttributeError` (AC12 follow-up).
+- `src/kb/review/context.py::pair_page_with_sources` — accepts explicit keyword-only `project_root=` ceiling; falls back to `raw_dir.parent` for back-compat (AC21).
+- `src/kb/review/refiner.py::refine_page` — parses frontmatter block with `yaml.safe_load` before rewriting; malformed YAML pages return `Error` instead of being laundered through a successful write (AC22).
+- `src/kb/utils/text.py::wrap_purpose` — now escapes attacker-planted `</kb_purpose>` closers to the inert `</kb-purpose>` hyphen variant, mirroring `_escape_source_document_fences` (AC23).
+- `src/kb/utils/io.py` module docstring — documents lock-ordering convention `VERDICTS → FEEDBACK → REVIEW_HISTORY` (AC17).
+- `src/kb/cli.py` — `--version` short-circuits BEFORE any `kb.config` import so operators with broken configs can still query the installed version; module docstring documents exit-code contract (AC16 + AC30).
+- `src/kb/graph/export.py` — Mermaid title-fallback uses the unmodified filename stem when `_sanitize_label` strips the title to empty, preserving `-` in the rendered label (AC26).
+- `tests/conftest.py` — autouse fixture `_reset_embeddings_state` clears `kb.query.embeddings._model` and `_index_cache` between every test (AC1).
+- `tests/test_phase4_audit_compile.py::test_manifest_pruning_keeps_unchanged_source` — asserts `_template/article` sentinel key AND hash value preserved across unrelated-source mutation (AC15).
+- `tests/test_cycle5_hardening.py::test_wrap_purpose_escapes_sentinel_closer` — flipped from pinning non-escape (cycle 5 decision) to asserting the escape fires (cycle 7 AC23 supersedes).
+
+#### Fixed
+- `src/kb/mcp/core.py` — 4 residual raw `{e}` error-string sites flagged by R1 Codex security verify (AC12 follow-up, commit `32b9387`).
 
 ---
 
