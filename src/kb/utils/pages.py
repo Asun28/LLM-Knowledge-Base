@@ -47,7 +47,12 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
     return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
 
 
-_page_id = page_id
+# Cycle 11 AC4 — deprecated alias. ``_page_id`` was the private helper name
+# before cycle 11 promoted ``page_id`` to the canonical public export. Kept as a
+# bare alias so legacy test imports (``tests/test_v0914_phase395.py``,
+# ``tests/test_v0915_task01.py``) keep working without a cycle-12 test-migration
+# commit. Scheduled for removal once those tests migrate.
+_page_id = page_id  # noqa: N816
 
 
 def normalize_sources(sources: str | list | None) -> list[str]:

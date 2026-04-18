@@ -108,11 +108,18 @@ def test_mcp_cli_runner_smoke(monkeypatch):
 
 
 def _version_short_circuit_env() -> dict[str, str]:
-    env = os.environ.copy()
+    """Build a minimal env for the short-circuit subprocess.
+
+    R1 Sonnet fix — copying ``os.environ`` would let a polluted parent
+    ``PYTHONPATH`` (e.g. a rogue ``kb/config.py`` on an existing entry) shadow
+    our explicit ``<repo>/src`` entry. Build a minimal dict from scratch that
+    contains only the keys required to launch Python on this platform.
+    """
     src_path = str(Path(__file__).resolve().parents[1] / "src")
-    env["PYTHONPATH"] = (
-        src_path if not env.get("PYTHONPATH") else src_path + os.pathsep + env["PYTHONPATH"]
-    )
+    env: dict[str, str] = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": src_path,
+    }
     if os.name == "nt":
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
     return env
