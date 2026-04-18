@@ -26,9 +26,28 @@ def _date_str(value: object) -> str:
     return str(value)
 
 
-def _page_id(page_path: Path, wiki_dir: Path) -> str:
-    """Convert a wiki page path to a page ID (e.g., 'concepts/rag')."""
-    return str(page_path.relative_to(wiki_dir)).replace("\\", "/").removesuffix(".md").lower()
+def scan_wiki_pages(wiki_dir: Path | None = None) -> list[Path]:
+    """Find all markdown files in wiki subdirectories (excluding index files)."""
+    wiki_dir = wiki_dir or WIKI_DIR
+    pages = []
+    for subdir in WIKI_SUBDIRS:
+        subdir_path = wiki_dir / subdir
+        if subdir_path.exists():
+            pages.extend(subdir_path.glob("*.md"))
+    return sorted(pages)
+
+
+def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
+    """Convert a wiki page path to a page ID (e.g., 'concepts/rag').
+
+    Note: The returned ID is lowercased for consistent node naming. The ``path``
+    node attribute retains original filesystem case and must be used for all file I/O.
+    """
+    wiki_dir = wiki_dir or WIKI_DIR
+    return page_path.relative_to(wiki_dir).as_posix().removesuffix(".md").lower()
+
+
+_page_id = page_id
 
 
 def normalize_sources(sources: str | list | None) -> list[str]:
