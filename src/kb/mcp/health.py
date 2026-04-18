@@ -57,6 +57,7 @@ def kb_lint(
         from kb.lint.runner import format_report, run_all_checks
 
         wiki_path = Path(wiki_dir) if wiki_dir else None
+        feedback_path = wiki_path.parent / ".data" / "feedback.json" if wiki_path else None
         report = run_all_checks(wiki_dir=wiki_path, fix=fix)
         result = format_report(report)
     except Exception as e:
@@ -68,7 +69,7 @@ def kb_lint(
     flagged, flag_err = _safe_call(
         lambda: __import__(
             "kb.feedback.reliability", fromlist=["get_flagged_pages"]
-        ).get_flagged_pages(),
+        ).get_flagged_pages(path=feedback_path),
         fallback=None,
         label="feedback_flagged_pages",
         log=logger,
@@ -113,6 +114,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
         from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
 
         wiki_path = Path(wiki_dir) if wiki_dir else None
+        feedback_path = wiki_path.parent / ".data" / "feedback.json" if wiki_path else None
         report = generate_evolution_report(wiki_dir=wiki_path)
         result = format_evolution_report(report)
     except Exception as e:
@@ -123,7 +125,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     try:
         from kb.feedback.reliability import get_coverage_gaps
 
-        gaps = get_coverage_gaps()
+        gaps = get_coverage_gaps(path=feedback_path)
         if gaps:
             result += (
                 "\n## Coverage Gaps (from query feedback)\n\n"
