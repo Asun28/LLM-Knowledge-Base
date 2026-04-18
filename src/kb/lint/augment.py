@@ -422,6 +422,52 @@ def _parse_proposals_md(proposals_path: Path) -> list[dict[str, Any]] | None:
     return proposals if proposals else None
 
 
+def _count_final_stub_outcomes(
+    *,
+    proposals: list[dict[str, Any]],
+    ingests: list[dict[str, Any]] | None,
+    verdicts: list[dict[str, Any]] | None,
+    manifest: Any | None,
+) -> tuple[int, int, int]:
+    """Return saved/skipped/failed counts from final per-stub state only."""
+    saved = 0
+    skipped = 0
+    failed = 0
+
+    verdict_by_stub = {v["stub_id"]: v for v in verdicts or []}
+    ingest_by_stub = {i["stub_id"]: i for i in ingests or []}
+
+    if manifest is not None:
+        for gap in manifest.data.get("gaps", []):
+            stub_id = gap.get("page_id")
+            verdict = verdict_by_stub.get(stub_id)
+            if verdict is not None and verdict.get("verdict") == "fail":
+                failed += 1
+                continue
+            state = gap.get("state")
+            if state in {"done", "saved", "ingested", "verdict"}:
+                saved += 1
+            elif state in {"abstained", "cooldown"}:
+                skipped += 1
+            else:
+                failed += 1
+        return saved, skipped, failed
+
+    if ingests is not None:
+        for ingest in ingest_by_stub.values():
+            status = ingest.get("status")
+            if status in {"ingested", "saved"}:
+                saved += 1
+            elif status in {"skipped", "dry_run_skipped"}:
+                skipped += 1
+            else:
+                failed += 1
+        return saved, skipped, failed
+
+    skipped = len(proposals)
+    return saved, skipped, failed
+
+
 def _save_raw_file(
     *,
     raw_dir: Path,
@@ -776,17 +822,11 @@ def run_augment(
 
         ingests = []
         verdicts = []
+        ingested_stub_ids: set[str] = set()
 
         for f in fetches:
             stub_id = f["stub_id"]
             if f["status"] != "saved":
-                ingests.append(
-                    {
-                        "stub_id": stub_id,
-                        "status": "skipped",
-                        "reason": f"fetch not saved: {f['status']}",
-                    }
-                )
                 continue
             raw_path = Path(f["raw_path"])
 
@@ -807,6 +847,7 @@ def run_augment(
                 if manifest is not None:
                     manifest.advance(stub_id, "failed", payload={"reason": msg})
                 ingests.append({"stub_id": stub_id, "status": "failed", "reason": msg})
+                ingested_stub_ids.add(stub_id)
                 continue
 
             if manifest is not None:
@@ -827,6 +868,7 @@ def run_augment(
                 if manifest is not None:
                     manifest.advance(stub_id, "failed", payload={"reason": msg})
                 ingests.append({"stub_id": stub_id, "status": "failed", "reason": msg})
+                ingested_stub_ids.add(stub_id)
                 continue
 
             if manifest is not None:
@@ -852,6 +894,7 @@ def run_augment(
                     "pages_updated": ingest_result.get("pages_updated", []),
                 }
             )
+            ingested_stub_ids.add(stub_id)
 
             # Targeted post-ingest quality check (Task 16)
             verdict, reason = _post_ingest_quality(page_path=stub_path, wiki_dir=wiki_dir)
@@ -886,6 +929,27 @@ def run_augment(
                 )
                 manifest.advance(stub_id, "done")
 
+        for prop in proposals:
+            stub_id = prop["stub_id"]
+            if stub_id in ingested_stub_ids:
+                continue
+            if prop.get("action") != "propose":
+                ingests.append(
+                    {
+                        "stub_id": stub_id,
+                        "status": "skipped",
+                        "reason": prop.get("reason", "abstained"),
+                    }
+                )
+            else:
+                ingests.append(
+                    {
+                        "stub_id": stub_id,
+                        "status": "failed",
+                        "reason": "no successful URL attempts",
+                    }
+                )
+
         if manifest is not None:
             manifest.close()
 
@@ -904,10 +968,11 @@ def run_augment(
     summary_lines.append(f"- Stubs examined: {len(eligible)}")
     summary_lines.append(f"- Proposals: {sum(1 for p in proposals if p['action'] == 'propose')}")
     if fetches is not None:
-        saved = sum(1 for f in fetches if f["status"] == "saved")
-        skipped = sum(1 for f in fetches if f["status"] == "skipped")
-        failed = sum(
-            1 for f in fetches if f["status"] not in {"saved", "skipped", "dry_run_skipped"}
+        saved, skipped, failed = _count_final_stub_outcomes(
+            proposals=proposals,
+            ingests=ingests,
+            verdicts=verdicts,
+            manifest=manifest,
         )
         summary_lines.append(f"- Saved: {saved}, Skipped: {skipped}, Failed: {failed}")
     if manifest_path:
