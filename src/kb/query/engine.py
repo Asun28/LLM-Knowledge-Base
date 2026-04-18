@@ -17,6 +17,7 @@ from kb.config import (
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
+    VECTOR_MIN_SIMILARITY,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
@@ -141,6 +142,16 @@ def search_pages(
             for pid, dist in hits:
                 if pid in page_map:
                     results.append({**page_map[pid], "score": round(1.0 / (1.0 + dist), 4)})
+            kept = [r for r in results if r.get("score", 0.0) >= VECTOR_MIN_SIMILARITY]
+            dropped = len(results) - len(kept)
+            if dropped:
+                logger.debug(
+                    "vec filter: %d kept, %d dropped (min_sim=%s)",
+                    len(kept),
+                    dropped,
+                    VECTOR_MIN_SIMILARITY,
+                )
+            results = kept
             if search_telemetry is not None:
                 search_telemetry["vector_hits"] = search_telemetry.get("vector_hits", 0) + len(
                     results

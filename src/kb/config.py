@@ -178,6 +178,8 @@ MAX_SEARCH_RESULTS = 100
 RRF_K = 60  # RRF fusion constant: score = 1/(K + rank)
 VECTOR_SEARCH_LIMIT_MULTIPLIER = 2  # Vector search fetches limit * N candidates
 BM25_SEARCH_LIMIT_MULTIPLIER = 1  # BM25 candidates = limit * this (intentionally 1×)
+# Minimum cosine similarity (after 1/(1+distance) conversion in engine.vector_search) a vector hit must reach before contributing to RRF fusion. Below this, the vector backend is treated as silent for that query.
+VECTOR_MIN_SIMILARITY = 0.3
 # Cycle 3 L6: hoisted from hardcoded `[:3]` in query/hybrid.py so operators can
 # tune expansion breadth without touching code. Total queries sent to vector
 # search = 1 (original) + MAX_QUERY_EXPANSIONS. A value of 2 matches the pre-
