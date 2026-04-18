@@ -17,13 +17,13 @@ from kb.config import (
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
-    VECTOR_INDEX_PATH_SUFFIX,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
+from kb.query.embeddings import _vec_db_path
 from kb.query.hybrid import rrf_fusion
 from kb.utils.llm import call_llm
 from kb.utils.markdown import FRONTMATTER_RE
@@ -128,7 +128,7 @@ def search_pages(
         try:
             from kb.query.embeddings import embed_texts, get_vector_index
 
-            vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
+            vec_path = _vec_db_path(wiki_dir or WIKI_DIR)
             if not vec_path.exists():
                 return []
             vecs = embed_texts([query])
@@ -211,7 +211,9 @@ def search_pages(
     scored = rrf_fusion(rank_lists)[:candidate_limit]
     scored = dedup_results(scored)
 
-    scored = _flag_stale_results(scored[:max_results])
+    scored = _flag_stale_results(
+        scored[:max_results], project_root=(wiki_dir.parent if wiki_dir else None)
+    )
     return scored
 
 
@@ -753,7 +755,7 @@ def query_wiki(
     try:
         from kb.query import embeddings as _embeddings
 
-        _vec_path = Path(PROJECT_ROOT) / VECTOR_INDEX_PATH_SUFFIX
+        _vec_path = _vec_db_path(wiki_dir or WIKI_DIR)
         _hybrid_configured = _embeddings._hybrid_available and _vec_path.exists()
     except Exception:
         _hybrid_configured = False
