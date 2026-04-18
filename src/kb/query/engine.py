@@ -24,7 +24,7 @@ from kb.graph.builder import build_graph
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
-from kb.query.hybrid import hybrid_search
+from kb.query.hybrid import rrf_fusion
 from kb.utils.llm import call_llm
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.pages import load_all_pages, load_purpose
@@ -152,25 +152,55 @@ def search_pages(
                 search_telemetry["vector_failed"] = True
             return []
 
-    # Hybrid search: RRF fusion of BM25 + vector results
-    scored = hybrid_search(question, bm25_search, vector_search, limit=max_results * 2)
-    scored = dedup_results(scored)
+    # Hybrid search: RRF fusion of BM25 + vector results, with PageRank as an
+    # optional rank-list signal over the same candidate set.
+    candidate_limit = max_results * 2
+    query_tokens_count = len(question.split())
+    try:
+        bm25_results = bm25_search(question, candidate_limit)
+    except Exception as exc:
+        logger.warning(
+            "hybrid_search backend=bm25 failed: %s (%s); query_tokens=%d",
+            exc.__class__.__name__,
+            exc,
+            query_tokens_count,
+        )
+        bm25_results = []
 
-    # Blend PageRank into scores if weight > 0
-    # Cycle 6 AC6 — pass pre-loaded `pages` to avoid a second disk walk;
-    # `build_graph(pages=...)` already supports the kwarg (builder.py:37).
-    pagerank_scores: dict[str, float] = {}
+    try:
+        vector_results = vector_search(question, candidate_limit)
+    except Exception as exc:
+        logger.warning(
+            "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
+            exc.__class__.__name__,
+            exc,
+            query_tokens_count,
+        )
+        vector_results = []
+
+    rank_lists = [bm25_results]
+    if vector_results:
+        rank_lists.append(vector_results)
+
     if PAGERANK_SEARCH_WEIGHT > 0:
+        # Cycle 6 AC6 — pass pre-loaded `pages` to avoid a second disk walk;
+        # `build_graph(pages=...)` already supports the kwarg (builder.py:37).
         pagerank_scores = _compute_pagerank_scores(wiki_dir, preloaded_pages=pages)
+        if pagerank_scores:
+            candidate_ids = {r["id"].lower() for r in bm25_results + vector_results}
+            pagerank_list = [
+                {"id": pid, "score": pagerank_scores.get(pid, 0.0)}
+                for pid in sorted(
+                    candidate_ids,
+                    key=lambda candidate: pagerank_scores.get(candidate, 0.0),
+                    reverse=True,
+                )[:candidate_limit]
+            ]
+            if pagerank_list:
+                rank_lists.append(pagerank_list)
 
-    if pagerank_scores:
-        blended = []
-        for r in scored:
-            pr = pagerank_scores.get(r["id"].lower(), 0.0)
-            new_score = r["score"] * (1 + PAGERANK_SEARCH_WEIGHT * pr)
-            blended.append({**r, "score": round(new_score, 4)})
-        blended.sort(key=lambda p: p["score"], reverse=True)
-        scored = blended
+    scored = rrf_fusion(rank_lists)[:candidate_limit]
+    scored = dedup_results(scored)
 
     scored = _flag_stale_results(scored[:max_results])
     return scored
