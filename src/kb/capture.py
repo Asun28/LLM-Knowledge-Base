@@ -7,7 +7,6 @@ Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 """
 
 import base64
-import binascii
 import logging
 import os
 import re
@@ -18,6 +17,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import unquote
 
 import yaml
@@ -36,6 +36,11 @@ from kb.utils.text import slugify, yaml_sanitize
 
 logger = logging.getLogger(__name__)
 
+MAX_PROMPT_CHARS = 600_000
+_SLUG_COLLISION_CEILING = 10000
+
+assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS, "CAPTURE_MAX_BYTES must not exceed MAX_PROMPT_CHARS"
+
 # === Rate limit (spec §4 step 4, §8) ===
 # Per-process token-bucket sliding window. threading.Lock makes the
 # check-then-act (len(deque) ≥ LIMIT, then append now) atomic under
@@ -53,6 +58,8 @@ def _check_rate_limit() -> tuple[bool, int]:
 
     Per-process only. Separate MCP server and CLI processes each enforce the
     limit independently; total across processes can exceed CAPTURE_MAX_CALLS_PER_HOUR.
+    TODO(v2): persist via .data/capture_rate.json + atomic_json_write under
+    file_lock for system-wide enforcement.
     For a true system-wide limit, persist the deque via
     `.data/capture_rate.json` + `atomic_json_write` under a `file_lock`.
     """
@@ -95,56 +102,73 @@ def _validate_input(content: str) -> tuple[str | None, str]:
 
 
 # === Secret scanner (spec §8 expanded pattern list) ===
-# Tuples are (label, compiled-regex). Order matters only for first-match wins;
+
+
+class _SecretPattern(NamedTuple):
+    label: str
+    pattern: re.Pattern[str]
+
+
+# Order matters only for first-match wins;
 # more specific patterns are listed before more general ones (e.g. sk-proj-
 # before sk-).
-_CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("AWS access key (temporary)", re.compile(r"ASIA[0-9A-Z]{16}")),
-    (
-        "AWS secret access key (env-var)",
-        re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+=]{40}"),
+_CAPTURE_SECRET_PATTERNS: list[_SecretPattern] = [
+    _SecretPattern(label="AWS access key", pattern=re.compile(r"AKIA[0-9A-Z]{16}")),
+    _SecretPattern(label="AWS access key (temporary)", pattern=re.compile(r"ASIA[0-9A-Z]{16}")),
+    _SecretPattern(
+        label="AWS secret access key (env-var)",
+        pattern=re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+=]{40}"),
     ),
-    ("OpenAI key (project)", re.compile(r"sk-proj-[a-zA-Z0-9_-]{20,}")),
-    ("Anthropic key", re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}")),
-    ("OpenAI key (legacy)", re.compile(r"sk-[a-zA-Z0-9]{20,}")),
-    ("GitHub PAT (long form)", re.compile(r"github_pat_[a-zA-Z0-9_]{82}")),
-    ("GitHub PAT", re.compile(r"ghp_[a-zA-Z0-9]{36}")),
-    ("Slack token", re.compile(r"xox[baprse]-[0-9a-zA-Z-]{10,}")),
-    (
-        "Bearer token",
+    _SecretPattern(label="OpenAI key (project)", pattern=re.compile(r"sk-proj-[a-zA-Z0-9_-]{20,}")),
+    _SecretPattern(label="Anthropic key", pattern=re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}")),
+    _SecretPattern(label="OpenAI key (legacy)", pattern=re.compile(r"sk-[a-zA-Z0-9]{20,}")),
+    _SecretPattern(
+        label="GitHub PAT (long form)",
+        pattern=re.compile(r"github_pat_[a-zA-Z0-9_]{82}"),
+    ),
+    _SecretPattern(label="GitHub PAT", pattern=re.compile(r"ghp_[a-zA-Z0-9]{36}")),
+    _SecretPattern(label="Slack token", pattern=re.compile(r"xox[baprse]-[0-9a-zA-Z-]{10,}")),
+    _SecretPattern(
+        label="Bearer token",
         # Require 20+ chars AND at least one digit/dot/underscore/slash/plus/eq
         # in the payload, so benign prose like "bearer responsibility-for-all"
         # (pure word chars + hyphens) doesn't trip the scanner.
-        re.compile(r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])[A-Za-z0-9._~+/=-]{20,}"),
+        pattern=re.compile(
+            r"(?i)bearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9._/+=])"
+            r"[A-Za-z0-9._~+/=-]{20,}"
+        ),
     ),
-    (
-        "JWT",
-        re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    _SecretPattern(
+        label="JWT",
+        pattern=re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
     ),
-    ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
-    ("GCP OAuth access token", re.compile(r"ya29\.[0-9A-Za-z_-]{20,}")),
-    ("GCP service account JSON", re.compile(r'"type"\s*:\s*"service_account"')),
-    ("Stripe live key", re.compile(r"sk_live_[0-9a-zA-Z]{24,}")),
-    ("Stripe live restricted key", re.compile(r"rk_live_[0-9a-zA-Z]{24,}")),
-    ("HuggingFace token", re.compile(r"hf_[A-Za-z0-9]{30,}")),
-    ("Twilio Account SID", re.compile(r"AC[a-f0-9]{32}")),
-    ("Twilio Auth Token (SK form)", re.compile(r"SK[a-f0-9]{32}")),
-    ("npm token", re.compile(r"npm_[A-Za-z0-9]{36}")),
-    (
-        # A6 (Phase 5 kb-capture LOW): keep Basic label so existing tests still
-        # match on "HTTP Basic" substring; value pattern preserved.
-        "HTTP Basic Authorization header",
-        re.compile(r"(?i)Authorization:\s*Basic\s+[A-Za-z0-9+/=]+"),
+    _SecretPattern(label="Google API key", pattern=re.compile(r"AIza[0-9A-Za-z_-]{35}")),
+    _SecretPattern(label="GCP OAuth access token", pattern=re.compile(r"ya29\.[0-9A-Za-z_-]{20,}")),
+    _SecretPattern(
+        label="GCP service account JSON",
+        pattern=re.compile(r'"type"\s*:\s*"service_account"'),
     ),
-    (
+    _SecretPattern(label="Stripe live key", pattern=re.compile(r"sk_live_[0-9a-zA-Z]{24,}")),
+    _SecretPattern(
+        label="Stripe live restricted key",
+        pattern=re.compile(r"rk_live_[0-9a-zA-Z]{24,}"),
+    ),
+    _SecretPattern(label="HuggingFace token", pattern=re.compile(r"hf_[A-Za-z0-9]{30,}")),
+    _SecretPattern(label="Twilio Account SID", pattern=re.compile(r"AC[a-f0-9]{32}")),
+    _SecretPattern(label="Twilio Auth Token (SK form)", pattern=re.compile(r"SK[a-f0-9]{32}")),
+    _SecretPattern(label="npm token", pattern=re.compile(r"npm_[A-Za-z0-9]{36}")),
+    _SecretPattern(
+        label="HTTP Basic Authorization header",
+        pattern=re.compile(r"(?i)Authorization:\s*Basic\s+[A-Za-z0-9+/=]+"),
+    ),
+    _SecretPattern(
         # A6 (Phase 5 kb-capture LOW): opaque Bearer tokens (OAuth2, Azure AD,
         # GCP, non-JWT session tokens). Require 16+ chars so short demo Bearer
         # doesn't false-positive; JWT Bearer is still caught by the JWT pattern.
-        "HTTP Bearer Authorization header",
-        re.compile(r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9+/=._~-]{16,}"),
+        label="HTTP Bearer Authorization header",
+        pattern=re.compile(r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9+/=._~-]{16,}"),
     ),
-    (
+    _SecretPattern(
         # A4 (Phase 5 kb-capture MED + 2× LOW merged): broaden to catch suffix
         # variants (ANTHROPIC_API_KEY, DJANGO_SECRET_KEY, GH_TOKEN, APP_SECRET,
         # ACCESS_KEY, ENCRYPTION_KEY) and optional shell `export ` prefix.
@@ -156,8 +180,8 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # scanner. Updated pattern accepts either 8+ non-space chars OR a
         # quote-wrapped run of 8+ chars including spaces (but no closing
         # line). Closing quote may be the same or absent.
-        "env-var assignment",
-        re.compile(
+        label="env-var assignment",
+        pattern=re.compile(
             r"(?im)^\s*(?:export\s+)?"
             r"(?:[A-Z][A-Z0-9_]*_)?"  # OPTIONAL prefix like ANTHROPIC_, DJANGO_
             r"(API_KEY|SECRET_KEY|SECRET|PASSWORD|PASSWD|TOKEN|AUTH_TOKEN|"
@@ -167,74 +191,75 @@ _CAPTURE_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"(?:['\"][^\n'\"]{8,}['\"]?|\S{8,})"
         ),
     ),
-    (
-        "DB connection string with password",
-        re.compile(
+    _SecretPattern(
+        label="DB connection string with password",
+        pattern=re.compile(
             r"(?i)(postgres|postgresql|mysql|mongodb(\+srv)?|redis|amqp)://"
             r"[^\s:@]+:[^\s@]+@"
         ),
     ),
-    (
-        "Private key block",
-        re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"),
+    _SecretPattern(
+        label="Private key block",
+        pattern=re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"),
     ),
-    (
-        "PostgreSQL DSN with password",
-        re.compile(r"(?i)postgresql://[^:\s]+:[^@\s]{6,}@"),
+    _SecretPattern(
+        label="PostgreSQL DSN with password",
+        pattern=re.compile(r"(?i)postgresql://[^:\s]+:[^@\s]{6,}@"),
     ),
-    (
-        "npm registry _authToken",
-        re.compile(r"(?i)//[a-z0-9._-]+/?:_authToken=[A-Za-z0-9+/=_-]{20,}"),
+    _SecretPattern(
+        label="npm registry _authToken",
+        pattern=re.compile(r"(?i)//[a-z0-9._-]+/?:_authToken=[A-Za-z0-9+/=_-]{20,}"),
     ),
 ]
 
 
-def _normalize_for_scan(content: str) -> str:
-    """Build a normalized view: append b64-decoded ASCII candidates and URL-decoded runs.
+def _normalize_for_scan(content: str) -> list[tuple[str, str]]:
+    """Build decoded secret-scan candidates with encoding labels.
 
-    The original content is kept; this function returns a SUPERSET that's only used for
-    secret-pattern matching. The decoded fragments give the regex sweep a chance to
-    catch trivially-encoded secrets without losing the original content.
+    The original content is scanned separately. These decoded fragments give
+    the regex sweep a chance to catch trivially-encoded secrets without losing
+    the original content.
 
-    Cost note: the superset peaks at ~1.76× input size (~88KB at the 50KB cap).
+    Cost note: decoded candidates peak at ~0.76× input size (~38KB at the 50KB cap).
     Base64 scan: O(input_size / 17) ≈ 2,941 candidates max (16-char minimum match).
     URL-decode scan: O(input_size / 10) ≈ 5,000 candidates max (9-char minimum: %XX×3).
     Both bounds are load-bearing on CAPTURE_MAX_BYTES — review before raising that.
     """
-    parts: list[str] = [content]
+    parts: list[tuple[str, str]] = []
     # Base64 candidates: at least 16 chars of [A-Za-z0-9+/=].
     for m in re.finditer(r"[A-Za-z0-9+/=]{16,}", content):
         try:
             decoded = base64.b64decode(m.group(0), validate=True)
             text = decoded.decode("ascii")
-            parts.append(text)
-        except (ValueError, binascii.Error, UnicodeDecodeError):
+            parts.append((text, "base64"))
+        except Exception as exc:
+            logger.debug("normalize: decoder skipped segment due to %s", exc)
             continue
     # URL-encoded runs: 3+ adjacent percent-encoded triplets.
     # Only decode the matched run (not the whole content) — keeps the normalized
     # view tight and avoids false positives on content with scattered %XX chars.
     # urllib.parse.unquote uses errors='replace' internally and never raises.
     for m in re.finditer(r"(?:%[0-9A-Fa-f]{2}){3,}", content):
-        parts.append(unquote(m.group(0)))
-    return "\n".join(parts)
+        parts.append((unquote(m.group(0)), "URL-encoded"))
+    return parts
 
 
 def _scan_for_secrets(content: str) -> tuple[str, str] | None:
     """Sweep content + normalized view for secret patterns.
 
     Returns (label, location) on first match, else None.
-    location is "line N" for plain matches, "via encoded form" for normalization matches.
+    location is "line N" for plain matches, "via <encoding>" for normalization matches.
     """
-    for label, pattern in _CAPTURE_SECRET_PATTERNS:
-        m = pattern.search(content)
+    for secret_pattern in _CAPTURE_SECRET_PATTERNS:
+        m = secret_pattern.pattern.search(content)
         if m:
             line_no = content[: m.start()].count("\n") + 1
-            return label, f"line {line_no}"
+            return secret_pattern.label, f"line {line_no}"
 
-    normalized = _normalize_for_scan(content)
-    for label, pattern in _CAPTURE_SECRET_PATTERNS:
-        if pattern.search(normalized):
-            return label, "via encoded form"
+    for decoded_text, encoding_label in _normalize_for_scan(content):
+        for secret_pattern in _CAPTURE_SECRET_PATTERNS:
+            if secret_pattern.pattern.search(decoded_text):
+                return secret_pattern.label, f"via {encoding_label}"
 
     return None
 
@@ -318,9 +343,22 @@ def _escape_prompt_fences(content: str) -> str:
 
 
 def _extract_items_via_llm(content: str) -> dict:
-    """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion."""
+    """Call scan-tier LLM with forced-JSON schema. Raises LLMError on retry exhaustion.
+
+    AC21 R1 M1: runtime pre-flight on the assembled prompt length. The
+    module-level `assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS` at import
+    time disappears under `python -O`, and a legitimately-sized content
+    combined with a larger-than-expected template could still slip past.
+    An explicit runtime check closes that gap regardless of optimization
+    level.
+    """
     safe_content = _escape_prompt_fences(content)
     prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=safe_content)
+    if len(prompt) > MAX_PROMPT_CHARS:
+        raise CaptureError(
+            f"capture prompt too long ({len(prompt)} chars > {MAX_PROMPT_CHARS} max); "
+            f"CAPTURE_MAX_BYTES={CAPTURE_MAX_BYTES} should prevent this — file a bug"
+        )
     return call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
 
 
@@ -347,6 +385,7 @@ def _verify_body_is_verbatim(items: list[dict], content: str) -> tuple[list[dict
         if body_stripped not in content:
             dropped += 1
             continue
+        item["body"] = body_stripped
         kept.append(item)
     return kept, dropped
 
@@ -362,23 +401,17 @@ def _build_slug(kind: str, title: str, existing: set[str]) -> str:
         base = kind
     if base not in existing:
         return base
-    # Collision loop: termination is guaranteed by the monotonic integer suffix
-    # (each `n` produces a distinct candidate slug). Runtime is O(|collision
-    # chain|) — proportional to how many `existing` entries already start with
-    # `base-`. `existing` comes from a full CAPTURES_DIR scan so its size is
-    # unbounded by this function; the practical bound is the rate limit and
-    # normal directory hygiene, not a hard loop cap.
-    n = 2
-    while True:
+    ceiling = _SLUG_COLLISION_CEILING
+    for n in range(2, ceiling + 2):
         suffix = f"-{n}"
         trimmed = base[: 80 - len(suffix)].rstrip("-") or kind[: 80 - len(suffix)]
         candidate = f"{trimmed}{suffix}"
         if candidate not in existing:
             return candidate
-        n += 1
+    raise RuntimeError(f"slug collision ceiling exhausted for {kind}/{base}; {ceiling} attempts")
 
 
-def _path_within_captures(path: Path, base_dir: Path | None = None) -> bool:
+def _is_path_within_captures(path: Path, base_dir: Path | None = None) -> bool:
     """Belt-and-suspenders: refuse any resolved path outside base_dir.
 
     Relies on base_dir itself being inside PROJECT_ROOT — enforced by the
@@ -564,7 +597,7 @@ def _write_item_files(
         success = False
         for _attempt in range(10):
             path = _captures_dir / f"{slug}.md"
-            if not _path_within_captures(path, base_dir=_captures_dir):
+            if not _is_path_within_captures(path, base_dir=_captures_dir):
                 return written, f"Error: slug escapes captures dir: {slug!r}"
             try:
                 _exclusive_atomic_write(path, markdown)
@@ -705,7 +738,7 @@ def capture_items(
 
 # === Module-import-time symlink guard (spec §5, §8) ===
 # If raw/captures/ is a symlink escaping PROJECT_ROOT, refuse to load the
-# module at all rather than fail open in _path_within_captures at runtime.
+# module at all rather than fail open in _is_path_within_captures at runtime.
 # A symlinked CAPTURES_DIR planted via some other primitive would resolve
 # to the symlink target on BOTH sides of the relative_to() call, silently
 # passing the path-within check. This assertion closes that gap.
@@ -729,6 +762,6 @@ if not _captures_resolved.is_relative_to(_project_resolved):
     )
 
 # A5 (Phase 5 kb-capture MED): public alias for the already-resolved
-# CAPTURES_DIR. _path_within_captures uses this cached value when base_dir=None
+# CAPTURES_DIR. _is_path_within_captures uses this cached value when base_dir=None
 # to avoid stat+readlink syscalls on every call.
 _CAPTURES_DIR_RESOLVED: Path = _captures_resolved

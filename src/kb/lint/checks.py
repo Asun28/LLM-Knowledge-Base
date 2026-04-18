@@ -529,13 +529,13 @@ def check_source_coverage(
             refs = extract_raw_refs(content)
             all_raw_refs.update(refs)
             continue
-        refs = extract_raw_refs(content)
-        all_raw_refs.update(refs)
         try:
             post = frontmatter.loads(content)
             all_raw_refs.update(normalize_sources(post.metadata.get("source")))
+            all_raw_refs.update(extract_raw_refs(post.content))
         except (ValueError, AttributeError, yaml.YAMLError) as e:
             logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
+            all_raw_refs.update(extract_raw_refs(content))
 
     # Find raw sources not referenced (append to issues collected above).
     for _type_name, type_dir in SOURCE_TYPE_DIRS.items():

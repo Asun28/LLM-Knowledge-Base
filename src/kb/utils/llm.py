@@ -2,6 +2,7 @@
 
 import logging
 import random
+import re
 import threading
 import time
 
@@ -25,8 +26,25 @@ RETRY_BASE_DELAY = LLM_RETRY_BASE_DELAY
 RETRY_MAX_DELAY = LLM_RETRY_MAX_DELAY
 REQUEST_TIMEOUT = LLM_REQUEST_TIMEOUT
 
+_LLM_ERROR_REDACT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("ANTHROPIC_KEY", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")),
+    ("OPENAI_KEY", re.compile(r"sk-proj-[A-Za-z0-9_\-]{20,}")),
+    ("GENERIC_SK_KEY", re.compile(r"sk-[A-Za-z0-9_\-]{20,}")),
+    ("BEARER_TOKEN", re.compile(r"Bearer\s+[A-Za-z0-9_\-\.]{20,}")),
+    ("LONG_HEX", re.compile(r"[A-Fa-f0-9]{32,}")),
+    ("LONG_B64", re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")),
+]
+
 _client: anthropic.Anthropic | None = None
 _client_lock = threading.Lock()
+
+
+def _redact_secrets(msg: str) -> str:
+    if not msg:
+        return msg
+    for label, pat in _LLM_ERROR_REDACT_PATTERNS:
+        msg = pat.sub(f"[REDACTED:{label}]", msg)
+    return msg
 
 
 def get_client() -> anthropic.Anthropic:
@@ -124,7 +142,7 @@ def _make_api_call(kwargs: dict, model: str):
             # `LLMError(kind=...)` so callers can branch: invalid_request (prompt
             # too long, invalid tool_choice), auth (bad key), permission (RBAC).
             # Raise immediately without incrementing `last_error` (cycle 3 L1).
-            safe_msg = truncate(str(e.message), limit=500)
+            safe_msg = truncate(_redact_secrets(str(e.message)), limit=500)
             if isinstance(e, anthropic.BadRequestError):
                 kind = "invalid_request"
             elif isinstance(e, anthropic.AuthenticationError):
@@ -168,7 +186,7 @@ def _make_api_call(kwargs: dict, model: str):
                 # contain tens of KB of echoed prompt content (including sensitive
                 # text). Preserve verbatim: exception class name, model, status code
                 # (so callers can still branch on the structured fields).
-                safe_msg = truncate(str(e.message), limit=500)
+                safe_msg = truncate(_redact_secrets(str(e.message)), limit=500)
                 raise LLMError(
                     f"API error from {model} ({e.__class__.__name__}): "
                     f"{e.status_code} — {safe_msg}",
@@ -235,13 +253,13 @@ def _make_api_call(kwargs: dict, model: str):
     elif isinstance(last_error, anthropic.APIStatusError):
         # Item 7 (cycle 2): truncate message here as well — the retry-exhausted
         # path also carries `last_error.message` which may echo prompt content.
-        safe_msg = truncate(str(last_error.message), limit=500)
+        safe_msg = truncate(_redact_secrets(str(last_error.message)), limit=500)
         msg = (
             f"API error {last_error.status_code} after {MAX_RETRIES} retries "
             f"calling {model} ({last_error.__class__.__name__}): {safe_msg}"
         )
     else:
-        safe_msg = truncate(str(last_error), limit=500)
+        safe_msg = truncate(_redact_secrets(str(last_error)), limit=500)
         msg = f"Failed after {MAX_RETRIES} retries calling {model}: {safe_msg}"
     raise LLMError(msg) from last_error
 

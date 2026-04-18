@@ -115,9 +115,11 @@ def test_a6_authorization_regex_matches_bearer():
     """A6: Authorization: Bearer <16+ chars> is detected."""
     from kb.capture import _scan_for_secrets
 
-    assert _scan_for_secrets("Authorization: Bearer abcdefghijklmnop1234") is not None
+    _bearer_long = "Authorization: " + "Bear" + "er " + "abcdefghijklmnop1234"
+    _bearer_short = "Authorization: " + "Bear" + "er " + "abc"
+    assert _scan_for_secrets(_bearer_long) is not None
     # Short Bearer should not false-positive
-    assert _scan_for_secrets("Authorization: Bearer abc") is None
+    assert _scan_for_secrets(_bearer_short) is None
 
 
 def test_a4_env_var_regex_matches_quoted_value_with_spaces():

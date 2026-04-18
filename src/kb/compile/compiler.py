@@ -72,7 +72,7 @@ def load_manifest(manifest_path: Path | None = None) -> dict[str, str]:
     if manifest_path.exists():
         try:
             return json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
             logger.warning("Corrupt manifest %s, resetting to empty: %s", manifest_path, e)
             return {}
     return {}

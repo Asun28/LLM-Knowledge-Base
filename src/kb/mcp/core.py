@@ -21,7 +21,14 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
-from kb.mcp.app import _format_ingest_result, _rel, _sanitize_error_str, error_tag, mcp
+from kb.mcp.app import (
+    _format_ingest_result,
+    _rel,
+    _sanitize_error_str,
+    _validate_wiki_dir,
+    error_tag,
+    mcp,
+)
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
@@ -355,13 +362,11 @@ def kb_ingest(
         return f"Error reading source file: {_sanitize_error_str(e, path)}"
 
     if len(content) > QUERY_CONTEXT_MAX_CHARS:
-        logger.warning(
-            "Source file %s is %d chars (> %d limit); truncating for extraction prompt",
-            _rel(path),
-            len(content),
-            QUERY_CONTEXT_MAX_CHARS,
+        return (
+            f"Error: source too long ({len(content)} chars; "
+            f"max {QUERY_CONTEXT_MAX_CHARS} chars). "
+            f"Split the file or pass extraction_json inline."
         )
-        content = content[:QUERY_CONTEXT_MAX_CHARS]
     prompt = build_extraction_prompt(content, template)
 
     rel_path = _rel(path)
@@ -599,7 +604,7 @@ def kb_save_source(
 
 
 @mcp.tool()
-def kb_compile_scan(incremental: bool = True) -> str:
+def kb_compile_scan(incremental: bool = True, wiki_dir: str | None = None) -> str:
     """Scan for new/changed raw sources that need ingestion.
 
     Returns source files to process. For each, call kb_ingest with extraction_json.
@@ -607,6 +612,8 @@ def kb_compile_scan(incremental: bool = True) -> str:
 
     Args:
         incremental: If True (default), only new/changed sources. If False, all.
+        wiki_dir: Optional wiki directory override. When provided, raw sources
+            and the hash manifest are resolved from the same project root.
     """
     try:
         from kb.compile.compiler import find_changed_sources, scan_raw_sources
@@ -614,10 +621,17 @@ def kb_compile_scan(incremental: bool = True) -> str:
         return f"Error loading compile module: {_sanitize_error_str(e)}"
 
     try:
+        wiki_path, err = _validate_wiki_dir(wiki_dir)
+        if err:
+            return err
+        raw_dir = wiki_path.parent / "raw" if wiki_path else None
+        manifest_path = wiki_path.parent / ".data" / "hashes.json" if wiki_path else None
         if incremental:
             # save_hashes=True (default): marks templates as seen so repeated calls
             # to kb_compile_scan de-duplicate work between invocations.
-            new_sources, changed_sources = find_changed_sources()
+            new_sources, changed_sources = find_changed_sources(
+                raw_dir=raw_dir, manifest_path=manifest_path
+            )
             if not new_sources and not changed_sources:
                 return "No new or changed sources found. Wiki is up to date."
 
@@ -638,7 +652,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
                 "then call kb_ingest(source_path, extraction_json=...) with your extraction."
             )
         else:
-            all_sources = scan_raw_sources()
+            all_sources = scan_raw_sources(raw_dir=raw_dir)
             if not all_sources:
                 return "No source files found in raw/."
             lines = [

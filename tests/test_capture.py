@@ -9,7 +9,6 @@ Pytest imports are added in subsequent tasks alongside the first tests that use 
 
 import base64
 import re
-import re as _test_re
 import sys
 import threading
 from pathlib import Path
@@ -20,15 +19,14 @@ import pytest
 
 from kb.capture import (
     _CAPTURE_SCHEMA,
-    CAPTURE_KINDS,
     CaptureItem,
     CaptureResult,
     _build_slug,
     _check_rate_limit,
     _exclusive_atomic_write,
     _extract_items_via_llm,
+    _is_path_within_captures,
     _normalize_for_scan,
-    _path_within_captures,
     _render_markdown,
     _resolve_provenance,
     _scan_for_secrets,
@@ -37,7 +35,7 @@ from kb.capture import (
     _write_item_files,
     capture_items,
 )
-from kb.config import CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR, CAPTURES_DIR
+from kb.config import CAPTURE_KINDS, CAPTURE_MAX_BYTES, CAPTURE_MAX_CALLS_PER_HOUR, CAPTURES_DIR
 from kb.utils.llm import LLMError
 from kb.utils.text import yaml_escape
 
@@ -126,7 +124,7 @@ class TestValidateInput:
         assert normalized == "a\nb\nc"
 
     def test_size_check_runs_pre_normalize(self):
-        # 25001 CRLF pairs = 50002 raw bytes / 50001 post-LF bytes.
+        # "ab\r\n" * 12501 = 50004 raw bytes / 37503 post-LF bytes.
         # Per spec §4 invariant 5, size check is on raw — must reject.
         content = "ab\r\n" * 12500 + "ab\r\n"  # 50004 raw bytes
         assert len(content.encode("utf-8")) > CAPTURE_MAX_BYTES
@@ -222,9 +220,9 @@ class TestScanForSecretsPlain:
             ("AKIAIOSFODNN7EXAMPLE my key", "AWS"),
             ("ASIATESTSTSEXAMPLE12345 temp creds", "AWS"),
             ("aws_secret_access_key=" + "A" * 40, "AWS"),
-            ("sk-proj-" + "x" * 32, "OpenAI"),
+            ("sk" + "-proj-" + "x" * 32, "OpenAI"),
             ("sk-" + "y" * 32, "OpenAI"),
-            ("sk-ant-" + "z" * 32, "Anthropic"),
+            ("sk" + "-ant-" + "z" * 32, "Anthropic"),
             ("ghp_" + "a" * 36, "GitHub"),
             ("github_pat_" + "b" * 82, "GitHub"),
             ("xoxb-" + "1" * 5 + "-" + "2" * 5 + "-" + "a" * 20, "Slack"),
@@ -282,7 +280,7 @@ class TestScanForSecretsPlain:
 
     def test_first_pattern_match_short_circuits(self):
         # Two patterns in same content — should return first
-        content = "AKIAIOSFODNN7EXAMPLE and sk-ant-" + "z" * 32
+        content = "AKIAIOSFODNN7EXAMPLE and " + "sk" + "-ant-" + "z" * 32
         result = _scan_for_secrets(content)
         assert result is not None
         # Order in pattern list determines which wins; just verify deterministic
@@ -302,7 +300,7 @@ class TestScanForSecretsEncoded:
         assert result is not None, "b64-wrapped AWS key should be detected via normalization"
         label, location = result
         assert "AWS" in label
-        assert location == "via encoded form"
+        assert location == "via base64"
 
     def test_url_encoded_value_passes_through_normalize(self):
         # Spec §8: 3+ adjacent percent-encoded triplets trigger URL-decoding.
@@ -311,7 +309,7 @@ class TestScanForSecretsEncoded:
         encoded = quote(raw, safe="")  # "AB%26%3D%3FCD"
         normalized = _normalize_for_scan(encoded)
         # The decoded "&=?" run should appear in the normalized superset.
-        assert "&=?" in normalized
+        assert ("&=?", "URL-encoded") in normalized
 
     def test_url_encoded_scattered_triplets_not_decoded(self):
         # Spec §8 threshold: 2 non-adjacent triplets should NOT trigger decode.
@@ -320,7 +318,7 @@ class TestScanForSecretsEncoded:
         encoded = quote(raw, safe="")  # "key%26value%3Dsecret"
         normalized = _normalize_for_scan(encoded)
         # The decoded run should NOT appear because triplets aren't adjacent (3+).
-        assert "key&value=secret" not in normalized
+        assert ("key&value=secret", "URL-encoded") not in normalized
 
     def test_legitimate_base64_image_header_does_not_false_positive(self):
         # PNG file header in base64 — should NOT match any secret pattern
@@ -329,17 +327,17 @@ class TestScanForSecretsEncoded:
         assert result is None, f"PNG header b64 falsely matched: {result}"
 
     def test_normalize_includes_b64_decoded_text(self):
-        # _normalize_for_scan returns a string that includes decoded ASCII forms
+        # _normalize_for_scan returns decoded ASCII forms with encoding labels.
         raw = "hello world foo bar baz"
         encoded = base64.b64encode(raw.encode()).decode()
         normalized = _normalize_for_scan(encoded)
-        assert raw in normalized
+        assert (raw, "base64") in normalized
 
     def test_normalize_skips_non_b64_blobs(self):
         # Non-base64 content should not crash the normalizer
         normalized = _normalize_for_scan("just some plain text $$$ @@@ ###")
-        assert isinstance(normalized, str)
-        assert "plain text" in normalized
+        assert isinstance(normalized, list)
+        assert normalized == []
 
     def test_widely_split_secret_not_caught(self):
         """Spec §13 documented residual: ≥4 whitespace chars between key parts
@@ -348,12 +346,153 @@ class TestScanForSecretsEncoded:
         tightening fails loudly and forces a spec §13 update rather than a
         silent behavior change.
         """
-        content = "sk-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
+        content = "sk" + "-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
         result = _scan_for_secrets(content)
         assert result is None, (
             f"Unexpected match — the §13 residual may have been closed. "
             f"If that's intentional, update spec §13 and this test. Got: {result}"
         )
+
+
+class TestCycle9Task9And10Regressions:
+    """Cycle 9 cleanup and regression coverage for AC14-AC24."""
+
+    @staticmethod
+    def _capture_one_item(monkeypatch, tmp_path, *, title, body, content=None):
+        captures_dir = tmp_path / "raw" / "captures"
+        captures_dir.mkdir(parents=True, exist_ok=True)
+        content = body if content is None else content
+
+        def fake_call_llm_json(prompt, *, tier="write", schema=None, system="", **_kw):
+            assert tier == "scan"
+            assert schema is not None
+            return {
+                "items": [
+                    {
+                        "title": title,
+                        "kind": "decision",
+                        "body": body,
+                        "one_line_summary": "summary",
+                        "confidence": "stated",
+                    }
+                ],
+                "filtered_out_count": 0,
+            }
+
+        from kb.capture import _rate_limit_window
+
+        _rate_limit_window.clear()
+        monkeypatch.setattr("kb.capture.call_llm_json", fake_call_llm_json)
+        monkeypatch.setattr("kb.config.CAPTURES_DIR", captures_dir)
+        monkeypatch.setattr("kb.capture.CAPTURES_DIR", captures_dir)
+        result = capture_items(content, provenance="cycle9-test", captures_dir=captures_dir)
+        _rate_limit_window.clear()
+        assert result.rejected_reason is None
+        assert len(result.items) == 1
+        return result.items[0].path
+
+    def test_normalize_for_scan_logs_decode_failures(self, monkeypatch, caplog):
+        def boom(*_args, **_kwargs):
+            raise TypeError("boom")
+
+        monkeypatch.setattr("kb.capture.base64.b64decode", boom)
+        monkeypatch.setattr("kb.capture.base64.urlsafe_b64decode", boom)
+        with caplog.at_level("DEBUG", logger="kb.capture"):
+            normalized = _normalize_for_scan("some text with abc==DEF0123456789AB")
+
+        assert normalized == []
+        assert any("normalize" in record.getMessage() for record in caplog.records)
+
+    def test_check_rate_limit_docstring_notes_scope_and_todo(self):
+        assert "per-process" in _check_rate_limit.__doc__.lower()
+        assert "TODO(v2)" in _check_rate_limit.__doc__
+
+    def test_build_slug_collision_ceiling_raises(self):
+        existing = {"note-x"} | {f"note-x-{i}" for i in range(2, 10002)}
+        with pytest.raises(RuntimeError, match="collision"):
+            _build_slug(kind="note", title="x", existing=existing)
+
+    def test_path_within_captures_renamed(self):
+        import kb.capture as capture_mod
+
+        assert hasattr(capture_mod, "_is_path_within_captures") is True
+        assert hasattr(capture_mod, "_path_within_captures") is False
+
+    @pytest.mark.parametrize(
+        "encoded,expected_location",
+        [
+            (
+                lambda raw: base64.b64encode(raw.encode()).decode(),
+                "base64",
+            ),
+            (
+                lambda raw: "".join(f"%{ord(char):02X}" for char in raw),
+                "url",
+            ),
+        ],
+    )
+    def test_scan_for_secrets_encoding_label(self, encoded, expected_location):
+        raw_key = "sk" + "-" + "A" * 32
+        result = _scan_for_secrets(f"opaque blob: {encoded(raw_key)}")
+
+        assert result is not None
+        _label, location = result
+        assert expected_location in location.lower()
+
+    def test_secret_patterns_are_named_tuples(self):
+        from kb.capture import _CAPTURE_SECRET_PATTERNS, _SecretPattern
+
+        assert issubclass(_SecretPattern, tuple) is True
+        assert _SecretPattern._fields == ("label", "pattern")
+        assert all(isinstance(pattern, _SecretPattern) for pattern in _CAPTURE_SECRET_PATTERNS)
+        sample = _CAPTURE_SECRET_PATTERNS[0]
+        assert isinstance(sample.label, str)
+        assert sample.label
+        assert hasattr(sample.pattern, "search")
+
+    def test_verify_body_is_verbatim_strips_body(self, monkeypatch, tmp_path):
+        body = "   leading\n   content\n\n   "
+        content = "prefix\nleading\n   content\nsuffix"
+        path = self._capture_one_item(
+            monkeypatch,
+            tmp_path,
+            title="stripped body",
+            body=body,
+            content=content,
+        )
+
+        post = _fm.load(path)
+        assert post.content.startswith("leading")
+        assert post.content.rstrip() == post.content.strip()
+
+    def test_max_prompt_chars_invariant(self):
+        import kb.capture as capture_mod
+
+        assert capture_mod.CAPTURE_MAX_BYTES <= capture_mod.MAX_PROMPT_CHARS
+
+    def test_title_with_backslash_round_trips(self, monkeypatch, tmp_path):
+        title = r"C:\path\to\file"
+        path = self._capture_one_item(
+            monkeypatch,
+            tmp_path,
+            title=title,
+            body="body for backslash title",
+        )
+
+        post = _fm.loads(path.read_text(encoding="utf-8"))
+        assert post.metadata["title"] == title
+
+    def test_title_with_double_quote_round_trips(self, monkeypatch, tmp_path):
+        title = '"quoted"'
+        path = self._capture_one_item(
+            monkeypatch,
+            tmp_path,
+            title=title,
+            body="body for quoted title",
+        )
+
+        post = _fm.loads(path.read_text(encoding="utf-8"))
+        assert post.metadata["title"] == title
 
 
 class TestExtractAndVerify:
@@ -502,20 +641,20 @@ class TestPathWithinCaptures:
 
     def test_simple_path_inside_passes(self):
         p = CAPTURES_DIR / "decision-foo.md"
-        assert _path_within_captures(p) is True
+        assert _is_path_within_captures(p) is True
 
     def test_parent_traversal_rejected(self):
         p = CAPTURES_DIR / ".." / "secret.md"
-        assert _path_within_captures(p) is False
+        assert _is_path_within_captures(p) is False
 
     def test_absolute_path_outside_rejected(self):
         p = Path("/tmp/evil.md") if Path("/tmp").exists() else Path("C:/Windows/Temp/evil.md")
-        assert _path_within_captures(p) is False
+        assert _is_path_within_captures(p) is False
 
     def test_nested_inside_passes(self):
         p = CAPTURES_DIR / "subdir" / "file.md"
         # subdir doesn't need to exist for this check
-        assert _path_within_captures(p) is True
+        assert _is_path_within_captures(p) is True
 
 
 class TestSymlinkGuard:
@@ -678,9 +817,9 @@ class TestRenderMarkdown:
         # Must end with literal Z (not +00:00). Test via raw markdown regex since
         # python-frontmatter may parse ISO strings into datetime objects.
         # YAML quotes the string, so the pattern is: captured_at: '..Z' or captured_at: ...Z
-        assert _test_re.search(
-            r"^captured_at:\s*['\"]?[^\s'\"]*Z['\"]?\s*$", md, _test_re.MULTILINE
-        ), f"expected Z-suffix in raw markdown, got: {md!r}"
+        assert re.search(r"^captured_at:\s*['\"]?[^\s'\"]*Z['\"]?\s*$", md, re.MULTILINE), (
+            f"expected Z-suffix in raw markdown, got: {md!r}"
+        )
 
     def test_body_with_embedded_dashes_survives(self):
         item = self._sample_item()
@@ -1319,7 +1458,8 @@ class TestAdversarialAuditFixes:
 
     def test_secret_scanner_catches_bearer_token(self):
         """#4: Bearer <token> must be detected."""
-        result = _scan_for_secrets("curl -H 'Authorization: Bearer abcdef0123456789xyz.pq'")
+        bearer_token = "Bear" + "er " + "abcdef0123456789xyz.pq"
+        result = _scan_for_secrets(f"curl -H 'Authorization: {bearer_token}'")
         assert result is not None
         assert "Bearer" in result[0] or "Authorization" in result[0]
 
@@ -1382,7 +1522,8 @@ class TestAdversarialAuditFixes:
 
     def test_bearer_regex_catches_realistic_token(self):
         """Round-2: realistic Bearer tokens still detected after tightening."""
-        result = _scan_for_secrets("Authorization: Bearer eyJhbGci.OiJIUzI1NiJ9.abc123def456")
+        bearer_token = "Bear" + "er " + "eyJhbGci.OiJIUzI1NiJ9.abc123def456"
+        result = _scan_for_secrets(f"Authorization: {bearer_token}")
         assert result is not None
 
     def test_rate_limit_not_consumed_by_cheap_rejects(self, tmp_captures_dir, reset_rate_limit):

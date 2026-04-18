@@ -16,6 +16,81 @@ logger = logging.getLogger(__name__)
 ERROR_TAG_FORMAT = "Error[{category}]: {message}"
 
 
+_INSTRUCTIONS_PREAMBLE = (
+    "Knowledge base tools for a structured wiki compiled from raw sources. "
+    "You (Claude Code) ARE the LLM — no API key needed.\n\n"
+    "WORKFLOW:"
+)
+
+_TOOL_GROUPS = (
+    (
+        "Browse",
+        (
+            ("kb_search", "browse wiki."),
+            ("kb_read_page", "browse wiki."),
+            ("kb_list_pages", "browse wiki."),
+            ("kb_list_sources", "browse wiki."),
+        ),
+    ),
+    (
+        "Ingest",
+        (
+            (
+                "kb_ingest",
+                "pass source_path + your extraction_json to create wiki pages. "
+                "Omit extraction_json to get the extraction prompt first.",
+            ),
+            ("kb_ingest_content", "one-shot for content not yet saved to raw/."),
+            ("kb_save_source", "save content to raw/ for later ingestion."),
+            (
+                "kb_capture",
+                "extract discrete knowledge items from unstructured text into raw/captures/.",
+            ),
+            ("kb_compile_scan", "find changed sources, then kb_ingest each."),
+            ("kb_compile", "run full compilation (requires ANTHROPIC_API_KEY)."),
+        ),
+    ),
+    (
+        "Health",
+        (
+            ("kb_stats", "health and gap analysis."),
+            ("kb_lint", "health and gap analysis."),
+            ("kb_evolve", "health and gap analysis."),
+            ("kb_detect_drift", "find wiki pages stale due to raw source changes."),
+            ("kb_graph_viz", "export knowledge graph as Mermaid diagram."),
+            ("kb_verdict_trends", "show weekly quality trends from verdict history."),
+        ),
+    ),
+    (
+        "Quality",
+        (
+            ("kb_review_page", "quality review."),
+            ("kb_refine_page", "quality review."),
+            ("kb_lint_deep", "quality review."),
+            ("kb_lint_consistency", "quality review."),
+            ("kb_query_feedback", "feedback and trust scoring."),
+            ("kb_reliability_map", "feedback and trust scoring."),
+            ("kb_affected_pages", "find pages impacted by a change."),
+            ("kb_save_lint_verdict", "persist lint/review verdicts."),
+            ("kb_create_page", "create comparison/synthesis/any wiki page directly."),
+        ),
+    ),
+    (
+        "Query",
+        (("kb_query", "returns wiki context for you to synthesize an answer."),),
+    ),
+)
+
+
+def _render_instructions() -> str:
+    _lines = [_INSTRUCTIONS_PREAMBLE, "", "## Tool Groups"]
+    for group_name, tools in _TOOL_GROUPS:
+        _lines.append(f"\n### {group_name}")
+        for name, desc in sorted(tools, key=lambda t: t[0]):
+            _lines.append(f"- `{name}` — {desc}")
+    return "\n".join(_lines)
+
+
 def error_tag(category: str, message: str) -> str:
     """Return a categorised error string for MCP tool responses.
 
@@ -31,28 +106,7 @@ def error_tag(category: str, message: str) -> str:
 
 mcp = FastMCP(
     "LLM Knowledge Base",
-    instructions=(
-        "Knowledge base tools for a structured wiki compiled from raw sources. "
-        "You (Claude Code) ARE the LLM — no API key needed.\n\n"
-        "WORKFLOW:\n"
-        "- kb_query: returns wiki context for you to synthesize an answer.\n"
-        "- kb_ingest: pass source_path + your extraction_json to create wiki pages. "
-        "Omit extraction_json to get the extraction prompt first.\n"
-        "- kb_ingest_content: one-shot for content not yet saved to raw/.\n"
-        "- kb_save_source: save content to raw/ for later ingestion.\n"
-        "- kb_compile_scan: find changed sources, then kb_ingest each.\n"
-        "- kb_compile: run full compilation (requires ANTHROPIC_API_KEY).\n"
-        "- kb_search, kb_read_page, kb_list_pages, kb_list_sources: browse wiki.\n"
-        "- kb_lint, kb_evolve, kb_stats: health and gap analysis.\n"
-        "- kb_detect_drift: find wiki pages stale due to raw source changes.\n"
-        "- kb_review_page, kb_refine_page, kb_lint_deep, kb_lint_consistency: quality review.\n"
-        "- kb_query_feedback, kb_reliability_map: feedback and trust scoring.\n"
-        "- kb_affected_pages: find pages impacted by a change.\n"
-        "- kb_save_lint_verdict: persist lint/review verdicts.\n"
-        "- kb_create_page: create comparison/synthesis/any wiki page directly.\n"
-        "- kb_graph_viz: export knowledge graph as Mermaid diagram.\n"
-        "- kb_verdict_trends: show weekly quality trends from verdict history."
-    ),
+    instructions=_render_instructions(),
 )
 
 
@@ -128,6 +182,22 @@ def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
     # Regex sweep for remaining absolute-path literals.
     s = _ABS_PATH_PATTERNS.sub("<path>", s)
     return s
+
+
+def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+    if wiki_dir is None:
+        return None, None
+    try:
+        path = Path(wiki_dir).expanduser()
+    except (TypeError, ValueError) as e:
+        return None, f"Invalid wiki_dir: {_sanitize_error_str(e)}"
+    if not path.is_absolute():
+        return None, f"Error: wiki_dir must be an absolute path (got: {wiki_dir})"
+    if not path.exists():
+        return None, f"Error: wiki_dir does not exist: {path}"
+    if not path.is_dir():
+        return None, f"Error: wiki_dir is not a directory: {path}"
+    return path.resolve(), None
 
 
 # Cycle 4 item #13 — cross-platform reservation of Windows device names.
