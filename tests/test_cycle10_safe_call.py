@@ -1,6 +1,7 @@
 from kb.lint._safe_call import _safe_call
 from kb.lint.runner import run_all_checks
 from kb.mcp import health
+from kb.mcp.app import _sanitize_error_str
 from kb.mcp.health import kb_lint
 
 
@@ -61,3 +62,14 @@ def test_lint_runner_surfaces_sanitised_verdict_history_error(tmp_project, tmp_p
 
     assert "verdict_history_error" in report
     assert str(tmp_path) not in report["verdict_history_error"]
+
+
+def test_sanitize_error_str_rewrites_explicit_path_before_regex_sweep():
+    secret_path = health.PROJECT_ROOT / "raw" / "secret.json"
+    exc = OSError(f"disk full at {secret_path}")
+
+    result = _sanitize_error_str(exc, secret_path)
+
+    assert "raw/secret.json" in result
+    assert str(secret_path) not in result
+    assert "<path>" not in result
