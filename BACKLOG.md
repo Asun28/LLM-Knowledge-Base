@@ -282,6 +282,9 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `utils/io.py:18,44` `tempfile.mkstemp(dir=path.parent)` + `Path(tmp_path).replace(path)` on network mounts — if `path.parent` is an offline OneDrive/SMB mount, `mkstemp` succeeds locally then `replace` fails; temp file is unlinked on `BaseException`, but on partial network failure (write fd closes ok, replace times out), the temp file may linger if `unlink` also times out. No retry path, no orphaned-temp cleanup. (R4)
   (fix: document that the package is not safe on network drives; or add startup orphan-temp sweep — find `*.tmp` siblings of known data files older than 1h and unlink)
 
+- `mcp/browse.py:319` `kb_stats`, `mcp/health.py:150 kb_graph_viz / :185 kb_verdict_trends / :210 kb_detect_drift` — manual `Path(wiki_dir).resolve()`; migrate to `_validate_wiki_dir` helper from cycle 9. (Surfaced in cycle 9 PR #23 R1 review; deliberately scoped-out.)
+  (fix: one-line replacement; same error-shape as new kb_compile_scan/kb_lint/kb_evolve)
+
 
 ---
 
