@@ -8,6 +8,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
+from kb.utils.sanitize import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
     Returns:
         Sanitized string safe for the MCP client.
     """
-    s = str(exc)
+    s = sanitize_error_text(exc)
     # Known-path substitution: per-call-site safety.
     for p in paths:
         if p is None:
@@ -184,9 +185,12 @@ def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
     return s
 
 
-def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+def _validate_wiki_dir(
+    wiki_dir: str | None, *, project_root: Path | None = None
+) -> tuple[Path | None, str | None]:
     if wiki_dir is None:
         return None, None
+    effective_project_root = project_root or PROJECT_ROOT
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
@@ -198,7 +202,7 @@ def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
     if not path.is_dir():
         return None, f"wiki_dir is not a directory: {_sanitize_error_str(str(path))}"
     path_resolved = path.resolve()
-    root = PROJECT_ROOT.resolve()
+    root = effective_project_root.resolve()
     if path_resolved != root and not path_resolved.is_relative_to(root):
         return (
             None,

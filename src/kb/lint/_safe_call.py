@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from kb.utils.sanitize import sanitize_error_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,8 +44,6 @@ def _safe_call[T](
     try:
         return fn(), None
     except Exception as exc:  # noqa: BLE001 — _safe_call IS the guard
-        from kb.mcp.app import _sanitize_error_str
-
-        msg = f"{label}_error: {type(exc).__name__}: {_sanitize_error_str(exc)}"
+        msg = f"{label}_error: {type(exc).__name__}: {sanitize_error_text(exc)}"
         active_log.warning("safe_call(%s) failed: %s", label, exc)
         return fallback, msg

@@ -27,10 +27,10 @@ def test_kb_lint_accepts_all_new_kwargs():
 
 def test_kb_lint_default_call_unchanged_behavior(tmp_project, create_wiki_page, monkeypatch):
     """Calling kb_lint() with no args still runs the standard lint report."""
-    from kb.mcp import app as mcp_app
+    from kb.mcp import health
     from kb.mcp.health import kb_lint
 
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
+    monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
     create_wiki_page(
         page_id="entities/foo",
         title="Foo",
@@ -45,10 +45,10 @@ def test_kb_lint_default_call_unchanged_behavior(tmp_project, create_wiki_page, 
 
 def test_kb_lint_augment_appends_summary_section(tmp_project, create_wiki_page, monkeypatch):
     """kb_lint(augment=True) appends ## Augment Summary to the report."""
-    from kb.mcp import app as mcp_app
+    from kb.mcp import health
     from kb.mcp.health import kb_lint
 
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
+    monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
     monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
     create_wiki_page(
         page_id="entities/foo",

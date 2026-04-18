@@ -120,6 +120,7 @@ class TestMcpHealthToolsThreadWikiDir:
             return {"suggestions": []}
 
         monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
+        monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
         monkeypatch.setattr("kb.evolve.analyzer.generate_evolution_report", _fake)
         monkeypatch.setattr("kb.evolve.analyzer.format_evolution_report", lambda r: "report")
         health.kb_evolve(wiki_dir=str(wiki_dir))

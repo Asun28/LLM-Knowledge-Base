@@ -11,15 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def _validate_health_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
-    from kb.mcp import app as mcp_app
-
-    original_project_root = mcp_app.PROJECT_ROOT
-    if PROJECT_ROOT != original_project_root:
-        mcp_app.PROJECT_ROOT = PROJECT_ROOT
-    try:
-        return _validate_wiki_dir(wiki_dir)
-    finally:
-        mcp_app.PROJECT_ROOT = original_project_root
+    return _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
 
 
 @mcp.tool()
@@ -64,7 +56,7 @@ def kb_lint(
             f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
         )
 
-    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
     if err:
         return f"Error: {err}"
 
@@ -126,7 +118,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     Args:
         wiki_dir: Cycle 6 AC2. Override wiki directory (default: kb.config.WIKI_DIR).
     """
-    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
     if err:
         return f"Error: {err}"
 

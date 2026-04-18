@@ -2,13 +2,13 @@
 
 import json
 import sys
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from kb.config import PROJECT_ROOT
-from kb.mcp import app as mcp_app
 from kb.mcp import browse, health
 from kb.mcp.app import _validate_wiki_dir
 from kb.mcp.health import kb_detect_drift, kb_graph_viz, kb_verdict_trends
@@ -28,10 +28,9 @@ def test_validate_wiki_dir_rejects_absolute_outside_project_root(tmp_path):
 
 def test_validate_wiki_dir_accepts_project_wiki_subdir(tmp_project, monkeypatch):
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
     wiki = tmp_project / "wiki"
 
-    path, err = _validate_wiki_dir(str(wiki))
+    path, err = _validate_wiki_dir(str(wiki), project_root=tmp_project)
 
     assert err is None
     assert path == wiki.resolve()
@@ -40,13 +39,12 @@ def test_validate_wiki_dir_accepts_project_wiki_subdir(tmp_project, monkeypatch)
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink semantics differ")
 def test_validate_wiki_dir_symlink_to_outside_rejected(tmp_project, tmp_path, monkeypatch):
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
     outside = tmp_path / "outside_project_root_cycle10"
     outside.mkdir()
     link = tmp_project / "wiki_link"
     link.symlink_to(outside, target_is_directory=True)
 
-    path, err = _validate_wiki_dir(str(link))
+    path, err = _validate_wiki_dir(str(link), project_root=tmp_project)
 
     assert path is None
     assert err is not None
@@ -72,7 +70,6 @@ def test_kb_stats_respects_wiki_dir_override_and_rejects_traversal(
         wiki_dir=wiki,
     )
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
     monkeypatch.setattr(browse, "PROJECT_ROOT", tmp_project)
 
     result = browse.kb_stats(wiki_dir=str(wiki))
@@ -88,9 +85,39 @@ def test_kb_stats_respects_wiki_dir_override_and_rejects_traversal(
 def _allow_tmp_project_wiki_dir(tmp_project, monkeypatch) -> Path:
     wiki = tmp_project / "wiki"
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
     monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
     return wiki
+
+
+def test_validate_wiki_dir_is_threadsafe_with_explicit_project_root(tmp_path):
+    results: list[tuple[int, Path | None, str | None]] = []
+    lock = threading.Lock()
+
+    def worker(i: int) -> None:
+        wiki = tmp_path / f"t{i}" / "wiki"
+        wiki.mkdir(parents=True)
+        path, err = _validate_wiki_dir(str(wiki), project_root=wiki.parent)
+        with lock:
+            results.append((i, path, err))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 20
+    for i, path, err in results:
+        expected = (tmp_path / f"t{i}" / "wiki").resolve()
+        assert err is None
+        assert path == expected
+
+    outside = tmp_path / "outside" / "wiki"
+    outside.mkdir(parents=True)
+    path, err = _validate_wiki_dir(str(outside), project_root=tmp_path / "inside")
+    assert path is None
+    assert err is not None
+    assert err.startswith("wiki_dir must be inside project root")
 
 
 def test_kb_graph_viz_respects_wiki_dir_override_and_rejects_traversal(

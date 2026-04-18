@@ -12,7 +12,6 @@ from kb.config import (
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.mcp import app as mcp_app
 from kb.mcp.app import _sanitize_error_str, _validate_page_id, _validate_wiki_dir, mcp
 from kb.utils.pages import load_all_pages
 
@@ -322,13 +321,7 @@ def kb_stats(wiki_dir: str | None = None) -> str:
         from kb.evolve.analyzer import analyze_coverage
         from kb.graph.builder import build_graph, graph_stats
 
-        original_project_root = mcp_app.PROJECT_ROOT
-        if PROJECT_ROOT != original_project_root:
-            mcp_app.PROJECT_ROOT = PROJECT_ROOT
-        try:
-            wiki_path, err = _validate_wiki_dir(wiki_dir)
-        finally:
-            mcp_app.PROJECT_ROOT = original_project_root
+        wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
         if err:
             return f"Error: {err}"
 

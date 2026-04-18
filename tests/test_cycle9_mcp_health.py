@@ -62,9 +62,11 @@ def _install_evolve_report(monkeypatch) -> None:
 
 def test_kb_lint_feedback_scoped_to_wiki_dir(tmp_project, monkeypatch):
     from kb.feedback import store
+    from kb.mcp import health
     from kb.mcp.health import kb_lint
 
     _install_lint_report(monkeypatch)
+    monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
     production_feedback = tmp_project / "production" / "feedback.json"
     _write_feedback(production_feedback, _feedback_with_low_trust_page("concepts/poison"))
     monkeypatch.setattr(store, "FEEDBACK_PATH", production_feedback)
@@ -88,9 +90,11 @@ def test_kb_lint_feedback_scoped_to_wiki_dir(tmp_project, monkeypatch):
 
 def test_kb_evolve_coverage_gaps_scoped_to_wiki_dir(tmp_project, monkeypatch):
     from kb.feedback import store
+    from kb.mcp import health
     from kb.mcp.health import kb_evolve
 
     _install_evolve_report(monkeypatch)
+    monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
     production_feedback = tmp_project / "production" / "feedback.json"
     _write_feedback(
         production_feedback,
