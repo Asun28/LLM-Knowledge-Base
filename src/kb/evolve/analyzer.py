@@ -5,7 +5,6 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from kb.compile.linker import build_backlinks
 from kb.config import (
     MAX_PAGES_FOR_TERM,
     MIN_PAGES_FOR_TERM,
@@ -22,6 +21,12 @@ from kb.utils.pages import WIKI_SUBDIRS
 logger = logging.getLogger(__name__)
 
 
+def _orphan_via_graph_resolver(pages: list[dict] | None, wiki_dir: Path) -> set[str]:
+    """Return page IDs that have inbound edges under graph wikilink resolution."""
+    graph = build_graph(wiki_dir, pages=pages)
+    return {node for node, degree in graph.in_degree() if degree > 0}
+
+
 def analyze_coverage(
     wiki_dir: Path | None = None,
     pages: list | None = None,
@@ -34,7 +39,7 @@ def analyze_coverage(
         wiki_dir: Path to wiki directory.
         pages: Pre-scanned page list from scan_wiki_pages(). If None, scans internally.
         pages_dicts: Optional pre-loaded page dicts (from load_all_pages).
-            When provided, ``build_backlinks`` reuses the bundle instead of
+            When provided, orphan detection reuses the bundle instead of
             re-scanning disk (Cycle 7 AC9).
 
     Returns:
@@ -44,7 +49,7 @@ def analyze_coverage(
     wiki_dir = wiki_dir or WIKI_DIR
     if pages is None:
         pages = scan_wiki_pages(wiki_dir)
-    backlinks = build_backlinks(wiki_dir, pages=pages_dicts)
+    pages_with_inbound = _orphan_via_graph_resolver(pages_dicts, wiki_dir)
 
     by_type = {subdir: 0 for subdir in WIKI_SUBDIRS}
     for page_path in pages:
@@ -59,7 +64,7 @@ def analyze_coverage(
     orphan_concepts = []
     for page_path in pages:
         pid = page_id(page_path, wiki_dir)
-        if pid.startswith("concepts/") and pid not in backlinks:
+        if pid.startswith("concepts/") and pid not in pages_with_inbound:
             orphan_concepts.append(pid)
 
     return {
