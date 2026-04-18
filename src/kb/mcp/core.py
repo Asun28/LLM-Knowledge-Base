@@ -548,6 +548,14 @@ def kb_save_source(
         return err
 
     slug = slugify(filename) or "untitled"
+    # Cycle 11 AC2 (same-class completeness with kb_ingest / kb_ingest_content):
+    # comparison and synthesis are wiki page types, not raw source types — guide
+    # the caller toward kb_create_page before the generic unknown-type branch.
+    if source_type in {"comparison", "synthesis"}:
+        return (
+            f"Error: source_type '{source_type}' is a wiki page type, not a raw source "
+            f"type; use kb_create_page to create comparison or synthesis pages directly."
+        )
     type_dir = SOURCE_TYPE_DIRS.get(source_type)
     if not type_dir:
         return (

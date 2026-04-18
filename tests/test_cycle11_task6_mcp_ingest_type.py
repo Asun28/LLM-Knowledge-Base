@@ -55,3 +55,24 @@ def test_kb_ingest_content_synthesis_names_kb_create_page(monkeypatch):
     )
 
     _assert_create_page_error(result)
+
+
+def test_kb_save_source_comparison_names_kb_create_page(tmp_project):
+    """Same-class completeness — kb_save_source rejects comparison with kb_create_page hint."""
+    result = core.kb_save_source(
+        content="x",
+        filename="x",
+        source_type="comparison",
+    )
+    assert "kb_create_page" in result
+    assert "comparison" in result
+
+
+def test_kb_save_source_synthesis_names_kb_create_page(tmp_project):
+    result = core.kb_save_source(
+        content="x",
+        filename="x",
+        source_type="synthesis",
+    )
+    assert "kb_create_page" in result
+    assert "synthesis" in result
