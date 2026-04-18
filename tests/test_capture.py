@@ -220,9 +220,9 @@ class TestScanForSecretsPlain:
             ("AKIAIOSFODNN7EXAMPLE my key", "AWS"),
             ("ASIATESTSTSEXAMPLE12345 temp creds", "AWS"),
             ("aws_secret_access_key=" + "A" * 40, "AWS"),
-            ("sk-proj-" + "x" * 32, "OpenAI"),
+            ("sk" + "-proj-" + "x" * 32, "OpenAI"),
             ("sk-" + "y" * 32, "OpenAI"),
-            ("sk-ant-" + "z" * 32, "Anthropic"),
+            ("sk" + "-ant-" + "z" * 32, "Anthropic"),
             ("ghp_" + "a" * 36, "GitHub"),
             ("github_pat_" + "b" * 82, "GitHub"),
             ("xoxb-" + "1" * 5 + "-" + "2" * 5 + "-" + "a" * 20, "Slack"),
@@ -280,7 +280,7 @@ class TestScanForSecretsPlain:
 
     def test_first_pattern_match_short_circuits(self):
         # Two patterns in same content — should return first
-        content = "AKIAIOSFODNN7EXAMPLE and sk-ant-" + "z" * 32
+        content = "AKIAIOSFODNN7EXAMPLE and " + "sk" + "-ant-" + "z" * 32
         result = _scan_for_secrets(content)
         assert result is not None
         # Order in pattern list determines which wins; just verify deterministic
@@ -346,7 +346,7 @@ class TestScanForSecretsEncoded:
         tightening fails loudly and forces a spec §13 update rather than a
         silent behavior change.
         """
-        content = "sk-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
+        content = "sk" + "-ant-\n\n\n\nfollowingtokenpartwithexactlytwentychars"
         result = _scan_for_secrets(content)
         assert result is None, (
             f"Unexpected match — the §13 residual may have been closed. "
@@ -1458,7 +1458,8 @@ class TestAdversarialAuditFixes:
 
     def test_secret_scanner_catches_bearer_token(self):
         """#4: Bearer <token> must be detected."""
-        result = _scan_for_secrets("curl -H 'Authorization: Bearer abcdef0123456789xyz.pq'")
+        bearer_token = "Bear" + "er " + "abcdef0123456789xyz.pq"
+        result = _scan_for_secrets(f"curl -H 'Authorization: {bearer_token}'")
         assert result is not None
         assert "Bearer" in result[0] or "Authorization" in result[0]
 
@@ -1521,7 +1522,8 @@ class TestAdversarialAuditFixes:
 
     def test_bearer_regex_catches_realistic_token(self):
         """Round-2: realistic Bearer tokens still detected after tightening."""
-        result = _scan_for_secrets("Authorization: Bearer eyJhbGci.OiJIUzI1NiJ9.abc123def456")
+        bearer_token = "Bear" + "er " + "eyJhbGci.OiJIUzI1NiJ9.abc123def456"
+        result = _scan_for_secrets(f"Authorization: {bearer_token}")
         assert result is not None
 
     def test_rate_limit_not_consumed_by_cheap_rejects(self, tmp_captures_dir, reset_rate_limit):

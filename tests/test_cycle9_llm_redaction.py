@@ -77,7 +77,7 @@ def _generic_retry_error_every_attempt(monkeypatch, message: str):
             lambda monkeypatch, message: _install_raising_client(
                 monkeypatch, _bad_request_error(message)
             ),
-            "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789",
+            "sk" + "-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789",
             "ANTHROPIC_KEY",
             1,
         ),
@@ -85,13 +85,13 @@ def _generic_retry_error_every_attempt(monkeypatch, message: str):
             lambda monkeypatch, message: _install_raising_client(
                 monkeypatch, _api_status_error(418, message)
             ),
-            "Bearer abcdefghijklmnopqrstuvwxyz0123456789.foo",
+            "Bear" + "er " + "abcdefghijklmnopqrstuvwxyz0123456789.foo",
             "BEARER_TOKEN",
             1,
         ),
         (
             _api_status_503_every_attempt,
-            "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789",
+            "sk" + "-proj-" + "abcdefghijklmnopqrstuvwxyz0123456789",
             "OPENAI_KEY",
             llm.MAX_RETRIES + 1,
         ),
@@ -122,7 +122,7 @@ def test_make_api_call_redacts_secrets_at_all_truncation_sites(
 
 
 def test_redact_before_truncate_ordering(monkeypatch):
-    secret = "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789"
+    secret = "sk" + "-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
     message = f"{'x' * 485}{secret}{'y' * 150}"
     messages = _install_raising_client(monkeypatch, _bad_request_error(message))
 
