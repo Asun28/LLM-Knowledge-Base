@@ -90,9 +90,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 
 ### HIGH
 
-- `kb/__init__.py` public API — top-level `__init__.py` exposes only `__version__`; `models/__init__.py` is empty. All consumers (CLI, MCP, tests) reach into deep submodules, so every internal move is a breaking change with no refactor seam. (R1)
-  (fix: curated top-level re-exports + `__all__` — `ingest_source`, `compile_wiki`, `query_wiki`, `build_graph`, `WikiPage`, `RawSource`, `LLMError` — and same for `models/__init__.py`)
-
 - `compile/compiler.py` naming inversion (~16-17) — `compile_wiki` is a thin orchestration shell over `ingest_source` + a manifest; real compilation primitives (`linker.py`) live in `compile/` but are consumed by `ingest/`. Dependency arrows invert the directory names; every new feature placement becomes a coin-flip. (R1)
   (fix: rename to `pipeline/orchestrator.py` and treat `compile/` as wikilink primitives only; or collapse `compile/compiler.py` into `kb.ingest.batch`)
 
@@ -211,6 +208,10 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). `file_lock` polls at 50 ms, adding minimum-latency floor on every verdict add. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
+- **[MEDIUM] `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v)**
+  Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
+  Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
+
 - `lint/checks.py:251, 325, 446` + `lint/semantic.py:93` `frontmatter.load(str(path))` hot-path — reopens every file per rule; 4×5k = 20k file opens for a 5k-page wiki just for frontmatter. (R1)
   (fix: subsumed by the shared pre-loaded corpus; or `@functools.lru_cache` keyed on `(path, mtime_ns)` returning `(metadata, body)`)
 
@@ -259,18 +260,11 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `ingest/pipeline.py:712-721` `ingest_source` inject_wikilinks per-page loop — for each newly-created entity/concept page, `inject_wikilinks` is called independently, each time re-scanning ALL wiki pages from disk via `scan_wiki_pages` + per-page `read_text`. A single ingest creating 50 entities + 50 concepts = 100 `inject_wikilinks` calls × N pages = 100·N disk reads. At 5k pages that's 500k reads per ingest — worse than R2-flagged graph/load double-scan. (R4)
   (fix: batch-aware `inject_wikilinks_batch(titles_and_ids, pages)` that scans each page once and checks for all new titles; compile N patterns into a single alternation; write back once)
 
-- `query/engine.py:108-123` `PAGERANK_SEARCH_WEIGHT` applied after RRF fusion — comment says `new_score = r["score"] * (1 + PAGERANK_SEARCH_WEIGHT * pr)` multiplies RRF-fused scores by PageRank factor. But RRF scores are ordinal-rank-based (1/(60+rank)), so scores cluster in [0.0, 0.033] regardless of relevance. Multiplying a PageRank centrality (0..1) on top cannot re-rank across orders of magnitude — it uniformly stretches scores by ≤ 1.5×. Design effect is PageRank is merely a tiebreaker among results RRF already ordered, not a true second signal. (R4)
-  (fix: apply PageRank blending BEFORE RRF fusion on the BM25-side list (multiply BM25 score by PR factor pre-fusion); or add PageRank as its own `list[dict]` input to `rrf_fusion` — then it competes at rank level, not score scale)
-
-
 - `compile/compiler.py:199-276` `detect_source_drift` — calls `find_changed_sources(..., save_hashes=False)` but the `elif deleted_keys:` branch at 192-194 STILL writes the manifest to persist pruning. `detect_source_drift` is advertised as read-only (the `save_hashes=False` kwarg exists for this caller per 127-129 docstring), yet a wiki with deleted raw sources triggers silent manifest mutation on every `kb_detect_drift` call. Violates the documented contract. (R4)
   (fix: split `save_hashes` into `save_template_hashes` + `prune_deleted`; `detect_source_drift` passes both False; or doc-note that deletion pruning is always persisted because stale entries break subsequent reads)
 
 
-- `mcp/quality.py:141-167` `kb_lint_consistency` auto-select mode — when invoked without `page_ids`, `build_consistency_context` takes shared-sources groups + wikilink components + term-overlap groups, deduplicates, chunks each to `MAX_CONSISTENCY_GROUP_SIZE=5`, and inlines the FULL body of each page in each group. No cap on total groups or total response bytes. On a moderate wiki with many multi-source pages, this can emit a response on the order of megabytes — shoved into the caller's next LLM prompt whole. (R4)
-  (fix: add `MAX_CONSISTENCY_GROUPS` (20), truncate per-page content to a fixed slice per group, or emit only page IDs + titles in auto mode and require explicit opt-in for inlined bodies)
-
-- `mcp/browse.py` `kb_stats` + `mcp/core.py` `kb_compile_scan` + `mcp/health.py` `kb_verdict_trends` — no `wiki_dir` plumbing. (Cycle 6 AC2 closed `kb_detect_drift`, `kb_evolve`, `kb_graph_viz`; these three still accept no override.)
+- `mcp/core.py` `kb_compile_scan` — no `wiki_dir` plumbing. (Cycle 6 AC2 closed `kb_detect_drift`, `kb_evolve`, `kb_graph_viz`; cycle 8 closed `kb_stats` and `kb_verdict_trends`.)
   (fix: extend the Cycle-6 pattern — `wiki_dir: str | None = None` converted to `Path` and forwarded to the library function; mirror `kb_lint`'s Phase 5.0 plumbing)
 
 - `query/engine.py:131,717` vector-index path ignores `wiki_dir` — `rebuild_vector_index(wiki_dir)` writes to `wiki_dir.parent / ".data" / "vector_index.db"`, but both `search_pages` and `query_wiki` check `PROJECT_ROOT / VECTOR_INDEX_PATH_SUFFIX`. A custom-project query can have a valid sibling vector index and still report/use BM25-only; worse, if the repo-default vector DB exists, the static `search_mode` gate is computed from the wrong project. (2026-04-18 two-round review R1)
@@ -285,26 +279,14 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `evolve/analyzer.py:24-60` `analyze_coverage` orphan-concept backlinks via unresolved `build_backlinks` — `build_backlinks` in `compile/linker.py:100` skips bare-slug wikilinks (no resolver, unlike `build_graph`). A concept referenced only via bare slug `[[foo]]` is falsely reported as orphan. `find_connection_opportunities` uses `build_graph` which DOES resolve bare slugs, creating inconsistency within the same evolve report: orphan list disagrees with graph edges. (R4)
   (fix: centralize bare-slug resolution so both `build_graph` and `build_backlinks` use the same resolver; or pass the resolved graph into `build_backlinks`)
 
-- `models/page.py:8-29` `WikiPage`/`RawSource` unused (R1) AND lack a `to_dict()`/`from_dict()` migration path — if kept, neither has a `__post_init__` validator (`page_type in PAGE_TYPES`, `confidence in CONFIDENCE_LEVELS`); they accept any string and provide no value beyond a tagged tuple. Phase 5 plans `status: seed|developing|mature|evergreen` and `belief_state` — without an established conversion contract (dict ↔ dataclass) the new fields land twice in two different shapes. (R4)
-  (fix: when promoting per R1, add `__post_init__` validation, `to_dict()`, classmethod `from_post(post)` bridging with `python-frontmatter`; document "dict is wire format, dataclass is in-memory model")
-
-- `utils/__init__.py` and `models/__init__.py` are 0-byte files — R1 flagged `kb/__init__.py` for empty public surface; the same problem exists one level down. Every internal consumer of utils does `from kb.utils.text import slugify`, `from kb.utils.io import atomic_json_write` — every submodule rename is a breaking change with no `__all__` redirect. (R4)
-  (fix: same prescription as `kb/__init__.py` — re-export the stable surface (`slugify`, `yaml_escape`, `STOPWORDS`, `atomic_json_write`, `atomic_text_write`, `file_lock`, `content_hash`, `extract_wikilinks`, `extract_raw_refs`, `WIKILINK_PATTERN`, `FRONTMATTER_RE`, `append_wiki_log`, `load_all_pages`, `normalize_sources`, `make_source_ref`) with `__all__`)
-
 - `ingest/pipeline.py:682-693 + compile/compiler.py:117-196` manifest hash key inconsistency under concurrent ingest — `_is_duplicate_content` (102) calls `load_manifest` to check whether ANY entry matches `source_hash`. If caller A is mid-ingest of `raw/articles/foo.md` (passed dedup at 566 but not yet written manifest at 688), caller B starts ingest of an IDENTICAL-content `raw/articles/foo-copy.md` — B's `_is_duplicate_content` sees no match (A hasn't saved), B proceeds to full extraction + page writes, BOTH succeed and write to manifest. Wiki now has TWO summary pages with identical content but different titles. R2 flagged the duplicate-check race; R5 specifies the **window**: the entire LLM extraction (~30 seconds) + all 11 ingest stages between dedup-check and manifest-save is unprotected. (R5)
   (fix: hold `file_lock(manifest_path)` across the entire `ingest_source` body OR write a "claim" entry to manifest as `{source_ref: "in_progress:{hash}"}` immediately after the dedup check, with `try/finally` to either commit the real hash on success or remove the claim on failure)
 
 - `utils/wiki_log.py:36-46` reader sees torn last line during concurrent append — `lint/checks.py:138 _INDEX_FILES = ("index.md", "_sources.md", "_categories.md", "log.md")` so any lint pass that reads `log.md` reads the file while ingest is mid-`f.write(entry)`. On Windows, text-mode `\n→\r\n` translation makes a single `f.write("- 2026-04-13 | ingest | ...\n")` non-atomic at the OS level; reader can see the entry up to the `\r` but not the `\n`. Lint's split-by-lines parser silently drops the truncated entry. R2 flagged the file's lack of a lock; R5 is the **specific cross-tool reader symptom**: the lint report appears clean while the log truly contains the entry — no warning surfaces. (R5)
   (fix: switch `wiki_log.py` writes to `newline="\n"` open mode for consistency with atomic-writes, AND wrap append in `file_lock(log_path)`; readers in lint should also acquire the lock for the brief read)
 
-- `ingest/pipeline.py:743-754 + utils/io.py:atomic_text_write` non-idempotent contradictions writes under retry — `kb_ingest` MCP tool returns plain strings, no retry semantics in transport, but FastMCP can re-deliver a tool call on transport timeout. If the first `ingest_source` wrote contradictions to `wiki/contradictions.md`, finished partial work, then crashed on `append_wiki_log` (696) before returning, MCP retry calls `ingest_source` again on the SAME source path. The dedup check at 566 catches it (returns `duplicate: True`) — so the contradictions block is NOT re-written. Good. BUT if the ORIGINAL crash happened BEFORE the manifest save at 688, the dedup check sees no entry, `ingest_source` runs again, writes a SECOND contradictions block with the same date and same source_ref. Append-only log now has duplicate entries. (R5)
-  (fix: persist manifest hash entry IMMEDIATELY after the dedup check passes (claim-then-commit pattern), so retries always hit the duplicate path; OR make the contradictions block write idempotent by checking `if f"## {source_ref} — {date.today().isoformat()}\n" in existing` before appending)
-
 - `mcp/core.py:108-117` + `mcp/quality.py:99-102,282-283` silent-degradation sites — remaining MCP sites still use the identical "log warning + use empty default" pattern. A corrupt store or unavailable dependency can look like a legitimate empty project instead of a degraded result. (R5; cycle 7 addressed verdict_history + feedback_flagged_pages only)
   (fix: standardize a `_safe_call(fn, fallback, label)` helper that logs warnings AND attaches `{label}_error: str(e)` to the returned report so the user sees "verdict_history unavailable: …" alongside the rest of the lint output)
-
-- `utils/llm.py:179-209` `call_llm` no logging of attempt success / final cost — `_make_api_call` logs warnings on retries, but a successful first-try response emits NOTHING. There's no DEBUG/INFO log of `(model, prompt_tokens, completion_tokens, latency, attempt)` for any LLM call. Every other production LLM library emits at INFO so operators can answer "which model handled this query? how many tokens? how many retries?" Without it, the cost-aware-LLM-pipeline (env-overridable model tiers in CLAUDE.md) cannot be audited or budgeted. Attached to every `kb_query`, `kb_ingest`, `rewrite_query`, `extract_from_source`. (R5)
-  (fix: after `_make_api_call`, log `logger.info("LLM ok: model=%s tier=%s tokens_in=%d tokens_out=%d retries=%d latency=%.2fs", ...)`; expose `last_call_metrics` via context-local for callers to thread into `result["telemetry"]`)
 
 ### LOW
 

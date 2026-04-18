@@ -34,10 +34,11 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
-### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-17)
+### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-18)
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |
 | [Backlog-by-file cycle 7](#phase-45--backlog-by-file-cycle-7-2026-04-18) | 2026-04-18 | 30 / 22 files | 1868 → 1919 (+51) | mcp/app, mcp/core, mcp/health, lint/_safe_call, lint/checks, lint/verdicts, lint/runner, lint/semantic, query/embeddings, query/engine, graph/builder, graph/export, compile/linker, evolve/analyzer, ingest/pipeline, ingest/extractors, review/context, review/refiner, utils/text, utils/io, config, cli |
 | [Backlog-by-file cycle 6](#phase-45--backlog-by-file-cycle-6-2026-04-18) | 2026-04-18 | 15 / 14 files | 1836 → 1868 (+32) | mcp/core, mcp/health, query/rewriter, query/engine, query/embeddings, query/hybrid, query/dedup, ingest/pipeline, cli, evolve/analyzer, graph/builder, utils/pages |
 | [Cycle 5 redo (hardening)](#phase-45--cycle-5-redo-hardening-2026-04-18) | 2026-04-18 | 6 / 6 files | 1821 → 1836 (+15) | query/engine, query/citations, mcp/app, lint/augment, utils/text, tests |
@@ -52,6 +53,34 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Backlog-by-file cycle 8 (2026-04-18)
+
+30 AC across 19 files. Tests: 1919 → 1949 (+30, across 138 test files). Full feature-dev pipeline (requirements → threat model + CVE baseline → Opus design decision gate → Codex plan + plan-gate → TDD impl + CI gate → Codex security verify + PR-introduced CVE diff → docs). 0 PR-introduced CVEs.
+
+#### Added
+- `src/kb/config.py` — new config constants: `MAX_CONSISTENCY_GROUPS`, `MAX_CONSISTENCY_PAGE_CONTENT_CHARS`.
+- `src/kb/models/page.py` — `WikiPage` and `RawSource` model validators, `WikiPage.to_dict()`, and `WikiPage.from_post()` class methods.
+- `src/kb/__init__.py`, `src/kb/utils/__init__.py`, `src/kb/models/__init__.py` — curated `__all__` for top-level `kb` package, `kb.utils`, and `kb.models`.
+- `src/kb/mcp/app.py` — `_validate_notes(notes, field_name)` helper.
+- `src/kb/mcp/browse.py::kb_stats` and `src/kb/mcp/health.py::kb_verdict_trends` MCP tools gain `wiki_dir` override with path-traversal rejection.
+- `src/kb/utils/llm.py` — LLM success INFO telemetry: logs model/attempt/tokens_in/tokens_out/latency_ms on each successful call.
+- 30 new tests across 7 test files (`tests/test_cycle8_*.py`).
+
+#### Changed
+- `src/kb/query/engine.py` — PageRank no longer applied as a post-fusion score multiplier; it now enters `rrf_fusion` as a separate ranked list (union of BM25 + vector candidates), giving it equal standing in Reciprocal Rank Fusion.
+- `src/kb/ingest/pipeline.py::_persist_contradictions` is now idempotent: a re-ingest with the same source, same date, and same claims produces no duplicate block (exact block match inside `wiki/contradictions.md`).
+- `src/kb/lint/semantic.py::build_consistency_context` auto mode now caps at `MAX_CONSISTENCY_GROUPS` (20) total groups and truncates per-page body at `MAX_CONSISTENCY_PAGE_CONTENT_CHARS` (4096 chars) after frontmatter strip.
+
+#### Fixed
+- Eager `kb.__init__` imports at package import time caused a circular import on the `kb --version` short-circuit path (regression from cycle-8 TASK 3); fixed via PEP 562 lazy `__getattr__` in `src/kb/__init__.py`.
+- `src/kb/query/engine.py` — PageRank tie-order non-determinism when multiple pages share the same score.
+
+#### Security
+- (Class A) `pip` upgraded 24.3.1 → 26.0.1 in venv; patches CVE-2025-8869 and CVE-2026-1703 plus 2 ECHO advisories.
+- `diskcache==5.6.3` (CVE-2025-69872, GHSA-w8v5-vhqr-4h9v) has no upstream patch as of 2026-04-18; recorded in BACKLOG. No Class B (PR-introduced) CVEs.
 
 ---
 
