@@ -1,16 +1,33 @@
-"""CLI entry point for knowledge base operations."""
+"""CLI entry point for knowledge base operations.
 
-import logging
-import os
+Exit-code contract (Cycle 7 AC16):
+    0 — success (including lint runs whose only issues are warnings).
+    1 — error (explicit failure, uncaught exception, or lint hard error).
+
+Cycle 7 AC30 — ``kb --version`` short-circuits BEFORE ``kb.config`` is
+imported so version queries never fail when the operator's config/env is
+broken. Do not move imports above the guard.
+"""
+
 import sys
-import traceback
-from pathlib import Path
 
-import click
+# AC30: version short-circuit must run before any ``kb.config`` import.
+if len(sys.argv) == 2 and sys.argv[1] in {"--version", "-V"}:
+    from kb import __version__ as _kb_version
 
-from kb import __version__
-from kb.config import SOURCE_TYPE_DIRS
-from kb.utils.text import truncate as _truncate_text
+    sys.stdout.write(f"kb, version {_kb_version}\n")
+    sys.exit(0)
+
+import logging  # noqa: E402
+import os  # noqa: E402
+import traceback  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import click  # noqa: E402
+
+from kb import __version__  # noqa: E402
+from kb.config import SOURCE_TYPE_DIRS  # noqa: E402
+from kb.utils.text import truncate as _truncate_text  # noqa: E402
 
 
 def _truncate(msg: str, limit: int = 600) -> str:

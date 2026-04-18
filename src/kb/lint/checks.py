@@ -33,20 +33,34 @@ logger = logging.getLogger(__name__)
 def check_dead_links(wiki_dir: Path | None = None) -> list[dict]:
     """Find wikilinks pointing to non-existent pages.
 
+    Cycle 7 AC18: ``[[index]]`` / ``[[_sources]]`` / ``[[log]]`` wikilinks are
+    not dead when the corresponding root-level file exists. ``scan_wiki_pages``
+    only walks ``WIKI_SUBDIRS`` and thus never includes root index files in
+    ``existing_ids`` — without this filter every page linking ``[[index]]``
+    generates a false-positive dead-link issue.
+
     Returns:
         List of dicts: {source, target, message}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
     result = resolve_wikilinks(wiki_dir)
+
+    # Stem → filename map for root files that count as valid link targets.
+    _ROOT_TARGETS = {name.removesuffix(".md"): name for name in _INDEX_FILES}
+
     issues = []
     for broken in result["broken"]:
+        target = broken["target"]
+        # AC18: honour root-level index files if present on disk.
+        if target in _ROOT_TARGETS and (wiki_dir / _ROOT_TARGETS[target]).is_file():
+            continue
         issues.append(
             {
                 "check": "dead_link",
                 "severity": "error",
                 "page": broken["source"],
-                "target": broken["target"],
-                "message": f"Broken wikilink: [[{broken['target']}]] in {broken['source']}",
+                "target": target,
+                "message": f"Broken wikilink: [[{target}]] in {broken['source']}",
             }
         )
     return issues

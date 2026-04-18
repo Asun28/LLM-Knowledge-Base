@@ -105,35 +105,60 @@ def resolve_wikilinks(wiki_dir: Path | None = None) -> dict:
     return {"total_links": total, "resolved": resolved, "broken": broken}
 
 
-def build_backlinks(wiki_dir: Path | None = None) -> dict[str, list[str]]:
+def build_backlinks(
+    wiki_dir: Path | None = None,
+    *,
+    pages: list[dict] | None = None,
+) -> dict[str, list[str]]:
     """Build a backlink index: for each page, list all pages that link to it.
+
+    Args:
+        wiki_dir: Path to wiki directory. Uses config default if None.
+        pages: Pre-loaded page dicts (id, path, content keys). When provided,
+            skips disk I/O — avoids redundant reads when callers already
+            loaded pages. Cycle 7 AC10.
 
     Returns:
         dict mapping page ID to list of page IDs that link to it.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    pages = scan_wiki_pages(wiki_dir)
-    existing_ids = {page_id(p, wiki_dir).lower() for p in pages}
     backlinks: dict[str, set[str]] = {}
 
-    for page_path in pages:
-        try:
-            content = page_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Failed to read %s for backlink index: %s", page_path, e)
-            continue
-        # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
-        fm_match = _FRONTMATTER_RE.match(content)
-        body = fm_match.group(2) if fm_match else content
-        links = extract_wikilinks(body)
-        # Lowercase source_id to match the lowercased keys in existing_ids
-        source_id = page_id(page_path, wiki_dir).lower()
+    if pages is not None:
+        # Cycle 7 AC10: use pre-loaded bundle. Expected dict keys: id, content.
+        existing_ids = {p["id"].lower() for p in pages}
+        for p in pages:
+            content = p.get("content", "")
+            fm_match = _FRONTMATTER_RE.match(content)
+            body = fm_match.group(2) if fm_match else content
+            links = extract_wikilinks(body)
+            source_id = p["id"].lower()
+            for link in links:
+                if link not in existing_ids:
+                    continue
+                backlinks.setdefault(link, set()).add(source_id)
+    else:
+        page_paths = scan_wiki_pages(wiki_dir)
+        existing_ids = {page_id(p, wiki_dir).lower() for p in page_paths}
 
-        for link in links:
-            target = link
-            if target not in existing_ids:
-                continue  # Skip broken links (consistent with build_graph)
-            backlinks.setdefault(target, set()).add(source_id)
+        for page_path in page_paths:
+            try:
+                content = page_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning("Failed to read %s for backlink index: %s", page_path, e)
+                continue
+            # Strip frontmatter before extracting wikilinks to avoid false matches in YAML values
+            fm_match = _FRONTMATTER_RE.match(content)
+            body = fm_match.group(2) if fm_match else content
+            links = extract_wikilinks(body)
+            # Lowercase source_id to match the lowercased keys in existing_ids
+            source_id = page_id(page_path, wiki_dir).lower()
+
+            for link in links:
+                target = link
+                if target not in existing_ids:
+                    continue  # Skip broken links (consistent with build_graph)
+                backlinks.setdefault(target, set()).add(source_id)
 
     return {k: sorted(v) for k, v in backlinks.items()}
 

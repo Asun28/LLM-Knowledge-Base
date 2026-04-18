@@ -21,7 +21,7 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
-from kb.mcp.app import _format_ingest_result, _rel, error_tag, mcp
+from kb.mcp.app import _format_ingest_result, _rel, _sanitize_error_str, error_tag, mcp
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
@@ -159,17 +159,17 @@ def kb_query(
         except anthropic.BadRequestError as e:
             logger.warning("kb_query API bad-request for %r: %s", question[:80], e)
             if "too long" in str(e).lower() or "context" in str(e).lower():
-                return error_tag("prompt_too_long", str(e))
-            return error_tag("invalid_input", str(e))
+                return error_tag("prompt_too_long", _sanitize_error_str(e))
+            return error_tag("invalid_input", _sanitize_error_str(e))
         except anthropic.RateLimitError as e:
             logger.warning("kb_query API rate-limited for %r: %s", question[:80], e)
-            return error_tag("rate_limit", str(e))
+            return error_tag("rate_limit", _sanitize_error_str(e))
         except LLMError as e:
             logger.error("kb_query API LLM failure for %r: %s", question[:80], e)
-            return error_tag("internal", f"LLM call failed: {e}")
+            return error_tag("internal", f"LLM call failed: {_sanitize_error_str(e)}")
         except Exception as e:
             logger.exception("kb_query API unexpected error for: %s", question)
-            return error_tag("internal", f"unexpected error: {e}")
+            return error_tag("internal", f"unexpected error: {_sanitize_error_str(e)}")
 
     # Default: Claude Code mode — return context for synthesis
     # H18: apply multi-turn query rewriting when conversation context is present
@@ -180,7 +180,7 @@ def kb_query(
         results = search_pages(question, max_results=max_results)
     except Exception as e:
         logger.exception("Error in kb_query search for: %s", question)
-        return f"Error: Search failed — {e}"
+        return f"Error: Search failed — {_sanitize_error_str(e)}"
 
     if not results:
         return (
@@ -305,7 +305,7 @@ def kb_ingest(
             )
         except Exception as e:
             logger.exception("Error ingesting %s (API mode)", source_path)
-            return f"Error ingesting source: {e}"
+            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
 
     # ── Detect source type ──
     if not source_type:
@@ -339,7 +339,7 @@ def kb_ingest(
             )
         except Exception as e:
             logger.exception("Error ingesting %s", source_path)
-            return f"Error ingesting source: {e}"
+            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
 
     # ── Claude Code mode: without extraction → return prompt ──
     from kb.ingest.extractors import build_extraction_prompt, load_template
@@ -347,12 +347,12 @@ def kb_ingest(
     try:
         template = load_template(source_type)
     except FileNotFoundError as e:
-        return f"Error: {e}"
+        return f"Error: {_sanitize_error_str(e)}"
 
     try:
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        return f"Error reading source file: {e}"
+        return f"Error reading source file: {_sanitize_error_str(e, path)}"
 
     if len(content) > QUERY_CONTEXT_MAX_CHARS:
         logger.warning(
@@ -501,7 +501,7 @@ def kb_ingest_content(
         except OSError:
             pass
         logger.exception("Error ingesting %s after write", filename)
-        return f"Error: Ingest failed — {e}"
+        return f"Error: Ingest failed — {_sanitize_error_str(e, file_path)}"
 
     source_ref = _rel(file_path)
     return f"Saved source: {source_ref} ({len(save_content)} chars)\n" + _format_ingest_result(
@@ -550,7 +550,7 @@ def kb_save_source(
         try:
             atomic_text_write(content, file_path)
         except OSError as e:
-            return f"Error: Failed to write source file: {e}"
+            return f"Error: Failed to write source file: {_sanitize_error_str(e, file_path)}"
     else:
         # Atomic exclusive create — avoid TOCTOU race between existence check and write
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -611,7 +611,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
     try:
         from kb.compile.compiler import find_changed_sources, scan_raw_sources
     except Exception as e:
-        return f"Error loading compile module: {e}"
+        return f"Error loading compile module: {_sanitize_error_str(e)}"
 
     try:
         if incremental:
@@ -652,7 +652,7 @@ def kb_compile_scan(incremental: bool = True) -> str:
                 "then call kb_ingest(source_path, extraction_json=...) with your extraction."
             )
     except Exception as e:
-        return f"Error scanning sources: {e}"
+        return f"Error scanning sources: {_sanitize_error_str(e)}"
 
     return "\n".join(lines)
 
@@ -677,7 +677,7 @@ def kb_compile(incremental: bool = True) -> str:
         result = compile_wiki(incremental=incremental)
     except Exception as e:
         logger.exception("Error running compile")
-        return f"Error running compile: {e}"
+        return f"Error running compile: {_sanitize_error_str(e)}"
 
     mode = result["mode"]
     lines = [
@@ -729,7 +729,7 @@ def kb_capture(content: str, provenance: str | None = None) -> str:
     try:
         result = capture_items(content, provenance=provenance)
     except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+        return f"Error: {type(e).__name__}: {_sanitize_error_str(e)}"
     return _format_capture_result(result)
 
 

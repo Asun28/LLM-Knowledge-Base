@@ -634,9 +634,13 @@ def query_wiki(
             question: The original question.
             answer: LLM-synthesized answer text.
             citations: list of dicts, each with keys 'type' ('wiki'|'raw'),
-                'path' (str), 'context' (str surrounding text).
+                'path' (str), 'context' (str surrounding text), and 'stale'
+                (bool) — True when the cited page's ``updated`` frontmatter
+                predates its raw source's mtime (Cycle 7 AC4 doc-sync).
             source_pages: list of page IDs retrieved by BM25 search.
             context_pages: list of page IDs actually included in LLM context.
+            stale_citations: list of page IDs (subset of context_pages) whose
+                stale flag is True (Cycle 7 AC4 doc-sync).
             output_path: str (only when output_format is set, non-text, and
                 answer synthesized).
             output_format: str (only when output_path is present).

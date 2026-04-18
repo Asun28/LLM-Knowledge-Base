@@ -117,6 +117,61 @@ def refine_page(
             return {"error": f"Invalid frontmatter format in {page_id}"}
         frontmatter_text = inner_match.group(1) + "\n"
 
+        # Cycle 7 AC22: validate the frontmatter block with ``yaml.safe_load``
+        # BEFORE rewriting. Without this gate, a page with malformed
+        # frontmatter (e.g. tab-indented keys that regex-match but fail
+        # YAML parsing) would be laundered through a successful write with
+        # fresh valid frontmatter, corrupting the page's original data.
+        # PR #21 R1 Codex MAJOR 4: also verify the parsed value is a mapping —
+        # well-formed YAML that parses to a scalar/list (e.g. `title: null`
+        # alone at the top) would otherwise pass the syntax gate while
+        # silently indicating a broken page.
+        import yaml  # noqa: PLC0415 — library-boundary import
+
+        try:
+            parsed_fm = yaml.safe_load(frontmatter_text)
+        except yaml.YAMLError as e:
+            logger.warning(
+                "refine_page(%s) rejected: malformed frontmatter YAML: %s",
+                page_id,
+                e,
+            )
+            return {
+                "error": (
+                    f"Malformed frontmatter YAML in {page_id} — "
+                    f"refine rejected to prevent corruption: {e}"
+                )
+            }
+        if parsed_fm is None or not isinstance(parsed_fm, dict):
+            logger.warning(
+                "refine_page(%s) rejected: frontmatter is not a mapping (%s)",
+                page_id,
+                type(parsed_fm).__name__,
+            )
+            return {
+                "error": (
+                    f"Frontmatter in {page_id} is not a YAML mapping — "
+                    f"refine rejected to prevent corruption."
+                )
+            }
+        # PR #21 R2 Codex — reject semantically broken frontmatter where the
+        # required ``title`` field parses to a null / empty / non-string value.
+        # ``title: null`` parses as a dict so the type gate above passes, but
+        # launching through a refine rewrites the page with a null title that
+        # silently breaks downstream ingest/graph consumers.
+        title_val = parsed_fm.get("title")
+        if title_val is None or (isinstance(title_val, str) and not title_val.strip()):
+            logger.warning(
+                "refine_page(%s) rejected: frontmatter title is null or empty",
+                page_id,
+            )
+            return {
+                "error": (
+                    f"Frontmatter in {page_id} has null/empty title — "
+                    f"refine rejected to prevent corruption."
+                )
+            }
+
         # Update the 'updated' date in frontmatter
         today = date.today().isoformat()
         if re.search(r"^updated: \d{4}-\d{2}-\d{2}", frontmatter_text, re.MULTILINE):

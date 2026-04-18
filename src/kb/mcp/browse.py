@@ -11,7 +11,7 @@ from kb.config import (
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.mcp.app import _validate_page_id, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def kb_search(query: str, max_results: int = 10) -> str:
         return "\n".join(lines)
     except Exception as e:
         logger.exception("Error in kb_search for query: %s", query)
-        return f"Error: Search failed — {e}"
+        return f"Error: Search failed — {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -120,7 +120,7 @@ def kb_read_page(page_id: str) -> str:
             raw = f.read(cap_bytes + 1)
     except OSError as e:
         logger.error("Error reading page %s: %s", page_id, e)
-        return f"Error: Could not read page {page_id}: {e}"
+        return f"Error: Could not read page {page_id}: {_sanitize_error_str(e)}"
     truncated_at_read = len(raw) > cap_bytes
     if truncated_at_read:
         raw = raw[:cap_bytes]
@@ -201,7 +201,7 @@ def kb_list_pages(page_type: str = "", limit: int = 200, offset: int = 0) -> str
         return "\n".join(lines)
     except Exception as e:
         logger.exception("Error in kb_list_pages")
-        return f"Error: Could not list pages — {e}"
+        return f"Error: Could not list pages — {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -310,7 +310,7 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
         return "\n".join(lines)
     except OSError as e:
         logger.error("Error listing sources: %s", e)
-        return f"Error: Could not list sources: {e}"
+        return f"Error: Could not list sources: {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -325,7 +325,7 @@ def kb_stats() -> str:
         stats = graph_stats(graph)
     except Exception as e:
         logger.exception("Error computing wiki stats")
-        return f"Error computing wiki stats: {e}"
+        return f"Error computing wiki stats: {_sanitize_error_str(e)}"
 
     lines = [
         "# Wiki Statistics\n",

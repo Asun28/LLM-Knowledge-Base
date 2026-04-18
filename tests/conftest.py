@@ -11,6 +11,29 @@ WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
 RAW_SUBDIRS = ("articles", "papers", "repos", "videos", "captures")
 
 
+# Cycle 7 AC1 — autouse reset of embeddings module singletons to prevent
+# order-dependent test failures. `_model` and `_index_cache` live at module
+# scope in kb.query.embeddings; without this fixture, tests that touch the
+# vector index leak state into every subsequent test in the collection order.
+# Lazy-imports to avoid forcing the dep on tests that don't touch embeddings.
+@pytest.fixture(autouse=True)
+def _reset_embeddings_state():
+    """Reset kb.query.embeddings module singletons between every test."""
+    try:
+        import kb.query.embeddings as _emb  # noqa: PLC0415
+
+        _emb._reset_model()
+    except ImportError:
+        pass  # embeddings optional — skip if deps missing
+    yield
+    try:
+        import kb.query.embeddings as _emb  # noqa: PLC0415
+
+        _emb._reset_model()
+    except ImportError:
+        pass
+
+
 @pytest.fixture
 def project_root() -> Path:
     return PROJECT_ROOT

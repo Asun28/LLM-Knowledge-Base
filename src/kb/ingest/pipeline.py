@@ -83,10 +83,15 @@ def _find_affected_pages(
 
     page_id_set = set(page_ids)
     affected: set[str] = set()
+    # Cycle 7 AC8: thread pre-loaded pages into build_backlinks so callers
+    # that already walked wiki/ don't pay a second scan.
+    all_pages = pages if pages is not None else None
     try:
         from kb.compile.linker import build_backlinks
 
-        backlinks_map = build_backlinks(wiki_dir)
+        if all_pages is None:
+            all_pages = load_all_pages(wiki_dir)
+        backlinks_map = build_backlinks(wiki_dir, pages=all_pages)
         for pid in page_ids:
             for linker in backlinks_map.get(pid, []):
                 if linker not in page_id_set:
@@ -95,7 +100,8 @@ def _find_affected_pages(
         logger.debug("Failed to compute backlinks for cascade: %s", e)
 
     try:
-        all_pages = pages if pages is not None else load_all_pages(wiki_dir)
+        if all_pages is None:
+            all_pages = load_all_pages(wiki_dir)
         new_sources: set[str] = set()
         for page in all_pages:
             if page["id"] in page_id_set:
@@ -262,25 +268,47 @@ def detect_source_type(source_path: Path, raw_dir: Path | None = None) -> str:
 
 
 def _write_wiki_page(
-    path: Path, title: str, page_type: str, source_ref: str, confidence: str, content: str
+    page_path: Path | None = None,
+    title: str = "",
+    page_type: str = "",
+    source_ref: str = "",
+    confidence: str = "",
+    content: str = "",
+    path: Path | None = None,
 ) -> None:
-    """Write a wiki page with proper YAML frontmatter."""
-    today = date.today().isoformat()
-    safe_title = yaml_escape(title)
-    safe_source = yaml_escape(source_ref)
-    fm_text = f'''---
-title: "{safe_title}"
-source:
-  - "{safe_source}"
-created: {today}
-updated: {today}
-type: {page_type}
-confidence: {confidence}
----
+    """Write a wiki page with proper YAML frontmatter.
 
-'''
-    atomic_text_write(fm_text + content, path)
-    append_evidence_trail(path, source_ref, f"Initial extraction: {page_type} page created")
+    Cycle 7 AC29: migrated from hand-rolled f-string YAML to
+    ``frontmatter.Post`` + ``frontmatter.dumps()``. YAML-escaping is now the
+    library's responsibility, eliminating the residual risk in ``yaml_escape``
+    for titles containing YAML-special characters.
+
+    Accepts either ``page_path=`` or ``path=`` for backward compatibility
+    with existing callers; ``page_path`` is preferred.
+    """
+    import frontmatter  # noqa: PLC0415 — library-boundary import
+
+    effective_path = page_path if page_path is not None else path
+    if effective_path is None:
+        raise ValueError("_write_wiki_page requires page_path (or path)")
+    today = date.today().isoformat()
+    post = frontmatter.Post(
+        content,
+        title=title,
+        source=[source_ref],
+        created=today,
+        updated=today,
+        type=page_type,
+        confidence=confidence,
+    )
+    # PR #21 R1 Codex MAJOR 3: sort_keys=False preserves insertion order so the
+    # frontmatter fields land as title → source → created → updated → type →
+    # confidence, matching the pre-cycle-7 hand-rolled YAML and every downstream
+    # parser that may depend on that ordering.
+    atomic_text_write(frontmatter.dumps(post, sort_keys=False) + "\n", effective_path)
+    append_evidence_trail(
+        effective_path, source_ref, f"Initial extraction: {page_type} page created"
+    )
 
 
 def _build_summary_content(extraction: dict, source_type: str) -> str:
@@ -408,11 +436,23 @@ def _update_existing_page(
     name: str = "",
     extraction: dict | None = None,
     verb: str = "Mentioned",
+    ctx: str | None = None,
 ) -> None:
     """Add a new source reference to an existing wiki page.
 
     Updates both the YAML frontmatter source: list and the References section.
     When name and extraction are provided, enriches page with context from the new source.
+
+    Cycle 7 AC5 + AC7:
+    - References insertion masks fenced code blocks first so `## References`
+      appearing literally inside a markdown example does not misdirect the
+      regex-anchored insertion point.
+    - When the page already has a ``## Context`` section, new context from
+      the re-ingest source is now appended as a ``### From {source_ref}``
+      subsection under the existing header rather than silently dropped.
+    - ``ctx`` kwarg (optional) lets callers inject context directly when
+      ``extraction=`` is unavailable; ``_extract_entity_context`` is still
+      used when ``ctx is None`` and ``name`` + ``extraction`` are supplied.
     """
     # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
     content = page_path.read_text(encoding="utf-8")
@@ -469,7 +509,15 @@ def _update_existing_page(
 
     # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
     ref_line = f"- {verb} in {source_ref}"
-    if "## References" in body_text:
+    # Cycle 7 AC5: mask fenced code blocks / inline code / markdown links
+    # before running the `## References` regex so literal `## References`
+    # text inside a code example cannot misdirect the insertion point. The
+    # `_mask_code_blocks` helper already ships in compile/linker and is the
+    # battle-tested pattern for regex-on-body operations.
+    from kb.compile.linker import _mask_code_blocks, _unmask_code_blocks  # noqa: PLC0415
+
+    masked_body, masked_code, mask_prefix = _mask_code_blocks(body_text)
+    if "## References" in masked_body:
         # Cycle 3 L7: the regex requires each matched line to end with `\n`
         # and the whole References block to terminate with either `\n## ` or
         # end-of-string. Files saved by editors that strip the trailing
@@ -477,31 +525,66 @@ def _update_existing_page(
         # matched zero characters after the header, so the new reference
         # appeared BEFORE any existing refs — silently reversing order and
         # sometimes dropping the new entry entirely. Normalize by ensuring
-        # body_text ends with `\n` before substitution.
-        if not body_text.endswith("\n"):
-            body_text = body_text + "\n"
-        # Append new reference at end of References block.
-        # Use MULTILINE (not DOTALL) so `.` does not cross line boundaries;
-        # match non-empty lines or blank lines until a new section or end-of-string.
-        body_text = re.sub(
+        # body ends with `\n` before substitution.
+        if not masked_body.endswith("\n"):
+            masked_body = masked_body + "\n"
+        # Append new reference at end of References block. PR #21 R1 Codex
+        # MAJOR 2: use ``re.subn`` so we can detect whether the regex
+        # actually matched (header variant like ``## References   `` with
+        # trailing whitespace would otherwise silently no-op, leaving the
+        # frontmatter source updated but the body unchanged).
+        masked_body_new, n_sub = re.subn(
             r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)",
             lambda m: m.group(1).rstrip("\n") + "\n" + ref_line + "\n",
-            body_text,
+            masked_body,
             count=1,
             flags=re.MULTILINE,
         )
+        if n_sub == 0:
+            # Heading present but didn't match the strict regex — append a
+            # fresh References block at the end instead of silently dropping
+            # the new reference.
+            masked_body_new = masked_body.rstrip("\n") + f"\n\n## References\n\n{ref_line}\n"
+        body_text = _unmask_code_blocks(masked_body_new, masked_code, mask_prefix)
         content = fm_text + body_text
-    elif "## References" not in content:
+    elif "## References" not in masked_body:
+        # Preserve the old unmasked body (no need to re-unmask a pure-append).
         content += f"\n## References\n\n{ref_line}\n"
 
-    # 4. Enrich with context from new source (if extraction provided)
-    if name and extraction:
+    # 4. Enrich with context from new source (if extraction provided OR direct ctx)
+    # Cycle 7 AC7: when a ``## Context`` section already exists, append a new
+    # ``### From {source_ref}`` subsection instead of silently dropping the
+    # new context. Compounds with AC5 by masking code blocks first.
+    if ctx is None and name and extraction:
         ctx = _extract_entity_context(name, extraction)
-        # Fix 2.4: check for section header presence, not full block equality
-        if ctx and "## Context" not in content:
-            # Add context before References section, or at end.
-            # Use regex anchored to line start to avoid matching "## References"
-            # inside body text or LLM-extracted context strings.
+    if ctx:
+        masked_c, masked_codes, mask_pfx = _mask_code_blocks(content)
+        if "## Context" in masked_c:
+            # Strip any leading `## Context` header that `_extract_entity_context`
+            # prepends so the incoming ``ctx`` is just the body — the existing
+            # section header stays authoritative. Without this strip a duplicate
+            # `## Context` header would land under the existing one.
+            ctx_body = re.sub(r"\A##\s*Context\s*\n+", "", ctx).rstrip("\n")
+            if not ctx_body:
+                # Nothing left after stripping the header — skip.
+                pass
+            else:
+                subsection = f"\n### From {source_ref}\n\n{ctx_body}\n"
+                # Find END of Context section (next ## header OR end-of-string).
+                match = re.search(
+                    r"(^## Context\n(?:.*\n)*?)(?=^## |\Z)",
+                    masked_c,
+                    flags=re.MULTILINE,
+                )
+                if match:
+                    end = match.end()
+                    masked_c = masked_c[:end].rstrip("\n") + subsection + masked_c[end:]
+                    content = _unmask_code_blocks(masked_c, masked_codes, mask_pfx)
+                else:
+                    # Fallback: append subsection at end of content.
+                    content += subsection
+        else:
+            # No existing Context section — insert before References (or append).
             ref_match = re.search(r"^## References", content, re.MULTILINE)
             if ref_match:
                 insert_pos = ref_match.start()
@@ -1008,10 +1091,12 @@ def ingest_source(
                     )
                     # H3 fix: delegate to _persist_contradictions (file-locked RMW).
                     _persist_contradictions(contradiction_warnings, source_ref, effective_wiki_dir)
-            except (KeyError, TypeError, ValueError, re.error) as e:
-                # C3 (Phase 4.5 R4 HIGH): narrow from bare Exception so bug-indicating
-                # programming errors (AttributeError, ImportError, NameError) surface
-                # instead of being silently masked as "non-fatal".
+            except (KeyError, TypeError, re.error) as e:
+                # C3 (Phase 4.5 R4 HIGH) + Cycle 7 AC6: narrow further — bug-
+                # indicating errors (ValueError, AttributeError, ImportError,
+                # NameError) must propagate instead of being silently masked
+                # as "non-fatal". Detection throwing ValueError indicates
+                # extractor malformation, not a data-quality skip.
                 logger.warning(
                     "Contradiction detection skipped for %s (non-fatal): %s",
                     source_ref,

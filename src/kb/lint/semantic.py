@@ -93,33 +93,53 @@ def build_fidelity_context(
     return "\n".join(lines)
 
 
-def _group_by_shared_sources(wiki_dir: Path) -> list[list[str]]:
-    """Group pages that share raw sources (from frontmatter source: fields)."""
-    pages = scan_wiki_pages(wiki_dir)
+def _group_by_shared_sources(wiki_dir: Path, *, pages: list[dict] | None = None) -> list[list[str]]:
+    """Group pages that share raw sources (from frontmatter source: fields).
+
+    Cycle 7 AC19: ``pages=`` kwarg lets callers pass a pre-loaded page bundle
+    to skip the ``scan_wiki_pages`` + ``frontmatter.load`` pass.
+    """
     source_to_pages: dict[str, list[str]] = {}
 
-    for page_path in pages:
-        try:
-            post = frontmatter.load(str(page_path))
-            pid = page_id(page_path, wiki_dir)
-            sources = normalize_sources(post.metadata.get("source"))
-            for src in sources:
-                source_to_pages.setdefault(src, []).append(pid)
-        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
-            logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
-            continue
+    if pages is not None:
+        # Pre-loaded bundle: id, content (frontmatter parsed per call).
+        for p in pages:
+            try:
+                content = p.get("content", "")
+                post = frontmatter.loads(content)
+                sources = normalize_sources(post.metadata.get("source"))
+                for src in sources:
+                    source_to_pages.setdefault(src, []).append(p["id"])
+            except (ValueError, AttributeError, yaml.YAMLError) as e:
+                logger.warning("Failed to parse frontmatter for %s: %s", p.get("id"), e)
+                continue
+    else:
+        page_paths = scan_wiki_pages(wiki_dir)
+        for page_path in page_paths:
+            try:
+                post = frontmatter.load(str(page_path))
+                pid = page_id(page_path, wiki_dir)
+                sources = normalize_sources(post.metadata.get("source"))
+                for src in sources:
+                    source_to_pages.setdefault(src, []).append(pid)
+            except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
+                logger.warning("Failed to load frontmatter for %s: %s", page_path, e)
+                continue
 
     return [pids for pids in source_to_pages.values() if len(pids) >= 2]
 
 
-def _group_by_wikilinks(wiki_dir: Path) -> list[list[str]]:
-    """Group pages connected by wikilinks (connected components in the undirected graph)."""
-    graph = build_graph(wiki_dir)
+def _group_by_wikilinks(wiki_dir: Path, *, pages: list[dict] | None = None) -> list[list[str]]:
+    """Group pages connected by wikilinks (connected components in the undirected graph).
+
+    Cycle 7 AC19: ``pages=`` threaded through to ``build_graph`` to skip scan.
+    """
+    graph = build_graph(wiki_dir, pages=pages)
     components = list(nx.connected_components(graph.to_undirected()))
     return [sorted(c) for c in components if len(c) >= 2]
 
 
-def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
+def _group_by_term_overlap(wiki_dir: Path, *, pages: list[dict] | None = None) -> list[list[str]]:
     """Group pages with high term overlap (>= 3 shared significant terms)."""
     # Common English words that pass the length filter but carry no semantic signal
     common_words = {
@@ -184,27 +204,37 @@ def _group_by_term_overlap(wiki_dir: Path) -> list[list[str]]:
         "updated",
         "stated",
     }
-    pages = scan_wiki_pages(wiki_dir)
     page_terms: dict[str, set[str]] = {}
 
-    for page_path in pages:
-        try:
-            raw = page_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Skipping unreadable page %s in term overlap: %s", page_path, e)
-            continue
-        pid = page_id(page_path, wiki_dir)
-        # Phase 4.5 HIGH L7: use shared FRONTMATTER_RE and group(2) for body text.
-        # Previous code used group(1) which captured the frontmatter fence, causing
-        # consistency grouping to tokenize YAML keys instead of body content.
-        fm_match = _FRONTMATTER_RE.match(raw)
-        body = fm_match.group(2) if fm_match else raw
-        words = {
+    def _terms_from_body(body: str) -> set[str]:
+        return {
             stripped
             for w in body.lower().split()
             if len(stripped := w.strip(".,!?()[]{}\"':-/")) > 4
         } - common_words
-        page_terms[pid] = words
+
+    if pages is not None:
+        # Cycle 7 AC19: reuse pre-loaded bundle.
+        for p in pages:
+            raw = p.get("content", "")
+            fm_match = _FRONTMATTER_RE.match(raw)
+            body = fm_match.group(2) if fm_match else raw
+            page_terms[p["id"]] = _terms_from_body(body)
+    else:
+        page_paths = scan_wiki_pages(wiki_dir)
+        for page_path in page_paths:
+            try:
+                raw = page_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning("Skipping unreadable page %s in term overlap: %s", page_path, e)
+                continue
+            pid = page_id(page_path, wiki_dir)
+            # Phase 4.5 HIGH L7: use shared FRONTMATTER_RE and group(2) for body text.
+            # Previous code used group(1) which captured the frontmatter fence, causing
+            # consistency grouping to tokenize YAML keys instead of body content.
+            fm_match = _FRONTMATTER_RE.match(raw)
+            body = fm_match.group(2) if fm_match else raw
+            page_terms[pid] = _terms_from_body(body)
 
     # Phase 4.5 HIGH L2: inverted postings index replaces O(n^2) pairwise loop.
     # No 500-page wall — this is O(T * avg_pages_per_term) which scales linearly.
@@ -237,6 +267,8 @@ def build_consistency_context(
     page_ids: list[str] | None = None,
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
+    *,
+    pages: list[dict] | None = None,
 ) -> str:
     """Build cross-page consistency check context.
 
@@ -254,11 +286,13 @@ def build_consistency_context(
         ]
         groups = [chunk for chunk in all_chunks if len(chunk) >= 2]
     else:
-        # Auto-select using three strategies (priority order per spec)
+        # Auto-select using three strategies (priority order per spec).
+        # Cycle 7 AC19: thread `pages=` into each grouper so they skip the
+        # scan_wiki_pages walk when the caller provided a pre-loaded bundle.
         all_groups: list[list[str]] = []
-        all_groups.extend(_group_by_shared_sources(wiki_dir))
-        all_groups.extend(_group_by_wikilinks(wiki_dir))
-        all_groups.extend(_group_by_term_overlap(wiki_dir))
+        all_groups.extend(_group_by_shared_sources(wiki_dir, pages=pages))
+        all_groups.extend(_group_by_wikilinks(wiki_dir, pages=pages))
+        all_groups.extend(_group_by_term_overlap(wiki_dir, pages=pages))
 
         # Deduplicate by sorted tuple
         seen: set[tuple[str, ...]] = set()

@@ -128,27 +128,32 @@ def run_all_checks(
         sev = issue.get("severity", "info")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-    # Include verdict audit trail summary (fail-safe).
-    # Cycle 3 M18: pass verdicts_path so tests / alternate profiles don't bleed
-    # production .data/lint_verdicts.json into the tmp-run report. The prior
-    # code also aliased `verdict_summary = verdict_history` (dead duplicate)
-    # — collapsed into a single local.
-    try:
-        verdict_history = get_verdict_summary(verdicts_path)
-    except Exception as e:
-        logger.warning("Failed to load verdict summary: %s", e)
-        verdict_history = None
+    # Include verdict audit trail summary.
+    # Cycle 7 AC27 — route through _safe_call so operators see
+    # "verdict_history_error: …" instead of a silent None that's indistinguishable
+    # from "no verdicts yet".
+    from kb.lint._safe_call import _safe_call
+
+    verdict_history, verdict_error = _safe_call(
+        lambda: get_verdict_summary(verdicts_path),
+        fallback=None,
+        label="verdict_history",
+        log=logger,
+    )
 
     summary = severity_counts
     summary["verdict_history"] = verdict_history
 
-    return {
+    report_dict = {
         "checks_run": checks_run,
         "total_issues": len(all_issues),
         "issues": all_issues,
         "summary": summary,
         "fixes_applied": fixes_applied,
     }
+    if verdict_error:
+        report_dict["verdict_history_error"] = verdict_error
+    return report_dict
 
 
 def format_report(report: dict) -> str:

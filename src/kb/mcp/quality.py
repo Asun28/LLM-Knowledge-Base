@@ -18,7 +18,7 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
-from kb.mcp.app import _validate_page_id, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
@@ -52,10 +52,10 @@ def kb_review_page(page_id: str) -> str:
 
         return build_review_context(page_id)
     except FileNotFoundError as e:
-        return f"Error reviewing {page_id}: {e}"
+        return f"Error reviewing {page_id}: {_sanitize_error_str(e)}"
     except Exception as e:
         logger.exception("Unexpected error reviewing %s", page_id)
-        return f"Error reviewing {page_id}: {e}"
+        return f"Error reviewing {page_id}: {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -94,7 +94,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         result = refine_page(page_id, updated_content, revision_notes)
     except Exception as e:
         logger.exception("Unexpected error refining %s", page_id)
-        return f"Error refining {page_id}: {e}"
+        return f"Error refining {page_id}: {_sanitize_error_str(e)}"
     if "error" in result:
         return f"Error: {result['error']}"
 
@@ -139,10 +139,10 @@ def kb_lint_deep(page_id: str) -> str:
 
         return build_fidelity_context(page_id)
     except FileNotFoundError as e:
-        return f"Error checking fidelity for {page_id}: {e}"
+        return f"Error checking fidelity for {page_id}: {_sanitize_error_str(e)}"
     except Exception as e:
         logger.exception("Unexpected error in lint_deep for %s", page_id)
-        return f"Error checking fidelity for {page_id}: {e}"
+        return f"Error checking fidelity for {page_id}: {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -171,7 +171,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         return build_consistency_context(ids)
     except Exception as e:
         logger.exception("Error running consistency check")
-        return f"Error running consistency check: {e}"
+        return f"Error running consistency check: {_sanitize_error_str(e)}"
 
 
 @mcp.tool()
@@ -203,7 +203,7 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Error storing feedback for question: %s", question)
-        return f"Error: Failed to store feedback — {e}"
+        return f"Error: Failed to store feedback — {_sanitize_error_str(e)}"
 
     action = {
         "useful": "Trust scores boosted for cited pages.",
@@ -229,7 +229,7 @@ def kb_reliability_map() -> str:
         flagged = set(get_flagged_pages())
     except Exception as e:
         logger.exception("Error computing reliability map")
-        return f"Error computing reliability map: {e}"
+        return f"Error computing reliability map: {_sanitize_error_str(e)}"
 
     lines = ["# Page Reliability Map\n"]
     for pid, s in sorted_pages:
@@ -274,7 +274,7 @@ def kb_affected_pages(page_id: str) -> str:
         back = backlinks_map.get(page_id, [])
     except Exception as e:
         logger.exception("Error building backlinks for %s", page_id)
-        return f"Error computing affected pages: {e}"
+        return f"Error computing affected pages: {_sanitize_error_str(e)}"
 
     # Find pages sharing same sources using the shared page loader
     shared_source_pages: list[str] = []
@@ -519,7 +519,7 @@ confidence: {confidence}
     except FileExistsError:
         return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
     except OSError as e:
-        return f"Error: Failed to write page: {e}"
+        return f"Error: Failed to write page: {_sanitize_error_str(e)}"
 
     # Log — MCP production boundary always uses WIKI_DIR / "log.md".
     try:

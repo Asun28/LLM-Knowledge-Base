@@ -300,15 +300,27 @@ def wikilink_display_escape(title: str) -> str:
     )
 
 
+# Cycle 7 AC23: rewrite attacker-planted ``</kb_purpose>`` closers in the
+# input to ``</kb-purpose>`` (hyphen variant) so a poisoned ``wiki/purpose.md``
+# cannot close the fence early and smuggle instructions into every future
+# extraction prompt. Mirrors ``_escape_source_document_fences`` pattern.
+_KB_PURPOSE_CLOSE_FENCE_RE = re.compile(r"<\s*/\s*kb_purpose\s*>", re.IGNORECASE)
+
+
+def _escape_kb_purpose_close(text: str) -> str:
+    """Rewrite ``</kb_purpose>`` closers to a hyphen-variant that cannot match."""
+    return _KB_PURPOSE_CLOSE_FENCE_RE.sub("</kb-purpose>", text)
+
+
 def wrap_purpose(text: str, max_chars: int = 4096) -> str:
     """Wrap purpose text in a sentinel with a hard char cap.
 
-    Defense is textual-only: wiki/purpose.md is human-curated (trusted). The
-    helper strips non-whitespace C0 controls and caps length, but does NOT
-    escape an attacker-supplied ``</kb_purpose>`` closer inside the input —
-    sentinel semantics are an LLM-trust boundary, not a hard parse.
+    Cycle 7 AC23: escapes attacker-planted ``</kb_purpose>`` closers before
+    wrapping so a poisoned purpose cannot close the fence early. Length still
+    capped at ``max_chars`` (default 4096).
     """
     if not text or not text.strip():
         return ""
     stripped = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)[:max_chars]
+    stripped = _escape_kb_purpose_close(stripped)
     return f"<kb_purpose>\n{stripped}\n</kb_purpose>"
