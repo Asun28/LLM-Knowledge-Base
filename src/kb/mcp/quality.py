@@ -9,10 +9,10 @@ from datetime import date
 from kb.config import (
     CONFIDENCE_LEVELS,
     MAX_INGEST_CONTENT_CHARS,
-    MAX_NOTES_LEN,
     MAX_QUESTION_LEN,
     PAGE_TYPES,
     PROJECT_ROOT,
+    VALID_VERDICT_TYPES,
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
@@ -352,8 +352,17 @@ def kb_save_lint_verdict(
     if err:
         return f"Error: {err}"
 
-    if len(notes) > MAX_NOTES_LEN:
-        return f"Error: Notes too long (max {MAX_NOTES_LEN} chars)."
+    if verdict_type not in VALID_VERDICT_TYPES:
+        return (
+            f"Error: Invalid verdict_type: {verdict_type}. "
+            f"Must be one of: {', '.join(repr(t) for t in VALID_VERDICT_TYPES)}"
+        )
+    if verdict not in ("pass", "fail", "warning"):
+        return f"Error: Invalid verdict: {verdict}. Must be 'pass', 'fail', or 'warning'"
+
+    err = _validate_notes(notes, "notes")
+    if err:
+        return err
 
     issue_list = None
     if issues:

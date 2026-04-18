@@ -9,7 +9,7 @@ from pathlib import Path
 from kb.config import MAX_CONSISTENCY_GROUPS, MAX_CONSISTENCY_PAGE_CONTENT_CHARS, MAX_NOTES_LEN
 from kb.lint.semantic import build_consistency_context
 from kb.mcp.app import _validate_notes
-from kb.mcp.quality import kb_lint_consistency
+from kb.mcp.quality import kb_lint_consistency, kb_save_lint_verdict
 
 
 def _write_page(wiki_dir: Path, page_id: str, source_ref: str, body: str) -> None:
@@ -106,3 +106,31 @@ def test_validate_notes_strips_control_chars_before_length_check():
     raw = ("x" * MAX_NOTES_LEN) + "\x00"
 
     assert _validate_notes(raw, "notes") is None
+
+
+def test_kb_save_lint_verdict_rejects_oversized_notes():
+    result = kb_save_lint_verdict(
+        page_id="concepts/rag",
+        verdict_type="fidelity",
+        verdict="pass",
+        notes="x" * 20000,
+    )
+
+    assert result.startswith("Error: notes too long")
+
+
+def test_kb_save_lint_verdict_accepts_control_char_padded_notes(tmp_path, monkeypatch):
+    import kb.lint.verdicts
+
+    verdicts_path = tmp_path / "lint_verdicts.json"
+    monkeypatch.setattr(kb.lint.verdicts, "VERDICTS_PATH", verdicts_path)
+
+    result = kb_save_lint_verdict(
+        page_id="concepts/rag",
+        verdict_type="fidelity",
+        verdict="pass",
+        notes=("\x00" * 5) + "ok notes" + ("\x00" * 5),
+    )
+
+    assert not result.startswith("Error:")
+    assert "Verdict recorded for concepts/rag" in result
