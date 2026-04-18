@@ -194,14 +194,21 @@ def kb_verdict_trends(wiki_dir: str | None = None) -> str:
 
         verdicts_path = None
         if wiki_dir is not None:
-            wiki_path = Path(wiki_dir).resolve()
-            wiki_path.relative_to(PROJECT_ROOT.resolve())
+            from kb.mcp import app as mcp_app
+
+            original_project_root = mcp_app.PROJECT_ROOT
+            if PROJECT_ROOT != original_project_root:
+                mcp_app.PROJECT_ROOT = PROJECT_ROOT
+            try:
+                wiki_path, err = _validate_wiki_dir(wiki_dir)
+            finally:
+                mcp_app.PROJECT_ROOT = original_project_root
+            if err:
+                return f"Error: {err}"
             verdicts_path = wiki_path.parent / ".data" / "verdicts.json"
 
         trends = compute_verdict_trends(path=verdicts_path)
         return format_verdict_trends(trends)
-    except ValueError as e:
-        return f"Error: Invalid wiki_dir — {_sanitize_error_str(e)}"
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
         return f"Error: Verdict trends failed — {_sanitize_error_str(e)}"

@@ -52,8 +52,8 @@ def test_kb_stats_rejects_traversal_wiki_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(browse, "PROJECT_ROOT", tmp_path / "project")
 
-    assert kb_stats(wiki_dir="../..").startswith("Error: Invalid wiki_dir")
-    assert kb_stats(wiki_dir=str(tmp_path.parent)).startswith("Error: Invalid wiki_dir")
+    assert kb_stats(wiki_dir="../..").startswith("Error: wiki_dir")
+    assert kb_stats(wiki_dir=str(tmp_path.parent)).startswith("Error: wiki_dir")
 
 
 def test_kb_verdict_trends_reads_data_next_to_supplied_wiki_dir(tmp_path, monkeypatch):
@@ -91,5 +91,5 @@ def test_kb_verdict_trends_rejects_traversal_wiki_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path / "project")
 
-    assert kb_verdict_trends(wiki_dir="../..").startswith("Error: Invalid wiki_dir")
-    assert kb_verdict_trends(wiki_dir=str(tmp_path.parent)).startswith("Error: Invalid wiki_dir")
+    assert kb_verdict_trends(wiki_dir="../..").startswith("Error: wiki_dir")
+    assert kb_verdict_trends(wiki_dir=str(tmp_path.parent)).startswith("Error: wiki_dir")
