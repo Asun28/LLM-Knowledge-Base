@@ -5,7 +5,6 @@ from pathlib import Path
 
 from kb.config import PROJECT_ROOT
 from kb.graph.export import export_mermaid
-from kb.lint._safe_call import _safe_call
 from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 
 logger = logging.getLogger(__name__)
@@ -69,6 +68,8 @@ def kb_lint(
 
     # Append feedback-flagged pages (Cycle 7 AC27: route through _safe_call so
     # failures surface in the report label instead of silently degrading).
+    from kb.lint._safe_call import _safe_call
+
     flagged, flag_err = _safe_call(
         lambda: __import__(
             "kb.feedback.reliability", fromlist=["get_flagged_pages"]
