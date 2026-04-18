@@ -29,6 +29,12 @@ def test_page_id_lowercases_mixed_case_filename():  # noqa: D103  # placeholder-
     assert page_id(Path("wiki/concepts/FOO.md"), wiki_dir=Path("wiki")) == "concepts/foo"
 
 
+def test_page_id_normalizes_backslashes_to_posix_id():  # noqa: D103
+    from kb.utils.pages import page_id
+
+    assert page_id(Path("wiki\\concepts\\foo.md"), wiki_dir=Path("wiki")) == "concepts/foo"
+
+
 def test_scan_wiki_pages_returns_sorted_pages_and_skips_root_sentinels(
     tmp_path,
 ):  # noqa: D103  # placeholder-for-task9
@@ -42,6 +48,7 @@ def test_scan_wiki_pages_returns_sorted_pages_and_skips_root_sentinels(
         "contradictions.md",
         "purpose.md",
         "_categories.md",
+        "hot.md",
         "_augment_proposals.md",
     ]
     for name in sentinel_names:
@@ -57,7 +64,11 @@ def test_scan_wiki_pages_returns_sorted_pages_and_skips_root_sentinels(
         page_path.parent.mkdir(parents=True, exist_ok=True)
         page_path.write_text("# Page\n", encoding="utf-8")
 
-    assert scan_wiki_pages(wiki_dir) == expected_pages
+    pages = scan_wiki_pages(wiki_dir)
+
+    assert pages == expected_pages
+    assert not {page.name for page in pages} & set(sentinel_names)
+    assert pages == sorted(pages)
 
 
 def test_private_page_id_alias_is_public_page_id():  # noqa: D103  # placeholder-for-task9
