@@ -588,14 +588,18 @@ class TestCliExitCodes:
     def test_version_command_exits_zero(self, tmp_path):
         """AC16 + AC30 behavioural: `kb --version` exits with code 0 and emits
         the version string. This is the concrete exit-code-0 success path."""
+        import os
         import subprocess
         import sys
 
+        repo_src = str(Path(__file__).resolve().parent.parent / "src")
+        env = {**os.environ, "PYTHONPATH": repo_src + os.pathsep + os.environ.get("PYTHONPATH", "")}
         proc = subprocess.run(
             [sys.executable, "-m", "kb.cli", "--version"],
             capture_output=True,
             text=True,
             timeout=20,
+            env=env,
         )
         assert proc.returncode == 0, (
             f"kb --version must exit 0; got {proc.returncode}\n"
@@ -1069,9 +1073,12 @@ class TestCliVersionShortcircuit:
         — the subprocess boots a fresh interpreter, runs the CLI with --version,
         and asserts `kb.config` is NOT in `sys.modules` after the short-circuit.
         """
+        import os
         import subprocess
         import sys
 
+        repo_src = str(Path(__file__).resolve().parent.parent / "src")
+        env = {**os.environ, "PYTHONPATH": repo_src + os.pathsep + os.environ.get("PYTHONPATH", "")}
         probe = (
             "import sys\n"
             "sys.argv = ['kb', '--version']\n"
@@ -1088,6 +1095,7 @@ class TestCliVersionShortcircuit:
             capture_output=True,
             text=True,
             timeout=20,
+            env=env,
         )
         assert result.returncode == 0, (
             f"--version path unexpectedly failed; stdout={result.stdout!r} stderr={result.stderr!r}"
