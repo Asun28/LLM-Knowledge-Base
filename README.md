@@ -109,7 +109,7 @@ pip install -r requirements.txt && pip install -e .
 kb --version
 ```
 
-**API key:** Copy `.env.example` to `.env` and add `ANTHROPIC_API_KEY` — or skip this entirely if you're using Claude Code Max (MCP tools use Claude Code as the LLM by default).
+**API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
 
 **Obsidian:** Open `wiki/` as a vault. Press `Ctrl+G` for the knowledge graph. See the **[full Obsidian guide](docs/guides/quickstart-obsidian.md)** ([HTML version](docs/guides/quickstart-obsidian.html)).
 

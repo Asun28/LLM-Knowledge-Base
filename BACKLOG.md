@@ -108,10 +108,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 - `graph/builder.py` no shared caching policy — cycle 6 added a query-side PageRank cache and preloaded-page threading for `kb_query`, and cycle 7 threaded page bundles through several callers, but the graph layer itself still has no reusable cache/invalidation contract. `lint/runner.py` and `lint/checks.py` can still rebuild graphs independently in one lint pass, and no policy doc defines when graph-derived caches are invalidated after ingest/refine. (R2; query hot-path portion resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 6")
   (fix: `kb.graph.cache` keyed on `(wiki_dir, max_mtime_of_wiki_subdirs)`; share within lint/evolve/query call stacks; invalidate at end of `ingest_source` + `refine_page`; document in CLAUDE.md alongside the manifest contract)
 
-- `mcp/core.py` `kb_ingest` source-file cap inconsistency — cycle 1/5 fixes consolidated `MAX_NOTES_LEN` and capped `kb_refine_page`, `kb_query_feedback`, and `kb_save_lint_verdict` notes, but `kb_ingest` still silently truncates source-file content to `QUERY_CONTEXT_MAX_CHARS=80K` with only a `logger.warning` while sibling tools reject oversized content at the MCP boundary. (R3; notes/constant-duplication portions resolved in CHANGELOG `[Unreleased]`)
-  (fix: reject oversized `kb_ingest` source files at MCP boundary instead of silently truncating; share the same size-limit wording used by `kb_ingest_content` / `kb_save_source`)
-
-
 - `tests/test_v0p5_purpose.py` purpose-threading coverage gap — cycle 6 added `rewrite_query` tests that mock `call_llm` and reject leaked preambles, but `test_v0p5_purpose.py` still checks only that the string "KB FOCUS" appears in the extraction prompt; it never verifies `query_wiki` threads `purpose.md` to the synthesizer. Phase 5's `kb_capture` will follow this template if not corrected. (R3; rewriter coverage portion resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 6")
   (fix: add `query_wiki(..., wiki_dir=tmp)` integration test asserting purpose text reaches the synthesis prompt)
 
@@ -154,9 +150,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 - `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page (line 609) → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes some of the SAME pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Within ONE process this is OK. Under concurrent ingest A + B, the read-then-write windows in different stages of A overlap with different stages of B in non-deterministic order; debugging becomes impossible because each `kb_ingest` run shows different conflict patterns. R5 highlights the **systemic absence of any locking discipline across the entire 11-stage ingest pipeline** — a problem that compounds with every Phase 5 feature. (R5)
   (fix: introduce a per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` and use consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, and `inject_wikilinks`; OR adopt a coarse wiki-wide ingest mutex)
 
-- `compile/compiler.py` `load_manifest` swallows only JSON/Unicode corruption — cycle 3/5/7 widened `load_feedback`, `load_verdicts`, and `load_review_history`, but `load_manifest()` still does not catch transient `OSError` from Windows atomic-rename/read races. A mid-rename manifest read can still bubble raw errors through drift/compile/ingest paths instead of recovering to `{}` with an operator warning. (R5; feedback/verdicts/review-history portions resolved in CHANGELOG `[Unreleased]`)
-  (fix: widen `load_manifest` to catch `OSError` alongside `json.JSONDecodeError` / `UnicodeDecodeError`, log a warning, and return `{}`; consider one short retry as in `load_verdicts`)
-
 ### HIGH — Additional (surfaced post-cycle-2 or deferred from cycle-1)
 
 > All items below are HIGH severity. Grouped here because they were either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
@@ -169,10 +162,6 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 - `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip), but deferred: (1) atomic temp-DB-then-replace rebuild (crash-mid-rebuild leaves empty index), (2) cold-load latency (0.8s+67MB on first query), (3) dim-mismatch (stored embedding dim vs current model not validated), (4) `_index_cache` cross-thread lock symmetry. Bundle into dedicated vector-index lifecycle cycle. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
 - `tests/` multiprocessing tests for cross-process `file_lock` semantics — cycle 1 HIGH used in-process threading as a proxy but Windows NTFS lock behavior is not exercised. Add `@pytest.mark.slow` multiprocessing tests in a dedicated test-infrastructure cycle. *(Deferred from Phase 4.5 HIGH cycle 1.)*
-
-### LOW — Deferred from cycle-2
-
-- `utils/llm.py` `_make_api_call` — truncation of `e.message` prevents simple prompt-content leak but does not REDACT (user prompts, image base64 fragments, API keys echoed by Anthropic). Follow-up cycle should add pattern-based redaction or prompt-prefix hashing before truncation. (references BACKLOG:701; deferred Step 5 gate Q11)
 
 ### MEDIUM
 
@@ -201,9 +190,6 @@ tokens (K1)._
   (fix: per-source "in-progress" marker in manifest cleared only after page write + log append; escalate manifest-write failure to CRITICAL)
 
 _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (M1)._
-
-- `lint/checks.py` `check_source_coverage` (~370-382) — reads the file, then `frontmatter.loads(content)` re-splits the YAML fence and runs PyYAML on the exact same string. At 5k pages this is 5k redundant YAML parses on top of the duplication above. (R1)
-  (fix: reuse parsed frontmatter from the shared corpus; or `FRONTMATTER_RE` + `yaml.safe_load` on captured fence)
 
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). `file_lock` polls at 50 ms, adding minimum-latency floor on every verdict add. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
@@ -242,9 +228,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `ingest/pipeline.py` extraction field type validation (~157, 162-163, 180, 186-188, 248-249, 253-254, 592, 625, 640, 726) — `call_llm_json` enforces schema only for the Anthropic-API path; Claude Code mode accepts `extraction_json` from the MCP client and validates only `isinstance(extraction, dict)` + `title` presence, NOT field types. A malformed `extraction_json={"title":"x", "core_argument": {...}, "key_claims": [42, null]}` hits `.lower()`/`.replace()` on non-string values at multiple sites, aborting mid-ingest with the state-store-fan-out hazard (R2): summary page created, index/sources updated, manifest NOT updated → re-ingest appears "new" and duplicates entries. (R3)
   (fix: `_coerce_str_field(extraction, field)` helper rejecting non-string values with a single up-front error BEFORE any filesystem write; reuse for all 10+ read sites)
 
-- `.env.example` vs `config.py` env-var drift — `.env.example` lists 4 vars; code also reads `CLAUDE_SCAN_MODEL`, `CLAUDE_WRITE_MODEL`, `CLAUDE_ORCHESTRATE_MODEL` (`config.py:66-68`). CLAUDE.md's model tier table documents them but `.env.example` doesn't. Conversely `EMBEDDING_MODEL` is hardcoded (`"minishlab/potion-base-8M"`) with no env override despite Phase 4 roadmap language about "EMBEDDING_MODEL availability." (R3)
-  (fix: add three `CLAUDE_*_MODEL` vars (commented, with defaults) to `.env.example`; either add an env override for `EMBEDDING_MODEL` in `config.py:128` or clarify in CLAUDE.md that only the 3 model IDs are env-overridable)
-
 - `tests/` no golden-file / snapshot tests — grep for `snapshot`/`golden`/`syrupy`/`inline_snapshot`/`approvaltests` returns zero hits. Wiki rendering (`_build_summary_content`, `append_evidence_trail`, contradictions append, `build_extraction_prompt`, `_render_sources`, Mermaid export, lint report) is verified only by `assert "X" in output`. `test_v0917_evidence_trail.py` checks `"## Evidence Trail" in text` — the actual format (order of `date | source | action`, prepend direction, whitespace) is unverified. Phase 5's output-format polymorphism (`kb_query --format=marp|html|chart|jupyter`), `wiki/overview.md`, and `wiki/_schema.md` all produce structured output that LLM-prompt tweaks silently reformat. (R3)
   (fix: add `pytest-snapshot` or `syrupy`; start with frontmatter rendering, evidence-trail format, Mermaid output, lint report format; commit `tests/__snapshots__/`)
 
@@ -263,21 +246,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `compile/compiler.py:199-276` `detect_source_drift` — calls `find_changed_sources(..., save_hashes=False)` but the `elif deleted_keys:` branch at 192-194 STILL writes the manifest to persist pruning. `detect_source_drift` is advertised as read-only (the `save_hashes=False` kwarg exists for this caller per 127-129 docstring), yet a wiki with deleted raw sources triggers silent manifest mutation on every `kb_detect_drift` call. Violates the documented contract. (R4)
   (fix: split `save_hashes` into `save_template_hashes` + `prune_deleted`; `detect_source_drift` passes both False; or doc-note that deletion pruning is always persisted because stale entries break subsequent reads)
 
-
-- `mcp/core.py` `kb_compile_scan` — no `wiki_dir` plumbing. (Cycle 6 AC2 closed `kb_detect_drift`, `kb_evolve`, `kb_graph_viz`; cycle 8 closed `kb_stats` and `kb_verdict_trends`.)
-  (fix: extend the Cycle-6 pattern — `wiki_dir: str | None = None` converted to `Path` and forwarded to the library function; mirror `kb_lint`'s Phase 5.0 plumbing)
-
-- `query/engine.py:131,717` vector-index path ignores `wiki_dir` — `rebuild_vector_index(wiki_dir)` writes to `wiki_dir.parent / ".data" / "vector_index.db"`, but both `search_pages` and `query_wiki` check `PROJECT_ROOT / VECTOR_INDEX_PATH_SUFFIX`. A custom-project query can have a valid sibling vector index and still report/use BM25-only; worse, if the repo-default vector DB exists, the static `search_mode` gate is computed from the wrong project. (2026-04-18 two-round review R1)
-  (fix: derive `vec_path` with `kb.query.embeddings._vec_db_path(wiki_dir or WIKI_DIR)` in both vector search and `search_mode` classification; add a custom `wiki_dir` regression with a temp `.data/vector_index.db`)
-
-- `query/engine.py:175,228-250` `_flag_stale_results` defaults to `PROJECT_ROOT` even when `search_pages(wiki_dir=tmp_wiki)` loaded pages from a custom project. Source refs like `raw/articles/foo.md` are checked under the repo root, so stale markers are false-negative when only the temp raw source changed and false-positive if the same ref exists in the production checkout with a newer mtime. (2026-04-18 two-round review R1)
-  (fix: pass `project_root=wiki_dir.parent` from `search_pages`; when `wiki_dir is None`, preserve `PROJECT_ROOT`; add a temp wiki/raw test that proves stale marking follows the override)
-
-- `mcp/health.py:65-83,121-135` `kb_lint(wiki_dir=...)` and `kb_evolve(wiki_dir=...)` append feedback-derived sections from default `FEEDBACK_PATH`. The main lint/evolve report is scoped to the override, but "Low-Trust Pages" and "Coverage Gaps" can leak production feedback into a temp/demo project and point at page IDs that do not exist there. (2026-04-18 two-round review R2)
-  (fix: derive `feedback_path = wiki_path.parent / ".data" / "feedback.json"` when `wiki_dir` is provided and pass it into `get_flagged_pages(path=...)` / `get_coverage_gaps(path=...)`; cover both tools with custom `wiki_dir` tests)
-
-- `evolve/analyzer.py:24-60` `analyze_coverage` orphan-concept backlinks via unresolved `build_backlinks` — `build_backlinks` in `compile/linker.py:100` skips bare-slug wikilinks (no resolver, unlike `build_graph`). A concept referenced only via bare slug `[[foo]]` is falsely reported as orphan. `find_connection_opportunities` uses `build_graph` which DOES resolve bare slugs, creating inconsistency within the same evolve report: orphan list disagrees with graph edges. (R4)
-  (fix: centralize bare-slug resolution so both `build_graph` and `build_backlinks` use the same resolver; or pass the resolved graph into `build_backlinks`)
 
 - `ingest/pipeline.py:682-693 + compile/compiler.py:117-196` manifest hash key inconsistency under concurrent ingest — `_is_duplicate_content` (102) calls `load_manifest` to check whether ANY entry matches `source_hash`. If caller A is mid-ingest of `raw/articles/foo.md` (passed dedup at 566 but not yet written manifest at 688), caller B starts ingest of an IDENTICAL-content `raw/articles/foo-copy.md` — B's `_is_duplicate_content` sees no match (A hasn't saved), B proceeds to full extraction + page writes, BOTH succeed and write to manifest. Wiki now has TWO summary pages with identical content but different titles. R2 flagged the duplicate-check race; R5 specifies the **window**: the entire LLM extraction (~30 seconds) + all 11 ingest stages between dedup-check and manifest-save is unprotected. (R5)
   (fix: hold `file_lock(manifest_path)` across the entire `ingest_source` body OR write a "claim" entry to manifest as `{source_ref: "in_progress:{hash}"}` immediately after the dedup check, with `try/finally` to either commit the real hash on success or remove the claim on failure)
@@ -299,17 +267,11 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `tests/` missing coverage — no focused test for `_build_query_context` tier-budget logic (`engine.py:235-324`) or `_flag_stale_results` edge cases (missing `sources`, non-ISO `updated`, mtime-eq-page-date). (R1)
   (fix: parametric test asserting per-tier byte budgets given sized summaries; stale-flag edge cases)
 
-- `mcp/app.py:15-36` FastMCP `instructions` block — 25-line bulleted summary duplicating the first line of every tool docstring; sent on every session init. When a tool description changes both must be edited; thematic grouping already broken (`kb_detect_drift` / `kb_graph_viz` / `kb_verdict_trends` appended out-of-order). No anchor connecting the block to the registry. (R3)
-  (fix: generate the instructions programmatically from the FastMCP tool registry; or replace with a one-paragraph pointer to `kb_list_pages` / CLAUDE.md and let FastMCP's auto tool listing do the work)
-
 - `tests/test_mcp_*.py`, `test_v098_fixes.py`, `test_v099_phase39.py`, `test_drift_detection_v094.py` — five ad-hoc helpers (`_setup_quality_paths`, `_setup_browse_dirs`, `_setup_project`, `_patch_source_type_dirs`, `_patch_source_dirs`) re-invent the same monkeypatch dance over slightly different `WIKI_*` / `.data/` subsets, across both `kb.config` AND importing modules (because of `from kb.config import X` re-binding). None in `conftest.py`; each file copy-pastes a variant and risks missing a global. Phase 5's new globals (hot.md, overview.md, captures/, schema.md, vector_index.db, ingest_locks/, pagerank.json) each require updating all five OR more leaks. (R3)
   (fix: single `tmp_kb_env` fixture in `conftest.py` that reflects `kb.config`'s `WIKI_*` / `RAW_DIR` / `PROJECT_ROOT` / `*_PATH` constants and monkeypatches BOTH `kb.config` AND every module that imported them via `sys.modules` reflection; collapse all five helpers)
 
 - `src/kb/__init__.py` + `src/kb/cli.py:143` + `src/kb/mcp_server.py:10` — three import layers to boot MCP: `kb mcp` → `cli.mcp()` → `from kb.mcp_server import main` → `from kb.mcp import mcp` → tool modules. Each layer runs an `__init__.py` and a `sys.modules` lookup. Harmless (<5 ms) but blocks clean "click entry → tool module" import-time profiling. (R3)
   (fix: collapse `kb/mcp_server.py` into `kb.mcp` as `kb.mcp.main`; `kb = "kb.mcp:main"` script entry in `pyproject.toml`; CLI's `kb mcp` becomes `from kb.mcp import main`)
-
-- `ingest/__init__.py` empty package — `__init__.py` is only a docstring/header; no `__all__`, no public-API curation. Every caller reaches into `kb.ingest.pipeline`/`kb.ingest.extractors`/`kb.ingest.contradiction`/`kb.ingest.evidence` directly. R1 flagged top-level package; the pattern recurs inside `kb.ingest`. Phase 5 additions (kb_capture, URL adapters, chunk-indexing hooks) will keep reaching into ever-deeper submodules unless a seam is created now. (R4)
-  (fix: add `from kb.ingest.pipeline import ingest_source; __all__ = ["ingest_source"]` — single public entry point)
 
 - `mcp/browse.py:48-73` `kb_read_page` case-insensitive fallback — the `subdir.glob("*.md")` loop iterates every file for every miss, lowercase-compares stems, picks first match. On collision (two files differing only in case) the fallback is insertion-order-dependent: first file `glob` returns wins. Two pages with canonical IDs differing only in case shadow each other. Logger warning notes the match but doesn't mention the ambiguity. (R4)
   (fix: if >1 case-insensitive match exists, return `Error: ambiguous page_id — multiple files match {page_id} case-insensitively: {matches}`; or lowercase all page IDs at slug time and drop the fallback)
@@ -592,66 +554,16 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ### MEDIUM
 
-- `capture.py:146-161` `_normalize_for_scan` except clause too narrow — `except (ValueError, binascii.Error, UnicodeDecodeError)` does not catch `TypeError`; a future refactor passing non-str to `unquote` would propagate uncaught, silently aborting the normalization pass with no log. (R1)
-  (fix: `except Exception: continue` with a comment "normaliser is best-effort; any decode failure silently skips that segment")
-
-- `capture.py:36-56` + `capture.py:40` `_check_rate_limit` per-process scope undocumented — docstring and `_check_rate_limit` body say "sliding 1-hour window" with no mention of per-process scope. MCP server and CLI (once added) each maintain independent deques, effectively doubling the allowed rate. Future developers adding a CLI wrapper will not realize the limit is not global. (R1)
-  (fix: add explicit docstring note on per-process scope; use `.data/capture_rate.json` + `atomic_json_write` for system-wide limit if required)
-
 - `capture.py:209-238` `_PROMPT_TEMPLATE` inline string vs templates/ convention — all other LLM prompts live as YAML files in `templates/` loaded via `load_template()`. R2 NIT refined: existing `templates/*.yaml` define JSON-Schema `extract:` fields for `build_extraction_schema()` — a structurally different purpose, so a plain format-string prompt does not fit there. (R1 + R2 NIT)
   (fix: `templates/capture_prompt.txt` in a new `prompts/` subdirectory; OR keep inline but extract to named module-level constant with comment)
 
 - `config.py:40-53` + `CLAUDE.md` architectural contradiction — `CAPTURES_DIR = RAW_DIR / "captures"` places the capture write target inside `raw/`, which CLAUDE.md defines as "Immutable source documents. The LLM reads but **never modifies** files here." `raw/captures/` is the only LLM-written output directory inside `raw/`. (R1)
   (fix: either (a) move `CAPTURES_DIR` to `captures/` at project root, or (b) carve out an explicit exception in CLAUDE.md and the config comment)
 
-- `tests/test_capture.py:21` `CAPTURE_KINDS` implicit re-export — test imports from `kb.capture` rather than its authoritative source `kb.config`. If `capture.py` is refactored to reference `CAPTURE_KINDS` via a different import form, the test import breaks silently. (R1)
-  (fix: `from kb.config import CAPTURE_KINDS` in the test; OR explicit re-export in `capture.py`)
-
-- `capture.py:403-435` + `tests/test_capture.py:632-715` yaml_escape double-escape fix lacks round-trip regression test — current tests still use alphanumeric-only titles; no test passes a backslash, double-quote, or embedded newline in the title and asserts `_fm.loads()` round-trip. A future accidental re-introduction of yaml_escape would pass all tests silently. (R2, revalidated 2026-04-17)
-  (fix: add `test_title_with_backslash_round_trips` and `test_title_with_double_quote_round_trips` for `r"C:\path\to\file"` and `'"quoted"'`)
-
 ### LOW
-
-- `capture.py:137-161` `_normalize_for_scan` iteration bound implicit on `CAPTURE_MAX_BYTES` — decode attempt count is O(input_size / 17) ≈ 2,941 max at the 50KB cap; bound is load-bearing on `CAPTURE_MAX_BYTES` not being raised without reviewing this function. (R1)
-  (fix: add a comment documenting the implicit bound; assert `CAPTURE_MAX_BYTES <= 200_000` at module level)
-
-- `capture.py:240-243` `_extract_items_via_llm` no pre-flight context window guard — prompt inlines up to 50KB of content (≈12.7K tokens). If `CAPTURE_MAX_BYTES` is later raised above ~600KB the Haiku context window will be silently exceeded at the API layer with an opaque error. (R1)
-  (fix: `MAX_PROMPT_CHARS = 600_000; assert len(prompt) <= MAX_PROMPT_CHARS` or derive from a config constant)
-
-- `capture.py:288-298` `_path_within_captures` naming inconsistency — only predicate (bool-returning) function in the module; all others use verb-first names. (R1)
-  (fix: rename to `_is_path_within_captures`; update two call sites in `_write_item_files`)
-
-- `capture.py:164-181` `_scan_for_secrets` encoded `location` lacks encoding type — `"via encoded form"` does not distinguish base64 vs URL-encoded secrets, making triage harder. (R1)
-  (fix: split `_normalize_for_scan` into annotated passes returning `(text, label)` tuples; emit `"via base64"` or `"via URL-encoding"`)
-
-- `capture.py:455-459` `os.scandir` on every `FileExistsError` retry is O(N×E) — with N=20 items and 10 retries each plus E=10,000 existing captures, pathological case is ~2M string operations. Non-issue under normal operation; degrades linearly under sustained cross-process race. (R2)
-  (fix: on `FileExistsError`, add the conflicting slug directly to `existing` before calling `_build_slug` again; re-scan only when write-retries are exhausted)
 
 - `capture.py:546` `captured_at` timestamp computed post-LLM — runs after `_extract_items_via_llm`; for Haiku calls under load, the gap can be 5-30s. Files are timestamped "when persisted", not "when submitted". (R2)
   (fix (optional): move `captured_at = datetime.now(UTC).strftime(...)` to immediately after `_resolve_provenance(...)` so both session-identity fields reflect submission time)
-
-- `capture.py:319-343` `_build_slug` collision suffix while-loop is unbounded — `while True` with monotonic suffix; no hard upper bound on `n`. Production requires millions of colliding names to be an issue, but a test accidentally constructing a large collision set could hang. (R3, revalidated 2026-04-17)
-  (fix: cap attempts to `len(existing) + 2` or a fixed defensive ceiling, raise/return a clear collision-exhausted error)
-
-### NIT
-
-- `capture.py:247-265` `_verify_body_is_verbatim` — `body.strip()` used for containment check but original unstripped `item` returned in `kept`; downstream writer receives bodies with leading/trailing whitespace. (R1)
-  (fix: set `item["body"] = body_stripped` before appending to `kept`, or document that callers must strip)
-
-- `tests/conftest.py:149-159` `tmp_captures_dir` — patches both `kb.config.CAPTURES_DIR` and `kb.capture.CAPTURES_DIR` but does not re-verify the patched path satisfies `is_relative_to(PROJECT_ROOT)`. A future test passing an intentionally-escaping path would bypass the security assertion silently. (R1)
-  (fix: add `assert captures.resolve().is_relative_to(PROJECT_ROOT.resolve())` inside the fixture)
-
-- `capture.py:86-134` `_CAPTURE_SECRET_PATTERNS` `list[tuple]` — two-element tuples accessed as `label, pattern`; a `NamedTuple` would make access self-documenting and adding a third field (e.g., `severity`) non-breaking. (R1)
-  (fix: `class _SecretPattern(NamedTuple): label: str; pattern: re.Pattern[str]`)
-
-- `tests/conftest.py:11` `RAW_SUBDIRS` incomplete — lists only 5 subdirs (`articles`, `papers`, `repos`, `videos`, `captures`); missing `podcasts`, `books`, `datasets`, `conversations`, `assets`. Tests using `tmp_project` that exercise those subdirs find them absent with no documented explanation. (R1)
-  (fix: derive from `SOURCE_TYPE_DIRS` keys dynamically)
-
-- `tests/test_capture.py:120-122` comment mismatch — says "25001 CRLF pairs = 50002 raw bytes / 50001 post-LF bytes" while the actual expression is `'ab\r\n' * 12501 = 50004 raw bytes` and `37503` post-LF. (R1, revalidated 2026-04-17)
-  (fix: `# 'ab\r\n' * 12501 = 50004 raw bytes, 37503 post-LF bytes`)
-
-- `tests/test_capture.py:11-12` duplicate `import re` — `import re` then `import re as _test_re`; the alias is used only once. Ruff F811. (R2)
-  (fix: remove `import re as _test_re`; change the usage to `re.search(...)`)
 
 ---
 
@@ -680,10 +592,7 @@ _All 3 HIGH items resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 1"
 
 ### MEDIUM
 
-- `lint/augment.py` `run_augment` (~706-729, summary block) — one stub with multiple candidate URLs can record both a failed attempt and a later saved attempt in `fetches`. The summary counts failed entries, not final stub outcomes, so a successful fallback URL reports `Saved: 1, Failed: 1` for a single gap. This makes the run look partially failed when the gap actually succeeded. (R1)
-  (fix: store URL-attempt details under each stub, or compute summary counts from final per-stub states in the manifest)
-
-_3 of 4 MEDIUM items resolved (data_dir threading, max_gaps lower bound, proposal URL re-validation). Summary-count semantic change deliberately deferred — observable behavior change._
+_All 4 MEDIUM items resolved in CHANGELOG `[Unreleased]` (data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)._
 
 ### LOW
 

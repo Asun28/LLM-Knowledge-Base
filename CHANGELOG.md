@@ -38,6 +38,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |
 | [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |
 | [Backlog-by-file cycle 7](#phase-45--backlog-by-file-cycle-7-2026-04-18) | 2026-04-18 | 30 / 22 files | 1868 → 1919 (+51) | mcp/app, mcp/core, mcp/health, lint/_safe_call, lint/checks, lint/verdicts, lint/runner, lint/semantic, query/embeddings, query/engine, graph/builder, graph/export, compile/linker, evolve/analyzer, ingest/pipeline, ingest/extractors, review/context, review/refiner, utils/text, utils/io, config, cli |
 | [Backlog-by-file cycle 6](#phase-45--backlog-by-file-cycle-6-2026-04-18) | 2026-04-18 | 15 / 14 files | 1836 → 1868 (+32) | mcp/core, mcp/health, query/rewriter, query/engine, query/embeddings, query/hybrid, query/dedup, ingest/pipeline, cli, evolve/analyzer, graph/builder, utils/pages |
@@ -53,6 +54,39 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 | [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
 
 > Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
+
+---
+
+### Phase 4.5 — Backlog-by-file cycle 9 (2026-04-18)
+
+30 AC across 14 files plus 2 security-review fixes. Tests: 1949 → 2003 (+54, across 150 test files). Full feature-dev pipeline (requirements → threat model + design gate → implementation + security verify → docs). 0 PR-introduced CVEs.
+
+#### Added
+- `src/kb/ingest/__init__.py` — lazy `__getattr__` re-export for `ingest_source`, preserving the package public API without loading the ingest pipeline on package import (AC29).
+- `src/kb/mcp/app.py` — `_validate_wiki_dir(wiki_dir)` boundary helper for MCP wiki override paths (security review).
+- `src/kb/evolve/analyzer.py` — `_orphan_via_graph_resolver` helper so orphan-concept detection uses `build_graph`'s bare-slug resolver (AC13).
+- `src/kb/utils/llm.py` — `_redact_secrets` helper for LLM error text before truncation (AC27).
+- Cycle-9 regression coverage across compiler, evolve, lint augment/checks, LLM redaction, MCP app/core/health/path validation, package exports, query engine, and env example tests.
+
+#### Changed
+- `src/kb/query/engine.py` — vector-index lookup, stale-flag project root, `search_mode`, and raw fallback now derive paths from the active `wiki_dir` override instead of repo defaults (AC1, AC2, AC3, AC4).
+- `src/kb/mcp/core.py` — `kb_compile_scan(wiki_dir=None)` threads custom wiki directories into changed-source scanning; `kb_ingest` rejects over-cap source files instead of silently truncating; `kb_ingest_content` validates boundary content size consistently (AC7, AC8, AC9).
+- `src/kb/mcp/health.py` — `kb_lint` and `kb_evolve` scope feedback-derived sections to the provided wiki project's `.data/feedback.json` (AC5, AC6).
+- `src/kb/mcp/app.py` — MCP instructions render from alphabetized `_TOOL_GROUPS` instead of a monolithic FastMCP instructions string (AC28).
+- `src/kb/lint/augment.py` — `run_augment` summary counts final per-stub outcomes, so fallback URL success no longer reports a failed stub (AC11).
+- `src/kb/lint/checks.py` — `check_source_coverage` parses frontmatter once and extracts body refs from parsed content (AC12).
+- `tests/conftest.py` — `RAW_SUBDIRS` derives from `SOURCE_TYPE_DIRS`; `tmp_captures_dir` asserts containment under `PROJECT_ROOT` (AC25, AC26).
+- `.env.example` — `ANTHROPIC_API_KEY` documented as optional for Claude Code/MCP mode and required only for direct API-backed flows (AC30).
+
+#### Fixed
+- `src/kb/compile/compiler.py` — `load_manifest` now catches transient `OSError` alongside JSON/Unicode read failures (AC10).
+- `src/kb/capture.py` — capture scanner and writer hardening: best-effort decode logging, bounded slug collision attempts, `_is_path_within_captures` rename, encoded-secret labels, `NamedTuple` secret patterns, stripped accepted bodies, prompt-size guard, and per-process rate-limit documentation (AC14, AC15, AC16, AC17, AC18, AC19, AC20, AC21).
+- `tests/test_capture.py` — capture tests import `CAPTURE_KINDS` from config, add YAML title round-trip regressions, correct the CRLF-size comment, and remove duplicate `re` import (AC22, AC23, AC24).
+
+#### Security
+- `src/kb/utils/llm.py` — four LLM error sites redact API keys/tokens/secrets before truncation and surfacing errors (AC27).
+- `src/kb/mcp/app.py`, `src/kb/mcp/core.py`, `src/kb/mcp/health.py` — `wiki_dir` overrides are validated at the MCP boundary before use (security review).
+- Test secret literals were split so redaction fixtures do not carry scanner-triggering full secret strings (security review).
 
 ---
 
