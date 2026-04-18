@@ -273,6 +273,15 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `mcp/browse.py` `kb_stats` + `mcp/core.py` `kb_compile_scan` + `mcp/health.py` `kb_verdict_trends` — no `wiki_dir` plumbing. (Cycle 6 AC2 closed `kb_detect_drift`, `kb_evolve`, `kb_graph_viz`; these three still accept no override.)
   (fix: extend the Cycle-6 pattern — `wiki_dir: str | None = None` converted to `Path` and forwarded to the library function; mirror `kb_lint`'s Phase 5.0 plumbing)
 
+- `query/engine.py:131,717` vector-index path ignores `wiki_dir` — `rebuild_vector_index(wiki_dir)` writes to `wiki_dir.parent / ".data" / "vector_index.db"`, but both `search_pages` and `query_wiki` check `PROJECT_ROOT / VECTOR_INDEX_PATH_SUFFIX`. A custom-project query can have a valid sibling vector index and still report/use BM25-only; worse, if the repo-default vector DB exists, the static `search_mode` gate is computed from the wrong project. (2026-04-18 two-round review R1)
+  (fix: derive `vec_path` with `kb.query.embeddings._vec_db_path(wiki_dir or WIKI_DIR)` in both vector search and `search_mode` classification; add a custom `wiki_dir` regression with a temp `.data/vector_index.db`)
+
+- `query/engine.py:175,228-250` `_flag_stale_results` defaults to `PROJECT_ROOT` even when `search_pages(wiki_dir=tmp_wiki)` loaded pages from a custom project. Source refs like `raw/articles/foo.md` are checked under the repo root, so stale markers are false-negative when only the temp raw source changed and false-positive if the same ref exists in the production checkout with a newer mtime. (2026-04-18 two-round review R1)
+  (fix: pass `project_root=wiki_dir.parent` from `search_pages`; when `wiki_dir is None`, preserve `PROJECT_ROOT`; add a temp wiki/raw test that proves stale marking follows the override)
+
+- `mcp/health.py:65-83,121-135` `kb_lint(wiki_dir=...)` and `kb_evolve(wiki_dir=...)` append feedback-derived sections from default `FEEDBACK_PATH`. The main lint/evolve report is scoped to the override, but "Low-Trust Pages" and "Coverage Gaps" can leak production feedback into a temp/demo project and point at page IDs that do not exist there. (2026-04-18 two-round review R2)
+  (fix: derive `feedback_path = wiki_path.parent / ".data" / "feedback.json"` when `wiki_dir` is provided and pass it into `get_flagged_pages(path=...)` / `get_coverage_gaps(path=...)`; cover both tools with custom `wiki_dir` tests)
+
 - `evolve/analyzer.py:24-60` `analyze_coverage` orphan-concept backlinks via unresolved `build_backlinks` — `build_backlinks` in `compile/linker.py:100` skips bare-slug wikilinks (no resolver, unlike `build_graph`). A concept referenced only via bare slug `[[foo]]` is falsely reported as orphan. `find_connection_opportunities` uses `build_graph` which DOES resolve bare slugs, creating inconsistency within the same evolve report: orphan list disagrees with graph edges. (R4)
   (fix: centralize bare-slug resolution so both `build_graph` and `build_backlinks` use the same resolver; or pass the resolved graph into `build_backlinks`)
 
