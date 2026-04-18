@@ -9,6 +9,8 @@ import yaml
 
 from kb.config import (
     MAX_CONSISTENCY_GROUP_SIZE,
+    MAX_CONSISTENCY_GROUPS,
+    MAX_CONSISTENCY_PAGE_CONTENT_CHARS,
     MIN_SHARED_TERMS,
     QUERY_CONTEXT_MAX_CHARS,
     WIKI_DIR,
@@ -273,11 +275,14 @@ def build_consistency_context(
     """Build cross-page consistency check context.
 
     If page_ids is provided, uses them as a single group.
-    Otherwise, auto-selects groups using shared sources and wikilinks.
+    Otherwise, auto-selects groups using shared sources and wikilinks, chunks
+    large groups, caps total emitted groups, strips frontmatter from page
+    bodies, and truncates each inlined body to the configured auto-mode limit.
 
     Returns formatted text for Claude Code to check for contradictions.
     """
     wiki_dir = wiki_dir or WIKI_DIR
+    auto_mode = page_ids is None
 
     if page_ids:
         all_chunks = [
@@ -310,6 +315,14 @@ def build_consistency_context(
                 chunk = g[i : i + MAX_CONSISTENCY_GROUP_SIZE]
                 if len(chunk) >= 2:
                     groups.append(chunk)
+        if len(groups) > MAX_CONSISTENCY_GROUPS:
+            dropped = len(groups) - MAX_CONSISTENCY_GROUPS
+            logger.info(
+                "Dropping %d consistency group(s) above cap=%d",
+                dropped,
+                MAX_CONSISTENCY_GROUPS,
+            )
+            groups = groups[:MAX_CONSISTENCY_GROUPS]
 
     if not groups:
         return "No page groups found for consistency checking."
@@ -330,6 +343,15 @@ def build_consistency_context(
                 except (OSError, UnicodeDecodeError) as e:
                     lines.append(f"### {pid}\n*Unreadable: {e}*\n---\n")
                     continue
+                if auto_mode:
+                    fm_match = _FRONTMATTER_RE.match(content)
+                    content = fm_match.group(2) if fm_match else content
+                    if len(content) > MAX_CONSISTENCY_PAGE_CONTENT_CHARS:
+                        content = (
+                            content[:MAX_CONSISTENCY_PAGE_CONTENT_CHARS]
+                            + f"\n\n[Truncated at {MAX_CONSISTENCY_PAGE_CONTENT_CHARS} "
+                            "chars — run kb_lint_deep for full body]"
+                        )
                 lines.append(f"### {pid}\n")
                 lines.append(content)
                 lines.append("\n---\n")

@@ -152,6 +152,9 @@ def kb_lint_consistency(page_ids: str = "") -> str:
 
     Pass comma-separated page IDs, or leave empty to auto-select
     pages most likely to conflict (shared sources, wikilink neighbors).
+    Auto mode chunks large groups, caps total emitted groups, strips
+    frontmatter, and truncates each inlined page body. Explicit page IDs are
+    not truncated.
 
     Args:
         page_ids: Comma-separated page IDs (e.g., 'concepts/rag,concepts/llm').
