@@ -17,6 +17,7 @@ from kb.config import (
     WIKI_SUBDIR_TO_TYPE,
 )
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
+from kb.lint._safe_call import _safe_call
 from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _sanitize_error_str, _validate_notes, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
@@ -99,20 +100,25 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     if "error" in result:
         return f"Error: {result['error']}"
 
-    # Include affected pages in response (fail-safe)
-    try:
-        from kb.compile.linker import build_backlinks
+    from kb.compile.linker import build_backlinks
 
-        backlinks = build_backlinks()
-        affected = backlinks.get(page_id, [])
-    except Exception:
-        logger.debug("Failed to compute backlinks for %s after refine", page_id, exc_info=True)
-        affected = []
+    # Include affected pages in response (fail-safe)
+    backlinks_map, backlinks_err = _safe_call(
+        lambda: build_backlinks(),
+        fallback={},
+        label="backlinks",
+        log=logger,
+    )
+    if backlinks_err is not None:
+        logger.debug("Failed to compute backlinks for %s after refine", page_id)
+    affected = backlinks_map.get(page_id, [])
 
     lines = [
         f"Refined: {page_id}",
         f"Notes: {revision_notes}",
     ]
+    if backlinks_err is not None:
+        lines.append(f"[warn] {backlinks_err}")
     if affected:
         lines.append(f"Affected pages ({len(affected)} — may need review):")
         for p in affected:
@@ -283,9 +289,8 @@ def kb_affected_pages(page_id: str) -> str:
         logger.exception("Error building backlinks for %s", page_id)
         return f"Error computing affected pages: {_sanitize_error_str(e)}"
 
-    # Find pages sharing same sources using the shared page loader
-    shared_source_pages: list[str] = []
-    try:
+    def _compute_shared() -> list[str]:
+        out: list[str] = []
         all_pages = load_all_pages(wiki_dir=WIKI_DIR)
         this_page = next((p for p in all_pages if p["id"] == page_id), None)
 
@@ -295,13 +300,20 @@ def kb_affected_pages(page_id: str) -> str:
                 if other["id"] == page_id:
                     continue
                 if set(page_sources) & set(other["sources"]):
-                    shared_source_pages.append(other["id"])
-    except Exception as e:
-        logger.debug("Failed to compute shared sources for %s: %s", page_id, e)
+                    out.append(other["id"])
+        return out
+
+    # Find pages sharing same sources using the shared page loader
+    shared_source_pages, shared_err = _safe_call(
+        _compute_shared,
+        fallback=[],
+        label="shared_sources",
+        log=logger,
+    )
 
     all_affected = sorted(set(back + shared_source_pages))
 
-    if not all_affected:
+    if not all_affected and shared_err is None:
         return f"No pages are affected by changes to {page_id}."
 
     lines = [
@@ -318,6 +330,9 @@ def kb_affected_pages(page_id: str) -> str:
         lines.append(f"\n## Shared Sources ({len(shared_source_pages)} pages share raw sources)")
         for p in shared_source_pages:
             lines.append(f"  - {p}")
+
+    if shared_err is not None:
+        lines.append(f"[warn] {shared_err}")
 
     lines.append("\nReview these pages if the changes affect shared claims or definitions.")
 
