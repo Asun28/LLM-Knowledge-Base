@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from kb.config import RAW_DIR, WIKI_DIR
-from kb.graph.builder import build_graph, scan_wiki_pages
+from kb.graph.builder import build_graph
 from kb.lint.checks import (
     check_cycles,
     check_dead_links,
@@ -17,6 +17,7 @@ from kb.lint.checks import (
     fix_dead_links,
 )
 from kb.lint.verdicts import get_verdict_summary
+from kb.utils.pages import scan_wiki_pages
 
 logger = logging.getLogger(__name__)
 

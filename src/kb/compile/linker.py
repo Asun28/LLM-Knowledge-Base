@@ -6,10 +6,10 @@ import uuid
 from pathlib import Path
 
 from kb.config import WIKI_DIR
-from kb.graph.builder import page_id, scan_wiki_pages
 from kb.utils.io import atomic_text_write
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
+from kb.utils.pages import page_id, scan_wiki_pages
 from kb.utils.text import wikilink_display_escape
 
 logger = logging.getLogger(__name__)

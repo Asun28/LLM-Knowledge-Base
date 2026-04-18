@@ -12,11 +12,11 @@ from kb.config import (
     UNDER_COVERED_TYPE_THRESHOLD,
     WIKI_DIR,
 )
-from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
+from kb.graph.builder import build_graph, graph_stats
 from kb.lint.checks import check_stub_pages
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
-from kb.utils.pages import WIKI_SUBDIRS
+from kb.utils.pages import WIKI_SUBDIRS, page_id, scan_wiki_pages
 
 logger = logging.getLogger(__name__)
 

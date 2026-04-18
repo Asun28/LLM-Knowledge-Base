@@ -64,3 +64,20 @@ def test_private_page_id_alias_is_public_page_id():  # noqa: D103  # placeholder
     from kb.utils.pages import _page_id, page_id
 
     assert _page_id is page_id
+
+
+def test_cycle11_ac4_six_callers_do_not_import_page_helpers_from_builder():  # noqa: D103
+    caller_paths = [
+        Path("src/kb/compile/linker.py"),
+        Path("src/kb/evolve/analyzer.py"),
+        Path("src/kb/lint/checks.py"),
+        Path("src/kb/lint/runner.py"),
+        Path("src/kb/lint/semantic.py"),
+        Path("src/kb/compile/compiler.py"),
+    ]
+
+    for caller_path in caller_paths:
+        for line in caller_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("from kb.graph.builder import"):
+                assert "page_id" not in line
+                assert "scan_wiki_pages" not in line
