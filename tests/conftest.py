@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from kb.config import PROJECT_ROOT
+from kb.config import PROJECT_ROOT, SOURCE_TYPE_DIRS
 
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
-RAW_SUBDIRS = ("articles", "papers", "repos", "videos", "captures")
+RAW_SUBDIRS = tuple(sorted(d.name for d in SOURCE_TYPE_DIRS.values()))
 
 
 # Cycle 7 AC1 — autouse reset of embeddings module singletons to prevent
@@ -181,6 +181,9 @@ def tmp_captures_dir(tmp_project, monkeypatch):
     """
     captures = tmp_project / "raw" / "captures"
     captures.mkdir(parents=True, exist_ok=True)
+    assert captures.resolve().is_relative_to(tmp_project.resolve()), (
+        f"tmp_captures_dir escaped tmp_project: {captures} not under {tmp_project}"
+    )
     monkeypatch.setattr("kb.config.CAPTURES_DIR", captures)
     monkeypatch.setattr("kb.capture.CAPTURES_DIR", captures)
     return captures
