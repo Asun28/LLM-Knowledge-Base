@@ -6,7 +6,7 @@ from pathlib import Path
 from kb.config import PROJECT_ROOT
 from kb.graph.export import export_mermaid
 from kb.lint._safe_call import _safe_call
-from kb.mcp.app import _sanitize_error_str, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,13 @@ def kb_lint(
             f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
         )
 
+    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    if err:
+        return err
+
     try:
         from kb.lint.runner import format_report, run_all_checks
 
-        wiki_path = Path(wiki_dir) if wiki_dir else None
         feedback_path = wiki_path.parent / ".data" / "feedback.json" if wiki_path else None
         report = run_all_checks(wiki_dir=wiki_path, fix=fix)
         result = format_report(report)
@@ -110,10 +113,13 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     Args:
         wiki_dir: Cycle 6 AC2. Override wiki directory (default: kb.config.WIKI_DIR).
     """
+    wiki_path, err = _validate_wiki_dir(wiki_dir)
+    if err:
+        return err
+
     try:
         from kb.evolve.analyzer import format_evolution_report, generate_evolution_report
 
-        wiki_path = Path(wiki_dir) if wiki_dir else None
         feedback_path = wiki_path.parent / ".data" / "feedback.json" if wiki_path else None
         report = generate_evolution_report(wiki_dir=wiki_path)
         result = format_evolution_report(report)

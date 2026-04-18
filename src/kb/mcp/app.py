@@ -184,6 +184,22 @@ def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
     return s
 
 
+def _validate_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | None]:
+    if wiki_dir is None:
+        return None, None
+    try:
+        path = Path(wiki_dir).expanduser()
+    except (TypeError, ValueError) as e:
+        return None, f"Invalid wiki_dir: {_sanitize_error_str(e)}"
+    if not path.is_absolute():
+        return None, f"Error: wiki_dir must be an absolute path (got: {wiki_dir})"
+    if not path.exists():
+        return None, f"Error: wiki_dir does not exist: {path}"
+    if not path.is_dir():
+        return None, f"Error: wiki_dir is not a directory: {path}"
+    return path.resolve(), None
+
+
 # Cycle 4 item #13 — cross-platform reservation of Windows device names.
 # These basenames (with or without extension) are UNABLE to be created as
 # regular files on Windows — NTFS aliases them to DOS devices. A wiki file

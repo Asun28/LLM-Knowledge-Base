@@ -21,7 +21,14 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
-from kb.mcp.app import _format_ingest_result, _rel, _sanitize_error_str, error_tag, mcp
+from kb.mcp.app import (
+    _format_ingest_result,
+    _rel,
+    _sanitize_error_str,
+    _validate_wiki_dir,
+    error_tag,
+    mcp,
+)
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
@@ -614,7 +621,9 @@ def kb_compile_scan(incremental: bool = True, wiki_dir: str | None = None) -> st
         return f"Error loading compile module: {_sanitize_error_str(e)}"
 
     try:
-        wiki_path = Path(wiki_dir) if wiki_dir else None
+        wiki_path, err = _validate_wiki_dir(wiki_dir)
+        if err:
+            return err
         raw_dir = wiki_path.parent / "raw" if wiki_path else None
         manifest_path = wiki_path.parent / ".data" / "hashes.json" if wiki_path else None
         if incremental:
