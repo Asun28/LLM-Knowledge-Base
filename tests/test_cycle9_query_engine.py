@@ -34,6 +34,18 @@ def _write_page(
 
 
 def test_search_pages_uses_override_vector_db(tmp_project, monkeypatch):
+    """AC1 R1 M2: verify search_pages calls get_vector_index against the
+    wiki_dir-derived vec_db path, never a PROJECT_ROOT-derived one.
+
+    The previous version of this test gated its assertions behind
+    `if calls:` — but `vector_search()` short-circuits on
+    `if not vec_path.exists()` before ever calling `get_vector_index`, so
+    `calls` was always empty on main and the test passed vacuously. The
+    fix: seed a placeholder DB at the EXPECTED override path (derived
+    from wiki_dir via `_vec_db_path`), so `vec_path.exists()` is True and
+    the spy fires. The spy itself never opens the DB — `get_vector_index`
+    is fully monkeypatched — so a zero-byte placeholder is sufficient.
+    """
     wiki_dir = tmp_project / "wiki"
     _write_page(wiki_dir / "concepts" / "foo.md", title="Foo", body="test foo")
 
@@ -42,6 +54,13 @@ def test_search_pages_uses_override_vector_db(tmp_project, monkeypatch):
     poison_db.parent.mkdir(parents=True)
     poison_db.write_bytes(b"poison")
     expected_vec_path = _vec_db_path(wiki_dir)
+
+    # Seed the placeholder vec_db at the expected override path so
+    # vector_search's vec_path.exists() gate lets get_vector_index run.
+    # Use the SQLite magic header — harmless if the spy opens the file,
+    # and makes intent obvious vs a bare empty byte string.
+    expected_vec_path.parent.mkdir(parents=True, exist_ok=True)
+    expected_vec_path.write_bytes(b"SQLite format 3\x00")
 
     from kb.query import embeddings, engine
 
@@ -57,10 +76,15 @@ def test_search_pages_uses_override_vector_db(tmp_project, monkeypatch):
 
     results = search_pages("test", wiki_dir=wiki_dir)
 
+    # AC1 assertions are now unconditional — the guard-gate `if calls:`
+    # was the loophole that let the test pass vacuously on main.
     assert results
-    if calls:
-        assert calls == [expected_vec_path]
-        assert poison_db not in calls
+    assert len(calls) >= 1, "get_vector_index should be called when vec_db exists"
+    called_path = calls[0]
+    assert called_path == expected_vec_path, f"Expected {expected_vec_path}, got {called_path}"
+    # Defense-in-depth: poison path (PROJECT_ROOT-derived) MUST NOT appear.
+    assert poison_db not in calls
+    assert poison_db.resolve() not in [c.resolve() for c in calls]
 
 
 def test_flag_stale_results_uses_override_project_root(tmp_project, monkeypatch):
