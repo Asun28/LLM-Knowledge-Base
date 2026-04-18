@@ -181,6 +181,13 @@ def _persist_contradictions(
                 raw_claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
                 claim = sanitize_extraction_field(raw_claim)
                 block += f"- {claim}\n"
+            if existing.find(block) != -1:
+                logger.debug(
+                    "Skipping duplicate contradiction block for %s on %s",
+                    safe_ref,
+                    date.today().isoformat(),
+                )
+                return
             atomic_text_write(existing + block, contradictions_path)
     except Exception as write_err:
         logger.warning("Failed to write contradictions.md: %s", write_err)
