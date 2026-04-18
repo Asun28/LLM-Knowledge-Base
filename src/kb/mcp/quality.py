@@ -18,7 +18,7 @@ from kb.config import (
 )
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint.verdicts import add_verdict
-from kb.mcp.app import _sanitize_error_str, _validate_page_id, mcp
+from kb.mcp.app import _sanitize_error_str, _validate_notes, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
@@ -76,8 +76,9 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     page_id = _strip_control_chars(page_id)
     if len(page_id) > 200:
         return f"Error: page_id too long ({len(page_id)} chars; max 200)."
-    if len(revision_notes) > MAX_NOTES_LEN:
-        return f"Error: revision_notes too long ({len(revision_notes)} chars; max {MAX_NOTES_LEN})."
+    notes_err = _validate_notes(revision_notes, "revision_notes")
+    if notes_err:
+        return notes_err
     err = _validate_page_id(page_id)
     if err:
         return f"Error: {err}"
@@ -191,6 +192,9 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         return "Error: Question cannot be empty."
     if len(question) > MAX_QUESTION_LEN:
         return f"Error: Question too long (max {MAX_QUESTION_LEN} chars)."
+    notes_err = _validate_notes(notes, "notes")
+    if notes_err:
+        return notes_err
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
     for pid in pages:
