@@ -187,13 +187,22 @@ def search_pages(
         # `build_graph(pages=...)` already supports the kwarg (builder.py:37).
         pagerank_scores = _compute_pagerank_scores(wiki_dir, preloaded_pages=pages)
         if pagerank_scores:
-            candidate_ids = {r["id"].lower() for r in bm25_results + vector_results}
+            candidate_ids: list[str] = []
+            seen_candidate_ids: set[str] = set()
+            for result in bm25_results + vector_results:
+                pid = result["id"].lower()
+                if pid not in seen_candidate_ids:
+                    seen_candidate_ids.add(pid)
+                    candidate_ids.append(pid)
+            candidate_order = {pid: rank for rank, pid in enumerate(candidate_ids)}
             pagerank_list = [
                 {"id": pid, "score": pagerank_scores.get(pid, 0.0)}
                 for pid in sorted(
                     candidate_ids,
-                    key=lambda candidate: pagerank_scores.get(candidate, 0.0),
-                    reverse=True,
+                    key=lambda candidate: (
+                        -pagerank_scores.get(candidate, 0.0),
+                        candidate_order[candidate],
+                    ),
                 )[:candidate_limit]
             ]
             if pagerank_list:
