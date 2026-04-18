@@ -294,7 +294,7 @@ def wikilink_display_escape(title: str) -> str:
     return (
         title.replace("]", ")")
         .replace("[", "(")
-        .replace("|", " ")
+        .replace("|", r"\|")
         .replace("\n", " ")
         .replace("\r", " ")
     )

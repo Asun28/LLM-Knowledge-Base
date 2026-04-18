@@ -121,13 +121,14 @@ def test_wikilink_escape_strips_close_brackets():
     assert "bad" in result
 
 
-def test_wikilink_escape_strips_pipes():
+def test_wikilink_escape_escapes_pipes():
     """Regression: Phase 4.5 HIGH item 11 (| splits wikilink display text)."""
     from kb.utils.text import wikilink_display_escape
 
     result = wikilink_display_escape(INJECTION_WIKILINK_PIPE)
-    assert "|" not in result
-    # Words survive after pipe replacement
+    assert r"\|" in result
+    assert result.count(r"\|") == INJECTION_WIKILINK_PIPE.count("|")
+    # Words survive after pipe escaping
     assert "Title" in result
     assert "with" in result
     assert "pipes" in result
