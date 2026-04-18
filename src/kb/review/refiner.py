@@ -154,6 +154,23 @@ def refine_page(
                     f"refine rejected to prevent corruption."
                 )
             }
+        # PR #21 R2 Codex — reject semantically broken frontmatter where the
+        # required ``title`` field parses to a null / empty / non-string value.
+        # ``title: null`` parses as a dict so the type gate above passes, but
+        # launching through a refine rewrites the page with a null title that
+        # silently breaks downstream ingest/graph consumers.
+        title_val = parsed_fm.get("title")
+        if title_val is None or (isinstance(title_val, str) and not title_val.strip()):
+            logger.warning(
+                "refine_page(%s) rejected: frontmatter title is null or empty",
+                page_id,
+            )
+            return {
+                "error": (
+                    f"Frontmatter in {page_id} has null/empty title — "
+                    f"refine rejected to prevent corruption."
+                )
+            }
 
         # Update the 'updated' date in frontmatter
         today = date.today().isoformat()

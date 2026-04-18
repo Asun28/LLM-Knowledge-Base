@@ -1063,17 +1063,35 @@ class TestWritePageFrontmatterDumps:
 
 
 class TestCliVersionShortcircuit:
-    def test_version_short_circuit_logic(self):
-        """Verify cli.py has the short-circuit guard before kb.config import."""
-        import kb.cli as cli
+    def test_version_does_not_trigger_kb_config_import(self):
+        """AC30 behavioural: invoking `kb --version` must exit without loading
+        `kb.config`. PR #21 R2 replacement for the prior source-order grep test
+        — the subprocess boots a fresh interpreter, runs the CLI with --version,
+        and asserts `kb.config` is NOT in `sys.modules` after the short-circuit.
+        """
+        import subprocess
+        import sys
 
-        src = inspect.getsource(cli)
-        # Behavioural: the short-circuit must handle argv early.
-        # We check that version-handling appears BEFORE any kb.config reference.
-        version_pos = src.find("--version")
-        config_import_pos = src.find("from kb.config")
-        if version_pos != -1 and config_import_pos != -1:
-            assert version_pos < config_import_pos, "--version guard must precede kb.config import"
+        probe = (
+            "import sys\n"
+            "sys.argv = ['kb', '--version']\n"
+            "try:\n"
+            "    import runpy\n"
+            "    runpy.run_module('kb.cli', run_name='__main__')\n"
+            "except SystemExit:\n"
+            "    pass\n"
+            "leaked = [m for m in sys.modules if m.startswith('kb.config')]\n"
+            "assert not leaked, f'kb.config leaked during --version: {leaked}'\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, (
+            f"--version path unexpectedly failed; stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
 
 # =============================================================================
