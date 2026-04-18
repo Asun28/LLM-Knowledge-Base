@@ -34,6 +34,22 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Backlog-by-file cycle 10 (2026-04-18)
+
+- `src/kb/mcp/app.py` — AC0: `_validate_wiki_dir` now enforces `PROJECT_ROOT` containment; error strings standardised (commit `ee1279f`).
+- `src/kb/mcp/quality.py` — AC1+AC1b: `kb_affected_pages` surfaces `backlinks` / `shared_sources` warnings (commit `4f045a4`).
+- `src/kb/mcp/browse.py` — AC3: `kb_stats` migrated to `_validate_wiki_dir`. AC2 regression-pinned (commit `a1c1f79`).
+- `src/kb/mcp/health.py` — AC4+AC5+AC6: `kb_graph_viz`, `kb_verdict_trends`, `kb_detect_drift` migrated to `_validate_wiki_dir` (commit `82b582a`). Plus security follow-up `1c3832e` removing `Path.resolve()` bypass.
+- `src/kb/query/engine.py` + `src/kb/config.py` — AC7+AC8: `VECTOR_MIN_SIMILARITY` cosine floor in `search_pages` (commit `6159d85`).
+- `src/kb/compile/compiler.py` — AC9: `find_changed_sources` docstring documents deletion-pruning persistence (commit `70b5e49`).
+- `src/kb/utils/text.py` — AC28.5: `wikilink_display_escape` now backslash-escapes `|` instead of silently substituting an em dash (commit `70b5e49`).
+- `src/kb/capture.py` — AC10+AC11: UUID prompt boundary + submission-time `captured_at` (commit `46f0e34`).
+- `src/kb/ingest/pipeline.py` — AC12+AC13a+AC13b: `_coerce_str_field` helper + `extraction_json` pass before manifest reservation + defensive checks in `_build_summary_content` (commit `01bb1bb`).
+- `src/kb/lint/_safe_call.py` — AC1s: sanitises embedded exception text via `_sanitize_error_str` (commit `9d4b447`).
+- `src/kb/capture.py` — AC14: `CaptureError` exception + `raw/captures` side-effect note (commit `46f0e34`).
+- Tests: 2004 → 2041 (+37 new tests); all passing, 7 Windows-skips (case-insensitive FS + symlinks); 0 new Dependabot alerts.
+- STALE at cycle 10 review (already fixed, removed from BACKLOG): `utils/wiki_log.py` torn-last-line (MEDIUM); `mcp/browse.py` query-length-cap + stale-flag (HIGH-Additional).
+
 ### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-18)
 
 | Cycle | Date | Items | Test Δ | Primary areas |
