@@ -318,9 +318,9 @@ Filter as noise:
 Cap the output at {max_items} items. Also report `filtered_out_count`: the number
 of candidate items you rejected as noise.
 
---- INPUT ---
+{boundary_start}
 {content}
---- END INPUT ---
+{boundary_end}
 """
 
 
@@ -353,7 +353,25 @@ def _extract_items_via_llm(content: str) -> dict:
     level.
     """
     safe_content = _escape_prompt_fences(content)
-    prompt = _PROMPT_TEMPLATE.format(max_items=CAPTURE_MAX_ITEMS, content=safe_content)
+    for _attempt in range(3):
+        boundary = _secrets.token_hex(16)
+        boundary_start = f"<<<INPUT-{boundary}>>>"
+        boundary_end = f"<<<END-INPUT-{boundary}>>>"
+        if (
+            boundary not in safe_content
+            and boundary_start not in safe_content
+            and boundary_end not in safe_content
+        ):
+            break
+    else:
+        raise ValueError("boundary collision after 3 retries — input may be adversarial")
+
+    prompt = _PROMPT_TEMPLATE.format(
+        max_items=CAPTURE_MAX_ITEMS,
+        boundary_start=boundary_start,
+        boundary_end=boundary_end,
+        content=safe_content,
+    )
     if len(prompt) > MAX_PROMPT_CHARS:
         raise CaptureError(
             f"capture prompt too long ({len(prompt)} chars > {MAX_PROMPT_CHARS} max); "
@@ -635,6 +653,12 @@ def _write_item_files(
 
 @dataclass(frozen=True)
 class CaptureResult:
+    """Result from capture_items.
+
+    Written item files include `captured_at` as submission time (UTC ISO-8601) —
+    close to the moment kb_capture was invoked, NOT to LLM completion.
+    """
+
     items: list[CaptureItem]
     filtered_out_count: int
     rejected_reason: str | None
@@ -666,6 +690,7 @@ def capture_items(
     """
     # Step 3: resolve provenance FIRST so all return paths carry it
     resolved_prov = _resolve_provenance(provenance)
+    captured_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Step 5: validate input (size pre-normalize + empty + CRLF normalize)
     # Runs BEFORE the rate-limit check — these checks cost zero LLM tokens, so
@@ -723,7 +748,6 @@ def capture_items(
     kept, body_dropped = _verify_body_is_verbatim(raw_items, normalized)
 
     # Step 9: write files
-    captured_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     written, write_error = _write_item_files(
         kept, resolved_prov, captured_at, captures_dir=captures_dir
     )
