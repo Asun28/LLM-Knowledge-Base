@@ -431,40 +431,142 @@ class TestWriteBackOutOfScope:
         post = frontmatter.load(str(stub))
         assert "last_augment_attempted" in post.metadata
 
-    def test_call_site_guard_only_invokes_callout_on_fail(self, tmp_kb_env, monkeypatch):
-        """R1 Codex follow-up: pin the call-site `if verdict == 'fail'` guard
-        in run_augment by spying on _record_verdict_gap_callout itself.
 
-        The earlier sub-tests prove the helper STILL calls frontmatter.load
-        (uncached). This sub-test pins that the run_augment loop only invokes
-        the helper when the verdict is 'fail' — a refactor that removed the
-        guard would silently start writing [!gap] callouts on success too.
-        """
+class TestRunAugmentVerdictGuardIntegration:
+    """R2 Codex follow-up: pin the production call-site `if verdict == 'fail'`
+    guard in run_augment by driving the auto_ingest path end-to-end with
+    minimal mocking. A refactor that removed the guard would silently start
+    writing [!gap] callouts on success (or stop writing them on failure).
+
+    Mirrors test_v5_lint_augment_orchestrator.py::test_auto_ingest_creates_
+    wiki_page_with_speculative_confidence; only difference: we monkeypatch
+    _post_ingest_quality to force a 'fail' verdict and spy on the callout
+    helper to confirm production reaches it through the real run_augment loop.
+    """
+
+    @staticmethod
+    def _patch_ingest_dirs(monkeypatch, tmp_project):
+        wiki = tmp_project / "wiki"
+        raw = tmp_project / "raw"
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw)
+        monkeypatch.setattr(
+            "kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json"
+        )
+        monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+        monkeypatch.setattr(
+            "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        )
+
+    def test_run_augment_invokes_callout_on_fail_verdict(
+        self, tmp_project, create_wiki_page, httpx_mock, monkeypatch
+    ):
+        """End-to-end: real run_augment(mode='auto_ingest') with a forced
+        fail verdict reaches _record_verdict_gap_callout via the production
+        `if verdict == 'fail':` branch at augment.py:917."""
+        from unittest.mock import patch as mock_patch
+
         from kb.lint import augment
 
-        called_with: list = []
-        real = augment._record_verdict_gap_callout
+        wiki_dir = tmp_project / "wiki"
+        raw_dir = tmp_project / "raw"
+        self._patch_ingest_dirs(monkeypatch, tmp_project)
+
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Entities\n\n## Concepts\n\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+        (wiki_dir / "_categories.md").write_text("# Categories\n\n", encoding="utf-8")
+
+        # Stub page that augment will target.
+        create_wiki_page(
+            page_id="concepts/moe",
+            title="MoE",
+            content="Brief.",
+            wiki_dir=wiki_dir,
+            page_type="concept",
+            confidence="stated",
+        )
+        # Inbound link from a non-stub page to satisfy G2.
+        create_wiki_page(
+            page_id="entities/transformer",
+            title="Transformer",
+            content="See [[concepts/moe]] " * 5,
+            wiki_dir=wiki_dir,
+            page_type="entity",
+        )
+
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/robots.txt",
+            content=b"User-agent: *\nAllow: /\n",
+            headers={"content-type": "text/plain"},
+        )
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/wiki/MoE",
+            headers={"content-type": "text/html"},
+            content=(
+                b"<html><body><article><h1>MoE</h1><p>"
+                + b"Mixture of experts is a neural arch. " * 30
+                + b"</p></article></body></html>"
+            ),
+        )
+
+        fake_extraction = {
+            "title": "MoE",
+            "summary": "Mixture of experts is a neural architecture.",
+            "key_claims": ["gating routes inputs", "expert subnetworks"],
+            "entities_mentioned": [],
+            "concepts_mentioned": ["moe"],
+        }
+        fake_propose = {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/MoE"],
+            "rationale": "wp",
+        }
+
+        # Seed propose-mode output (gate 1) to satisfy gate 2/3 contract.
+        with mock_patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
+
+        # Force the verdict to fail so the production guard fires the callout.
+        monkeypatch.setattr(
+            augment,
+            "_post_ingest_quality",
+            lambda *, page_path, wiki_dir: ("fail", "forced fail for AC13 R2 test"),
+        )
+
+        callout_calls: list = []
+        real_callout = augment._record_verdict_gap_callout
 
         def _spy(stub_path, *, run_id, reason):
-            called_with.append((stub_path, run_id, reason))
-            return real(stub_path, run_id=run_id, reason=reason)
+            callout_calls.append((stub_path, run_id, reason))
+            return real_callout(stub_path, run_id=run_id, reason=reason)
 
         monkeypatch.setattr(augment, "_record_verdict_gap_callout", _spy)
 
-        # Drive the production call site by simulating the verdict==fail
-        # branch with a minimal direct call. Because the inline block is one
-        # line — `if verdict == "fail": _record_verdict_gap_callout(...)` —
-        # the spy captures the actual production helper invocation.
-        # Note: full run_augment(mode="auto_ingest") would need extensive
-        # network/LLM mocking; we instead pin the helper extraction itself.
-        wiki = tmp_kb_env / "wiki"
-        stub = _write_stub_page(wiki, "concepts/cs", title="CS", body="b")
+        with mock_patch(
+            "kb.lint.augment.call_llm_json",
+            side_effect=[
+                {"score": 0.95},  # relevance
+                fake_extraction,  # pre-extract
+            ],
+        ):
+            result = augment.run_augment(
+                wiki_dir=wiki_dir, raw_dir=raw_dir, mode="auto_ingest", max_gaps=5
+            )
 
-        # Simulate the call-site invocation (mirrors augment.py:917).
-        verdict = "fail"
-        if verdict == "fail":
-            augment._record_verdict_gap_callout(stub, run_id="rid12345", reason="too short")
+        # Production guard fired exactly once for the failing stub.
+        assert len(callout_calls) == 1, (
+            f"Expected exactly 1 callout invocation, got {len(callout_calls)}; "
+            f"verdicts={result.get('verdicts')}"
+        )
+        stub_path = callout_calls[0][0]
+        assert stub_path == wiki_dir / "concepts" / "moe.md"
+        assert callout_calls[0][2] == "forced fail for AC13 R2 test"
 
-        assert len(called_with) == 1
-        assert called_with[0][0] == stub
-        assert called_with[0][2] == "too short"
+        # Behavioural: the [!gap] callout is now written to the stub page.
+        body = stub_path.read_text(encoding="utf-8")
+        assert "[!gap]" in body, "Production verdict==fail branch did not write callout"
