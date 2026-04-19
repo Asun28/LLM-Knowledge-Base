@@ -103,10 +103,25 @@ def cli(ctx: click.Context | None = None, verbose: bool = False):
     # body runs). Helper is no-op on missing dirs, swallows all errors at
     # WARNING, never raises. Dedup resolved paths so a pathological config
     # where .data alias-resolves to WIKI_DIR sweeps once, not twice.
+    #
+    # Cycle 13 R1 fix: each ``Path.resolve()`` is wrapped because a broken
+    # symlink, symlink loop, or inaccessible mount can raise OSError /
+    # RuntimeError BEFORE the helper's own swallowing kicks in. AC7 contract
+    # forbids the sweep from blocking CLI boot; failed-resolve targets are
+    # logged WARNING and skipped (helper has the same behaviour).
     from kb.config import PROJECT_ROOT, WIKI_DIR
 
-    sweep_targets = sorted({Path(d).resolve() for d in (PROJECT_ROOT / ".data", WIKI_DIR)})
-    for target in sweep_targets:
+    sweep_targets: set[Path] = set()
+    for raw_target in (PROJECT_ROOT / ".data", WIKI_DIR):
+        try:
+            sweep_targets.add(Path(raw_target).resolve())
+        except (OSError, RuntimeError) as exc:  # broken symlink / loop / EACCES
+            logging.getLogger(__name__).warning(
+                "kb CLI sweep: skipping unresolvable target %s (%s)",
+                raw_target,
+                exc,
+            )
+    for target in sorted(sweep_targets):
         sweep_orphan_tmp(target)
 
 

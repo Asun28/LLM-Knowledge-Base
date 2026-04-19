@@ -130,11 +130,12 @@ def export_mermaid(
                 # Cycle 13 AC4: cached frontmatter read. Path(path) wrap is
                 # INSIDE the try so a TypeError from a non-path-like value
                 # falls into the broad fallback (title fallback is non-fatal).
-                metadata, _body = load_page_frontmatter(Path(path))
+                page_path = Path(path)
+                metadata, _body = load_page_frontmatter(page_path)
             except Exception as exc:  # pragma: no cover — any corrupt page is non-fatal
                 logger.debug("Graph export title load failed for %s: %s", node, exc)
                 continue
-            titles[node] = str(metadata.get("title", Path(path).stem))
+            titles[node] = str(metadata.get("title", page_path.stem))
 
     # Build Mermaid output
     lines = ["graph LR"]
