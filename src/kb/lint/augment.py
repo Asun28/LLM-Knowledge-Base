@@ -30,7 +30,7 @@ from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
-from kb.utils.pages import load_page_frontmatter
+from kb.utils.pages import load_page_frontmatter, save_page_frontmatter
 from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
@@ -1041,8 +1041,10 @@ def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) ->
     """
     if not stub_path.exists():
         return
-    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
-    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
+    # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed for
+    # mutable Post) + save via save_page_frontmatter which preserves
+    # metadata insertion order (sort_keys=False). See cycle-7 R1 Codex M3
+    # lesson on alphabetisation regression.
     post = frontmatter.load(str(stub_path))
     gap_callout = (
         f"> [!gap]\n"
@@ -1051,7 +1053,7 @@ def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) ->
     )
     if "[!gap]" not in post.content:
         post.content = gap_callout + post.content
-        atomic_text_write(frontmatter.dumps(post), stub_path)
+        save_page_frontmatter(stub_path, post)
 
 
 def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
@@ -1061,8 +1063,9 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     the callout is not re-inserted (but confidence is still forced to
     ``speculative`` on every call).
     """
-    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
-    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
+    # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed for
+    # mutable Post) + save via save_page_frontmatter which preserves
+    # metadata insertion order (sort_keys=False).
     post = frontmatter.load(str(page_path))
     post.metadata["confidence"] = "speculative"
     callout = (
@@ -1073,7 +1076,7 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     )
     if "[!augmented]" not in post.content:
         post.content = callout + post.content
-    atomic_text_write(frontmatter.dumps(post), page_path)
+    save_page_frontmatter(page_path, post)
 
 
 def _record_attempt(stub_path: Path) -> None:
@@ -1090,13 +1093,14 @@ def _record_attempt(stub_path: Path) -> None:
     if not stub_path.exists():
         return
     try:
-        # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
-        # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
+        # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed
+        # for mutable Post) + save via save_page_frontmatter which
+        # preserves metadata insertion order (sort_keys=False).
         post = frontmatter.load(str(stub_path))
         post.metadata["last_augment_attempted"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         )
-        atomic_text_write(frontmatter.dumps(post), stub_path)
+        save_page_frontmatter(stub_path, post)
     except Exception as e:
         logger.warning("Failed to record last_augment_attempted for %s: %s", stub_path, e)
 
