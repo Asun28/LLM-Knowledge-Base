@@ -570,3 +570,113 @@ class TestRunAugmentVerdictGuardIntegration:
         # Behavioural: the [!gap] callout is now written to the stub page.
         body = stub_path.read_text(encoding="utf-8")
         assert "[!gap]" in body, "Production verdict==fail branch did not write callout"
+
+    def test_run_augment_skips_callout_on_pass_verdict(
+        self, tmp_project, create_wiki_page, httpx_mock, monkeypatch
+    ):
+        """R2-retry follow-up: prove the guard is conditional, not unconditional.
+
+        If a future refactor removed the ``if verdict == 'fail':`` guard and
+        always called ``_record_verdict_gap_callout``, the fail-only test
+        would still pass (spy fires once; same as production). Force a
+        ``pass`` verdict and assert the spy fires ZERO times — this is the
+        only way to pin the guard's CONDITIONAL semantics.
+        """
+        from unittest.mock import patch as mock_patch
+
+        from kb.lint import augment
+
+        wiki_dir = tmp_project / "wiki"
+        raw_dir = tmp_project / "raw"
+        self._patch_ingest_dirs(monkeypatch, tmp_project)
+
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Entities\n\n## Concepts\n\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+        (wiki_dir / "_categories.md").write_text("# Categories\n\n", encoding="utf-8")
+
+        create_wiki_page(
+            page_id="concepts/moe",
+            title="MoE",
+            content="Brief.",
+            wiki_dir=wiki_dir,
+            page_type="concept",
+            confidence="stated",
+        )
+        create_wiki_page(
+            page_id="entities/transformer",
+            title="Transformer",
+            content="See [[concepts/moe]] " * 5,
+            wiki_dir=wiki_dir,
+            page_type="entity",
+        )
+
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/robots.txt",
+            content=b"User-agent: *\nAllow: /\n",
+            headers={"content-type": "text/plain"},
+        )
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/wiki/MoE",
+            headers={"content-type": "text/html"},
+            content=(
+                b"<html><body><article><h1>MoE</h1><p>"
+                + b"Mixture of experts is a neural arch. " * 30
+                + b"</p></article></body></html>"
+            ),
+        )
+
+        fake_extraction = {
+            "title": "MoE",
+            "summary": "Mixture of experts is a neural architecture.",
+            "key_claims": ["gating routes inputs", "expert subnetworks"],
+            "entities_mentioned": [],
+            "concepts_mentioned": ["moe"],
+        }
+        fake_propose = {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/MoE"],
+            "rationale": "wp",
+        }
+
+        with mock_patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
+
+        # Force a PASS verdict (the negative case).
+        monkeypatch.setattr(
+            augment,
+            "_post_ingest_quality",
+            lambda *, page_path, wiki_dir: ("pass", "all good (forced)"),
+        )
+
+        callout_calls: list = []
+        real_callout = augment._record_verdict_gap_callout
+
+        def _spy(stub_path, *, run_id, reason):
+            callout_calls.append((stub_path, run_id, reason))
+            return real_callout(stub_path, run_id=run_id, reason=reason)
+
+        monkeypatch.setattr(augment, "_record_verdict_gap_callout", _spy)
+
+        with mock_patch(
+            "kb.lint.augment.call_llm_json",
+            side_effect=[
+                {"score": 0.95},  # relevance
+                fake_extraction,  # pre-extract
+            ],
+        ):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="auto_ingest", max_gaps=5)
+
+        # Production guard MUST short-circuit on pass — spy never fires.
+        assert callout_calls == [], (
+            f"Expected 0 callout invocations on pass verdict, got {len(callout_calls)}: "
+            f"{callout_calls}"
+        )
+
+        # Behavioural: NO [!gap] callout in the stub page (proves the
+        # production guard prevented the write end-to-end).
+        stub_body = (wiki_dir / "concepts" / "moe.md").read_text(encoding="utf-8")
+        assert "[!gap]" not in stub_body, (
+            "Production guard regression: [!gap] callout written despite pass verdict"
+        )
