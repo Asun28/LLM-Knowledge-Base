@@ -199,3 +199,74 @@ class TestSemanticMigration:
         semantic._group_by_shared_sources(wiki)
 
         assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
+
+
+class TestGraphExportMigration:
+    """AC11 — export_mermaid title fallback uses cached helper.
+
+    The graph node 'path' attribute is a string (set by build_graph as
+    str(page_path)). The migration wraps it as Path(path) INSIDE the broad
+    try so a TypeError from a non-path-like value falls into the existing
+    non-fatal fallback at logger.debug.
+    """
+
+    def test_export_mermaid_loads_title_via_cache_helper(self, tmp_kb_env):
+        import networkx as nx
+
+        from kb.graph import export
+
+        wiki = tmp_kb_env / "wiki"
+        target = _write_stub_page(
+            wiki,
+            "concepts/alpha",
+            title="Alpha Title",
+            body="Alpha body.",
+        )
+
+        # Build a minimal graph with a single node carrying the path attribute.
+        g = nx.DiGraph()
+        g.add_node("concepts/alpha", path=str(target))
+        # Add an edge so the node has degree > 0.
+        g.add_node("concepts/beta", path="")
+        g.add_edge("concepts/alpha", "concepts/beta")
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        out = export.export_mermaid(graph=g, max_nodes=5)
+        # Mermaid output should contain the title (post-_sanitize_label).
+        assert "Alpha Title" in out, f"title missing from mermaid output:\n{out}"
+
+    def test_export_mermaid_uses_cached_helper(self, tmp_kb_env, monkeypatch):
+        """Spy on load_page_frontmatter to prove export uses the cached path."""
+        import networkx as nx
+
+        from kb.graph import export
+
+        wiki = tmp_kb_env / "wiki"
+        target = _write_stub_page(
+            wiki,
+            "concepts/foo",
+            title="Foo",
+            body="Foo body.",
+        )
+
+        g = nx.DiGraph()
+        g.add_node("concepts/foo", path=str(target))
+        g.add_node("concepts/bar", path=str(target))  # second node forces 2 loads
+        g.add_edge("concepts/foo", "concepts/bar")
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        calls: list[Path] = []
+        real_helper = export.load_page_frontmatter
+
+        def _spy(page_path):
+            calls.append(page_path)
+            return real_helper(page_path)
+
+        monkeypatch.setattr(export, "load_page_frontmatter", _spy)
+        export.export_mermaid(graph=g, max_nodes=5)
+
+        assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
+        # Path wrap inside try: spy should receive Path objects, not strings.
+        assert all(isinstance(p, Path) for p in calls), (
+            f"Expected all Path args, got mixed: {[type(p) for p in calls]}"
+        )

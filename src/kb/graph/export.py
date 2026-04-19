@@ -4,11 +4,9 @@ import logging
 import re
 from pathlib import Path
 
-import frontmatter
-
 from kb.config import WIKI_DIR
 from kb.graph.builder import build_graph
-from kb.utils.pages import load_all_pages
+from kb.utils.pages import load_all_pages, load_page_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -129,11 +127,14 @@ def export_mermaid(
         for node in nodes_to_include:
             path = graph.nodes[node].get("path")
             try:
-                post = frontmatter.load(path)
+                # Cycle 13 AC4: cached frontmatter read. Path(path) wrap is
+                # INSIDE the try so a TypeError from a non-path-like value
+                # falls into the broad fallback (title fallback is non-fatal).
+                metadata, _body = load_page_frontmatter(Path(path))
             except Exception as exc:  # pragma: no cover — any corrupt page is non-fatal
                 logger.debug("Graph export title load failed for %s: %s", node, exc)
                 continue
-            titles[node] = str(post.metadata.get("title", Path(path).stem))
+            titles[node] = str(metadata.get("title", Path(path).stem))
 
     # Build Mermaid output
     lines = ["graph LR"]
