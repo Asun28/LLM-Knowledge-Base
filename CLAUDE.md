@@ -34,7 +34,8 @@ Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Refer
 
 ### Module Map (`src/kb/`)
 
-- **Core (Phase 1):** `config`, `models`, `utils`, `ingest`, `compile`, `query`, `lint`, `evolve`, `graph`, `mcp` (split package: `app`, `core`, `browse`, `health`, `quality`), `mcp_server` (entry shim), CLI (6 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `mcp`).
+- **Core (Phase 1):** `config`, `models`, `utils`, `ingest`, `compile`, `query`, `lint`, `evolve`, `graph`, `mcp` (split package: `app`, `core`, `browse`, `health`, `quality`), `mcp_server` (entry shim), CLI (7 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `publish`, `mcp`).
+- **Publish (Phase 5, cycle 14):** `compile.publish` — `build_llms_txt`, `build_llms_full_txt`, `build_graph_jsonld` builders for Karpathy Tier-1 machine-consumable outputs. JSON-LD uses `json.dump` with schema.org `@context`; all three builders filter pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`. `kb publish` CLI validates `--out-dir` containment via `is_relative_to(PROJECT_ROOT)` OR pre-existing dir.
 - **Quality (Phase 2):** `feedback` (weighted Bayesian trust — "wrong" penalized 2× vs "incomplete"), `review` (pairing, refiner with audit trail), `lint.semantic` (fidelity / consistency / completeness builders), `lint.verdicts` (persistent verdict store), `.claude/agents/wiki-reviewer.md` (Actor-Critic agent).
 - **Capture (Phase 5):** `capture` — conversation/notes atomization for `raw/captures/`.
 - **Output adapters (Phase 4.11):** `query.formats` — `markdown`, `marp`, `html`, `chart`, `jupyter`. Files land at `PROJECT_ROOT/outputs/{ts}-{slug}.{ext}` with provenance frontmatter. Outputs directory is **OUTSIDE** `wiki/` (gitignored) to prevent search-index poisoning. `kb_query(output_format=...)` requires `use_api=True`. Chart adapter emits a static Python script + JSON sidecar — matplotlib is NOT a kb runtime dependency.
@@ -76,6 +77,7 @@ kb compile [--full]
 kb query "What is compile-not-retrieve?"
 kb lint [--fix]
 kb evolve
+kb publish [--out-dir PATH] [--format llms|llms-full|graph|all]   # /llms.txt + /llms-full.txt + /graph.jsonld (cycle 14)
 kb mcp                        # Start MCP server for Claude Code
 
 # Playwright browser (needed by crawl4ai)
@@ -109,7 +111,8 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 **Key APIs** (non-obvious behavior — for full signatures, read the source):
 - `call_llm(prompt, tier="write")` / `call_llm_json(prompt, tier, schema)` — In `kb.utils.llm`. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). `call_llm_json` uses forced tool_use for guaranteed structured JSON — no fence-stripping needed. Raises `LLMError` on failure, `ValueError` on invalid tier.
 - `ingest_source(path, source_type=None, extraction=None, *, defer_small=False, wiki_dir=None)` — In `kb.ingest.pipeline`. Returns dict with `pages_created`, `pages_updated`, `pages_skipped`, `affected_pages`, `wikilinks_injected`, and `duplicate: True` on hash match. Pass `extraction` dict to skip LLM call (Claude Code mode). Pass `wiki_dir` to write to a custom wiki directory (default: `WIKI_DIR`).
-- `load_all_pages(wiki_dir=None)` / `scan_wiki_pages(wiki_dir=None)` / `page_id(page_path, wiki_dir=None)` — In `kb.utils.pages`. `load_all_pages` returns list of dicts. `page_id` lowercases IDs and preserves subdir separators; use the stored page `path` for filesystem I/O when case matters. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim.
+- `load_all_pages(wiki_dir=None)` / `scan_wiki_pages(wiki_dir=None)` / `page_id(page_path, wiki_dir=None)` — In `kb.utils.pages`. `load_all_pages` returns list of dicts. `page_id` lowercases IDs and preserves subdir separators; use the stored page `path` for filesystem I/O when case matters. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim. Cycle 14 AC23 adds an additive `status` key (empty string when absent).
+- `save_page_frontmatter(path, post)` — In `kb.utils.pages`. Cycle 14 AC16 — the single enforcement point for key-order-preserving writes. Rigid contract: calls `atomic_text_write(frontmatter.dumps(post, sort_keys=False), path)`. USE THIS for any write-back that reads via `frontmatter.load` and needs to preserve metadata insertion order (Evidence Trail sentinel, downstream YAML-diff tools). The three augment write-back sites (`_record_verdict_gap_callout`, `_mark_page_augmented`, `_record_attempt` in `kb.lint.augment`) use this wrapper.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
 - `build_extraction_schema(template)` — In `kb.ingest.extractors`. Builds JSON Schema from template fields. `load_template()` is LRU-cached. Use `_build_schema_cached(source_type)` for cached schema lookups (avoids rebuilding on every extraction call).
 - `query_wiki(question, wiki_dir=None, max_results=10, conversation_context=None, *, output_format=None)` — In `kb.query.engine`. Returns dict with keys:
@@ -252,8 +255,14 @@ created: 2026-04-05
 updated: 2026-04-05
 type: entity | concept | comparison | synthesis | summary
 confidence: stated | inferred | speculative
+# Cycle 14 AC1/AC2/AC23 — optional epistemic-integrity fields; absent is valid.
+# belief_state: confirmed | uncertain | contradicted | stale | retracted
+# authored_by: human | llm | hybrid
+# status: seed | developing | mature | evergreen
 ---
 ```
+
+**Optional epistemic fields (cycle 14):** `belief_state` is the cross-source aggregate (orthogonal to per-source `confidence`); `authored_by` formalises human vs LLM authorship; `status` tracks the page lifecycle. Query engine applies a +5% `STATUS_RANKING_BOOST` to pages with `status in (mature, evergreen)` whose full metadata passes `validate_frontmatter`. Publish outputs (`kb publish`) skip pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`.
 
 ## Ingestion Commands
 
