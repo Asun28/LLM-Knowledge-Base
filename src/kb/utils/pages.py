@@ -9,6 +9,7 @@ import frontmatter
 import yaml
 
 from kb.config import WIKI_DIR, WIKI_SUBDIR_TO_TYPE
+from kb.utils.io import atomic_text_write
 
 logger = logging.getLogger(__name__)
 
@@ -206,3 +207,38 @@ def load_purpose(wiki_dir: Path) -> str | None:
     except OSError as e:
         logger.warning("Could not read purpose.md: %s", e)
         return None
+
+
+# Cycle 14 AC16 — frontmatter-preserving save wrapper.
+#
+# Rigid contract: rebuilds `sort_keys=False` on every call and uses
+# `atomic_text_write` for crash-safe temp+rename semantics. The cycle-7
+# R1 Codex M3 lesson — `frontmatter.dumps` without `sort_keys=False`
+# alphabetises metadata keys and regresses the Evidence Trail sentinel
+# contract plus downstream YAML-diff workflows.
+#
+# Single enforcement point: callers that need to write back a `Post`
+# object (e.g. kb.lint.augment's three sites) MUST go through this
+# wrapper so the `sort_keys=False` knob never drifts.
+#
+# NOT a cache-invalidating wrapper. `load_page_frontmatter` is LRU-
+# cached keyed by `(path, mtime_ns)`. On coarse-mtime filesystems
+# (FAT32, SMB, OneDrive), a write-immediately-followed-by-read from
+# the cached helper may see stale metadata until the mtime advances.
+# Callers that need post-write read consistency should use
+# `frontmatter.load(path)` directly.
+
+
+def save_page_frontmatter(path: Path, post: frontmatter.Post) -> None:
+    """Write ``post`` to ``path`` preserving metadata key insertion order.
+
+    Uses ``frontmatter.dumps(post, sort_keys=False)`` so that downstream
+    YAML-diff tools and the Evidence Trail sentinel contract survive the
+    round-trip. Delegates to ``atomic_text_write`` for crash-safe
+    temp+rename; produces LF line endings per that helper's contract.
+
+    Args:
+        path: Destination file path (existing or new).
+        post: ``frontmatter.Post`` instance carrying metadata + content.
+    """
+    atomic_text_write(frontmatter.dumps(post, sort_keys=False), path)
