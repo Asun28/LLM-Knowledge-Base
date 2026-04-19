@@ -113,14 +113,44 @@ def test_cycle11_ac4_six_callers_resolve_page_helpers_via_canonical_module():
                 f"{module_name}.scan_wiki_pages drifted from kb.utils.pages.scan_wiki_pages"
             )
 
-    # Function-local imports in ``compile.compiler.detect_source_drift`` cannot
-    # be observed at module level. Exercise the canonical identity through a
-    # dynamic symbol resolution check: the callable that ``detect_source_drift``
-    # imports lazily must be the same object as ``kb.utils.pages.page_id``.
-    # Confirm by introspecting the compiler module's source lazily via the
-    # import machinery, not via string scan.
-    from kb.compile import compiler as compiler_module
+    # R2 follow-up — the module-level identity check above misses
+    # ``compile.compiler.detect_source_drift``'s FUNCTION-LOCAL imports
+    # (``from kb.utils.pages import page_id as get_page_id`` inside the
+    # function body). Exercise the function-local path behaviourally by
+    # calling ``detect_source_drift`` with an empty raw dir + empty manifest:
+    # the function runs through the ``from kb.utils.pages import ...`` line,
+    # binds ``get_page_id``/``scan_wiki_pages`` to the canonical objects, and
+    # returns a clean zero-changes dict. If the function-local import was
+    # accidentally pointed at a different module OR if the helpers were
+    # deleted outright, this call would raise ``ImportError``.
 
-    lazy_page_id = importlib.import_module("kb.utils.pages").page_id
-    assert compiler_module is not None
-    assert lazy_page_id is canonical.page_id
+
+def test_cycle11_ac4_detect_source_drift_function_local_imports_resolve(tmp_path):
+    """R2 follow-up — exercise compile.compiler.detect_source_drift's
+    function-local imports to confirm the caller-migration contract holds
+    at RUNTIME, not just at module-import time.
+    """
+    from kb.compile.compiler import detect_source_drift
+
+    raw_dir = tmp_path / "raw"
+    wiki_dir = tmp_path / "wiki"
+    for sub in ("articles", "papers"):
+        (raw_dir / sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / sub).mkdir(parents=True, exist_ok=True)
+    manifest_path = tmp_path / ".data" / "hashes.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    report = detect_source_drift(
+        raw_dir=raw_dir,
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
+    )
+    # Clean empty-corpus path succeeds only if the function-local
+    # ``from kb.utils.pages import page_id, scan_wiki_pages`` resolves
+    # correctly. An ImportError inside ``detect_source_drift`` would raise
+    # here, catching any future regression that points the function-local
+    # import at a stale module.
+    assert isinstance(report, dict)
+    assert "changed_sources" in report or "summary" in report
