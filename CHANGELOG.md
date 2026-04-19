@@ -34,6 +34,30 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 -- Backlog-by-file cycle 13 (2026-04-20)
+
+8 AC across 5 source files / 7 implementation commits + planning artifacts. Tests: 2119 → 2131 (+12); full suite 2131 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 alerts, Class B diff empty).
+
+#### Added
+- `tests/test_cycle13_frontmatter_migration.py` — behavioural regressions for AC9-AC13 (read-only migration spies + mtime-invalidation pin + write-back negative-pin spy across all 3 augment write-back sites).
+- `tests/test_cycle13_sweep_wiring.py` — AC14 sweep wiring + stale-`.tmp`-removed + dedup-pathological-alias coverage.
+- `tests/test_cycle13_augment_raw_dir.py` — AC15 four-branch raw_dir derivation + integration sanity that `run_augment` routes through the new resolver.
+- `src/kb/lint/augment.py` — `_resolve_raw_dir(wiki_dir, raw_dir)` helper extraction (AC8 testability) and `_record_verdict_gap_callout(stub_path, run_id, reason)` helper extraction (AC13 testability). Both pure refactors.
+
+#### Changed
+- `src/kb/lint/augment.py` — `_collect_eligible_stubs` migrated to `load_page_frontmatter` cached helper with widened except tuple (AC1). 3 write-back sites annotated as out-of-scope (AC6). `run_augment` derives `raw_dir = wiki_dir.parent / "raw"` when wiki_dir is overridden and raw_dir is omitted (AC8).
+- `src/kb/lint/semantic.py` — `_group_by_shared_sources` page-paths branch migrated to `load_page_frontmatter` (AC3). Pre-loaded-bundle branch unchanged.
+- `src/kb/graph/export.py` — `export_mermaid` title fallback migrated to `load_page_frontmatter`; `Path(path)` wrap is INSIDE the broad `try` so a non-path-like graph node attribute degrades to title fallback (AC4). Removes module-level `import frontmatter`.
+- `src/kb/review/context.py` — `pair_page_with_sources` migrated to `load_page_frontmatter` with widened except tuple (AC5). Removes module-level `import frontmatter`.
+- `src/kb/cli.py` — `cli` group callback now sweeps `{PROJECT_ROOT/.data, WIKI_DIR}` (resolved + deduped) on every CLI invocation via `sweep_orphan_tmp` (AC7). Runs after the AC30 `--version` short-circuit and Click's eager callbacks; helper swallows all errors at WARNING.
+- `BACKLOG.md` — deletes the 3 cycle-13-target entries (frontmatter migration MED, sweep_orphan_tmp wiring LOW, run_augment raw_dir derivation LOW); adds a new LOW entry pinning the 3 augment write-back sites for cycle-14-target.
+
+#### Fixed
+- None — cycle 13 is additive housekeeping per the cycle-12 plan.
+
+#### Security
+- Step-11 verify (Codex): all 7 threat-model items IMPLEMENTED. T1 (sweep tmp race): mitigated by helper's 3600s threshold. T2 (raw_dir escape): lexical comparison mirrors cycle-7 effective_data_dir pattern. T3 (graph path type): `Path(path)` inside broad try. T4 (cached stale on FAT32/OneDrive): out-of-scope `_post_ingest_quality` stays uncached. T6 (WIKI_DIR third-party tmp): non-recursive glob. Class A Dependabot 0 open; Class B diff empty.
+
 ### Phase 4.5 -- Backlog-by-file cycle 12 (2026-04-19)
 
 17 AC across 13 files / 10 implementation commits + 1 security-verify PARTIAL fix. Tests: 2089 to 2118 (+29); full suite 2111 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
@@ -104,6 +128,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [**backlog-by-file cycle 13**](#phase-45--backlog-by-file-cycle-13-2026-04-20) | 2026-04-20 | 8 AC / 5 src files / 7 commits | 2119 → 2131 (+12) | frontmatter migration (5 read-only sites), CLI boot sweep_orphan_tmp wiring, run_augment raw_dir derivation, write-back site negative-pin spy, helper extractions for testability |
 | [**backlog-by-file cycle 12**](#phase-45--backlog-by-file-cycle-12-2026-04-19) | 2026-04-19 | 17 AC / 13 files / 11 commits | 2089 to 2118 (+29) | conftest fixture, io sweep, KB_PROJECT_ROOT, frontmatter LRU cache, lint/checks migration, kb-mcp console script, graph docstring, augment regression coverage, sanitizer pin, security-verify AC2/AC8 fix |
 | [**backlog-by-file cycle 11**](#phase-45--backlog-by-file-cycle-11-2026-04-19) | 2026-04-19 | 14 AC / 14 files / 13 commits | 2041 → 2081 (+40) | ingest coercion + comparison/synthesis reject, page helper relocation, CLI import smoke, stale-result edge cases, test fixture cleanup, MCP same-class guard |
 | [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |

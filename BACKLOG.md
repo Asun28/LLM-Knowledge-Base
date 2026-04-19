@@ -183,7 +183,8 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
   Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
   Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
 
-- `src/kb/lint/augment.py` (5 sites) + `lint/semantic.py` (1) + `graph/export.py` (1) + `review/context.py` (1) — migrate remaining 8 `frontmatter.load(str(...))` sites to `kb.utils.pages.load_page_frontmatter`. Target: cycle 13. Helper shipped cycle 12 AC8; strict-4 in `lint/checks.py` migrated cycle 12 AC11.
+- `src/kb/lint/augment.py:1041, 1063, 1092` — write-back frontmatter migration deferred. Three sites (`_record_verdict_gap_callout`, `_mark_page_augmented`, `_record_attempt`) keep uncached `frontmatter.load(str(...))` because each calls `frontmatter.dumps(post)` and needs a live `Post` object. Migrating requires a YAML-key-ordering-preserving `_save_page_frontmatter` wrapper (cycle-7 R1 Codex M3 lesson). Pinned by `tests/test_cycle13_frontmatter_migration.py::TestWriteBackOutOfScope`. Target: dedicated YAML-ordering cycle.
+- `src/kb/lint/augment.py::_post_ingest_quality` — kept on uncached `frontmatter.load(str(...))` because it follows same-process writes from `_mark_page_augmented` / `_record_verdict_gap_callout`. On FAT32 / OneDrive / SMB the cached helper could return stale metadata. Documented inline (cycle 13 AC2 scope). Migrating requires either explicit `cache_clear()` after every write-back site or a write-aware cache hook.
 
 - `ingest/pipeline.py` index-file write order (~653-700) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. A crash between `_sources.md` and manifest writes can duplicate entries on re-ingest. (R2)
   (fix: introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
@@ -217,9 +218,11 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ### LOW
 
-- `src/kb/utils/io.py` `sweep_orphan_tmp` has no default caller. Wire into CLI boot (`kb.cli:cli`) or `ingest_source()` tail. Target: cycle 13. Helper shipped cycle 12 AC2; caller wiring deferred.
+<!-- Cycle 13 closed both LOW items: AC7 wired sweep_orphan_tmp into kb.cli:cli
+     boot sweeping {.data, WIKI_DIR}; AC8 + _resolve_raw_dir helper derives
+     run_augment raw_dir from wiki_dir.parent / "raw" when wiki_dir is overridden
+     and raw_dir omitted. See CHANGELOG cycle 13. -->
 
-- `src/kb/lint/augment.py` `run_augment` defaults `raw_dir = raw_dir or RAW_DIR` independently of `wiki_dir`. Plumb `raw_dir` default from `wiki_dir.parent / "raw"` to match `effective_data_dir` derivation. Target: cycle 13. AC13 test passes both dirs explicitly as workaround.
 
 ---
 
