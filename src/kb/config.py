@@ -365,7 +365,7 @@ def tier1_budget_for(component: str) -> int:
 
 # ── Cycle 14 AC10/AC11 — per-platform source-freshness decay (vocabulary) ──
 # Keys are hostname tokens; values are decay windows in days. Ordered dict:
-# first match wins on substring lookup via decay_days_for(). No existing
+# first match wins on exact-or-dot-suffix lookup via decay_days_for(). No existing
 # call-site migrated this cycle; BACKLOG tracks wiring into
 # _flag_stale_results + lint staleness scan.
 SOURCE_DECAY_DAYS: dict[str, int] = {
@@ -384,9 +384,9 @@ def decay_days_for(ref: str | None) -> int:
 
     Parses ``ref`` as a URL via urllib.parse, extracts the hostname, and
     matches against ``SOURCE_DECAY_DAYS`` via exact or dot-boundary suffix
-    match (never substring — cycle-14 threat T6). IDN hostnames are IDNA-
-    encoded before comparison. Refs without a scheme or hostname fall back
-    to ``SOURCE_DECAY_DEFAULT_DAYS``.
+    match only (cycle-14 threat T6 — avoid partial-match domain spoof).
+    IDN hostnames are IDNA-encoded before comparison. Refs without a
+    scheme or hostname fall back to ``SOURCE_DECAY_DEFAULT_DAYS``.
 
     Args:
         ref: URL-style source reference (e.g. ``"https://arxiv.org/abs/X"``)

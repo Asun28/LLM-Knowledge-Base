@@ -1043,8 +1043,8 @@ def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) ->
         return
     # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed for
     # mutable Post) + save via save_page_frontmatter which preserves
-    # metadata insertion order (sort_keys=False). See cycle-7 R1 Codex M3
-    # lesson on alphabetisation regression.
+    # metadata key insertion order. See cycle-7 R1 Codex M3 lesson on
+    # alphabetisation regression.
     post = frontmatter.load(str(stub_path))
     gap_callout = (
         f"> [!gap]\n"
@@ -1065,7 +1065,7 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     """
     # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed for
     # mutable Post) + save via save_page_frontmatter which preserves
-    # metadata insertion order (sort_keys=False).
+    # metadata key insertion order.
     post = frontmatter.load(str(page_path))
     post.metadata["confidence"] = "speculative"
     callout = (
@@ -1095,7 +1095,7 @@ def _record_attempt(stub_path: Path) -> None:
     try:
         # Cycle-13 AC6 + Cycle-14 AC18: uncached frontmatter.load (needed
         # for mutable Post) + save via save_page_frontmatter which
-        # preserves metadata insertion order (sort_keys=False).
+        # preserves metadata key insertion order.
         post = frontmatter.load(str(stub_path))
         post.metadata["last_augment_attempted"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")

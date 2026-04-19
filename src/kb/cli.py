@@ -366,7 +366,11 @@ def publish(out_dir: Path | None, fmt: str):
     from kb.config import OUTPUTS_DIR, PROJECT_ROOT, WIKI_DIR
 
     target_dir = out_dir if out_dir is not None else OUTPUTS_DIR
-    # Threat T1 — path containment: resolve and verify.
+    # Threat T1 — path containment: resolve, reject UNC and traversal
+    # components, then verify either inside PROJECT_ROOT or pre-existing.
+    target_str = str(target_dir)
+    if ".." in Path(target_str).parts:
+        raise click.UsageError(f"Refusing --out-dir with '..' traversal component: {target_dir}")
     try:
         resolved = Path(target_dir).resolve(strict=False)
     except OSError as exc:
@@ -374,12 +378,9 @@ def publish(out_dir: Path | None, fmt: str):
     # Reject UNC paths on Windows.
     if str(resolved).startswith("\\\\"):
         raise click.UsageError(f"Refusing UNC path for --out-dir: {target_dir}")
-    # Allow if inside PROJECT_ROOT OR pre-existing operator directory.
-    try:
-        resolved.relative_to(PROJECT_ROOT)
-        inside_project = True
-    except ValueError:
-        inside_project = False
+    # Allow if inside PROJECT_ROOT (via is_relative_to) OR pre-existing
+    # operator-managed directory.
+    inside_project = resolved.is_relative_to(PROJECT_ROOT)
     if not inside_project and not resolved.is_dir():
         raise click.UsageError(
             f"--out-dir {target_dir} is outside PROJECT_ROOT and does not pre-exist. "
