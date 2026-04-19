@@ -55,6 +55,20 @@ def page_id(page_path: Path, wiki_dir: Path | None = None) -> str:
 _page_id = page_id  # noqa: N816
 
 
+@functools.lru_cache(maxsize=8192)
+def _load_page_frontmatter_cached(path_str: str, mtime_ns: int) -> tuple:
+    post = frontmatter.load(path_str)
+    return dict(post.metadata), post.content
+
+
+def load_page_frontmatter(page_path):
+    mtime_ns = page_path.stat().st_mtime_ns
+    return _load_page_frontmatter_cached(str(page_path), mtime_ns)
+
+
+load_page_frontmatter.cache_clear = _load_page_frontmatter_cached.cache_clear
+
+
 def normalize_sources(sources: str | list | None) -> list[str]:
     """Normalize frontmatter 'source' field to always be a list of strings."""
     if sources is None:
@@ -105,22 +119,22 @@ def load_all_pages(
             continue
         for page_path in sorted(subdir_path.glob("*.md")):
             try:
-                post = frontmatter.load(str(page_path))
+                metadata, body = load_page_frontmatter(page_path)
                 pid = _page_id(page_path, wiki_dir)
-                sources = normalize_sources(post.metadata.get("source"))
+                sources = normalize_sources(metadata.get("source"))
                 page_dict = {
                     "id": pid,
                     "path": str(page_path),
-                    "title": str(post.metadata.get("title", page_path.stem)),
-                    "type": post.metadata.get("type", "unknown"),
-                    "confidence": post.metadata.get("confidence", "unknown"),
+                    "title": str(metadata.get("title", page_path.stem)),
+                    "type": metadata.get("type", "unknown"),
+                    "confidence": metadata.get("confidence", "unknown"),
                     "sources": sources,
-                    "created": _date_str(post.metadata.get("created")),
-                    "updated": _date_str(post.metadata.get("updated")),
-                    "content": post.content,
+                    "created": _date_str(metadata.get("created")),
+                    "updated": _date_str(metadata.get("updated")),
+                    "content": body,
                 }
                 if include_content_lower:
-                    page_dict["content_lower"] = post.content.lower()
+                    page_dict["content_lower"] = body.lower()
                 pages.append(page_dict)
             except (
                 OSError,
