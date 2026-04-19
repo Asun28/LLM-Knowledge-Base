@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import frontmatter
+import yaml
 
 from kb.config import (
     AUGMENT_ALLOWED_DOMAINS,
@@ -29,6 +30,7 @@ from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
+from kb.utils.pages import load_page_frontmatter
 from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
@@ -69,27 +71,29 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
             continue
 
         try:
-            post = frontmatter.load(str(page_path))
-        except (OSError, ValueError, UnicodeDecodeError) as e:
+            # Cycle 13 AC1: cached frontmatter read; widened except picks up
+            # the helper's re-raised AttributeError + yaml.YAMLError.
+            metadata, body = load_page_frontmatter(page_path)
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Skipping unparseable stub %s: %s", page_id, e)
             continue
 
-        title = str(post.metadata.get("title", "") or "")
+        title = str(metadata.get("title", "") or "")
 
         # G1 placeholder title
         if not title or _PLACEHOLDER_TITLE_RE.match(title.strip()):
             continue
 
         # G3 confidence ≠ speculative
-        if post.metadata.get("confidence") == "speculative":
+        if metadata.get("confidence") == "speculative":
             continue
 
         # G4 per-page opt-out
-        if post.metadata.get("augment") is False:
+        if metadata.get("augment") is False:
             continue
 
         # G6 cooldown
-        last_attempt = post.metadata.get("last_augment_attempted")
+        last_attempt = metadata.get("last_augment_attempted")
         if last_attempt:
             try:
                 if isinstance(last_attempt, datetime):
@@ -117,9 +121,9 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
             {
                 "page_id": page_id,
                 "title": title,
-                "page_type": post.metadata.get("type", page_id.split("/")[0].rstrip("s")),
-                "frontmatter": dict(post.metadata),
-                "body": post.content,
+                "page_type": metadata.get("type", page_id.split("/")[0].rstrip("s")),
+                "frontmatter": dict(metadata),
+                "body": body,
                 "inbound_count": len(non_summary_inbound),
                 "inbound_pages": non_summary_inbound,
             }
@@ -564,7 +568,7 @@ def run_augment(
     from kb.lint.fetcher import AugmentFetcher
 
     wiki_dir = wiki_dir or WIKI_DIR
-    raw_dir = raw_dir or RAW_DIR
+    raw_dir = _resolve_raw_dir(wiki_dir, raw_dir)
 
     # B2/B3 (Phase 5 three-round MEDIUM): when caller supplies a custom wiki
     # but no explicit data_dir, derive `wiki_dir.parent / ".data"` so manifest
@@ -909,17 +913,8 @@ def run_augment(
             )
             verdicts.append({"stub_id": stub_id, "verdict": verdict, "reason": reason})
 
-            if verdict == "fail" and stub_path.exists():
-                # Add a [!gap] callout flagging the page for manual review
-                post = frontmatter.load(str(stub_path))
-                gap_callout = (
-                    f"> [!gap]\n"
-                    f"> Augment run {run_id[:8]} failed quality check: "
-                    f"{reason}. Manual review needed.\n\n"
-                )
-                if "[!gap]" not in post.content:
-                    post.content = gap_callout + post.content
-                    atomic_text_write(frontmatter.dumps(post), stub_path)
+            if verdict == "fail":
+                _record_verdict_gap_callout(stub_path, run_id=run_id, reason=reason)
 
             if manifest is not None:
                 manifest.advance(
@@ -1016,6 +1011,49 @@ def run_augment(
     }
 
 
+def _resolve_raw_dir(wiki_dir: Path, raw_dir: Path | None) -> Path:
+    """Cycle 13 AC8 — derive raw_dir from wiki_dir override when omitted.
+
+    When caller supplies a custom ``wiki_dir`` but omits ``raw_dir``, derive
+    ``wiki_dir.parent / "raw"`` so augment runs stay project-isolated (mirrors
+    the existing ``effective_data_dir`` derivation pattern).
+
+    Lexical comparison ``wiki_dir != WIKI_DIR`` matches the cycle-7
+    ``effective_data_dir`` pattern; do NOT ``.resolve()`` — users with
+    symlinked wiki mounts rely on path identity.
+
+    Branch table:
+      - ``raw_dir`` is None AND ``wiki_dir != WIKI_DIR`` → derive sibling
+      - ``raw_dir`` is not None → honour explicit (any value, including
+        the global ``RAW_DIR`` literally re-passed)
+      - default → ``RAW_DIR``
+    """
+    if raw_dir is None and wiki_dir != WIKI_DIR:
+        return wiki_dir.parent / "raw"
+    return raw_dir or RAW_DIR
+
+
+def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) -> None:
+    """Prepend a ``[!gap]`` callout to a stub page after a failed augment verdict.
+
+    Idempotent: if a ``[!gap]`` callout is already present in the body, the
+    callout is not re-inserted. No-op when ``stub_path`` does not exist.
+    """
+    if not stub_path.exists():
+        return
+    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
+    post = frontmatter.load(str(stub_path))
+    gap_callout = (
+        f"> [!gap]\n"
+        f"> Augment run {run_id[:8]} failed quality check: "
+        f"{reason}. Manual review needed.\n\n"
+    )
+    if "[!gap]" not in post.content:
+        post.content = gap_callout + post.content
+        atomic_text_write(frontmatter.dumps(post), stub_path)
+
+
 def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     """Force ``confidence: speculative`` + prepend ``[!augmented]`` callout.
 
@@ -1023,6 +1061,8 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     the callout is not re-inserted (but confidence is still forced to
     ``speculative`` on every call).
     """
+    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
     post = frontmatter.load(str(page_path))
     post.metadata["confidence"] = "speculative"
     callout = (
@@ -1050,6 +1090,8 @@ def _record_attempt(stub_path: Path) -> None:
     if not stub_path.exists():
         return
     try:
+        # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+        # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
         post = frontmatter.load(str(stub_path))
         post.metadata["last_augment_attempted"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -1079,6 +1121,11 @@ def _post_ingest_quality(*, page_path: Path, wiki_dir: Path) -> tuple[str, str]:
         )
 
     try:
+        # Cycle 13 AC2 (scope): Intentionally uses uncached frontmatter.load.
+        # This read may immediately follow same-process writes from
+        # _mark_page_augmented / _record_verdict_gap_callout. On FAT32 /
+        # OneDrive / SMB (coarse mtime resolution), the cached helper could
+        # return stale metadata. Design gate Q11.
         post = frontmatter.load(str(page_path))
     except Exception as e:
         return "fail", f"frontmatter unparseable: {e}"

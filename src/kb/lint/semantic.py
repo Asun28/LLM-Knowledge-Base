@@ -18,7 +18,7 @@ from kb.config import (
 from kb.graph.builder import build_graph
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
-from kb.utils.pages import normalize_sources, page_id, scan_wiki_pages
+from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +119,10 @@ def _group_by_shared_sources(wiki_dir: Path, *, pages: list[dict] | None = None)
         page_paths = scan_wiki_pages(wiki_dir)
         for page_path in page_paths:
             try:
-                post = frontmatter.load(str(page_path))
+                # Cycle 13 AC3: cached frontmatter read (mtime-keyed LRU).
+                metadata, _body = load_page_frontmatter(page_path)
                 pid = page_id(page_path, wiki_dir)
-                sources = normalize_sources(post.metadata.get("source"))
+                sources = normalize_sources(metadata.get("source"))
                 for src in sources:
                     source_to_pages.setdefault(src, []).append(pid)
             except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
