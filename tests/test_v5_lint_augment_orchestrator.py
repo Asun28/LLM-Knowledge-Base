@@ -592,6 +592,72 @@ def test_execute_mode_dry_run_does_not_fetch(tmp_project, create_wiki_page, monk
     )
 
 
+def test_cycle12_ac13_run_augment_default_paths_custom_wiki_dir(tmp_project, monkeypatch):
+    from kb import config
+    from kb.lint.augment import _format_proposals_md, run_augment
+    from kb.lint.fetcher import FetchResult
+
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    proposals_path = wiki_dir / "_augment_proposals.md"
+    proposals_path.write_text(
+        _format_proposals_md(
+            [
+                {
+                    "stub_id": "entities/cycle12-default-paths",
+                    "title": "Cycle Twelve Default Paths",
+                    "action": "propose",
+                    "urls": ["https://en.wikipedia.org/wiki/Cycle_Twelve_Default_Paths"],
+                    "rationale": "cycle12 deterministic proposal",
+                }
+            ],
+            "cycle12-default-paths",
+        ),
+        encoding="utf-8",
+    )
+
+    project_data = config.PROJECT_ROOT / ".data"
+    project_augment_before = {
+        p.name
+        for p in project_data.iterdir()
+        if p.name == "augment_rate.json" or p.name.startswith("augment")
+    }
+
+    monkeypatch.setattr(
+        "kb.lint.augment._propose_urls",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("execute must not propose")),
+    )
+    monkeypatch.setattr("kb.lint.augment._relevance_score", lambda **kwargs: 0.95)
+
+    def fake_fetch(self, url, *, respect_robots=True):
+        return FetchResult(
+            status="ok",
+            content="Cycle twelve default path content.",
+            extracted_markdown="Cycle twelve default path content. " * 20,
+            content_type="text/html",
+            bytes=128,
+            reason=None,
+            url=url,
+        )
+
+    monkeypatch.setattr("kb.lint.fetcher.AugmentFetcher.fetch", fake_fetch)
+
+    result = run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5)
+
+    manifest_path = result["manifest_path"]
+    assert manifest_path is not None
+    assert manifest_path.startswith(str(tmp_project))
+    assert (tmp_project / ".data" / "augment_rate.json").exists()
+    assert list((raw_dir / "articles").glob("cycle-twelve-default-paths*.md"))
+
+    project_augment_after = {
+        p.name
+        for p in project_data.iterdir()
+        if p.name == "augment_rate.json" or p.name.startswith("augment")
+    }
+    assert project_augment_after == project_augment_before
+
+
 # ── Task 15: auto-ingest mode tests ──────────────────────────────
 
 

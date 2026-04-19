@@ -3,6 +3,10 @@
 from click.testing import CliRunner
 
 
+def _entry_names(path):
+    return {p.name for p in path.iterdir()} if path.exists() else set()
+
+
 def test_cli_lint_augment_propose_default(tmp_project, create_wiki_page):
     from kb.cli import cli
 
@@ -80,3 +84,74 @@ def test_cli_lint_auto_ingest_without_execute_errors(tmp_project):
     )
     assert result.exit_code != 0
     assert "execute" in result.output.lower() or "auto-ingest" in result.output.lower()
+
+
+def test_cycle12_ac12_augment_execute_wiki_dir_containment(
+    tmp_project, create_wiki_page, monkeypatch
+):
+    from kb import config
+    from kb.cli import cli
+    from kb.lint import augment
+    from kb.lint.fetcher import FetchResult
+
+    wiki = tmp_project / "wiki"
+    raw = tmp_project / "raw"
+
+    create_wiki_page(
+        page_id="entities/cycle12-target",
+        title="Cycle Twelve Target",
+        content="Brief.",
+        wiki_dir=wiki,
+        page_type="entity",
+    )
+    create_wiki_page(
+        page_id="concepts/cycle12-linker",
+        title="Cycle Twelve Linker",
+        content="See [[entities/cycle12-target]] for the containment case. " * 5,
+        wiki_dir=wiki,
+        page_type="concept",
+    )
+
+    project_raw_before = _entry_names(config.PROJECT_ROOT / "raw")
+    project_data_before = _entry_names(config.PROJECT_ROOT / ".data")
+
+    monkeypatch.setattr(augment, "RAW_DIR", raw)
+    monkeypatch.setattr(
+        augment,
+        "_propose_urls",
+        lambda *, stub, purpose_text: {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/Cycle_Twelve_Target"],
+            "rationale": "cycle12 deterministic proposal",
+        },
+    )
+    monkeypatch.setattr("kb.lint.augment._relevance_score", lambda **kwargs: 0.95)
+
+    def fake_fetch(self, url, *, respect_robots=True):
+        return FetchResult(
+            status="ok",
+            content="Cycle twelve target content.",
+            extracted_markdown="Cycle twelve target content. " * 20,
+            content_type="text/html",
+            bytes=128,
+            reason=None,
+            url=url,
+        )
+
+    monkeypatch.setattr("kb.lint.fetcher.AugmentFetcher.fetch", fake_fetch)
+
+    runner = CliRunner()
+    propose = runner.invoke(cli, ["lint", "--augment", "--wiki-dir", str(wiki)])
+    assert propose.exit_code == 0, propose.output
+    assert (wiki / "_augment_proposals.md").exists()
+
+    execute = runner.invoke(
+        cli,
+        ["lint", "--augment", "--execute", "--wiki-dir", str(wiki)],
+    )
+    assert execute.exit_code == 0, execute.output
+
+    assert list((raw / "articles").glob("cycle-twelve-target*.md"))
+    assert list((tmp_project / ".data").glob("augment-run-*.json"))
+    assert _entry_names(config.PROJECT_ROOT / "raw") == project_raw_before
+    assert _entry_names(config.PROJECT_ROOT / ".data") == project_data_before
