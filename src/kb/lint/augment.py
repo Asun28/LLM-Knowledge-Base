@@ -913,17 +913,8 @@ def run_augment(
             )
             verdicts.append({"stub_id": stub_id, "verdict": verdict, "reason": reason})
 
-            if verdict == "fail" and stub_path.exists():
-                # Add a [!gap] callout flagging the page for manual review
-                post = frontmatter.load(str(stub_path))
-                gap_callout = (
-                    f"> [!gap]\n"
-                    f"> Augment run {run_id[:8]} failed quality check: "
-                    f"{reason}. Manual review needed.\n\n"
-                )
-                if "[!gap]" not in post.content:
-                    post.content = gap_callout + post.content
-                    atomic_text_write(frontmatter.dumps(post), stub_path)
+            if verdict == "fail":
+                _record_verdict_gap_callout(stub_path, run_id=run_id, reason=reason)
 
             if manifest is not None:
                 manifest.advance(
@@ -1020,6 +1011,27 @@ def run_augment(
     }
 
 
+def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) -> None:
+    """Prepend a ``[!gap]`` callout to a stub page after a failed augment verdict.
+
+    Idempotent: if a ``[!gap]`` callout is already present in the body, the
+    callout is not re-inserted. No-op when ``stub_path`` does not exist.
+    """
+    if not stub_path.exists():
+        return
+    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
+    post = frontmatter.load(str(stub_path))
+    gap_callout = (
+        f"> [!gap]\n"
+        f"> Augment run {run_id[:8]} failed quality check: "
+        f"{reason}. Manual review needed.\n\n"
+    )
+    if "[!gap]" not in post.content:
+        post.content = gap_callout + post.content
+        atomic_text_write(frontmatter.dumps(post), stub_path)
+
+
 def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     """Force ``confidence: speculative`` + prepend ``[!augmented]`` callout.
 
@@ -1027,6 +1039,8 @@ def _mark_page_augmented(page_path: Path, *, source_url: str) -> None:
     the callout is not re-inserted (but confidence is still forced to
     ``speculative`` on every call).
     """
+    # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+    # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
     post = frontmatter.load(str(page_path))
     post.metadata["confidence"] = "speculative"
     callout = (
@@ -1054,6 +1068,8 @@ def _record_attempt(stub_path: Path) -> None:
     if not stub_path.exists():
         return
     try:
+        # Cycle-13 AC6: write-back; DO NOT migrate to load_page_frontmatter —
+        # frontmatter.dumps needs a live Post object. See BACKLOG cycle-14-target.
         post = frontmatter.load(str(stub_path))
         post.metadata["last_augment_attempted"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -1083,6 +1099,11 @@ def _post_ingest_quality(*, page_path: Path, wiki_dir: Path) -> tuple[str, str]:
         )
 
     try:
+        # Cycle 13 AC2 (scope): Intentionally uses uncached frontmatter.load.
+        # This read may immediately follow same-process writes from
+        # _mark_page_augmented / _record_verdict_gap_callout. On FAT32 /
+        # OneDrive / SMB (coarse mtime resolution), the cached helper could
+        # return stale metadata. Design gate Q11.
         post = frontmatter.load(str(page_path))
     except Exception as e:
         return "fail", f"frontmatter unparseable: {e}"

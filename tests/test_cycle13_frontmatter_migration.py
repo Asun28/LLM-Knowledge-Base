@@ -336,3 +336,88 @@ class TestReviewContextMigration:
         )
 
         assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
+
+
+class TestWriteBackOutOfScope:
+    """AC13 — pin all 3 write-back sites in lint/augment.py.
+
+    Each of `_record_verdict_gap_callout`, `_mark_page_augmented`, and
+    `_record_attempt` MUST keep using uncached `frontmatter.load(str(...))`
+    because they call `frontmatter.dumps(post)` which requires a live Post
+    object. The spy proves the production code path STILL invokes
+    `frontmatter.load` at each of the 3 sites — a future "migrate everything"
+    sweep would silently break YAML key ordering otherwise (cycle-7 R1
+    Codex M3 lesson).
+    """
+
+    def _build_spy(self, monkeypatch):
+        from kb.lint import augment
+
+        calls: list[str] = []
+        real_load = augment.frontmatter.load
+
+        def _spy(path, *args, **kwargs):
+            calls.append(str(path))
+            return real_load(path, *args, **kwargs)
+
+        monkeypatch.setattr(augment.frontmatter, "load", _spy)
+        return calls
+
+    def test_record_verdict_gap_callout_uses_uncached_load(self, tmp_kb_env, monkeypatch):
+        from kb.lint import augment
+
+        wiki = tmp_kb_env / "wiki"
+        stub = _write_stub_page(
+            wiki,
+            "concepts/failed-stub",
+            title="Failed Stub",
+            body="Original body.",
+        )
+
+        calls = self._build_spy(monkeypatch)
+        augment._record_verdict_gap_callout(stub, run_id="abcdef0123", reason="too short")
+
+        assert str(stub) in calls, f"Expected {stub} in spy calls, got {calls}"
+        # Behavioural: gap callout was written to the page.
+        assert "[!gap]" in stub.read_text(encoding="utf-8"), (
+            "Expected [!gap] callout to be prepended to the stub body."
+        )
+
+    def test_mark_page_augmented_uses_uncached_load(self, tmp_kb_env, monkeypatch):
+        from kb.lint import augment
+
+        wiki = tmp_kb_env / "wiki"
+        page = _write_stub_page(
+            wiki,
+            "concepts/auged",
+            title="Auged",
+            body="Body.",
+        )
+
+        calls = self._build_spy(monkeypatch)
+        augment._mark_page_augmented(page, source_url="https://example.com/foo")
+
+        assert str(page) in calls, f"Expected {page} in spy calls, got {calls}"
+        # Behavioural: confidence forced to speculative.
+        post = frontmatter.load(str(page))
+        assert post.metadata["confidence"] == "speculative"
+        assert "[!augmented]" in post.content
+
+    def test_record_attempt_uses_uncached_load(self, tmp_kb_env, monkeypatch):
+        from kb.lint import augment
+
+        wiki = tmp_kb_env / "wiki"
+        stub = _write_stub_page(
+            wiki,
+            "concepts/recorded",
+            title="Recorded",
+            body="Body.",
+        )
+
+        calls = self._build_spy(monkeypatch)
+        augment._record_attempt(stub)
+
+        assert str(stub) in calls, f"Expected {stub} in spy calls, got {calls}"
+        # Behavioural: last_augment_attempted timestamp written.
+        post = frontmatter.load(str(stub))
+        assert "last_augment_attempted" in post.metadata
