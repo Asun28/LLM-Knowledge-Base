@@ -145,6 +145,8 @@ def test_load_all_pages_returns_all_fields(create_wiki_page, tmp_path):
         "updated",
         "content",
         "content_lower",
+        # Cycle 14 AC23 — additive `status` key (empty string when absent).
+        "status",
     }
     assert page["id"] == "concepts/rag"
     assert page["content_lower"] == page["content"].lower()
