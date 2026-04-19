@@ -62,6 +62,27 @@ def _load_page_frontmatter_cached(path_str: str, mtime_ns: int) -> tuple:
 
 
 def load_page_frontmatter(page_path):
+    """Load frontmatter ``(metadata, body)`` with mtime-keyed LRU cache.
+
+    The public wrapper reads ``page_path.stat().st_mtime_ns`` on every call and
+    delegates to ``_load_page_frontmatter_cached`` keyed on
+    ``(str(page_path), mtime_ns)``. Successful parses are cached
+    (``maxsize=8192`` — covers wikis up to ~8k pages with full-run retention
+    for the 4 lint/checks call sites; larger wikis see partial eviction).
+    Parse/read errors (``OSError``, ``ValueError``, ``AttributeError``,
+    ``yaml.YAMLError``, ``UnicodeDecodeError``) are re-raised to preserve each
+    existing caller's ``try/except`` contract, and the cache never stores a
+    failure (``@lru_cache`` does not cache exceptions natively).
+
+    Caveat — ``mtime_ns`` resolution depends on the filesystem. NTFS resolves
+    at ~100 ns. FAT32 is 2-second granularity. OneDrive / SMB mounts can
+    coalesce mtime writes. Two edits that land within the filesystem's coarse
+    window share a cache key and the second read will see stale frontmatter
+    until the next edit bumps mtime_ns. Acceptable for lint/query hot-paths
+    because each CLI invocation starts with a fresh cache and mid-run edits
+    are rare; tests that mutate frontmatter should call
+    ``load_page_frontmatter.cache_clear()`` between mutations.
+    """
     mtime_ns = page_path.stat().st_mtime_ns
     return _load_page_frontmatter_cached(str(page_path), mtime_ns)
 

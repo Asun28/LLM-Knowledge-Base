@@ -166,14 +166,18 @@ def sweep_orphan_tmp(directory: Path, *, max_age_seconds: float = 3600.0) -> int
     locked, missing, or permission-denied temp file does not block the rest of
     the sweep.
 
-    Returns the number of files successfully removed. The function treats a
-    missing `directory` as a caller bug and raises `FileNotFoundError`; other
-    filesystem failures at the cleanup boundary are best-effort and do not
-    propagate to the caller.
+    Returns the number of files successfully removed. Never raises past the
+    boundary — a missing, non-directory, or permission-denied `directory` logs
+    WARNING and returns 0 so callers (CLI boot, ingest tail, cleanup scripts)
+    can invoke the sweep unconditionally without defensive pre-checks.
     """
     directory = Path(directory).resolve()
     if not directory.exists():
-        raise FileNotFoundError(directory)
+        logger.warning("sweep_orphan_tmp: directory does not exist: %s", directory)
+        return 0
+    if not directory.is_dir():
+        logger.warning("sweep_orphan_tmp: path is not a directory: %s", directory)
+        return 0
 
     removed = 0
     try:
