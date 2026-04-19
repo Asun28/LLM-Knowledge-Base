@@ -175,3 +175,12 @@ def test_check_frontmatter_reports_malformed_page(tmp_path):
         )
         for issue in issues
     )
+
+
+def test_graph_builder_documents_case_sensitivity_caveat():
+    import kb.graph.builder as gb
+
+    doc = (gb.__doc__ or "").lower()
+    assert "case-sensitiv" in doc  # handles case-sensitivity / case-sensitive
+    assert "path" in doc
+    assert "id" in doc
