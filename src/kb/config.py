@@ -1,10 +1,47 @@
 """Project configuration — paths, model tiers, and settings."""
 
+import logging
 import os
 from pathlib import Path
 
 # ── Project paths ──────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_LOG = logging.getLogger(__name__)
+
+
+def _resolve_project_root() -> Path:
+    heuristic = Path(__file__).resolve().parent.parent.parent
+    env_root = os.environ.get("KB_PROJECT_ROOT")
+    if env_root:
+        try:
+            candidate = Path(env_root).resolve()
+            if candidate.is_dir():
+                return candidate
+            reason = "resolved path is not a directory"
+        except (OSError, RuntimeError) as exc:
+            reason = f"could not resolve path: {exc}"
+        _LOG.warning("Invalid KB_PROJECT_ROOT=%s: %s; using %s", env_root, reason, heuristic)
+        return heuristic
+
+    if (heuristic / "pyproject.toml").exists():
+        return heuristic
+
+    # Walk from cwd through at most 5 parent levels; no unbounded filesystem scan.
+    try:
+        cwd = Path.cwd().resolve()
+    except (OSError, RuntimeError):
+        return heuristic
+    for candidate in (cwd, *cwd.parents[:5]):
+        if (candidate / "pyproject.toml").exists():
+            _LOG.info(
+                "Detected project root from cwd walk-up via pyproject.toml: path=%s wiki_exists=%s",
+                candidate,
+                (candidate / "wiki").exists(),
+            )
+            return candidate
+    return heuristic
+
+
+PROJECT_ROOT = _resolve_project_root()
 RAW_DIR = PROJECT_ROOT / "raw"
 WIKI_DIR = PROJECT_ROOT / "wiki"
 RESEARCH_DIR = PROJECT_ROOT / "research"
