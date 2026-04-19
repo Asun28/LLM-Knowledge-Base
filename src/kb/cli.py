@@ -337,5 +337,69 @@ def mcp():
         sys.exit(1)
 
 
+@cli.command()
+@click.option(
+    "--out-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination directory for publish outputs (default: PROJECT_ROOT/outputs).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["llms", "llms-full", "graph", "all"]),
+    default="all",
+    help=(
+        "Which publish format(s) to emit. Defaults to 'all' "
+        "(llms.txt + llms-full.txt + graph.jsonld)."
+    ),
+)
+def publish(out_dir: Path | None, fmt: str):
+    """Publish wiki as /llms.txt, /llms-full.txt, and/or /graph.jsonld.
+
+    Cycle 14 AC21. The output directory must either be inside PROJECT_ROOT
+    (auto-created if missing) OR must already exist on disk (operator-
+    managed path outside the project). Rejects UNC paths and paths that
+    resolve outside PROJECT_ROOT and do not pre-exist. See threat T1.
+    """
+    from kb.compile.publish import build_graph_jsonld, build_llms_full_txt, build_llms_txt
+    from kb.config import OUTPUTS_DIR, PROJECT_ROOT, WIKI_DIR
+
+    target_dir = out_dir if out_dir is not None else OUTPUTS_DIR
+    # Threat T1 — path containment: resolve and verify.
+    try:
+        resolved = Path(target_dir).resolve(strict=False)
+    except OSError as exc:
+        raise click.UsageError(f"Invalid --out-dir {target_dir!r}: {exc}") from exc
+    # Reject UNC paths on Windows.
+    if str(resolved).startswith("\\\\"):
+        raise click.UsageError(f"Refusing UNC path for --out-dir: {target_dir}")
+    # Allow if inside PROJECT_ROOT OR pre-existing operator directory.
+    try:
+        resolved.relative_to(PROJECT_ROOT)
+        inside_project = True
+    except ValueError:
+        inside_project = False
+    if not inside_project and not resolved.is_dir():
+        raise click.UsageError(
+            f"--out-dir {target_dir} is outside PROJECT_ROOT and does not pre-exist. "
+            "Create it first or choose a path inside the project."
+        )
+    resolved.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if fmt in ("llms", "all"):
+            p = build_llms_txt(WIKI_DIR, resolved / "llms.txt")
+            click.echo(f"wrote {p}")
+        if fmt in ("llms-full", "all"):
+            p = build_llms_full_txt(WIKI_DIR, resolved / "llms-full.txt")
+            click.echo(f"wrote {p}")
+        if fmt in ("graph", "all"):
+            p = build_graph_jsonld(WIKI_DIR, resolved / "graph.jsonld")
+            click.echo(f"wrote {p}")
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()
