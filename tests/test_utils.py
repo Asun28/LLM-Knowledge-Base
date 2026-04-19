@@ -145,6 +145,11 @@ def test_load_all_pages_returns_all_fields(create_wiki_page, tmp_path):
         "updated",
         "content",
         "content_lower",
+        # Cycle 14 AC23 + AC1 — additive epistemic-integrity keys
+        # (empty string when absent in frontmatter).
+        "status",
+        "belief_state",
+        "authored_by",
     }
     assert page["id"] == "concepts/rag"
     assert page["content_lower"] == page["content"].lower()

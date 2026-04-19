@@ -4,7 +4,13 @@ import datetime
 
 import frontmatter
 
-from kb.config import CONFIDENCE_LEVELS, PAGE_TYPES
+from kb.config import (
+    AUTHORED_BY_VALUES,
+    BELIEF_STATES,
+    CONFIDENCE_LEVELS,
+    PAGE_STATUSES,
+    PAGE_TYPES,
+)
 
 REQUIRED_FIELDS = ("title", "source", "created", "updated", "type", "confidence")
 
@@ -63,5 +69,19 @@ def validate_frontmatter(post: frontmatter.Post) -> list[str]:
         errors.append(
             f"Invalid confidence: {post.metadata['confidence']}. Must be one of {CONFIDENCE_LEVELS}"
         )
+
+    # Cycle 14 AC2 — optional epistemic-integrity fields. Absent is valid
+    # (backwards compatible); when present, the value must be a non-empty
+    # string from the associated vocabulary. None / empty-string / YAML
+    # boolean coercion (e.g. `status: yes` → True) are all rejected.
+    for field, vocab in (
+        ("belief_state", BELIEF_STATES),
+        ("authored_by", AUTHORED_BY_VALUES),
+        ("status", PAGE_STATUSES),
+    ):
+        if field in post.metadata:
+            value = post.metadata[field]
+            if not isinstance(value, str) or not value or value not in vocab:
+                errors.append(f"Invalid {field}: {value!r}. Must be one of {vocab}")
 
     return errors

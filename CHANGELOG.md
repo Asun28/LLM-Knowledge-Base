@@ -34,6 +34,30 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 -- Backlog-by-file cycle 14 (2026-04-20)
+
+21 AC across 9 source files + 1 new module / 8 implementation commits + planning artifacts + 1 security-verify PARTIAL fix. Tests: 2140 → 2235 (+95); full suite 2235 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 Dependabot alerts, Class B diff empty). Scope: Epistemic-Integrity 2.0 metadata vocabularies (belief_state, authored_by, status), query coverage-confidence refusal gate, per-platform source-decay + tier1-budget helpers, frontmatter-preserving save wrapper with augment write-back migration, Karpathy Tier-1 publish module (`kb publish` + /llms.txt + /llms-full.txt + /graph.jsonld), and status ranking boost.
+
+#### Added
+- `src/kb/compile/publish.py` — new module with `build_llms_txt`, `build_llms_full_txt`, `build_graph_jsonld` builders. Filter retracted/contradicted/speculative pages (threat T2). JSON-LD uses `json.dump` with a fully-constructed dict (T3); url is relative POSIX (T8). `LLMS_FULL_MAX_BYTES` = 5 MiB UTF-8 cap with page-level deterministic stop + oversized-first-page marker.
+- `src/kb/cli.py` — `kb publish [--out-dir] [--format llms|llms-full|graph|all]` subcommand. Validates `--out-dir` via `is_relative_to(PROJECT_ROOT)` OR pre-existing directory; rejects UNC and `..` traversal (threat T1).
+- `src/kb/utils/pages.py` — `save_page_frontmatter(path, post)` rigid wrapper (`sort_keys=False` + `atomic_text_write`) — single enforcement point for the cycle-7 R1 M3 key-order contract (threat T4).
+- `src/kb/config.py` — `BELIEF_STATES`, `AUTHORED_BY_VALUES`, `PAGE_STATUSES` vocabularies (AC1); `QUERY_COVERAGE_CONFIDENCE_THRESHOLD = 0.45` (AC4); `CONTEXT_TIER1_SPLIT` + `tier1_budget_for` helper (AC7/AC8); `SOURCE_DECAY_DAYS` + `decay_days_for` helper with dot-boundary match (AC10/AC11 + threat T6); `STATUS_RANKING_BOOST = 0.05` (Q10).
+- `src/kb/query/engine.py` — coverage-confidence refusal gate in `query_wiki` (AC5); `_apply_status_boost` helper applied after RRF fusion, gated by `validate_frontmatter` (AC23 + threat T9); `vector_search` stashes per-hit cosine on `search_telemetry["vector_scores_by_id"]` side-channel (additive — no signature break).
+- `tests/test_cycle14_*.py` — 7 new test files (`config_constants`, `frontmatter_fields`, `save_frontmatter`, `augment_key_order`, `coverage_gate`, `status_boost`, `publish`) covering 95 new assertions.
+
+#### Changed
+- `src/kb/models/frontmatter.py` — `validate_frontmatter` rejects invalid `belief_state`, `authored_by`, `status` values; absent fields remain valid (AC2).
+- `src/kb/lint/augment.py` — three augment write-back sites (`_record_verdict_gap_callout`, `_mark_page_augmented`, `_record_attempt`) migrated to `save_page_frontmatter` (AC18 + threat T10). Comments updated; `sort_keys` literal no longer appears in the module.
+- `src/kb/utils/pages.py` — `load_all_pages` returns additive `status` key from page metadata (empty string when absent); existing consumers ignore (AC23 support).
+- `BACKLOG.md` — deletes the closed entries (belief_state, authored_by, status ranking-boost, coverage-confidence gate, /llms.txt + /llms-full.txt + /graph.jsonld, augment write-back cycle-14-target, per-subdir ingest rules — closed via pointer to existing `detect_source_type`). Adds 5 new entries for cycle-15+ follow-ups (tier1 split wiring, decay_days_for wiring, status evolve/lint sub-asks, LLM-suggested rephrasings, incremental publish, atomic publish writes).
+
+#### Fixed
+- None — cycle 14 is additive housekeeping per the cycle-13 plan.
+
+#### Security
+- Step-11 verify (Codex): all 10 threat-model items IMPLEMENTED after three follow-up fixes. T1 (traversal guard explicit `..` + `is_relative_to`), T2 (publish epistemic filter), T3 (JSON-LD no-f-string), T4 (save wrapper contract), T5 (advisory no-echo), T6 (decay dot-boundary match), T7 (dropped — existing code covers), T8 (relative POSIX url), T9 (status boost validated), T10 (augment migration complete). Class A Dependabot 0 open; Class B diff empty.
+
 ### Phase 4.5 -- Backlog-by-file cycle 13 (2026-04-20)
 
 8 AC across 5 source files / 7 implementation commits + planning artifacts. Tests: 2119 → 2131 (+12); full suite 2131 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 alerts, Class B diff empty).

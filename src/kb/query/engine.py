@@ -11,16 +11,20 @@ from kb.config import (
     BM25_B,
     BM25_K1,
     MAX_SEARCH_RESULTS,
+    PAGE_STATUSES,
     PAGERANK_SEARCH_WEIGHT,
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
+    QUERY_COVERAGE_CONFIDENCE_THRESHOLD,
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
+    STATUS_RANKING_BOOST,
     VECTOR_MIN_SIMILARITY,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
+from kb.models.frontmatter import validate_frontmatter
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
@@ -55,7 +59,11 @@ def search_pages(
             attempt/result counts so callers can distinguish "hybrid
             attempted, zero hits" from "hybrid disabled" (cycle 3 H11 PR
             review R1 Codex MAJOR). Keys set: ``vector_attempts``,
-            ``vector_hits``, ``bm25_hits``. Keyword-only — additive.
+            ``vector_hits``, ``bm25_hits``, and (cycle 14 AC5)
+            ``vector_scores_by_id: dict[str, float]`` — a supported
+            side-channel mapping page_id → cosine similarity used by
+            ``query_wiki`` to compute the coverage-confidence gate.
+            Keyword-only — additive.
 
     Returns:
         List of matching page dicts sorted by relevance score (descending).
@@ -156,6 +164,15 @@ def search_pages(
                 search_telemetry["vector_hits"] = search_telemetry.get("vector_hits", 0) + len(
                     results
                 )
+                # Cycle 14 AC5 — stash per-page vector similarity on the
+                # side-channel. `score` is the cosine-proxy 1/(1+dist); RRF
+                # fusion later overwrites `score` with a rank-reciprocal
+                # value, so we save the cosine here for query_wiki's
+                # coverage-confidence computation. ADDITIVE — no signature
+                # change on search_pages.
+                scores_by_id = search_telemetry.setdefault("vector_scores_by_id", {})
+                for r in results:
+                    scores_by_id[r["id"]] = r["score"]
             return results
         except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
             logger.debug("Vector search unavailable: %s", e)
@@ -220,12 +237,81 @@ def search_pages(
                 rank_lists.append(pagerank_list)
 
     scored = rrf_fusion(rank_lists)[:candidate_limit]
+
+    # Cycle 14 AC23 — status ranking boost. Applied AFTER RRF fusion and
+    # BEFORE dedup_results so boosted pages can influence dedup order
+    # (per design gate Q6: decision is to use validate_frontmatter gating
+    # rather than a separate authored_by co-gate). Gate: page status in
+    # (mature, evergreen) AND reconstructed metadata passes
+    # validate_frontmatter (no errors). Invalid frontmatter → no boost
+    # (threat T9 — attacker-controlled frontmatter).
+    scored = [_apply_status_boost(p) for p in scored]
+
     scored = dedup_results(scored)
 
     scored = _flag_stale_results(
         scored[:max_results], project_root=(wiki_dir.parent if wiki_dir else None)
     )
     return scored
+
+
+class _PostLike:
+    """Lightweight duck-type shim matching frontmatter.Post's .metadata attr.
+
+    Used by ``_apply_status_boost`` to reconstruct a validate_frontmatter-
+    compatible object from a load_all_pages page dict without constructing
+    a real frontmatter.Post (which pulls extra parsing machinery).
+    """
+
+    __slots__ = ("metadata",)
+
+
+# Trusted status lifecycle states that receive the ranking boost. Must be
+# a subset of PAGE_STATUSES; validated at module load time below.
+_TRUSTED_STATUSES: frozenset[str] = frozenset({"mature", "evergreen"})
+assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
+    "_TRUSTED_STATUSES must be a subset of PAGE_STATUSES vocabulary"
+)
+
+
+def _apply_status_boost(page: dict) -> dict:
+    """Apply STATUS_RANKING_BOOST to pages with status in _TRUSTED_STATUSES.
+
+    Cycle 14 AC23 / Q6 — boost fires only when:
+    1. Page status is "mature" or "evergreen" (members of PAGE_STATUSES).
+    2. The reconstructed page metadata passes ``validate_frontmatter`` with
+       zero errors (prevents attacker-planted invalid frontmatter from
+       exploiting the boost — threat T9).
+
+    Returns the page dict with ``score`` updated; never mutates in place.
+    """
+    status = page.get("status", "")
+    if status not in _TRUSTED_STATUSES:
+        return page
+    # Reconstruct a minimal frontmatter.Post-shaped object for validation.
+    # Pass the sources list through verbatim (even when empty) so
+    # validate_frontmatter can flag an empty list; empty list indicates a
+    # page with no provenance, which is never eligible for the trust boost.
+    sources = page.get("sources")
+    if sources is None:
+        sources = []
+    post = _PostLike()
+    post.metadata = {
+        "title": page.get("title", ""),
+        "source": sources,
+        "created": page.get("created", ""),
+        "updated": page.get("updated", ""),
+        "type": page.get("type", ""),
+        "confidence": page.get("confidence", ""),
+        "status": status,
+    }
+    errors = validate_frontmatter(post)
+    if errors:
+        # Invalid frontmatter — no boost (T9). Return unchanged.
+        return page
+    boosted = dict(page)
+    boosted["score"] = page.get("score", 0.0) * (1 + STATUS_RANKING_BOOST)
+    return boosted
 
 
 def _compute_pagerank_scores(
@@ -791,11 +877,23 @@ def query_wiki(
             "context_pages": [],
             "stale_citations": [],
             "search_mode": search_mode,
+            "coverage_confidence": None,
         }
 
     # 2. Build context from matching pages
     ctx = _build_query_context(matching_pages)
     context = ctx["context"]
+
+    # Cycle 14 AC5 — coverage-confidence computation over Tier-1 vector hits.
+    # Extract the per-page cosine similarities stashed by vector_search on
+    # the search_telemetry side-channel (see search_pages). Coverage is the
+    # mean cosine similarity over pages actually packed into the context.
+    vector_scores = search_telemetry.get("vector_scores_by_id", {})
+    ctx_pages_list = ctx.get("context_pages", [])
+    ctx_vector_scores = [vector_scores[pid] for pid in ctx_pages_list if pid in vector_scores]
+    coverage_confidence: float | None = (
+        (sum(ctx_vector_scores) / len(ctx_vector_scores)) if ctx_vector_scores else None
+    )
 
     # Raw-source fallback: supplement thin wiki context with verbatim raw source content.
     # Cycle 3 H15: trigger on SEMANTIC signal, not post-truncation char count.
@@ -852,15 +950,32 @@ INSTRUCTIONS:
 - Distinguish between stated facts and inferences.
 """
 
-    answer = call_llm(
-        prompt,
-        tier="orchestrate",
-        system=(
-            "You are a knowledge base assistant. "
-            "Answer questions using wiki content with inline citations."
-        ),
-        max_tokens=QUERY_MAX_TOKENS,
+    # Cycle 14 AC5 — coverage-confidence refusal gate. When coverage is
+    # below the threshold, skip synthesis and return a fixed refusal
+    # template. The advisory MUST NOT echo the user question verbatim
+    # (threat T5). Only fires when there are vector hits to average;
+    # BM25-only queries (coverage_confidence is None) pass through.
+    low_confidence = (
+        coverage_confidence is not None
+        and coverage_confidence < QUERY_COVERAGE_CONFIDENCE_THRESHOLD
     )
+    if low_confidence:
+        refusal_advisory = (
+            f"Coverage {coverage_confidence:.2f} below threshold "
+            f"{QUERY_COVERAGE_CONFIDENCE_THRESHOLD:.2f}. Consider rephrasing "
+            "or widening the query."
+        )
+        answer = refusal_advisory
+    else:
+        answer = call_llm(
+            prompt,
+            tier="orchestrate",
+            system=(
+                "You are a knowledge base assistant. "
+                "Answer questions using wiki content with inline citations."
+            ),
+            max_tokens=QUERY_MAX_TOKENS,
+        )
 
     # 4. Extract citations from the answer
     citations = extract_citations(answer)
@@ -880,7 +995,11 @@ INSTRUCTIONS:
         "context_pages": ctx["context_pages"],
         "stale_citations": stale_citations,
         "search_mode": search_mode,
+        "coverage_confidence": coverage_confidence,
     }
+    if low_confidence:
+        result_dict["low_confidence"] = True
+        result_dict["advisory"] = refusal_advisory
 
     # 5. Optional output adapter (Phase 4.11)
     if output_format and output_format.strip().lower() != "text":
