@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -9,6 +10,32 @@ from kb.config import PROJECT_ROOT, SOURCE_TYPE_DIRS
 
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
 RAW_SUBDIRS = tuple(sorted(d.name for d in SOURCE_TYPE_DIRS.values()))
+
+_TMP_KB_ENV_PATCHED_NAMES = (
+    "PROJECT_ROOT",
+    "RAW_DIR",
+    "WIKI_DIR",
+    "CAPTURES_DIR",
+    "OUTPUTS_DIR",
+    "VERDICTS_PATH",
+    "FEEDBACK_PATH",
+    "REVIEW_HISTORY_PATH",
+    "WIKI_ENTITIES",
+    "WIKI_CONCEPTS",
+    "WIKI_COMPARISONS",
+    "WIKI_SUMMARIES",
+    "WIKI_SYNTHESIS",
+    "RAW_ARTICLES",
+    "RAW_PAPERS",
+    "RAW_REPOS",
+    "RAW_VIDEOS",
+    "RAW_PODCASTS",
+    "RAW_BOOKS",
+    "RAW_DATASETS",
+    "RAW_CONVERSATIONS",
+    "RAW_ASSETS",
+    "SOURCE_TYPE_DIRS",
+)
 
 
 # Cycle 7 AC1 — autouse reset of embeddings module singletons to prevent
@@ -94,6 +121,106 @@ def tmp_project(tmp_path: Path) -> Path:
     )
     (wiki / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
     return tmp_path
+
+
+@pytest.fixture
+def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
+    """Patch KB paths into a temporary project.
+
+    Patched names: PROJECT_ROOT, RAW_DIR, WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR,
+    VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, WIKI_ENTITIES,
+    WIKI_CONCEPTS, WIKI_COMPARISONS, WIKI_SUMMARIES, WIKI_SYNTHESIS,
+    RAW_ARTICLES, RAW_PAPERS, RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS, RAW_BOOKS,
+    RAW_DATASETS, RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
+
+    Also patches kb.capture._CAPTURES_DIR_RESOLVED, kb.capture._captures_resolved,
+    and kb.capture._project_resolved when kb.capture is already imported.
+    Update this fixture when new kb.config path constants or derived path caches
+    are added.
+    """
+    import kb.config as config  # noqa: PLC0415
+
+    project = tmp_path
+    raw = project / "raw"
+    wiki = project / "wiki"
+    data = project / ".data"
+    captures = raw / "captures"
+
+    patched = {
+        "PROJECT_ROOT": project,
+        "RAW_DIR": raw,
+        "WIKI_DIR": wiki,
+        "CAPTURES_DIR": captures,
+        "OUTPUTS_DIR": project / "outputs",
+        "VERDICTS_PATH": data / "lint_verdicts.json",
+        "FEEDBACK_PATH": data / "query_feedback.json",
+        "REVIEW_HISTORY_PATH": data / "review_history.json",
+        "WIKI_ENTITIES": wiki / "entities",
+        "WIKI_CONCEPTS": wiki / "concepts",
+        "WIKI_COMPARISONS": wiki / "comparisons",
+        "WIKI_SUMMARIES": wiki / "summaries",
+        "WIKI_SYNTHESIS": wiki / "synthesis",
+        "RAW_ARTICLES": raw / "articles",
+        "RAW_PAPERS": raw / "papers",
+        "RAW_REPOS": raw / "repos",
+        "RAW_VIDEOS": raw / "videos",
+        "RAW_PODCASTS": raw / "podcasts",
+        "RAW_BOOKS": raw / "books",
+        "RAW_DATASETS": raw / "datasets",
+        "RAW_CONVERSATIONS": raw / "conversations",
+        "RAW_ASSETS": raw / "assets",
+    }
+    original_values = {name: getattr(config, name) for name in patched}
+    original_source_type_dirs = config.SOURCE_TYPE_DIRS
+    patched_source_type_dirs = {
+        source_type: raw / source_dir.name
+        for source_type, source_dir in original_source_type_dirs.items()
+    }
+    patched["SOURCE_TYPE_DIRS"] = patched_source_type_dirs
+    original_values["SOURCE_TYPE_DIRS"] = original_source_type_dirs
+
+    for path in (
+        wiki,
+        raw,
+        data,
+        patched["OUTPUTS_DIR"],
+        captures,
+        patched["WIKI_ENTITIES"],
+        patched["WIKI_CONCEPTS"],
+        patched["WIKI_COMPARISONS"],
+        patched["WIKI_SUMMARIES"],
+        patched["WIKI_SYNTHESIS"],
+        patched["RAW_ARTICLES"],
+        patched["RAW_PAPERS"],
+        patched["RAW_REPOS"],
+        patched["RAW_VIDEOS"],
+        patched["RAW_PODCASTS"],
+        patched["RAW_BOOKS"],
+        patched["RAW_DATASETS"],
+        patched["RAW_CONVERSATIONS"],
+        patched["RAW_ASSETS"],
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+    for name, value in patched.items():
+        monkeypatch.setattr(config, name, value)
+
+    # Mirror already-imported `from kb.config import X` bindings that still
+    # point at the original config objects.
+    for module in tuple(sys.modules.values()):
+        if module is None:
+            continue
+        for name, value in patched.items():
+            if getattr(module, name, object()) == original_values[name]:
+                monkeypatch.setattr(module, name, value, raising=False)
+
+    capture_module = sys.modules.get("kb.capture")
+    if capture_module is not None:
+        monkeypatch.setattr(capture_module, "_CAPTURES_DIR_RESOLVED", captures.resolve())
+        monkeypatch.setattr(capture_module, "_captures_resolved", captures.resolve())
+        monkeypatch.setattr(capture_module, "_project_resolved", project.resolve())
+
+    return project
 
 
 @pytest.fixture
