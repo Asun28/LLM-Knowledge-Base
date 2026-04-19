@@ -136,3 +136,66 @@ class TestAugmentReadOnlySites:
         assert any(Path(p) == target for p in calls), (
             f"Expected {target} in spy call list, got {calls}"
         )
+
+
+class TestSemanticMigration:
+    """AC10 — _group_by_shared_sources page-paths branch uses cached helper."""
+
+    def test_group_by_shared_sources_returns_grouped_pages(self, tmp_kb_env):
+        from kb.lint import semantic
+
+        wiki = tmp_kb_env / "wiki"
+        # Two pages share the same raw source.
+        _write_stub_page(
+            wiki,
+            "concepts/alpha",
+            title="Alpha",
+            body="Alpha body.",
+            source=["raw/articles/shared.md"],
+        )
+        _write_stub_page(
+            wiki,
+            "concepts/beta",
+            title="Beta",
+            body="Beta body.",
+            source=["raw/articles/shared.md"],
+        )
+        _write_stub_page(
+            wiki,
+            "concepts/lonely",
+            title="Lonely",
+            body="No shared source.",
+            source=["raw/articles/lonely.md"],
+        )
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        groups = semantic._group_by_shared_sources(wiki)
+        # Find the group containing both shared-source pages.
+        group_with_alpha = next(
+            (g for g in groups if "concepts/alpha" in g),
+            None,
+        )
+        assert group_with_alpha is not None, f"alpha not grouped; groups={groups}"
+        assert "concepts/beta" in group_with_alpha, (
+            f"beta missing from alpha's group: {group_with_alpha}"
+        )
+
+    def test_group_by_shared_sources_uses_cached_helper(self, tmp_kb_env, monkeypatch):
+        """Spy on load_page_frontmatter to prove semantic uses the cached path."""
+        from kb.lint import semantic
+
+        wiki = tmp_kb_env / "wiki"
+        _write_stub_page(wiki, "concepts/x", title="X", body="X", source=["raw/x.md"])
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        calls: list[Path] = []
+        real_helper = semantic.load_page_frontmatter
+
+        def _spy(page_path):
+            calls.append(page_path)
+            return real_helper(page_path)
+
+        monkeypatch.setattr(semantic, "load_page_frontmatter", _spy)
+        semantic._group_by_shared_sources(wiki)
+
+        assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
