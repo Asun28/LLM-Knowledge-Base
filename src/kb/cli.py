@@ -27,6 +27,7 @@ import click  # noqa: E402
 
 from kb import __version__  # noqa: E402
 from kb.config import SOURCE_TYPE_DIRS  # noqa: E402
+from kb.utils.io import sweep_orphan_tmp  # noqa: E402
 from kb.utils.text import truncate as _truncate_text  # noqa: E402
 
 
@@ -96,6 +97,17 @@ def cli(ctx: click.Context | None = None, verbose: bool = False):
         ctx.ensure_object(dict)
         ctx.obj["verbose"] = verbose
     _setup_logging()
+    # Cycle 13 AC7: sweep orphan atomic-write .tmp siblings from hot dirs.
+    # Runs after the AC30 --version short-circuit (line 15-19) and after
+    # Click's eager --version/--help callbacks (which exit before the group
+    # body runs). Helper is no-op on missing dirs, swallows all errors at
+    # WARNING, never raises. Dedup resolved paths so a pathological config
+    # where .data alias-resolves to WIKI_DIR sweeps once, not twice.
+    from kb.config import PROJECT_ROOT, WIKI_DIR
+
+    sweep_targets = sorted({Path(d).resolve() for d in (PROJECT_ROOT / ".data", WIKI_DIR)})
+    for target in sweep_targets:
+        sweep_orphan_tmp(target)
 
 
 @cli.command()
