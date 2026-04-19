@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import frontmatter
+import yaml
 
 from kb.config import (
     AUGMENT_ALLOWED_DOMAINS,
@@ -29,6 +30,7 @@ from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
+from kb.utils.pages import load_page_frontmatter
 from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
@@ -69,27 +71,29 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
             continue
 
         try:
-            post = frontmatter.load(str(page_path))
-        except (OSError, ValueError, UnicodeDecodeError) as e:
+            # Cycle 13 AC1: cached frontmatter read; widened except picks up
+            # the helper's re-raised AttributeError + yaml.YAMLError.
+            metadata, body = load_page_frontmatter(page_path)
+        except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Skipping unparseable stub %s: %s", page_id, e)
             continue
 
-        title = str(post.metadata.get("title", "") or "")
+        title = str(metadata.get("title", "") or "")
 
         # G1 placeholder title
         if not title or _PLACEHOLDER_TITLE_RE.match(title.strip()):
             continue
 
         # G3 confidence ≠ speculative
-        if post.metadata.get("confidence") == "speculative":
+        if metadata.get("confidence") == "speculative":
             continue
 
         # G4 per-page opt-out
-        if post.metadata.get("augment") is False:
+        if metadata.get("augment") is False:
             continue
 
         # G6 cooldown
-        last_attempt = post.metadata.get("last_augment_attempted")
+        last_attempt = metadata.get("last_augment_attempted")
         if last_attempt:
             try:
                 if isinstance(last_attempt, datetime):
@@ -117,9 +121,9 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
             {
                 "page_id": page_id,
                 "title": title,
-                "page_type": post.metadata.get("type", page_id.split("/")[0].rstrip("s")),
-                "frontmatter": dict(post.metadata),
-                "body": post.content,
+                "page_type": metadata.get("type", page_id.split("/")[0].rstrip("s")),
+                "frontmatter": dict(metadata),
+                "body": body,
                 "inbound_count": len(non_summary_inbound),
                 "inbound_pages": non_summary_inbound,
             }
