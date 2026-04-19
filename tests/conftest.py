@@ -130,13 +130,20 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     Patched names: PROJECT_ROOT, RAW_DIR, WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR,
     VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, WIKI_ENTITIES,
     WIKI_CONCEPTS, WIKI_COMPARISONS, WIKI_SUMMARIES, WIKI_SYNTHESIS,
+    WIKI_INDEX, WIKI_SOURCES, WIKI_LOG, WIKI_CONTRADICTIONS, WIKI_PURPOSE,
     RAW_ARTICLES, RAW_PAPERS, RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS, RAW_BOOKS,
     RAW_DATASETS, RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
 
     Also patches kb.capture._CAPTURES_DIR_RESOLVED, kb.capture._captures_resolved,
     and kb.capture._project_resolved when kb.capture is already imported.
-    Update this fixture when new kb.config path constants or derived path caches
-    are added.
+
+    DELIBERATELY EXCLUDED (read-only package data, never written by kb):
+    TEMPLATES_DIR (YAML extraction templates shipped in repo); RESEARCH_DIR
+    (human-authored analysis). Tests that need tmp templates/research must
+    monkeypatch those explicitly.
+
+    Update this fixture when new kb.config WRITE-TARGET path constants or
+    derived path caches are added.
     """
     import kb.config as config  # noqa: PLC0415
 
@@ -160,6 +167,11 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
         "WIKI_COMPARISONS": wiki / "comparisons",
         "WIKI_SUMMARIES": wiki / "summaries",
         "WIKI_SYNTHESIS": wiki / "synthesis",
+        "WIKI_INDEX": wiki / "index.md",
+        "WIKI_SOURCES": wiki / "_sources.md",
+        "WIKI_LOG": wiki / "log.md",
+        "WIKI_CONTRADICTIONS": wiki / "contradictions.md",
+        "WIKI_PURPOSE": wiki / "purpose.md",
         "RAW_ARTICLES": raw / "articles",
         "RAW_PAPERS": raw / "papers",
         "RAW_REPOS": raw / "repos",
@@ -206,9 +218,13 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
         monkeypatch.setattr(config, name, value)
 
     # Mirror already-imported `from kb.config import X` bindings that still
-    # point at the original config objects.
-    for module in tuple(sys.modules.values()):
+    # point at the original config objects. Scoped to ``kb.*`` modules so a
+    # third-party module happening to hold a dict/Path that compares equal
+    # cannot be rebound — cycle-12 R1 architect review hardening.
+    for module_name, module in tuple(sys.modules.items()):
         if module is None:
+            continue
+        if not (module_name == "kb" or module_name.startswith("kb.")):
             continue
         for name, value in patched.items():
             if getattr(module, name, object()) == original_values[name]:

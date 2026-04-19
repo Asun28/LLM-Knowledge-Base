@@ -155,3 +155,45 @@ def test_cycle12_ac12_augment_execute_wiki_dir_containment(
     assert list((tmp_project / ".data").glob("augment-run-*.json"))
     assert _entry_names(config.PROJECT_ROOT / "raw") == project_raw_before
     assert _entry_names(config.PROJECT_ROOT / ".data") == project_data_before
+
+
+def test_cycle12_ac12_execute_without_propose_is_rejected(tmp_project, monkeypatch):
+    """R1 edge-case negative pin: `--execute` must not proceed when no
+    `_augment_proposals.md` exists (gate 2/3 short-circuit at augment.py:605-625).
+
+    Exercises the same `--wiki-dir` surface as the positive test but without the
+    propose phase; verifies the execute run is a no-op rather than silently
+    fetching URLs, and that no raw / .data / manifest writes occur anywhere.
+    """
+    from kb import config
+    from kb.cli import cli
+    from kb.lint import augment
+
+    wiki = tmp_project / "wiki"
+    raw = tmp_project / "raw"
+
+    # Must not have a proposals file — this is the precondition under test.
+    assert not (wiki / "_augment_proposals.md").exists()
+
+    # Redirect augment's raw_dir the same way the positive test does so a
+    # hypothetical regression (writes despite missing proposals) would land
+    # under tmp, not real PROJECT_ROOT.
+    monkeypatch.setattr(augment, "RAW_DIR", raw)
+
+    project_raw_before = _entry_names(config.PROJECT_ROOT / "raw")
+    project_data_before = _entry_names(config.PROJECT_ROOT / ".data")
+    tmp_data_before = _entry_names(tmp_project / ".data")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["lint", "--augment", "--execute", "--wiki-dir", str(wiki)])
+
+    # Short-circuit path is non-erroring — CLI prints the summary and exits 0.
+    assert result.exit_code == 0, result.output
+    assert "no proposals file" in result.output.lower() or "propose" in result.output.lower()
+
+    # No raw artefacts written anywhere.
+    assert not list((raw / "articles").glob("*.md"))
+    # No manifest written anywhere under tmp/.data or real .data.
+    assert _entry_names(tmp_project / ".data") == tmp_data_before
+    assert _entry_names(config.PROJECT_ROOT / "raw") == project_raw_before
+    assert _entry_names(config.PROJECT_ROOT / ".data") == project_data_before
