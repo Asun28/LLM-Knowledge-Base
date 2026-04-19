@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 kb = "kb.cli:cli"
+kb-mcp = "kb.mcp:main"
 
 [project.optional-dependencies]
 dev = [
