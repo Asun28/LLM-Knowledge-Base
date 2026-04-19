@@ -51,6 +51,8 @@ source .venv/bin/activate     # Unix
 # Environment setup
 cp .env.example .env          # then fill in:
 # ANTHROPIC_API_KEY (optional for Claude Code/MCP mode; required for direct API-backed flows), FIRECRAWL_API_KEY (optional), OPENAI_API_KEY (optional)
+# Optional: override project root detection
+export KB_PROJECT_ROOT=/path/to/your/kb    # heuristic + walk-up fallback if unset
 
 # Install deps + editable package (enables `kb` CLI command)
 # NOTE: `pip install -e .` must be run before `kb` CLI or `from kb import ...` works outside pytest
