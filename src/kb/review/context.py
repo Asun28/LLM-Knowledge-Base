@@ -3,11 +3,10 @@
 import logging
 from pathlib import Path
 
-import frontmatter
 import yaml
 
 from kb.config import RAW_DIR, WIKI_DIR
-from kb.utils.pages import normalize_sources
+from kb.utils.pages import load_page_frontmatter, normalize_sources
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +52,14 @@ def pair_page_with_sources(
         return {"error": f"Page not found: {page_id}", "page_id": page_id}
 
     try:
-        post = frontmatter.load(str(page_path))
-    except yaml.YAMLError as e:
+        # Cycle 13 AC5: cached frontmatter read; widened except picks up the
+        # helper's full re-raise set (OSError/ValueError/AttributeError/etc.).
+        metadata, _body = load_page_frontmatter(page_path)
+    except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
         return {"error": f"Malformed YAML in {page_id}: {e}", "page_id": page_id}
 
     # Get source paths from frontmatter
-    sources_meta = normalize_sources(post.metadata.get("source"))
+    sources_meta = normalize_sources(metadata.get("source"))
 
     source_contents = []
     # Cycle 7 AC21: prefer explicit project_root when caller supplied; otherwise
@@ -131,8 +132,8 @@ def pair_page_with_sources(
 
     return {
         "page_id": page_id,
-        "page_content": post.content,
-        "page_metadata": dict(post.metadata),
+        "page_content": _body,
+        "page_metadata": dict(metadata),
         "source_contents": source_contents,
     }
 

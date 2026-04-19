@@ -270,3 +270,69 @@ class TestGraphExportMigration:
         assert all(isinstance(p, Path) for p in calls), (
             f"Expected all Path args, got mixed: {[type(p) for p in calls]}"
         )
+
+
+class TestReviewContextMigration:
+    """AC12 — pair_page_with_sources uses cached helper.
+
+    The widened except catches the cached helper's full re-raise set
+    (OSError/ValueError/AttributeError/yaml.YAMLError/UnicodeDecodeError);
+    pre-cycle catch was yaml.YAMLError-only.
+    """
+
+    def test_pair_page_with_sources_returns_source_contents(self, tmp_kb_env):
+        from kb.review import context
+
+        wiki = tmp_kb_env / "wiki"
+        raw = tmp_kb_env / "raw"
+        # Write raw source.
+        article = raw / "articles" / "shared.md"
+        article.write_text("Raw article body — non-empty.", encoding="utf-8")
+        # Write wiki page referencing it.
+        _write_stub_page(
+            wiki,
+            "concepts/cited",
+            title="Cited Concept",
+            body="Refers to the shared article.",
+            source=["raw/articles/shared.md"],
+        )
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        result = context.pair_page_with_sources(
+            "concepts/cited",
+            wiki_dir=wiki,
+            raw_dir=raw,
+            project_root=tmp_kb_env,
+        )
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert result["page_metadata"]["title"] == "Cited Concept"
+        sc = result["source_contents"]
+        assert len(sc) == 1, f"expected 1 source, got {len(sc)}"
+        assert sc[0]["content"] is not None and "Raw article body" in sc[0]["content"]
+
+    def test_pair_page_with_sources_uses_cached_helper(self, tmp_kb_env, monkeypatch):
+        """Spy on load_page_frontmatter to prove context uses the cached path."""
+        from kb.review import context
+
+        wiki = tmp_kb_env / "wiki"
+        raw = tmp_kb_env / "raw"
+        _write_stub_page(wiki, "concepts/x", title="X", body="X body.", source=[])
+
+        pages_mod.load_page_frontmatter.cache_clear()
+        calls: list[Path] = []
+        real_helper = context.load_page_frontmatter
+
+        def _spy(page_path):
+            calls.append(page_path)
+            return real_helper(page_path)
+
+        monkeypatch.setattr(context, "load_page_frontmatter", _spy)
+        context.pair_page_with_sources(
+            "concepts/x",
+            wiki_dir=wiki,
+            raw_dir=raw,
+            project_root=tmp_kb_env,
+        )
+
+        assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
