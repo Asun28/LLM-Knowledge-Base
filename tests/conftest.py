@@ -67,6 +67,31 @@ def tmp_project(tmp_path: Path) -> Path:
         (wiki / subdir).mkdir(parents=True)
     for subdir in RAW_SUBDIRS:
         (raw / subdir).mkdir(parents=True)
+    (wiki / "index.md").write_text(
+        "---\n"
+        "title: Wiki Index\n"
+        "source: []\n"
+        "type: index\n"
+        "---\n\n"
+        "# Knowledge Base Index\n\n"
+        "## Pages\n\n"
+        "*No pages yet.*\n\n"
+        "## Entities\n\n"
+        "*No pages yet.*\n\n"
+        "## Concepts\n\n"
+        "*No pages yet.*\n\n"
+        "## Comparisons\n\n"
+        "*No pages yet.*\n\n"
+        "## Summaries\n\n"
+        "*No pages yet.*\n\n"
+        "## Synthesis\n\n"
+        "*No pages yet.*\n",
+        encoding="utf-8",
+    )
+    (wiki / "_sources.md").write_text(
+        "---\ntitle: Source Mapping\nsource: []\ntype: index\n---\n\n# Source Mapping\n",
+        encoding="utf-8",
+    )
     (wiki / "log.md").write_text("# Wiki Log\n\n", encoding="utf-8")
     return tmp_path
 

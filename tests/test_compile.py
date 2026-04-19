@@ -241,17 +241,25 @@ def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
     (raw_dir / "articles" / "one.md").write_text("# One\nbody.", encoding="utf-8")
     manifest_path = tmp_project / ".data" / "hashes_test.json"
 
-    # Stub out ingest_source entirely to avoid LLM calls
-    monkeypatch.setattr(
-        compiler_mod,
-        "ingest_source",
-        lambda *a, **k: {
+    # Stub out ingest_source LLM work while preserving its manifest side effect.
+    def fake_ingest_source(source, *a, **k):
+        manifest = load_manifest(manifest_path)
+        manifest[compiler_mod._canonical_rel_path(source, raw_dir)] = compiler_mod.content_hash(
+            source
+        )
+        real_save(manifest, manifest_path)
+        return {
             "pages_created": ["summaries/one"],
             "pages_updated": [],
             "pages_skipped": [],
             "wikilinks_injected": [],
             "affected_pages": [],
-        },
+        }
+
+    monkeypatch.setattr(
+        compiler_mod,
+        "ingest_source",
+        fake_ingest_source,
     )
 
     wiki_dir = tmp_project / "wiki"
@@ -264,4 +272,28 @@ def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
 
     assert call_count["save_manifest"] == 1, (
         f"manifest saved {call_count['save_manifest']}x per source; expected 1"
+    )
+    manifest_after_first = load_manifest(manifest_path)
+    source_entries = {
+        k: v for k, v in manifest_after_first.items() if not k.startswith("_template/")
+    }
+    assert source_entries == {
+        "raw/articles/one.md": compiler_mod.content_hash(raw_dir / "articles" / "one.md")
+    }
+
+    # Cycle 11 AC13 R1 fix (Codex M2 + Sonnet M1): prove manifest STABILITY across
+    # a second same-source compile. A correct implementation should observe no
+    # content change (same source, same hash). A future refactor that rewrites
+    # the manifest with a different normalised key OR mutates unchanged entries
+    # on re-compile would break this assertion even when save-count stays at one.
+    call_count["save_manifest"] = 0
+    compile_wiki(
+        raw_dir=raw_dir,
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
+        incremental=True,
+    )
+    manifest_after_second = load_manifest(manifest_path)
+    assert manifest_after_second == manifest_after_first, (
+        "second same-source compile mutated manifest; expected idempotent no-op"
     )

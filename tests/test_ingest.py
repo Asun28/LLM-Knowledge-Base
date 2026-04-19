@@ -84,7 +84,7 @@ def test_detect_source_type_papers(tmp_path):
 
 
 @patch("kb.ingest.pipeline.extract_from_source")
-def test_ingest_source(mock_extract, tmp_path):
+def test_ingest_source(mock_extract, tmp_project):
     """ingest_source creates summary, entity, and concept pages."""
     mock_extract.return_value = {
         "title": "Test Article",
@@ -95,44 +95,15 @@ def test_ingest_source(mock_extract, tmp_path):
         "concepts_mentioned": ["Testing", "RAG"],
     }
 
-    # Set up temporary directory structure
-    raw_dir = tmp_path / "raw"
+    raw_dir = tmp_project / "raw"
     articles_dir = raw_dir / "articles"
-    articles_dir.mkdir(parents=True)
-    wiki_dir = tmp_path / "wiki"
-    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
-        (wiki_dir / subdir).mkdir(parents=True)
-
-    # Create index files
-    (wiki_dir / "index.md").write_text(
-        "---\ntitle: Wiki Index\nupdated: 2026-04-06\n---\n\n# Knowledge Base Index\n\n"
-        "## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n\n"
-        "## Comparisons\n\n*No pages yet.*\n\n## Summaries\n\n*No pages yet.*\n\n"
-        "## Synthesis\n\n*No pages yet.*\n"
-    )
-    (wiki_dir / "_sources.md").write_text(
-        "---\ntitle: Source Mapping\nupdated: 2026-04-06\n---\n\n# Source Mapping\n"
-    )
-    (wiki_dir / "log.md").write_text(
-        "---\ntitle: Activity Log\nupdated: 2026-04-06\n---\n\n# Activity Log\n"
-    )
+    wiki_dir = tmp_project / "wiki"
 
     # Create source file
     source = articles_dir / "test-article.md"
     source.write_text("# Test Article\n\nThis is a test article about testing and RAG.")
 
-    # Create contradictions file so the patch target exists
-    (wiki_dir / "contradictions.md").touch()
-
-    # H6 fix: WIKI_CONTRADICTIONS removed from pipeline; path derived from effective_wiki_dir.
-    with (
-        patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
-        patch("kb.utils.paths.RAW_DIR", raw_dir),
-        patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
-        patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
-        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-    ):
-        result = ingest_source(source, source_type="article", wiki_dir=wiki_dir)
+    result = ingest_source(source, source_type="article", wiki_dir=wiki_dir, raw_dir=raw_dir)
 
     assert result["source_type"] == "article"
     assert len(result["pages_created"]) > 0

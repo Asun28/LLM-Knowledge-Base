@@ -239,9 +239,8 @@ def detect_source_drift(
     import frontmatter as fm
 
     from kb.config import WIKI_DIR as DEFAULT_WIKI_DIR
-    from kb.graph.builder import page_id as get_page_id
-    from kb.graph.builder import scan_wiki_pages
-    from kb.utils.pages import normalize_sources
+    from kb.utils.pages import normalize_sources, scan_wiki_pages
+    from kb.utils.pages import page_id as get_page_id
 
     raw_dir = raw_dir or RAW_DIR
     wiki_dir = wiki_dir or DEFAULT_WIKI_DIR

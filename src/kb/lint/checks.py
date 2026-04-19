@@ -20,11 +20,11 @@ from kb.config import (
     SUPPORTED_SOURCE_EXTENSIONS,
     WIKI_DIR,
 )
-from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
+from kb.graph.builder import build_graph, graph_stats
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.io import atomic_text_write
 from kb.utils.markdown import extract_raw_refs, extract_wikilinks
-from kb.utils.pages import normalize_sources
+from kb.utils.pages import normalize_sources, page_id, scan_wiki_pages
 from kb.utils.paths import make_source_ref
 
 logger = logging.getLogger(__name__)

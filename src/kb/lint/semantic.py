@@ -15,10 +15,10 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     WIKI_DIR,
 )
-from kb.graph.builder import build_graph, page_id, scan_wiki_pages
+from kb.graph.builder import build_graph
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
-from kb.utils.pages import normalize_sources
+from kb.utils.pages import normalize_sources, page_id, scan_wiki_pages
 
 logger = logging.getLogger(__name__)
 

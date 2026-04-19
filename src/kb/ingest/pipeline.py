@@ -445,8 +445,11 @@ def _extract_entity_context(name: str, extraction: dict) -> str:
     name_lower = name.lower()
     relevant = []
 
-    for field in ("core_argument", "abstract", "description", "problem_solved"):
-        val = extraction.get(field)
+    context_values = [
+        _coerce_str_field(extraction, field)
+        for field in ("core_argument", "abstract", "description", "problem_solved")
+    ]
+    for val in context_values:
         if val and bool(re.search(rf"\b{re.escape(name_lower)}\b", val.lower())):
             relevant.append(val)
             break
@@ -855,6 +858,12 @@ def ingest_source(
 
     effective_raw_dir = raw_dir if raw_dir is not None else RAW_DIR
 
+    if source_type in {"comparison", "synthesis"}:
+        raise ValueError(
+            f"source_type={source_type!r} is not valid for ingest_source; "
+            "use kb_create_page for comparison and synthesis pages"
+        )
+
     # C2 (Phase 4.5 MEDIUM): reject extensions not in SUPPORTED_SOURCE_EXTENSIONS
     # at the library boundary, not only at the MCP wrapper, so internal callers
     # cannot slip suffix-less files (README, LICENSE) through. Uses the broad
@@ -944,7 +953,11 @@ def ingest_source(
     new_pages_with_titles: list[tuple[str, str]] = []
 
     # 1. Create summary page (preserve created: date on re-ingest)
-    title = extraction.get("title") or extraction.get("name") or source_path.stem
+    title = (
+        _coerce_str_field(extraction, "title")
+        or _coerce_str_field(extraction, "name")
+        or source_path.stem
+    )
     summary_slug = slugify(title)
     if not summary_slug:
         # Fix 2.19: use "untitled" as final fallback if stem also produces empty slug
