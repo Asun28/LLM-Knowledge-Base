@@ -160,6 +160,13 @@ MODEL_TIERS = {
 PAGE_TYPES = ("entity", "concept", "comparison", "synthesis", "summary")
 CONFIDENCE_LEVELS = ("stated", "inferred", "speculative")
 
+# ── Cycle 14 AC1 — optional epistemic-integrity frontmatter vocabularies ──
+# Fields are optional; absent is valid. When present, values must be in these
+# tuples (enforced by kb.models.frontmatter.validate_frontmatter).
+BELIEF_STATES = ("confirmed", "uncertain", "contradicted", "stale", "retracted")
+AUTHORED_BY_VALUES = ("human", "llm", "hybrid")
+PAGE_STATUSES = ("seed", "developing", "mature", "evergreen")
+
 # ── Phase 2: Quality system paths ────────────────────────────
 FEEDBACK_PATH = PROJECT_ROOT / ".data" / "query_feedback.json"
 REVIEW_HISTORY_PATH = PROJECT_ROOT / ".data" / "review_history.json"
@@ -321,3 +328,98 @@ AUGMENT_CONTENT_TYPES: tuple[str, ...] = (
 # Threshold for classifying weekly trend direction as significant.
 # Used by kb.lint.trends to determine "improving", "stable", or "declining".
 VERDICT_TREND_THRESHOLD = 0.1
+
+# ── Cycle 14 AC4 — query coverage-confidence refusal gate ─────
+# When the mean vector-similarity of pages packed into Tier-1 context falls
+# below this threshold, query_wiki skips synthesis and returns a fixed
+# refusal advisory. See src/kb/query/engine.py::query_wiki.
+QUERY_COVERAGE_CONFIDENCE_THRESHOLD = 0.45
+
+# ── Cycle 14 AC7 — CONTEXT_TIER1_BUDGET proportional split (vocabulary) ──
+# Integer percentages summing to 100. Helper: tier1_budget_for(component).
+# No existing call-site migrated this cycle; follow-up BACKLOG entry tracks
+# wiring into query/engine.py's context assembly.
+CONTEXT_TIER1_SPLIT: dict[str, int] = {
+    "wiki_pages": 60,
+    "chat_history": 20,
+    "index": 5,
+    "system": 15,
+}
+
+
+def tier1_budget_for(component: str) -> int:
+    """Return the CONTEXT_TIER1_BUDGET share for a split component.
+
+    Args:
+        component: One of ``CONTEXT_TIER1_SPLIT`` keys.
+
+    Raises:
+        ValueError: if ``component`` is not a known split key.
+    """
+    if component not in CONTEXT_TIER1_SPLIT:
+        raise ValueError(
+            f"invalid tier1 component: {component!r}; valid={tuple(CONTEXT_TIER1_SPLIT)}"
+        )
+    return (CONTEXT_TIER1_BUDGET * CONTEXT_TIER1_SPLIT[component]) // 100
+
+
+# ── Cycle 14 AC10/AC11 — per-platform source-freshness decay (vocabulary) ──
+# Keys are hostname tokens; values are decay windows in days. Ordered dict:
+# first match wins on substring lookup via decay_days_for(). No existing
+# call-site migrated this cycle; BACKLOG tracks wiring into
+# _flag_stale_results + lint staleness scan.
+SOURCE_DECAY_DAYS: dict[str, int] = {
+    "huggingface.co": 120,
+    "github.com": 180,
+    "stackoverflow.com": 365,
+    "arxiv.org": 1095,
+    "wikipedia.org": 1460,
+    "openlibrary.org": 1825,
+}
+SOURCE_DECAY_DEFAULT_DAYS = STALENESS_MAX_DAYS
+
+
+def decay_days_for(ref: str | None) -> int:
+    """Return the decay-window days for a source reference.
+
+    Parses ``ref`` as a URL via urllib.parse, extracts the hostname, and
+    matches against ``SOURCE_DECAY_DAYS`` via exact or dot-boundary suffix
+    match (never substring — cycle-14 threat T6). IDN hostnames are IDNA-
+    encoded before comparison. Refs without a scheme or hostname fall back
+    to ``SOURCE_DECAY_DEFAULT_DAYS``.
+
+    Args:
+        ref: URL-style source reference (e.g. ``"https://arxiv.org/abs/X"``)
+            or ``None``/empty string.
+
+    Returns:
+        Decay window in days.
+    """
+    if not ref:
+        return SOURCE_DECAY_DEFAULT_DAYS
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(ref.strip())
+    except (ValueError, AttributeError):
+        return SOURCE_DECAY_DEFAULT_DAYS
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return SOURCE_DECAY_DEFAULT_DAYS
+    try:
+        host = host.encode("idna").decode("ascii")
+    except (UnicodeError, UnicodeDecodeError):
+        # Already ASCII or idna-encoding failed; use raw lowercase host.
+        pass
+    for key, days in SOURCE_DECAY_DAYS.items():
+        if host == key or host.endswith("." + key):
+            return days
+    return SOURCE_DECAY_DEFAULT_DAYS
+
+
+# ── Cycle 14 AC23 / Q10 — status ranking boost magnitude ──────
+# Multiplicative boost factor applied to pages whose frontmatter status is
+# in ("mature", "evergreen") AND passes validate_frontmatter (AC2 gate).
+# Applied in src/kb/query/engine.py::search_pages AFTER RRF fusion and
+# BEFORE dedup_results.
+STATUS_RANKING_BOOST = 0.05
