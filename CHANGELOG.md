@@ -36,7 +36,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ### Phase 4.5 -- Backlog-by-file cycle 12 (2026-04-19)
 
-17 AC across 13 files / 10 implementation commits. Tests: 2089 to 2115 (+26); full suite 2108 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
+17 AC across 13 files / 10 implementation commits + 1 security-verify PARTIAL fix. Tests: 2089 to 2118 (+29); full suite 2111 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
 
 #### Added
 - `tests/conftest.py` — `tmp_kb_env` fixture for isolated project roots in write-sensitive tests (AC1).
@@ -104,7 +104,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
-| [**backlog-by-file cycle 12**](#phase-45--backlog-by-file-cycle-12-2026-04-19) | 2026-04-19 | 17 AC / 13 files / 10 commits | 2089 to 2115 (+26) | conftest fixture, io sweep, KB_PROJECT_ROOT, frontmatter LRU cache, lint/checks migration, kb-mcp console script, graph docstring, augment regression coverage, sanitizer pin |
+| [**backlog-by-file cycle 12**](#phase-45--backlog-by-file-cycle-12-2026-04-19) | 2026-04-19 | 17 AC / 13 files / 11 commits | 2089 to 2118 (+29) | conftest fixture, io sweep, KB_PROJECT_ROOT, frontmatter LRU cache, lint/checks migration, kb-mcp console script, graph docstring, augment regression coverage, sanitizer pin, security-verify AC2/AC8 fix |
 | [**backlog-by-file cycle 11**](#phase-45--backlog-by-file-cycle-11-2026-04-19) | 2026-04-19 | 14 AC / 14 files / 13 commits | 2041 → 2081 (+40) | ingest coercion + comparison/synthesis reject, page helper relocation, CLI import smoke, stale-result edge cases, test fixture cleanup, MCP same-class guard |
 | [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |
 | [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |
