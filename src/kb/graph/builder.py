@@ -1,4 +1,15 @@
-"""Build a networkx graph from wiki pages and their wikilinks."""
+"""Build a networkx graph from wiki pages and their wikilinks.
+
+Re-exports `page_id` and `scan_wiki_pages` from `kb.utils.pages` for back-compat.
+
+**Case-sensitivity caveat** — `page_id` lowercases the returned ID while each
+page's stored `path` field preserves the original filesystem case. On
+case-sensitive filesystems (Linux CI) a consumer that reconstructs the page
+file location as `wiki_dir / f"{id}.md"` will hit `FileNotFoundError` when the
+on-disk filename has uppercase letters. Always use the page's `path` field for
+file I/O; reserve the lowercased `id` for graph-node lookups and cross-page
+references where casing is irrelevant.
+"""
 
 import logging
 from pathlib import Path

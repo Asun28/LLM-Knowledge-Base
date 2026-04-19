@@ -34,6 +34,31 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 -- Backlog-by-file cycle 12 (2026-04-19)
+
+17 AC across 13 files / 10 implementation commits + 1 security-verify PARTIAL fix. Tests: 2089 to 2118 (+29); full suite 2111 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
+
+#### Added
+- `tests/conftest.py` — `tmp_kb_env` fixture for isolated project roots in write-sensitive tests (AC1).
+- `src/kb/utils/io.py` — `sweep_orphan_tmp` helper for non-recursive stale `.tmp` sibling cleanup (AC2).
+- `src/kb/utils/pages.py` — LRU-cached `load_page_frontmatter` helper keyed by path and `mtime_ns` (AC8).
+- `pyproject.toml` / `kb.mcp` — `kb-mcp` console script alongside the existing CLI entry point (AC7).
+- Cycle-12 regression coverage — `test_cycle12_*.py` files including `sanitize_context` (AC14), plus augment regressions in `test_v5_lint_augment_cli.py` and `test_v5_lint_augment_orchestrator.py` (AC12, AC13).
+
+#### Changed
+- `src/kb/config.py` — `KB_PROJECT_ROOT` environment override plus bounded walk-up fallback from the current working directory (AC5, AC6).
+- `src/kb/utils/io.py` — docstring caveats for `file_lock` PID behavior and atomic-write behavior on network mounts (AC3, AC4).
+- `src/kb/utils/pages.py` — `load_all_pages` now uses `load_page_frontmatter` (AC9).
+- `src/kb/lint/checks.py` — four `frontmatter.load` sites migrated to `load_page_frontmatter` (AC11).
+- `src/kb/mcp_server.py` — back-compat shim for the package-level MCP entry point (AC7).
+- `src/kb/graph/builder.py` — module docstring documents `page_id()` lowercasing and case-sensitive filesystem caveat (AC10).
+
+#### Fixed
+- None - cycle 12 is additive housekeeping.
+
+#### Security
+- `KB_PROJECT_ROOT` is OS-trusted; `Path.resolve()` plus `.is_dir()` gates invalid values, logs `WARNING`, and falls back safely. A hostile local environment can still redirect file I/O in the single-user CLI context, which is documented here for awareness. AC14 pins `conversation_context` sanitization across both `kb_query` branches.
+
 ### Phase 4.5 — Backlog-by-file cycle 11 (2026-04-19)
 
 14 AC across 14 files / 13 implementation commits. Tests: 2041 → 2081 (+40); full suite 2081 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
@@ -79,6 +104,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| [**backlog-by-file cycle 12**](#phase-45--backlog-by-file-cycle-12-2026-04-19) | 2026-04-19 | 17 AC / 13 files / 11 commits | 2089 to 2118 (+29) | conftest fixture, io sweep, KB_PROJECT_ROOT, frontmatter LRU cache, lint/checks migration, kb-mcp console script, graph docstring, augment regression coverage, sanitizer pin, security-verify AC2/AC8 fix |
 | [**backlog-by-file cycle 11**](#phase-45--backlog-by-file-cycle-11-2026-04-19) | 2026-04-19 | 14 AC / 14 files / 13 commits | 2041 → 2081 (+40) | ingest coercion + comparison/synthesis reject, page helper relocation, CLI import smoke, stale-result edge cases, test fixture cleanup, MCP same-class guard |
 | [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |
 | [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |

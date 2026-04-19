@@ -183,14 +183,7 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
   Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
   Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
 
-- `lint/checks.py:251, 325, 446` + `lint/semantic.py:93` `frontmatter.load(str(path))` hot-path — reopens every file per rule; 4×5k = 20k file opens for a 5k-page wiki just for frontmatter. (R1)
-  (fix: subsumed by the shared pre-loaded corpus; or `@functools.lru_cache` keyed on `(path, mtime_ns)` returning `(metadata, body)`)
-
-- `utils/io.py` `file_lock` PID-liveness (~81-94) — after 5 s timeout, waiter calls `os.kill(pid, 0)` on the recorded PID. On Windows PIDs are aggressively recycled, so `os.kill(pid, 0)` succeeds for an unrelated process sharing the PID (AV, shell, service); conversely, a dead holder whose PID got reassigned to a live unrelated process makes the waiter raise `TimeoutError` instead of stealing. Either failure mode corrupts the verdict / feedback RMW chain. (R2)
-  (fix: on Windows use `msvcrt.locking` or `CreateFile(FILE_SHARE_NONE)` and hold the handle; POSIX `fcntl.flock`. Do not use PID-liveness heuristics for correctness.)
-
-- `graph/builder.py` `page_id()` lowercasing (~27-34) — lowercases the node ID while `path` attribute keeps original case. On case-sensitive filesystems (CI Linux), any consumer that reconstructs `wiki_dir / f"{pid}.md"` (e.g. `semantic.build_consistency_context:275`) hits `FileNotFoundError` and the page is silently skipped as `*Page not found*`. Windows dev + Linux CI diverge on the same corpus. (R2)
-  (fix: normalize filenames on disk to lowercase at ingest; or stop lowercasing in `page_id()` and route all comparisons through a shared `normalize_id` helper applied only on lookup)
+- `src/kb/lint/augment.py` (5 sites) + `lint/semantic.py` (1) + `graph/export.py` (1) + `review/context.py` (1) — migrate remaining 8 `frontmatter.load(str(...))` sites to `kb.utils.pages.load_page_frontmatter`. Target: cycle 13. Helper shipped cycle 12 AC8; strict-4 in `lint/checks.py` migrated cycle 12 AC11.
 
 - `ingest/pipeline.py` index-file write order (~653-700) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. A crash between `_sources.md` and manifest writes can duplicate entries on re-ingest. (R2)
   (fix: introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
@@ -224,20 +217,9 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ### LOW
 
-- `mcp/core.py` `kb_query` `conversation_context` (~70-83) — capped at `MAX_QUESTION_LEN * 4` chars but not stripped of control chars / role headers; passed verbatim to the rewriter LLM in the `use_api` branch. (R1)
-  (fix: strip control chars + explicit role-tag patterns; wrap in `<prior_turn>…</prior_turn>` sentinel for LLM)
+- `src/kb/utils/io.py` `sweep_orphan_tmp` has no default caller. Wire into CLI boot (`kb.cli:cli`) or `ingest_source()` tail. Target: cycle 13. Helper shipped cycle 12 AC2; caller wiring deferred.
 
-- `tests/test_mcp_*.py`, `test_v098_fixes.py`, `test_v099_phase39.py`, `test_drift_detection_v094.py` — five ad-hoc helpers (`_setup_quality_paths`, `_setup_browse_dirs`, `_setup_project`, `_patch_source_type_dirs`, `_patch_source_dirs`) re-invent the same monkeypatch dance over slightly different `WIKI_*` / `.data/` subsets, across both `kb.config` AND importing modules (because of `from kb.config import X` re-binding). None in `conftest.py`; each file copy-pastes a variant and risks missing a global. Phase 5's new globals (hot.md, overview.md, captures/, schema.md, vector_index.db, ingest_locks/, pagerank.json) each require updating all five OR more leaks. (R3)
-  (fix: single `tmp_kb_env` fixture in `conftest.py` that reflects `kb.config`'s `WIKI_*` / `RAW_DIR` / `PROJECT_ROOT` / `*_PATH` constants and monkeypatches BOTH `kb.config` AND every module that imported them via `sys.modules` reflection; collapse all five helpers)
-
-- `src/kb/__init__.py` + `src/kb/cli.py:143` + `src/kb/mcp_server.py:10` — three import layers to boot MCP: `kb mcp` → `cli.mcp()` → `from kb.mcp_server import main` → `from kb.mcp import mcp` → tool modules. Each layer runs an `__init__.py` and a `sys.modules` lookup. Harmless (<5 ms) but blocks clean "click entry → tool module" import-time profiling. (R3)
-  (fix: collapse `kb/mcp_server.py` into `kb.mcp` as `kb.mcp.main`; `kb = "kb.mcp:main"` script entry in `pyproject.toml`; CLI's `kb mcp` becomes `from kb.mcp import main`)
-
-- `config.py:7` `PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent` — assumes package layout `src/kb/config.py` always sits 3 levels under PROJECT_ROOT. When installed via `pip install -e .` from checkout it works; installed from a built wheel into `site-packages/kb/config.py`, it points at `site-packages/kb/../../` — the `site-packages` directory itself, NOT the user's project. `PROJECT_ROOT` then derives `RAW_DIR`, `WIKI_DIR`, etc. Package only works when installed via `-e` from a checkout containing `raw/`+`wiki/`; undocumented. (R4)
-  (fix: prefer `os.environ.get("KB_PROJECT_ROOT", ...)` with explicit detection — walk up from cwd looking for `pyproject.toml` + `wiki/`, fall back to the heuristic; document in README that the package is checkout-local, not pip-installable as a library)
-
-- `utils/io.py:18,44` `tempfile.mkstemp(dir=path.parent)` + `Path(tmp_path).replace(path)` on network mounts — if `path.parent` is an offline OneDrive/SMB mount, `mkstemp` succeeds locally then `replace` fails; temp file is unlinked on `BaseException`, but on partial network failure (write fd closes ok, replace times out), the temp file may linger if `unlink` also times out. No retry path, no orphaned-temp cleanup. (R4)
-  (fix: document that the package is not safe on network drives; or add startup orphan-temp sweep — find `*.tmp` siblings of known data files older than 1h and unlink)
+- `src/kb/lint/augment.py` `run_augment` defaults `raw_dir = raw_dir or RAW_DIR` independently of `wiki_dir`. Plumb `raw_dir` default from `wiki_dir.parent / "raw"` to match `effective_data_dir` derivation. Target: cycle 13. AC13 test passes both dirs explicitly as workaround.
 
 ---
 
@@ -543,12 +525,6 @@ _All 3 HIGH items resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 1"
 _All 4 MEDIUM items resolved in CHANGELOG `[Unreleased]` (data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)._
 
 ### LOW
-
-- `tests/test_v5_lint_augment_cli.py` + `tests/test_v5_kb_lint_signature.py` — CLI/MCP augment coverage only exercises propose/no-stub or validation paths. No test runs `execute` or `auto_ingest` through the public CLI/MCP entry points with `--wiki-dir` / `wiki_dir=` and asserts raw files, manifests, and rate-limit files stay under the same temp project. This is why the custom-dir leaks above remain invisible. (R3)
-  (fix: add public-surface tests for `kb lint --augment --execute --wiki-dir <tmp>/wiki` and `kb_lint(augment=True, execute=True, wiki_dir=...)`; assert writes land in `<tmp>/raw` and `<tmp>/.data`, not repo defaults)
-
-- `tests/test_v5_lint_augment_orchestrator.py` execute-mode cases — direct `run_augment` tests always pass `raw_dir=tmp_project / "raw"` and monkeypatch `MANIFEST_DIR` / `RATE_PATH`, which bypasses the default-path behavior users hit through CLI/MCP. The suite therefore tests a safer dependency-injected path than the product actually exposes. (R3)
-  (fix: add at least one unmonkeypatched default-path regression using an isolated temp project API, or refactor `run_augment` so data/raw dirs are explicit dependencies and public callers must provide them)
 
 ---
 

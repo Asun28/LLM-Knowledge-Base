@@ -60,6 +60,13 @@ def atomic_json_write(data: object, path: Path) -> None:
 
     Creates parent directories if needed. On failure, cleans up the
     temp file and re-raises the exception.
+
+    Caveat: cloud-synced or network-backed directories such as OneDrive or SMB
+    shares can transiently lock the temp file or destination and make the final
+    replace time out or fail. Failed writes attempt immediate cleanup, but a
+    locked sibling `.tmp` can remain; callers that write in those directories
+    should periodically call `sweep_orphan_tmp(path.parent)` to remove old
+    orphan temp files.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -88,6 +95,13 @@ def atomic_text_write(content: str, path: Path) -> None:
 
     Creates parent directories if needed. On failure, cleans up the
     temp file and re-raises the exception.
+
+    Caveat: cloud-synced or network-backed directories such as OneDrive or SMB
+    shares can transiently lock the temp file or destination and make the final
+    replace time out or fail. Failed writes attempt immediate cleanup, but a
+    locked sibling `.tmp` can remain; callers that write in those directories
+    should periodically call `sweep_orphan_tmp(path.parent)` to remove old
+    orphan temp files.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -137,6 +151,58 @@ def _purge_legacy_locks(base: Path | None = None) -> int:
     return purged
 
 
+def sweep_orphan_tmp(directory: Path, *, max_age_seconds: float = 3600.0) -> int:
+    """Remove old top-level atomic-write `.tmp` siblings from a directory.
+
+    The input is resolved before scanning, then only files matching
+    `directory.glob("*.tmp")` are considered. The scan is intentionally
+    non-recursive so callers can sweep a directory of atomic-write siblings
+    without deleting unrelated temp files in nested application data.
+
+    A temp file is removed only when `time.time() - path.stat().st_mtime` is
+    greater than `max_age_seconds`; fresh files are left in place because they
+    may belong to an active writer. `OSError` from `stat()` or `unlink()` is
+    logged at WARNING with the path and error detail, then swallowed so one
+    locked, missing, or permission-denied temp file does not block the rest of
+    the sweep.
+
+    Returns the number of files successfully removed. Never raises past the
+    boundary — a missing, non-directory, or permission-denied `directory` logs
+    WARNING and returns 0 so callers (CLI boot, ingest tail, cleanup scripts)
+    can invoke the sweep unconditionally without defensive pre-checks.
+    """
+    directory = Path(directory).resolve()
+    if not directory.exists():
+        logger.warning("sweep_orphan_tmp: directory does not exist: %s", directory)
+        return 0
+    if not directory.is_dir():
+        logger.warning("sweep_orphan_tmp: path is not a directory: %s", directory)
+        return 0
+
+    removed = 0
+    try:
+        candidates = list(directory.glob("*.tmp"))
+    except OSError as exc:
+        logger.warning("Failed to scan tmp files in %s: %s", directory, exc)
+        return removed
+
+    for path in candidates:
+        try:
+            age_seconds = time.time() - path.stat().st_mtime
+        except OSError as exc:
+            logger.warning("Failed to stat tmp file %s: %s", path, exc)
+            continue
+        if age_seconds <= max_age_seconds:
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove tmp file %s: %s", path, exc)
+            continue
+        removed += 1
+    return removed
+
+
 def _ensure_legacy_locks_purged() -> None:
     """Cycle 2 PR review R1: run `_purge_legacy_locks` lazily on first
     `file_lock` acquisition rather than at module import. Avoids touching
@@ -171,6 +237,12 @@ def file_lock(path: Path, timeout: float | None = None):
 
     Raises TimeoutError if the lock is held by a running process.  Raises
     OSError on unparseable lock content (item 2).
+
+    Windows PID-recycling caveat: stale-lock detection depends on the PID in
+    the lock file. Windows can recycle PIDs, so a timed-out waiter can see a
+    different live process with the same PID and avoid stealing the lock even
+    though the original holder is gone. Investigate and delete such lock files
+    manually when the owning process is known to be dead.
 
     Lock-order convention (Phase 4.5 HIGH cycle 1):
       page_path < history_path < contradictions_path < log_path < manifest_path
