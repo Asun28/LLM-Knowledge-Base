@@ -14,6 +14,7 @@ from kb.config import (
     PAGERANK_SEARCH_WEIGHT,
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
+    QUERY_COVERAGE_CONFIDENCE_THRESHOLD,
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
@@ -156,6 +157,15 @@ def search_pages(
                 search_telemetry["vector_hits"] = search_telemetry.get("vector_hits", 0) + len(
                     results
                 )
+                # Cycle 14 AC5 — stash per-page vector similarity on the
+                # side-channel. `score` is the cosine-proxy 1/(1+dist); RRF
+                # fusion later overwrites `score` with a rank-reciprocal
+                # value, so we save the cosine here for query_wiki's
+                # coverage-confidence computation. ADDITIVE — no signature
+                # change on search_pages.
+                scores_by_id = search_telemetry.setdefault("vector_scores_by_id", {})
+                for r in results:
+                    scores_by_id[r["id"]] = r["score"]
             return results
         except (ImportError, sqlite3.OperationalError, OSError, ValueError) as e:
             logger.debug("Vector search unavailable: %s", e)
@@ -791,11 +801,23 @@ def query_wiki(
             "context_pages": [],
             "stale_citations": [],
             "search_mode": search_mode,
+            "coverage_confidence": None,
         }
 
     # 2. Build context from matching pages
     ctx = _build_query_context(matching_pages)
     context = ctx["context"]
+
+    # Cycle 14 AC5 — coverage-confidence computation over Tier-1 vector hits.
+    # Extract the per-page cosine similarities stashed by vector_search on
+    # the search_telemetry side-channel (see search_pages). Coverage is the
+    # mean cosine similarity over pages actually packed into the context.
+    vector_scores = search_telemetry.get("vector_scores_by_id", {})
+    ctx_pages_list = ctx.get("context_pages", [])
+    ctx_vector_scores = [vector_scores[pid] for pid in ctx_pages_list if pid in vector_scores]
+    coverage_confidence: float | None = (
+        (sum(ctx_vector_scores) / len(ctx_vector_scores)) if ctx_vector_scores else None
+    )
 
     # Raw-source fallback: supplement thin wiki context with verbatim raw source content.
     # Cycle 3 H15: trigger on SEMANTIC signal, not post-truncation char count.
@@ -852,15 +874,32 @@ INSTRUCTIONS:
 - Distinguish between stated facts and inferences.
 """
 
-    answer = call_llm(
-        prompt,
-        tier="orchestrate",
-        system=(
-            "You are a knowledge base assistant. "
-            "Answer questions using wiki content with inline citations."
-        ),
-        max_tokens=QUERY_MAX_TOKENS,
+    # Cycle 14 AC5 — coverage-confidence refusal gate. When coverage is
+    # below the threshold, skip synthesis and return a fixed refusal
+    # template. The advisory MUST NOT echo the user question verbatim
+    # (threat T5). Only fires when there are vector hits to average;
+    # BM25-only queries (coverage_confidence is None) pass through.
+    low_confidence = (
+        coverage_confidence is not None
+        and coverage_confidence < QUERY_COVERAGE_CONFIDENCE_THRESHOLD
     )
+    if low_confidence:
+        refusal_advisory = (
+            f"Coverage {coverage_confidence:.2f} below threshold "
+            f"{QUERY_COVERAGE_CONFIDENCE_THRESHOLD:.2f}. Consider rephrasing "
+            "or widening the query."
+        )
+        answer = refusal_advisory
+    else:
+        answer = call_llm(
+            prompt,
+            tier="orchestrate",
+            system=(
+                "You are a knowledge base assistant. "
+                "Answer questions using wiki content with inline citations."
+            ),
+            max_tokens=QUERY_MAX_TOKENS,
+        )
 
     # 4. Extract citations from the answer
     citations = extract_citations(answer)
@@ -880,7 +919,11 @@ INSTRUCTIONS:
         "context_pages": ctx["context_pages"],
         "stale_citations": stale_citations,
         "search_mode": search_mode,
+        "coverage_confidence": coverage_confidence,
     }
+    if low_confidence:
+        result_dict["low_confidence"] = True
+        result_dict["advisory"] = refusal_advisory
 
     # 5. Optional output adapter (Phase 4.11)
     if output_format and output_format.strip().lower() != "text":
