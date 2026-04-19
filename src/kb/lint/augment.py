@@ -568,7 +568,7 @@ def run_augment(
     from kb.lint.fetcher import AugmentFetcher
 
     wiki_dir = wiki_dir or WIKI_DIR
-    raw_dir = raw_dir or RAW_DIR
+    raw_dir = _resolve_raw_dir(wiki_dir, raw_dir)
 
     # B2/B3 (Phase 5 three-round MEDIUM): when caller supplies a custom wiki
     # but no explicit data_dir, derive `wiki_dir.parent / ".data"` so manifest
@@ -1009,6 +1009,28 @@ def run_augment(
         "manifest_path": manifest_path,
         "summary": "\n".join(summary_lines),
     }
+
+
+def _resolve_raw_dir(wiki_dir: Path, raw_dir: Path | None) -> Path:
+    """Cycle 13 AC8 — derive raw_dir from wiki_dir override when omitted.
+
+    When caller supplies a custom ``wiki_dir`` but omits ``raw_dir``, derive
+    ``wiki_dir.parent / "raw"`` so augment runs stay project-isolated (mirrors
+    the existing ``effective_data_dir`` derivation pattern).
+
+    Lexical comparison ``wiki_dir != WIKI_DIR`` matches the cycle-7
+    ``effective_data_dir`` pattern; do NOT ``.resolve()`` — users with
+    symlinked wiki mounts rely on path identity.
+
+    Branch table:
+      - ``raw_dir`` is None AND ``wiki_dir != WIKI_DIR`` → derive sibling
+      - ``raw_dir`` is not None → honour explicit (any value, including
+        the global ``RAW_DIR`` literally re-passed)
+      - default → ``RAW_DIR``
+    """
+    if raw_dir is None and wiki_dir != WIKI_DIR:
+        return wiki_dir.parent / "raw"
+    return raw_dir or RAW_DIR
 
 
 def _record_verdict_gap_callout(stub_path: Path, *, run_id: str, reason: str) -> None:
