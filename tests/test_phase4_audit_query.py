@@ -1,6 +1,6 @@
 """Tests for query engine correctness — Phase 4 audit."""
 
-from kb.config import CONTEXT_TIER1_BUDGET, QUERY_CONTEXT_MAX_CHARS
+from kb.config import CONTEXT_TIER1_BUDGET, QUERY_CONTEXT_MAX_CHARS, tier1_budget_for
 from kb.query.engine import _build_query_context
 
 
@@ -30,8 +30,14 @@ def test_tier1_budget_prevents_summary_starvation():
 
 
 def test_tier1_budget_allows_multiple_small_summaries():
-    """Multiple small summaries that fit within CONTEXT_TIER1_BUDGET must all be included."""
-    chunk = CONTEXT_TIER1_BUDGET // 4
+    """Multiple small summaries that fit within the summaries tier-1 budget must all be included.
+
+    Cycle 15 AC2 — the summaries cap is ``tier1_budget_for("wiki_pages")`` (60% of
+    ``CONTEXT_TIER1_BUDGET``), not the full tier-1 pool. Size the fixture to
+    the scoped budget so the regression still exercises the multi-fit path.
+    """
+    summaries_cap = tier1_budget_for("wiki_pages")
+    chunk = summaries_cap // 4
     summaries = [_make_page(f"summaries/s{i}", "summary", chunk - 200) for i in range(3)]
     result = _build_query_context(summaries, max_chars=QUERY_CONTEXT_MAX_CHARS)
     for s in summaries:

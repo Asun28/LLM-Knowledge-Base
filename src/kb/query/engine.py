@@ -8,6 +8,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from kb.config import (
+    AUTHORED_BY_BOOST,
+    AUTHORED_BY_VALUES,
     BM25_B,
     BM25_K1,
     MAX_SEARCH_RESULTS,
@@ -19,9 +21,12 @@ from kb.config import (
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
+    SOURCE_DECAY_DEFAULT_DAYS,
     STATUS_RANKING_BOOST,
     VECTOR_MIN_SIMILARITY,
     WIKI_DIR,
+    decay_days_for,
+    tier1_budget_for,
 )
 from kb.graph.builder import build_graph
 from kb.models.frontmatter import validate_frontmatter
@@ -247,6 +252,11 @@ def search_pages(
     # (threat T9 — attacker-controlled frontmatter).
     scored = [_apply_status_boost(p) for p in scored]
 
+    # Cycle 15 AC3 — authored_by ranking boost. Same gate shape as
+    # _apply_status_boost (threat T7); applied AFTER status boost so the
+    # two multipliers compose for human-authored + mature pages.
+    scored = [_apply_authored_by_boost(p) for p in scored]
+
     scored = dedup_results(scored)
 
     scored = _flag_stale_results(
@@ -314,6 +324,50 @@ def _apply_status_boost(page: dict) -> dict:
     return boosted
 
 
+# Trusted authored_by values that receive the ranking boost. Must be a
+# subset of AUTHORED_BY_VALUES; validated at module load time below.
+_TRUSTED_AUTHORED_BY: frozenset[str] = frozenset({"human", "hybrid"})
+assert _TRUSTED_AUTHORED_BY <= set(AUTHORED_BY_VALUES), (
+    "_TRUSTED_AUTHORED_BY must be a subset of AUTHORED_BY_VALUES vocabulary"
+)
+
+
+def _apply_authored_by_boost(page: dict) -> dict:
+    """Apply AUTHORED_BY_BOOST to pages with authored_by in _TRUSTED_AUTHORED_BY.
+
+    Cycle 15 AC3 / T7 — boost fires only when:
+    1. Page authored_by is "human" or "hybrid".
+    2. The reconstructed page metadata passes ``validate_frontmatter`` with
+       zero errors (prevents attacker-planted invalid frontmatter from
+       exploiting the boost — threat T7 parallel to cycle-14 T9 on status).
+
+    Returns the page dict with ``score`` updated; never mutates in place.
+    Literal copy of ``_apply_status_boost`` structure for gate discipline.
+    """
+    authored_by = page.get("authored_by", "")
+    if authored_by not in _TRUSTED_AUTHORED_BY:
+        return page
+    sources = page.get("sources")
+    if sources is None:
+        sources = []
+    post = _PostLike()
+    post.metadata = {
+        "title": page.get("title", ""),
+        "source": sources,
+        "created": page.get("created", ""),
+        "updated": page.get("updated", ""),
+        "type": page.get("type", ""),
+        "confidence": page.get("confidence", ""),
+        "authored_by": authored_by,
+    }
+    errors = validate_frontmatter(post)
+    if errors:
+        return page
+    boosted = dict(page)
+    boosted["score"] = page.get("score", 0.0) * (1 + AUTHORED_BY_BOOST)
+    return boosted
+
+
 def _compute_pagerank_scores(
     wiki_dir: Path | None = None,
     *,
@@ -363,13 +417,38 @@ def _compute_pagerank_scores(
     return result
 
 
+def _compose_topics(page: dict) -> str:
+    """Concatenate page tags + title into a single string for volatility lookup.
+
+    Cycle 15 AC1/AC16 support — tags can be list-of-str or str; compose
+    robustly so ``volatility_multiplier_for`` never chokes on unexpected
+    shapes.
+    """
+    tags = page.get("tags", "")
+    if isinstance(tags, list):
+        tags_str = " ".join(str(t) for t in tags)
+    else:
+        tags_str = str(tags) if tags else ""
+    title = str(page.get("title", ""))
+    return f"{tags_str} {title}".strip()
+
+
 def _flag_stale_results(results: list[dict], project_root: Path | None = None) -> list[dict]:
-    """Flag results where page updated date is older than newest source mtime.
+    """Flag results stale if source-mtime advanced OR absolute decay exceeded.
+
+    Cycle 15 AC1 — composes two orthogonal staleness signals:
+      1. Source-mtime gate (pre-existing): stale if any cited source file has
+         mtime newer than the wiki page's ``updated`` date.
+      2. Decay-window gate (new): stale if ``(today - page_date).days`` exceeds
+         the maximum per-source decay window (lenient — longest-decay platform
+         wins for multi-source pages). Pages with no sources skip the decay
+         check.
 
     Adds 'stale': True/False to each result dict. Non-destructive — modifies
     copies of the input dicts.
     """
     root = project_root or PROJECT_ROOT
+    today = date.today()
     flagged = []
     for r in results:
         r = {**r, "stale": False}
@@ -383,19 +462,26 @@ def _flag_stale_results(results: list[dict], project_root: Path | None = None) -
         except (ValueError, TypeError):
             flagged.append(r)
             continue
+        # Signal 1: source-mtime vs page-date.
         newest_source_mtime = None
         for src in sources:
             src_path = root / src
             if src_path.exists():
-                # I1 (Phase 4.5 MEDIUM): UTC-aware mtime date computation. Prior
-                # code used date.fromtimestamp(mtime) which applies local TZ,
-                # while date.fromisoformat(updated_str) is naive. On DST/TZ
-                # boundaries near midnight UTC the comparison would flip.
+                # I1 (Phase 4.5 MEDIUM): UTC-aware mtime date computation.
                 mtime = datetime.fromtimestamp(src_path.stat().st_mtime, tz=UTC).date()
                 if newest_source_mtime is None or mtime > newest_source_mtime:
                     newest_source_mtime = mtime
         if newest_source_mtime and newest_source_mtime > page_date:
             r["stale"] = True
+        # Signal 2: absolute decay window. Cycle 15 AC1 — lenient max over
+        # sources so a multi-source page with at least one long-decay
+        # platform (arxiv=1095d) is not prematurely flagged.
+        if not r["stale"]:
+            topics = _compose_topics(r)
+            decay_candidates = [decay_days_for(str(src), topics=topics) for src in sources]
+            max_decay = max(decay_candidates, default=SOURCE_DECAY_DEFAULT_DAYS)
+            if (today - page_date).days > max_decay:
+                r["stale"] = True
         flagged.append(r)
     return flagged
 
@@ -649,6 +735,11 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
 
     from kb.config import CONTEXT_TIER1_BUDGET, CONTEXT_TIER2_BUDGET
 
+    # Cycle 15 AC2 — route summaries tier-1 cap through tier1_budget_for so
+    # the CONTEXT_TIER1_SPLIT["wiki_pages"] proportion shapes context
+    # assembly (previously the full CONTEXT_TIER1_BUDGET was used as the
+    # summaries cap, ignoring the split vocabulary shipped in cycle 14).
+    summaries_budget = tier1_budget_for("wiki_pages")
     effective_max = min(max_chars, CONTEXT_TIER1_BUDGET + CONTEXT_TIER2_BUDGET)
     summaries = [p for p in pages if p.get("type") == "summary"]
     others = [p for p in pages if p.get("type") != "summary"]
@@ -695,12 +786,12 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
         total += len(section)
         return True
 
-    # Phase 4.5 HIGH Q1: per-addition tier budget. Each summary must fit within
-    # the REMAINING tier-1 budget, not just be checked against the cap as a
-    # stopping rule. Prevents one 30K summary from starving tier 2.
+    # Phase 4.5 HIGH Q1 + Cycle 15 AC2: per-addition tier budget scoped to
+    # summaries_budget (tier1_budget_for("wiki_pages")). Shrinking the
+    # wiki_pages split reduces the summaries cap proportionally.
     tier1_used = 0
     for p in summaries:
-        tier1_remaining = CONTEXT_TIER1_BUDGET - tier1_used
+        tier1_remaining = summaries_budget - tier1_used
         if tier1_remaining <= 0:
             skipped += 1
             continue
