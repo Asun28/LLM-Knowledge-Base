@@ -24,7 +24,7 @@ from kb.graph.builder import build_graph, graph_stats
 from kb.models.frontmatter import validate_frontmatter
 from kb.utils.io import atomic_text_write
 from kb.utils.markdown import extract_raw_refs, extract_wikilinks
-from kb.utils.pages import normalize_sources, page_id, scan_wiki_pages
+from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
 from kb.utils.paths import make_source_ref
 
 logger = logging.getLogger(__name__)
@@ -314,8 +314,9 @@ def check_staleness(
 
     for page_path in pages:
         try:
-            post = frontmatter.load(str(page_path))
-            updated = post.metadata.get("updated")
+            metadata, body = load_page_frontmatter(page_path)
+            del body
+            updated = metadata.get("updated")
             if isinstance(updated, str):
                 if not updated:
                     updated = None
@@ -395,12 +396,13 @@ def check_frontmatter_staleness(
 
     for page_path in pages:
         try:
-            post = frontmatter.load(str(page_path))
+            metadata, body = load_page_frontmatter(page_path)
+            del body
         except (OSError, ValueError, AttributeError, yaml.YAMLError, UnicodeDecodeError) as e:
             logger.warning("Failed to load wiki page %s: %s", page_path, e)
             continue
 
-        updated = post.metadata.get("updated")
+        updated = metadata.get("updated")
         if isinstance(updated, str):
             try:
                 updated = date.fromisoformat(updated)
@@ -451,7 +453,8 @@ def check_frontmatter(
 
     for page_path in pages:
         try:
-            post = frontmatter.load(str(page_path))
+            metadata, body = load_page_frontmatter(page_path)
+            post = frontmatter.Post(body, **metadata)
             errors = validate_frontmatter(post)
             if errors:
                 pid = page_id(page_path, wiki_dir)
@@ -598,8 +601,9 @@ def check_stub_pages(
         if pid.startswith(AUTOGEN_PREFIXES):
             continue
         try:
-            post = frontmatter.load(str(page_path))
-            body = post.content.strip()
+            metadata, body = load_page_frontmatter(page_path)
+            del metadata
+            body = body.strip()
             if len(body) < min_content_chars:
                 issues.append(
                     {
