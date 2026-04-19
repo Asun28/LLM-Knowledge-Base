@@ -11,6 +11,7 @@ from kb.config import (
     BM25_B,
     BM25_K1,
     MAX_SEARCH_RESULTS,
+    PAGE_STATUSES,
     PAGERANK_SEARCH_WEIGHT,
     PROJECT_ROOT,
     QUERY_CONTEXT_MAX_CHARS,
@@ -18,10 +19,12 @@ from kb.config import (
     QUERY_MAX_TOKENS,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
+    STATUS_RANKING_BOOST,
     VECTOR_MIN_SIMILARITY,
     WIKI_DIR,
 )
 from kb.graph.builder import build_graph
+from kb.models.frontmatter import validate_frontmatter
 from kb.query.bm25 import BM25Index, tokenize
 from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
@@ -230,12 +233,74 @@ def search_pages(
                 rank_lists.append(pagerank_list)
 
     scored = rrf_fusion(rank_lists)[:candidate_limit]
+
+    # Cycle 14 AC23 — status ranking boost. Applied AFTER RRF fusion and
+    # BEFORE dedup_results so boosted pages can influence dedup order
+    # (per design gate Q6: decision is to use validate_frontmatter gating
+    # rather than a separate authored_by co-gate). Gate: page status in
+    # (mature, evergreen) AND reconstructed metadata passes
+    # validate_frontmatter (no errors). Invalid frontmatter → no boost
+    # (threat T9 — attacker-controlled frontmatter).
+    scored = [_apply_status_boost(p) for p in scored]
+
     scored = dedup_results(scored)
 
     scored = _flag_stale_results(
         scored[:max_results], project_root=(wiki_dir.parent if wiki_dir else None)
     )
     return scored
+
+
+def _apply_status_boost(page: dict) -> dict:
+    """Apply STATUS_RANKING_BOOST to pages with status in PAGE_STATUSES[-2:].
+
+    Cycle 14 AC23 / Q6 — boost fires only when:
+    1. Page status is "mature" or "evergreen" (members of PAGE_STATUSES).
+    2. The reconstructed page metadata passes ``validate_frontmatter`` with
+       zero errors (prevents attacker-planted invalid frontmatter from
+       exploiting the boost — threat T9).
+
+    Returns the page dict with ``score`` updated; never mutates in place.
+    """
+    status = page.get("status", "")
+    # Boost only for the "trusted" lifecycle states — last two members of
+    # PAGE_STATUSES. Seed/developing do not receive the boost even when
+    # validated.
+    _trusted_statuses = {"mature", "evergreen"}
+    assert _trusted_statuses <= set(PAGE_STATUSES), (
+        "trusted_statuses must be a subset of PAGE_STATUSES vocabulary"
+    )
+    if status not in _trusted_statuses:
+        return page
+    # Reconstruct a minimal frontmatter.Post for validation. Pass the
+    # sources list through verbatim (even when empty) so validate_frontmatter
+    # can flag an empty list; empty list indicates a page with no
+    # provenance, which is never eligible for the trust boost.
+    sources = page.get("sources")
+    if sources is None:
+        sources = []
+    metadata = {
+        "title": page.get("title", ""),
+        "source": sources,
+        "created": page.get("created", ""),
+        "updated": page.get("updated", ""),
+        "type": page.get("type", ""),
+        "confidence": page.get("confidence", ""),
+        "status": status,
+    }
+
+    class _PostLike:
+        pass
+
+    post = _PostLike()
+    post.metadata = metadata
+    errors = validate_frontmatter(post)
+    if errors:
+        # Invalid frontmatter — no boost (T9). Return unchanged.
+        return page
+    boosted = dict(page)
+    boosted["score"] = page.get("score", 0.0) * (1 + STATUS_RANKING_BOOST)
+    return boosted
 
 
 def _compute_pagerank_scores(

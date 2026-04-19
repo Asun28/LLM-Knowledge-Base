@@ -154,6 +154,10 @@ def load_all_pages(
                     "created": _date_str(metadata.get("created")),
                     "updated": _date_str(metadata.get("updated")),
                     "content": body,
+                    # Cycle 14 AC23 — status ranking boost. Additive key;
+                    # existing consumers ignore. Empty string when absent
+                    # so downstream membership checks are safe.
+                    "status": str(metadata.get("status", "")),
                 }
                 if include_content_lower:
                     page_dict["content_lower"] = body.lower()
