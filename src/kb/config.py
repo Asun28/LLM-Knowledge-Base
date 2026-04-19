@@ -1,8 +1,12 @@
 """Project configuration — paths, model tiers, and settings."""
 
 import logging
+import math
 import os
+import re
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 # ── Project paths ──────────────────────────────────────────────
 _LOG = logging.getLogger(__name__)
@@ -379,7 +383,61 @@ SOURCE_DECAY_DAYS: dict[str, int] = {
 SOURCE_DECAY_DEFAULT_DAYS = STALENESS_MAX_DAYS
 
 
-def decay_days_for(ref: str | None) -> int:
+# ── Cycle 15 AC14 — per-topic volatility multipliers ──────────
+# Case-folded keyword map: when a page's tags/title match one of these
+# keywords, the source decay window is multiplied so volatile topics
+# (LLMs, agents, web frameworks) treat sources as fresh for shorter
+# windows — or in the cycle-14/15 shape, the multiplier EXTENDS decay
+# because max() wins and 1.1× a 1095d arxiv window is 1204d. Read-only
+# mapping prevents caller mutation; keys are casefolded at definition
+# so lookup does not have to worry about case drift (threat T1).
+_RAW_VOLATILITY_TOPICS: dict[str, float] = {
+    "llm": 1.1,
+    "react": 1.1,
+    "docker": 1.1,
+    "claude": 1.1,
+    "agent": 1.1,
+    "mcp": 1.1,
+}
+SOURCE_VOLATILITY_TOPICS: Mapping[str, float] = MappingProxyType(
+    {k.casefold(): v for k, v in _RAW_VOLATILITY_TOPICS.items()}
+)
+
+
+def volatility_multiplier_for(text: str | None) -> float:
+    """Return the highest matching volatility multiplier for ``text``.
+
+    Scans ``text`` for word-boundary matches against each key in
+    ``SOURCE_VOLATILITY_TOPICS``. Returns the maximum matched multiplier,
+    or ``1.0`` when no key matches. "Most volatile topic wins" semantics
+    — a page tagged both ``llm`` and a hypothetical ``rust`` key would
+    take the larger multiplier.
+
+    Threat T1 mitigation:
+      - ``text`` is truncated to 4096 chars before scanning (length cap
+        prevents pathological-input CPU exhaustion on adversarial tags).
+      - Each key is ``re.escape``-ed so future keys with regex metachars
+        cannot corrupt the pattern.
+
+    Args:
+        text: Page tags + title concatenated; ``None``/empty returns 1.0.
+
+    Returns:
+        Multiplier in ``[1.0, max(SOURCE_VOLATILITY_TOPICS.values())]``.
+    """
+    if not text:
+        return 1.0
+    # Cycle 15 T1 — length cap before regex loop.
+    text = text[:4096]
+    hits: list[float] = []
+    for key, mult in SOURCE_VOLATILITY_TOPICS.items():
+        pattern = rf"\b{re.escape(key)}\b"
+        if re.search(pattern, text, re.IGNORECASE):
+            hits.append(mult)
+    return max(hits, default=1.0)
+
+
+def decay_days_for(ref: str | None, topics: str | None = None) -> int:
     """Return the decay-window days for a source reference.
 
     Parses ``ref`` as a URL via urllib.parse, extracts the hostname, and
@@ -388,15 +446,38 @@ def decay_days_for(ref: str | None) -> int:
     IDN hostnames are IDNA-encoded before comparison. Refs without a
     scheme or hostname fall back to ``SOURCE_DECAY_DEFAULT_DAYS``.
 
+    Cycle 15 AC16 — optional ``topics`` kwarg composes with the base
+    decay window via ``volatility_multiplier_for``. When provided, the
+    result is clamped to ``[1, SOURCE_DECAY_DEFAULT_DAYS * 50]`` to
+    defend against hostile/typo multipliers (threat T2). Non-finite or
+    non-positive multipliers fall back to 1.0 BEFORE the ``int()``
+    coercion (``int(nan)`` raises on CPython).
+
     Args:
         ref: URL-style source reference (e.g. ``"https://arxiv.org/abs/X"``)
             or ``None``/empty string.
+        topics: Optional concatenation of tags + title for per-topic
+            volatility. ``None`` (default) preserves pre-cycle-15
+            backward compat (no multiplier applied).
 
     Returns:
-        Decay window in days.
+        Decay window in days, always in ``[1, SOURCE_DECAY_DEFAULT_DAYS * 50]``.
     """
     if not ref:
-        return SOURCE_DECAY_DEFAULT_DAYS
+        base_days = SOURCE_DECAY_DEFAULT_DAYS
+    else:
+        base_days = _lookup_decay_by_host(ref)
+    if topics is None:
+        return base_days
+    # Cycle 15 T2 — fallback BEFORE int() to avoid ValueError on NaN.
+    mult = volatility_multiplier_for(topics)
+    if not math.isfinite(mult) or mult <= 0:
+        mult = 1.0
+    return max(1, min(int(base_days * mult), SOURCE_DECAY_DEFAULT_DAYS * 50))
+
+
+def _lookup_decay_by_host(ref: str) -> int:
+    """Internal helper — host match via urlparse + dot-boundary keyfind."""
     try:
         from urllib.parse import urlparse
 
@@ -409,7 +490,6 @@ def decay_days_for(ref: str | None) -> int:
     try:
         host = host.encode("idna").decode("ascii")
     except (UnicodeError, UnicodeDecodeError):
-        # Already ASCII or idna-encoding failed; use raw lowercase host.
         pass
     for key, days in SOURCE_DECAY_DAYS.items():
         if host == key or host.endswith("." + key):
@@ -423,3 +503,10 @@ def decay_days_for(ref: str | None) -> int:
 # Applied in src/kb/query/engine.py::search_pages AFTER RRF fusion and
 # BEFORE dedup_results.
 STATUS_RANKING_BOOST = 0.05
+
+# ── Cycle 15 AC3 — authored_by ranking boost magnitude ──────────
+# Multiplicative boost factor applied to pages whose frontmatter
+# authored_by is in ("human", "hybrid") AND passes validate_frontmatter
+# (T7 gate). Applied by _apply_authored_by_boost AFTER _apply_status_boost
+# in the query score pipeline.
+AUTHORED_BY_BOOST = 0.02
