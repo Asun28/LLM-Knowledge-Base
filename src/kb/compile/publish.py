@@ -47,36 +47,22 @@ def _is_excluded(page: dict) -> bool:
     """
     if str(page.get("confidence", "")).lower() == _EXCLUDED_CONFIDENCE:
         return True
-    # belief_state comes from metadata via load_all_pages. This module
-    # reads raw frontmatter directly below since load_all_pages doesn't
-    # surface belief_state today. See partition logic.
+    if str(page.get("belief_state", "")).lower() in _EXCLUDED_BELIEF_STATES:
+        return True
     return False
 
 
 def _partition_pages(pages: list[dict]) -> tuple[list[dict], list[dict]]:
     """Split pages into (kept, excluded).
 
-    The ``belief_state`` field is not yet surfaced by ``load_all_pages``;
-    read it from the raw frontmatter via python-frontmatter for each page
-    so we can respect the filter.
+    Both ``confidence`` and ``belief_state`` are surfaced by
+    ``load_all_pages`` (cycle 14), so no second disk read is required —
+    partition is a pure dict check over the already-loaded page list.
     """
-    import frontmatter
-
     kept: list[dict] = []
     excluded: list[dict] = []
     for page in pages:
-        # Fast-path: confidence comes from load_all_pages.
         if _is_excluded(page):
-            excluded.append(page)
-            continue
-        # Slow-path: pull belief_state from the page's frontmatter.
-        try:
-            parsed = frontmatter.load(page["path"])
-        except (OSError, ValueError, UnicodeDecodeError):
-            kept.append(page)
-            continue
-        belief_state = str(parsed.metadata.get("belief_state", "")).lower()
-        if belief_state in _EXCLUDED_BELIEF_STATES:
             excluded.append(page)
         else:
             kept.append(page)
@@ -178,8 +164,7 @@ def build_llms_full_txt(wiki_dir: Path, out_path: Path) -> Path:
     current_bytes = 0
     cap = LLMS_FULL_MAX_BYTES
     truncated_count = 0
-    first_page_oversized = False
-
+    pages_written = 0
     for idx, page in enumerate(kept):
         title = _sanitize_line(page.get("title", page["id"]))
         header = f"# {title}\n\n"
@@ -201,15 +186,17 @@ def build_llms_full_txt(wiki_dir: Path, out_path: Path) -> Path:
                     parts.append(encoded.decode("utf-8", errors="ignore"))
                     parts.append("\n\n[!oversized page truncated]\n")
                     current_bytes += len(encoded)
-                    first_page_oversized = True
-                idx += 1
-            truncated_count = len(kept) - idx
+                    pages_written = 1
+            truncated_count = len(kept) - pages_written
             break
         parts.append(piece)
         current_bytes += piece_bytes
+        pages_written = idx + 1
 
     footer_lines: list[str] = []
-    if truncated_count > 0 and not first_page_oversized:
+    if truncated_count > 0:
+        # MINOR 4 fix: emit truncation footer even when first_page_oversized,
+        # so operators reading the file know additional pages were omitted.
         remaining_ids = [
             p["id"] for p in kept[len(kept) - truncated_count : len(kept) - truncated_count + 3]
         ]

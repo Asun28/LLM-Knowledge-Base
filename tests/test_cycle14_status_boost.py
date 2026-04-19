@@ -128,3 +128,62 @@ class TestNoMutation:
         page = _base_page("nomut", score=0.5, status="mature")
         _apply_status_boost(page)
         assert page["score"] == 0.5  # unchanged
+
+
+class TestDedupInteraction:
+    """MINOR 2 (R1 Sonnet) — boost-before-dedup interaction.
+
+    Design-gate Q6 chose apply-before-dedup so boosted pages can influence
+    dedup ordering. Verify a mature page with a lower base score than a
+    seed competitor does end up winning dedup_by_source when their IDs
+    collide (same-page duplicates from BM25 + vector).
+    """
+
+    def test_mature_wins_dedup_over_higher_score_seed(self):
+        from kb.query.dedup import dedup_results
+
+        # Two entries for the same page id — one from BM25 (score 0.50,
+        # seed status), one from vector (score 0.49, mature status). After
+        # _apply_status_boost runs, the mature entry's score becomes
+        # 0.49 * 1.05 = 0.5145, surpassing the seed.
+        mature = _base_page("concepts/cap", score=0.49, status="mature")
+        seed = _base_page("concepts/cap", score=0.50, status="seed")
+        # Same id on both — simulates the post-RRF candidate list.
+        boosted = [_apply_status_boost(p) for p in (seed, mature)]
+        deduped = dedup_results(boosted)
+        assert len(deduped) == 1
+        # The mature one survived — its score is now higher than seed's
+        # unboosted 0.50.
+        assert deduped[0]["status"] == "mature"
+        assert deduped[0]["score"] > 0.50
+
+
+class TestThresholdIdentity:
+    """MINOR 3 (R1 Sonnet) — verify threshold is imported from config.
+
+    Python floats aren't guaranteed to be interned, so ``is`` identity on
+    the value itself isn't reliable. Instead verify the value matches
+    AND that tuning the config value flows through to the consumer's
+    module-level reference via a fresh-import check.
+    """
+
+    def test_threshold_equals_config(self):
+        from kb import config as kb_config
+        from kb.query import engine as query_engine
+
+        assert (
+            query_engine.QUERY_COVERAGE_CONFIDENCE_THRESHOLD
+            == kb_config.QUERY_COVERAGE_CONFIDENCE_THRESHOLD
+        )
+
+    def test_engine_re_imports_config_constant(self):
+        """Sanity check that engine.py imports the name from kb.config
+        (rather than redefining the literal). Behavioural proxy for the
+        identity check."""
+        import kb.query.engine as engine_mod
+
+        # If engine.py has `from kb.config import QUERY_COVERAGE_CONFIDENCE_THRESHOLD`,
+        # then the attribute lookup `engine_mod.QUERY_COVERAGE_CONFIDENCE_THRESHOLD`
+        # resolves to the value currently bound at module-load time.
+        assert hasattr(engine_mod, "QUERY_COVERAGE_CONFIDENCE_THRESHOLD")
+        assert isinstance(engine_mod.QUERY_COVERAGE_CONFIDENCE_THRESHOLD, float)

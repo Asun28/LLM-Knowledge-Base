@@ -59,7 +59,11 @@ def search_pages(
             attempt/result counts so callers can distinguish "hybrid
             attempted, zero hits" from "hybrid disabled" (cycle 3 H11 PR
             review R1 Codex MAJOR). Keys set: ``vector_attempts``,
-            ``vector_hits``, ``bm25_hits``. Keyword-only — additive.
+            ``vector_hits``, ``bm25_hits``, and (cycle 14 AC5)
+            ``vector_scores_by_id: dict[str, float]`` — a supported
+            side-channel mapping page_id → cosine similarity used by
+            ``query_wiki`` to compute the coverage-confidence gate.
+            Keyword-only — additive.
 
     Returns:
         List of matching page dicts sorted by relevance score (descending).
@@ -251,8 +255,27 @@ def search_pages(
     return scored
 
 
+class _PostLike:
+    """Lightweight duck-type shim matching frontmatter.Post's .metadata attr.
+
+    Used by ``_apply_status_boost`` to reconstruct a validate_frontmatter-
+    compatible object from a load_all_pages page dict without constructing
+    a real frontmatter.Post (which pulls extra parsing machinery).
+    """
+
+    __slots__ = ("metadata",)
+
+
+# Trusted status lifecycle states that receive the ranking boost. Must be
+# a subset of PAGE_STATUSES; validated at module load time below.
+_TRUSTED_STATUSES: frozenset[str] = frozenset({"mature", "evergreen"})
+assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
+    "_TRUSTED_STATUSES must be a subset of PAGE_STATUSES vocabulary"
+)
+
+
 def _apply_status_boost(page: dict) -> dict:
-    """Apply STATUS_RANKING_BOOST to pages with status in PAGE_STATUSES[-2:].
+    """Apply STATUS_RANKING_BOOST to pages with status in _TRUSTED_STATUSES.
 
     Cycle 14 AC23 / Q6 — boost fires only when:
     1. Page status is "mature" or "evergreen" (members of PAGE_STATUSES).
@@ -263,23 +286,17 @@ def _apply_status_boost(page: dict) -> dict:
     Returns the page dict with ``score`` updated; never mutates in place.
     """
     status = page.get("status", "")
-    # Boost only for the "trusted" lifecycle states — last two members of
-    # PAGE_STATUSES. Seed/developing do not receive the boost even when
-    # validated.
-    _trusted_statuses = {"mature", "evergreen"}
-    assert _trusted_statuses <= set(PAGE_STATUSES), (
-        "trusted_statuses must be a subset of PAGE_STATUSES vocabulary"
-    )
-    if status not in _trusted_statuses:
+    if status not in _TRUSTED_STATUSES:
         return page
-    # Reconstruct a minimal frontmatter.Post for validation. Pass the
-    # sources list through verbatim (even when empty) so validate_frontmatter
-    # can flag an empty list; empty list indicates a page with no
-    # provenance, which is never eligible for the trust boost.
+    # Reconstruct a minimal frontmatter.Post-shaped object for validation.
+    # Pass the sources list through verbatim (even when empty) so
+    # validate_frontmatter can flag an empty list; empty list indicates a
+    # page with no provenance, which is never eligible for the trust boost.
     sources = page.get("sources")
     if sources is None:
         sources = []
-    metadata = {
+    post = _PostLike()
+    post.metadata = {
         "title": page.get("title", ""),
         "source": sources,
         "created": page.get("created", ""),
@@ -288,12 +305,6 @@ def _apply_status_boost(page: dict) -> dict:
         "confidence": page.get("confidence", ""),
         "status": status,
     }
-
-    class _PostLike:
-        pass
-
-    post = _PostLike()
-    post.metadata = metadata
     errors = validate_frontmatter(post)
     if errors:
         # Invalid frontmatter — no boost (T9). Return unchanged.

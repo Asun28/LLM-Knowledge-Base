@@ -154,10 +154,14 @@ def load_all_pages(
                     "created": _date_str(metadata.get("created")),
                     "updated": _date_str(metadata.get("updated")),
                     "content": body,
-                    # Cycle 14 AC23 — status ranking boost. Additive key;
-                    # existing consumers ignore. Empty string when absent
+                    # Cycle 14 AC23 + AC1 — optional epistemic-integrity
+                    # frontmatter fields surfaced as additive keys. Existing
+                    # consumers ignore; publish builders and the status
+                    # ranking boost read directly. Empty string when absent
                     # so downstream membership checks are safe.
                     "status": str(metadata.get("status", "")),
+                    "belief_state": str(metadata.get("belief_state", "")),
+                    "authored_by": str(metadata.get("authored_by", "")),
                 }
                 if include_content_lower:
                     page_dict["content_lower"] = body.lower()
