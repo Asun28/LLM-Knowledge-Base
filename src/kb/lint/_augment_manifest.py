@@ -97,20 +97,28 @@ class Manifest:
         return cls(run_id=run_id, path=path, data=data, data_dir=resolved)
 
     @classmethod
-    def resume(cls, *, run_id_prefix: str, data_dir: Path | None = None) -> Manifest | None:
+    def resume(cls, *, run_id: str, data_dir: Path | None = None) -> Manifest | None:
+        """Resume an incomplete run by EXACT 8-char hex id (cycle 17 AC11 + Q8).
+
+        The manifest filename stem is `augment-run-<run_id[:8]>.json`, so a
+        fully-specified exact-8-char id maps to one deterministic filename with
+        no glob wildcard interpolation. Returns None when the file is missing
+        or when the run already completed (ended_at set).
+        """
         resolved = _resolve_data_dir(data_dir)
         if not resolved.exists():
             return None
-        for f in resolved.glob(f"augment-run-{run_id_prefix}*.json"):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as e:
-                logger.warning("Skipping corrupt manifest %s: %s", f, e)
-                continue
-            if data.get("ended_at"):
-                continue  # already complete
-            return cls(run_id=data["run_id"], path=f, data=data, data_dir=resolved)
-        return None
+        path = resolved / f"augment-run-{run_id}.json"
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Skipping corrupt manifest %s: %s", path, e)
+            return None
+        if data.get("ended_at"):
+            return None  # already complete
+        return cls(run_id=data["run_id"], path=path, data=data, data_dir=resolved)
 
     # ---- mutators ----
 

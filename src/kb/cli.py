@@ -249,6 +249,15 @@ def query(question: str, output_format: str):
     default=None,
     help="Override wiki directory.",
 )
+@click.option(
+    "--resume",
+    type=str,
+    default="",
+    help=(
+        "Resume an incomplete augment run by its 8-hex-char id "
+        "(e.g. --resume=abc12345). Requires --augment."
+    ),
+)
 def lint(
     fix: bool,
     augment: bool,
@@ -257,16 +266,25 @@ def lint(
     dry_run: bool,
     max_gaps: int,
     wiki_dir: Path | None,
+    resume: str,
 ):
     """Run lint checks on the wiki. Add --augment for reactive gap-fill."""
     from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
     from kb.lint.runner import format_report, run_all_checks
+    from kb.mcp.app import _validate_run_id
 
     # Flag dependency validation
     if execute and not augment:
         raise click.UsageError("--execute requires --augment")
     if auto_ingest and not execute:
         raise click.UsageError("--auto-ingest requires --execute (and --augment)")
+    # Cycle 17 AC12 — --resume requires --augment; validated before forwarding.
+    if resume and not augment:
+        raise click.UsageError("--resume requires --augment")
+    if resume:
+        err = _validate_run_id(resume)
+        if err:
+            raise click.UsageError(err)
     # B4 (Phase 5 three-round MEDIUM): reject non-positive values up front so
     # negative --max-gaps doesn't silently truncate proposals via Python slicing.
     if max_gaps < 1:
@@ -295,6 +313,7 @@ def lint(
                 mode=mode,
                 max_gaps=max_gaps,
                 dry_run=dry_run,
+                resume=resume or None,
             )
             click.echo("\n" + augment_result["summary"])
 
