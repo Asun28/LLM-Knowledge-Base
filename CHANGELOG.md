@@ -36,7 +36,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ### Phase 4.5 -- Backlog-by-file cycle 16 (2026-04-20)
 
-24 AC across 8 source files + 9 new test files + doc updates / 10 commits (1 Step-11 security-verify N1 fix). Tests: 2334 → 2459 collected (+125); full suite 2452 passed + 7 skipped (run-time count).
+24 AC across 8 source files + 9 new test files + doc updates / 14 commits (1 Step-11 security-verify N1 fix + 1 R1 fix batch + 1 R2 fix batch + 1 R3 NIT batch). Tests: 2334 → 2464 collected (+130); full suite 2457 passed + 7 skipped (run-time count).
 
 #### Added
 - `src/kb/config.py` — new constants `QUERY_REPHRASING_MAX = 3`, `DUPLICATE_SLUG_DISTANCE_THRESHOLD = 3`, `CALLOUT_MARKERS = ("contradiction","gap","stale","key-insight")`.

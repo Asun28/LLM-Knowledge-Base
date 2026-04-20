@@ -290,6 +290,15 @@ def kb_query(
             if result.get("output_error"):
                 parts.append(f"\n[warn] Output format failed: {result['output_error']}")
 
+            # Cycle 16 R3 NIT 2 — surface rephrasings on low-coverage refusal
+            # path so MCP callers see the scan-tier suggestions instead of
+            # having them silently swallowed by the response builder.
+            rephrasings = result.get("rephrasings") or []
+            if rephrasings:
+                parts.append("\nSuggested rephrasings:")
+                for r in rephrasings:
+                    parts.append(f"  - {r}")
+
             # Cycle 16 AC17-AC19 — persist synthesis to wiki/synthesis/.
             if save_slug is not None:
                 saved_msg = _save_synthesis(save_slug, result)
