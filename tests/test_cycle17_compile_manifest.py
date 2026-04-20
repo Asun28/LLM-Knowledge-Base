@@ -216,6 +216,47 @@ class TestAC3FullModeLock:
             f"Surviving keys: {list(surviving.keys())}"
         )
 
+    def test_find_changed_sources_save_branch_holds_lock(self, tmp_path: Path) -> None:
+        """Cycle 17 T2 same-class peer — find_changed_sources(save_hashes=True) must
+        hold file_lock around its load+prune+save."""
+        from kb.compile.compiler import find_changed_sources
+
+        raw_abs = tmp_path / "raw"
+        raw_abs.mkdir()
+        (raw_abs / "articles").mkdir()
+        (raw_abs / "articles" / "seed.md").write_text(
+            "---\ntitle: seed\n---\nbody\n", encoding="utf-8"
+        )
+        manifest_path = tmp_path / "hashes.json"
+        save_manifest({"_template/article": "seed_hash"}, manifest_path)
+
+        race_key = "raw/articles/concurrent.md"
+        (raw_abs / "articles" / "concurrent.md").write_text("body", encoding="utf-8")
+        race_done = threading.Event()
+
+        import kb.compile.compiler as _cc
+
+        original_scan = _cc.scan_raw_sources
+
+        def spy_scan(*args, **kwargs):
+            """Inject a concurrent manifest write between find_changed_sources' load and save."""
+            result = original_scan(*args, **kwargs)
+            m = load_manifest(manifest_path)
+            m[race_key] = "race_value"
+            save_manifest(m, manifest_path)
+            race_done.set()
+            return result
+
+        with patch("kb.compile.compiler.scan_raw_sources", side_effect=spy_scan):
+            find_changed_sources(raw_dir=raw_abs, manifest_path=manifest_path)
+
+        assert race_done.is_set()
+        surviving = load_manifest(manifest_path)
+        assert race_key in surviving, (
+            "T2 peer regression: concurrent write during find_changed_sources "
+            f"was clobbered. Surviving: {list(surviving.keys())}"
+        )
+
     def test_lock_file_pattern_matches_file_lock_convention(self, tmp_path: Path) -> None:
         """file_lock uses <path>.lock sibling; if a prior run crashed,
         the stale lock should not block a new run (stale-lock purge is

@@ -141,6 +141,13 @@ def find_changed_sources(
 
     Returns:
         Tuple of (new_sources, changed_sources).
+
+    Cycle 17 T2 same-class peer — when ``save_hashes=True`` the
+    ``load_manifest → prune → save_manifest`` block below is the manifest RMW
+    pair that AC3 covers for ``compile_wiki``'s tail. It is wrapped in
+    ``file_lock(manifest_path)`` at the save site to preserve the same
+    concurrent-writer invariant at every manifest RMW. The ``save_hashes=False``
+    branch is read-only and does not need the lock.
     """
     manifest = load_manifest(manifest_path)
     all_sources = scan_raw_sources(raw_dir)
@@ -197,9 +204,17 @@ def find_changed_sources(
                     changed_source_set.add(f.resolve())
 
     if save_hashes:
-        # Update manifest with current template hashes and save (includes pruned entries)
-        manifest.update(current_tpl_hashes)
-        save_manifest(manifest, manifest_path)
+        # Cycle 17 T2 same-class peer — manifest RMW must hold file_lock so a
+        # concurrent kb_ingest between our load_manifest (above) and save does
+        # not lose its entry. Re-reading under the lock closes the RMW window.
+        with file_lock(manifest_path):
+            latest_manifest = load_manifest(manifest_path)
+            # Re-apply our pruning + template updates on the freshly-loaded
+            # manifest so we do not clobber concurrent writes.
+            for k in deleted_keys:
+                latest_manifest.pop(k, None)
+            latest_manifest.update(current_tpl_hashes)
+            save_manifest(latest_manifest, manifest_path)
     # Cycle 4 PR R1 Codex MAJOR 3 — previously `elif deleted_keys: save_manifest(...)`
     # ran even when save_hashes=False, which made detect_source_drift (the
     # documented read-only caller) mutate the manifest. The side effect caused
