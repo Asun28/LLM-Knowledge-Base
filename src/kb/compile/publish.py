@@ -1,8 +1,19 @@
 """Publish wiki contents as machine-consumable outputs.
 
 Cycle 14 AC20/AC21/AC22 — Tier-1 recommended next item (Karpathy-verbatim
-``/llms.txt``, ``/llms-full.txt``, and ``/graph.jsonld``). Each builder is
-a pure function: reads from ``wiki_dir``, writes one file to ``out_path``.
+``/llms.txt``, ``/llms-full.txt``, and ``/graph.jsonld``).
+
+Cycle 16 AC20-AC22 adds two more builders:
+  - ``build_per_page_siblings`` writes ``{out_dir}/pages/{page_id}.txt`` +
+    ``.json`` per page (multi-file output — takes a base directory).
+  - ``build_sitemap_xml`` writes ``{out_path}`` with sitemap.org/0.9 schema
+    (single-file output — takes a full path).
+
+Signature convention: single-file builders (``build_llms_txt``,
+``build_llms_full_txt``, ``build_graph_jsonld``, ``build_sitemap_xml``)
+take a full ``out_path``; multi-file builders (``build_per_page_siblings``)
+take a base ``out_dir`` and derive child paths internally. This asymmetry
+encodes output-cardinality and is intentional (cycle 16 Q9).
 
 Security/threat mitigations:
   - T1 (path containment): enforced by the CLI wrapper ``kb publish``.
@@ -11,14 +22,23 @@ Security/threat mitigations:
     every output with a ``[!excluded] N`` footer.
   - T3 (JSON injection): ``build_graph_jsonld`` uses ``json.dump`` with a
     fully-constructed Python dict; no f-string JSON assembly.
-  - T8 (URL disclosure): JSON-LD ``url`` is a wiki-relative POSIX path; no
-    absolute filesystem paths and no ``file://`` scheme.
+  - T7 (XML injection, cycle 16): ``build_sitemap_xml`` uses ``ET.SubElement``
+    + ``.text`` assignment — never f-string-concatenates child text.
+  - T8 (URL disclosure): every ``<loc>`` / ``url`` is a wiki-relative POSIX
+    path; no absolute filesystem paths, no ``file://`` scheme.
+  - T9 (sibling path traversal, cycle 16): every per-page sibling write
+    resolves the target and asserts containment under ``out_dir/pages``.
+  - T10 (incremental-skip retracted leak, cycle 16): per-page sibling
+    cleanup for ``excluded`` pages runs UNCONDITIONALLY on every publish,
+    BEFORE the incremental skip check — ``incremental=True`` can never
+    leave stale retracted siblings on disk.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from kb.utils.io import atomic_text_write
@@ -344,4 +364,153 @@ def build_graph_jsonld(wiki_dir: Path, out_path: Path, *, incremental: bool = Fa
     # volumes on Windows/OneDrive). json.dumps preserves the cycle-14 T3
     # contract (no f-string JSON assembly).
     atomic_text_write(json.dumps(document, ensure_ascii=False, indent=2) + "\n", out_path)
+    return out_path
+
+
+# ── Cycle 16 AC20-AC22 — per-page siblings + sitemap ─────────────────────
+
+
+def _sibling_paths_for(page_id: str, pages_dir: Path) -> tuple[Path, Path]:
+    """Return (txt_path, json_path) for a page under the siblings base."""
+    txt = pages_dir / f"{page_id}.txt"
+    return txt, txt.with_suffix(".json")
+
+
+def _is_contained(target: Path, base: Path) -> bool:
+    """Safe containment check: target's resolved path must live under base."""
+    try:
+        resolved_target = target.resolve()
+        resolved_base = base.resolve()
+    except OSError:
+        return False
+    return str(resolved_target).startswith(str(resolved_base))
+
+
+def build_per_page_siblings(
+    wiki_dir: Path, out_dir: Path, *, incremental: bool = False
+) -> list[Path]:
+    """Emit one ``.txt`` + ``.json`` sibling pair per kept page.
+
+    Cycle 16 AC20 / AC22 / T7 / T8 / T9 / T10.
+
+    Layout::
+        {out_dir}/pages/{page_id}.txt   # title + body plaintext
+        {out_dir}/pages/{page_id}.json  # metadata (sort_keys=True determinism)
+
+    Behaviour:
+      - Retracted/contradicted/speculative pages EXCLUDED (T2/T10).
+      - Cleanup (unlink ``.txt`` + ``.json``) for currently-excluded pages
+        runs UNCONDITIONALLY on every call, BEFORE the incremental skip
+        check — ``incremental=True`` cannot leak stale siblings (cycle 16
+        Q2/C3 amendment).
+      - Per-page target paths are resolve()-checked under ``{out_dir}/pages``
+        before any write (T9). A page whose id escapes containment is
+        skipped with a warning.
+      - Incremental skip: when ``incremental=True`` and the output directory
+        is newer than the newest wiki page mtime, returns the existing
+        sibling paths without re-writing.
+
+    Returns:
+        Sorted list of paths written (or that exist after cleanup).
+    """
+    pages = load_all_pages(wiki_dir)
+    kept, excluded = _partition_pages(pages)
+
+    pages_dir = (out_dir / "pages").resolve()
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    # T10 cycle 16 Q2/C3 — cleanup runs UNCONDITIONALLY (before skip).
+    for page in excluded:
+        page_id = str(page.get("id", "")).strip()
+        if not page_id:
+            continue
+        txt_path, json_path = _sibling_paths_for(page_id, pages_dir)
+        # Containment check: only unlink paths that LAND under pages_dir;
+        # refuse to follow a hostile page_id elsewhere on disk.
+        if _is_contained(txt_path, pages_dir):
+            txt_path.unlink(missing_ok=True)
+        if _is_contained(json_path, pages_dir):
+            json_path.unlink(missing_ok=True)
+
+    # Incremental short-circuit (cleanup already ran).
+    if incremental and _publish_skip_if_unchanged(wiki_dir, pages_dir):
+        logger.info("build_per_page_siblings skipped — output dir newer than wiki")
+        return sorted(pages_dir.rglob("*.txt")) + sorted(pages_dir.rglob("*.json"))
+
+    written: list[Path] = []
+    for page in _sort_pages(kept):
+        page_id = str(page.get("id", "")).strip()
+        if not page_id:
+            continue
+        txt_path, json_path = _sibling_paths_for(page_id, pages_dir)
+        # T9 — skip paths that resolve outside pages_dir.
+        if not _is_contained(txt_path, pages_dir) or not _is_contained(json_path, pages_dir):
+            logger.warning(
+                "build_per_page_siblings skipping page_id=%r — path traversal risk", page_id
+            )
+            continue
+        txt_path.parent.mkdir(parents=True, exist_ok=True)
+
+        title = str(page.get("title", page_id))
+        body = str(page.get("content", ""))
+        plaintext = f"{title}\n\n{body}" if body else title + "\n"
+        atomic_text_write(plaintext, txt_path)
+        written.append(txt_path)
+
+        # R1 amendment — stdlib json.dumps(sort_keys=True) for deterministic
+        # cross-platform byte output (AC22 idempotency).
+        meta = {
+            "title": title,
+            "page_id": page_id,
+            "url": f"pages/{page_id}.txt",
+            "updated": str(page.get("updated", "")),
+            "confidence": str(page.get("confidence", "")),
+            "belief_state": str(page.get("belief_state", "")),
+            "authored_by": str(page.get("authored_by", "")),
+            "status": str(page.get("status", "")),
+            "source": list(page.get("sources", [])),
+        }
+        json_body = json.dumps(meta, indent=2, sort_keys=True, ensure_ascii=False)
+        atomic_text_write(json_body + "\n", json_path)
+        written.append(json_path)
+
+    return sorted(written)
+
+
+def build_sitemap_xml(wiki_dir: Path, out_path: Path, *, incremental: bool = False) -> Path:
+    """Emit a ``sitemap.xml`` at ``out_path`` per sitemap.org/0.9 schema.
+
+    Cycle 16 AC21 / AC22 / T7 / T8 / T10.
+
+    Each ``<url>`` entry has:
+      - ``<loc>`` — wiki-relative POSIX path ``pages/{page_id}.txt`` (T8).
+      - ``<lastmod>`` — the page ``updated`` frontmatter value (ISO-8601
+        YYYY-MM-DD) when present and non-empty.
+
+    XML construction uses ``ET.SubElement(...).text = value`` so child
+    text is escaped by the stdlib serializer — no f-string concat (T7).
+    """
+    pages = load_all_pages(wiki_dir)
+    kept, _ = _partition_pages(pages)
+
+    if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
+        logger.info("build_sitemap_xml skipped — output newer than wiki")
+        return out_path
+
+    urlset = ET.Element("urlset", {"xmlns": "http://www.sitemaps.org/schemas/sitemap/0.9"})
+    for page in _sort_pages(kept):
+        page_id = str(page.get("id", "")).strip()
+        if not page_id:
+            continue
+        url = ET.SubElement(urlset, "url")
+        loc = ET.SubElement(url, "loc")
+        loc.text = f"pages/{page_id}.txt"  # T8: relative POSIX only
+        lastmod_value = str(page.get("updated", "")).strip()
+        if lastmod_value:
+            lastmod = ET.SubElement(url, "lastmod")
+            lastmod.text = lastmod_value
+
+    xml_body = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(urlset, encoding="unicode")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_text_write(xml_body + "\n", out_path)
     return out_path
