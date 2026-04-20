@@ -20,7 +20,7 @@ Full detail: [history archive](CHANGELOG-history.md#<anchor>).
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
-| cycle 17 | 2026-04-20 | 16 AC / 11 src / 12 commits | 2464 → 2548 (+84) | manifest lock symmetry, capture two-pass, lint augment resume, shared run-id validator, MCP lazy imports (narrowed), thin-tool coverage |
+| cycle 17 | 2026-04-20 | 16 AC / 11 src / 14 commits | 2464 → 2548 (+84) | manifest lock symmetry, capture two-pass, lint augment resume, shared run-id validator, MCP lazy imports (narrowed), thin-tool coverage |
 | cycle 16 | 2026-04-20 | 24 AC / 8 src / 14 commits | 2334 → 2464 (+130) | enrichment targets, query rephrasings, duplicate-slug + inline-callout lint, kb_query `save_as`, per-page siblings + sitemap publish |
 | cycle 15 | 2026-04-20 | 26 AC / 6 src / 7 commits | 2245 → 2334 (+89) | authored-by boost, source volatility, per-source decay, incremental publish, lint decay/status wiring |
 | cycle 14 | 2026-04-20 | 21 AC / 9 src / 8 commits | 2140 → 2235 (+95) | Epistemic-Integrity 2.0 vocabularies, coverage-confidence refusal gate, `kb publish` module (/llms.txt, /llms-full.txt, /graph.jsonld), status ranking boost |

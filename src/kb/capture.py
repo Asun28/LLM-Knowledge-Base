@@ -643,8 +643,16 @@ def _write_item_files(
 
     # Phase 3 — write real content then atomic-rename temp → final.
     written: list[CaptureItem] = []
+    # Cycle 17 PR R1 Sonnet MAJOR — track the current item index explicitly so
+    # the except handler's rollback slice is correct regardless of where the
+    # failure fires (write_text before os.replace vs after). `len(written)`
+    # alone misidentifies the failing index when write_text raises AFTER the
+    # O_EXCL reservation but BEFORE the atomic os.replace (temp_path still
+    # exists, must be rolled back).
+    current_idx = 0
     try:
         for i, (slug, temp_path, item) in enumerate(reservations):
+            current_idx = i
             markdown = _render_markdown(
                 item=item,
                 captured_alongside=alongside_for[i],
@@ -669,8 +677,12 @@ def _write_item_files(
             )
     except OSError as e:
         _rollback_finalized(written)
-        _rollback_reservations(reservations[len(written) :])
-        return [], f"Error: write failed on item {len(written)}: {e}"
+        # Roll back the failing reservation AND every untouched one after it.
+        # `reservations[current_idx:]` includes the failing item (whose temp
+        # still exists when write_text raises pre-os.replace; is a no-op when
+        # os.replace itself raises because temp was already renamed).
+        _rollback_reservations(reservations[current_idx:])
+        return [], f"Error: write failed on item {current_idx}: {e}"
 
     return written, None
 

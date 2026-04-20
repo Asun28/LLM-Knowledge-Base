@@ -699,13 +699,20 @@ def run_augment(
         if dry_run:
             fetches = [{"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals]
         else:
-            manifest = Manifest.start(
-                run_id=run_id,
-                mode=mode,
-                max_gaps=max_gaps,
-                stubs=[{"page_id": p["stub_id"], "title": p["title"]} for p in proposals],
-                data_dir=effective_data_dir,
-            )
+            # Cycle 17 PR R1 Sonnet BLOCKER — when resuming, REUSE the existing
+            # manifest object instead of calling `Manifest.start` which would
+            # overwrite the resumed JSON file (filename = augment-run-<run_id[:8]>.json)
+            # and destroy the audit trail of previous state transitions.
+            if resume_manifest is not None:
+                manifest = resume_manifest
+            else:
+                manifest = Manifest.start(
+                    run_id=run_id,
+                    mode=mode,
+                    max_gaps=max_gaps,
+                    stubs=[{"page_id": p["stub_id"], "title": p["title"]} for p in proposals],
+                    data_dir=effective_data_dir,
+                )
             manifest_path = str(manifest.path)
             limiter = RateLimiter(data_dir=effective_data_dir)
             fetches = []

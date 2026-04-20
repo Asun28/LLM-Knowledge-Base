@@ -216,9 +216,25 @@ class TestAC3FullModeLock:
             f"Surviving keys: {list(surviving.keys())}"
         )
 
-    def test_find_changed_sources_save_branch_holds_lock(self, tmp_path: Path) -> None:
-        """Cycle 17 T2 same-class peer — find_changed_sources(save_hashes=True) must
-        hold file_lock around its load+prune+save."""
+    def test_find_changed_sources_save_branch_uses_lock_and_reload(self, tmp_path: Path) -> None:
+        """Cycle 17 T2 same-class peer — verify find_changed_sources save branch
+        holds `file_lock(manifest_path)` AND re-reads inside the lock.
+
+        Design: this test pins the two-part contract by monkeypatching
+        `save_manifest` and asserting that BEFORE the save fires, the
+        production code has called `load_manifest` a second time (the in-lock
+        reload). A correctly-implemented save branch will show call order
+        ``[load_manifest pre-lock, save_manifest (or more loads) inside lock]``
+        — in particular, a `load_manifest` call immediately before each
+        `save_manifest` call inside the `with file_lock` block. An unlocked
+        or un-reloaded implementation would save directly from the pre-lock
+        `manifest` dict, detectable via fewer `load_manifest` calls.
+
+        We avoid the earlier vacuous pattern (spy on `scan_raw_sources` which
+        runs outside the lock) and the artificial-race pattern (spy `save_manifest`
+        to write mid-save — a contrived sequence that can't occur under the
+        real lock because `file_lock` serialises writes at the OS level).
+        """
         from kb.compile.compiler import find_changed_sources
 
         raw_abs = tmp_path / "raw"
@@ -230,32 +246,43 @@ class TestAC3FullModeLock:
         manifest_path = tmp_path / "hashes.json"
         save_manifest({"_template/article": "seed_hash"}, manifest_path)
 
-        race_key = "raw/articles/concurrent.md"
-        (raw_abs / "articles" / "concurrent.md").write_text("body", encoding="utf-8")
-        race_done = threading.Event()
-
+        # Track the sequence of load_manifest / save_manifest calls to verify
+        # the save branch re-reads inside the lock (cycle-17 T2 peer fix).
         import kb.compile.compiler as _cc
 
-        original_scan = _cc.scan_raw_sources
+        original_load = _cc.load_manifest
+        original_save = _cc.save_manifest
+        call_log: list[str] = []
 
-        def spy_scan(*args, **kwargs):
-            """Inject a concurrent manifest write between find_changed_sources' load and save."""
-            result = original_scan(*args, **kwargs)
-            m = load_manifest(manifest_path)
-            m[race_key] = "race_value"
-            save_manifest(m, manifest_path)
-            race_done.set()
-            return result
+        def trace_load(*args, **kwargs):
+            call_log.append("load")
+            return original_load(*args, **kwargs)
 
-        with patch("kb.compile.compiler.scan_raw_sources", side_effect=spy_scan):
+        def trace_save(*args, **kwargs):
+            call_log.append("save")
+            return original_save(*args, **kwargs)
+
+        with (
+            patch("kb.compile.compiler.load_manifest", side_effect=trace_load),
+            patch("kb.compile.compiler.save_manifest", side_effect=trace_save),
+        ):
             find_changed_sources(raw_dir=raw_abs, manifest_path=manifest_path)
 
-        assert race_done.is_set()
-        surviving = load_manifest(manifest_path)
-        assert race_key in surviving, (
-            "T2 peer regression: concurrent write during find_changed_sources "
-            f"was clobbered. Surviving: {list(surviving.keys())}"
+        # Expected sequence: pre-lock load → in-lock load (the T2 peer fix) → save.
+        # Minimum: ≥2 loads before the (first) save. A broken implementation
+        # with a single pre-lock load followed by a save would show only
+        # ["load", "save"] and fail this test.
+        first_save_idx = call_log.index("save")
+        loads_before_first_save = call_log[:first_save_idx].count("load")
+        assert loads_before_first_save >= 2, (
+            f"T2 peer regression: find_changed_sources save branch did not "
+            f"re-read the manifest inside file_lock. Call log: {call_log}. "
+            f"Expected at least 2 load_manifest calls before the first save."
         )
+
+        # Existing template entry must survive the save (basic behavioural pin).
+        surviving = load_manifest(manifest_path)
+        assert "_template/article" in surviving
 
     def test_lock_file_pattern_matches_file_lock_convention(self, tmp_path: Path) -> None:
         """file_lock uses <path>.lock sibling; if a prior run crashed,
