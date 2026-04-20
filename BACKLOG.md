@@ -183,19 +183,21 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
   Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
   Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
 
-- `src/kb/lint/augment.py::_post_ingest_quality` — kept on uncached `frontmatter.load(str(...))` because it follows same-process writes from `_mark_page_augmented` / `_record_verdict_gap_callout`. On FAT32 / OneDrive / SMB the cached helper could return stale metadata. Documented inline (cycle 13 AC2 scope). Migrating requires either explicit `cache_clear()` after every write-back site or a write-aware cache hook.
+- `src/kb/evolve/analyzer.py` `suggest_enrichment_targets` — AC8-carry (cycle 16): design a new `suggest_enrichment_targets(pages, status_priority=["seed", "developing"])` function that iterates existing pages (not dead-link targets), sorts by status, and surfaces through `kb_evolve`. Requires a dedicated requirements + threat + brainstorm cycle.
 
-- `src/kb/query/engine.py` + `src/kb/lint/checks.py` — wire `decay_days_for` into `_flag_stale_results` and the lint staleness scan. Helper shipped in cycle 14 AC10/AC11 with per-platform decay windows (huggingface.co 120d, github.com 180d, stackoverflow 365d, arxiv 1095d, wikipedia 1460d, openlibrary 1825d), but no call site consumes it yet — staleness still uses the flat 90-day `STALENESS_MAX_DAYS`. Target: cycle 15.
+- `src/kb/lint/augment.py::_post_ingest_quality` — AC17-drop rationale for future reference: cache-invalidation work was reconsidered and DROPPED. Cycle-13 AC2 intentionally uses uncached `frontmatter.load` to avoid FAT32/OneDrive/SMB coarse-mtime holes. Do not re-open without a concrete failure case.
 
-- `src/kb/query/engine.py` — wire `tier1_budget_for` into `_build_query_context` so the 60/20/5/15 split actually shapes context assembly. Helper shipped in cycle 14 AC7/AC8 but no call site consumes it yet. Target: cycle 15.
+- `src/kb/query/engine.py::query_wiki` — LLM-suggested rephrasings for low-coverage advisory (deferred from cycle 15 non-goals): implement a scan-tier call that proposes 2-3 alternative phrasings when coverage is low.
 
-- `src/kb/evolve/analyzer.py` + `src/kb/lint/checks.py` — `status: mature|evergreen` sub-asks from BACKLOG 400 still open after cycle 14 shipped only the ranking boost. (a) `kb_evolve` should target `status: seed` pages preferentially; (b) `kb_lint` should flag `status: mature` pages not updated in 90+ days. Target: cycle 15.
+- `compile/linker.py` cross-reference auto-linking — deferred: when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` added to A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
 
-- `src/kb/query/engine.py::query_wiki` — low-coverage advisory (cycle 14 AC5) currently emits a fixed string. BACKLOG-line-293 originally asked for "LLM-suggested rephrasings"; implement via a scan-tier call that proposes 2-3 alternative phrasings when coverage is low. Target: cycle 15+.
+- `mcp/core.py` `kb_query` `save_as` parameter — deferred: immediately create a `wiki/synthesis/{slug}.md` page from the query answer with citations mapped to `source:` refs and proper frontmatter; no feedback gate required.
 
-- `src/kb/compile/publish.py` — incremental publish. Builders currently regenerate all three files on every `kb publish` invocation. For a 10k-page wiki this is ~2-3s work; diff against existing file mtimes and skip unchanged. Target: cycle 15+.
+- `wiki/` inline callout markers — deferred: embed `> [!contradiction]`, `> [!gap]`, `> [!stale]`, `> [!key-insight]` callouts at the point of relevance in wiki page bodies and have lint parse them for aggregate reporting.
 
-- `src/kb/compile/publish.py` — wrap `out_path.write_text(...)` in `atomic_text_write` for crash-safe temp+rename on publish artifacts. Low severity (artifacts are regeneratable) but maintains codebase-wide atomic-write discipline. Target: cycle 15.
+- `lint/checks.py` duplicate-slug lint check — deferred: detect near-duplicate slugs (`attention` vs `attention-mechanism`, `rag` vs `retrieval-augmented`) so merge tooling can resolve drift.
+
+- `compile/publish.py` compile-time auto-publish + sibling `.txt`/`.json` + `sitemap.xml` — deferred: hook `kb publish` into `compile_wiki`, add per-page sibling files, and write a wiki-root sitemap.
 
 - `ingest/pipeline.py` index-file write order (~653-700) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. A crash between `_sources.md` and manifest writes can duplicate entries on re-ingest. (R2)
   (fix: introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
@@ -297,14 +299,12 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `lint/drift.py` `kb_drift_audit` — cold re-ingest a random sample of raw sources with no prior wiki context, diff against current wiki pages, surface divergence as "potential LLM drift" warnings. Different from existing `kb_detect_drift` which checks source mtime changes; this catches *wiki-side* drift where compilation has diverged from source truth. Source: Memory Drift Prevention (asakin, gist — cites ETH Zurich study: auto-generated context degraded 5/8 cases).
   (effort: Medium — new module; reuse existing `ingest_source` with `wiki_dir=tmp` then diff)
 
-- `compile/merge.py` `kb_merge <a> <b>` + `lint/checks.py` duplicate-slug — lint detects near-duplicate slugs (`attention` vs `attention-mechanism`, `rag` vs `retrieval-augmented`); `kb_merge` MCP tool merges two pages, updates all backlinks across `wiki/` and `wiki/outputs/`, archives absorbed page to `wiki/archive/` with a redirect stub, one git commit per merge. Source: Louis Wang.
-  (effort: Medium — merge is the new work; dup-slug detection adds one lint check)
+- `compile/merge.py` `kb_merge <a> <b>` — MCP tool merges two pages, updates all backlinks across `wiki/` and `wiki/outputs/`, archives absorbed page to `wiki/archive/` with a redirect stub, one git commit per merge. Source: Louis Wang.
+  (effort: Medium — duplicate-slug detection is tracked separately in Phase 4.5 MEDIUM)
 
 <!-- `query/engine.py` coverage-confidence gate SHIPPED in cycle 14 AC5 (fixed refusal template). LLM-suggested rephrasings remain deferred — see "kb_query low-coverage advisory LLM-suggested rephrasings" above. -->
 
-<!-- `models/` `authored_by` frontmatter vocabulary + validate_frontmatter SHIPPED in cycle 14 AC1/AC2. Query-weight boost + lint human-auto-edited flag remain deferred. -->
-- `models/` `authored_by` consumers — query engine applies mild weight boost to `authored_by: human|hybrid`; lint flags user-declared human pages that have been auto-edited by ingest without flag removal. (Vocabulary shipped cycle 14; consumers deferred.)
-  (effort: Low — ranking hook + lint rule)
+<!-- `models/` `authored_by` frontmatter vocabulary + validate_frontmatter SHIPPED in cycle 14 AC1/AC2. Query-weight boost + lint human-auto-edited flag SHIPPED in cycle 15. -->
 
 - `ingest/pipeline.py` `lint/semantic.py` inline claim-level confidence tags — emit `[EXTRACTED]`, `[INFERRED]`, `[AMBIGUOUS]` inline markers in wiki page bodies during ingest; modify ingest LLM prompts to annotate individual claims at source; `kb_lint_deep` spot-verifies a random sample of EXTRACTED-tagged claims against the raw source file, flagging hallucinated attributions. Complements page-level `confidence` frontmatter without replacing it; directly answers "LLM stated this as sourced fact but it's not in the source." Source: llm-wiki-skill confidence annotation + lint verification model.
   (effort: Medium — ingest prompt update + regex claim parser + lint spot-check against raw source text)
@@ -313,9 +313,7 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 <!-- `query/formats/` `kb_query --format=…` adapters SHIPPED in Phase 4.11 (2026-04-14). -->
 
-<!-- `compile/publish.py` `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` SHIPPED in cycle 14 AC20-AC22 (2026-04-20) with `kb publish` CLI subcommand. Auto-compile hook + per-page sibling `.txt`/`.json` files + `/sitemap.xml` remain deferred. -->
-- `compile/publish.py` compile-time auto-publish — hook `kb publish` into `compile_wiki` so /llms.txt and /graph.jsonld regenerate on every incremental compile; add per-page `.txt`/`.json` siblings and a wiki-root `/sitemap.xml`. Cycle-14 shipped the builders + CLI only; compile integration and sibling/sitemap outputs remain deferred.
-  (effort: Low — compile hook + two additional renderers)
+<!-- `compile/publish.py` `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` SHIPPED in cycle 14 AC20-AC22 (2026-04-20) with `kb publish` CLI subcommand. Atomic writes + incremental publish SHIPPED in cycle 15. Auto-compile hook + per-page sibling `.txt`/`.json` files + `/sitemap.xml` remain deferred — see Phase 4.5 MEDIUM. -->
 
 ### MEDIUM LEVERAGE — Synthesis & Exploration
 
@@ -353,11 +351,9 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - Deferred "community-aware retrieval boost" — Louvain intra-edge density <0.15 = "sparse/weak" threshold; surface sparse communities in `kb_evolve`. Source: nashsu.
   (effort: N/A — threshold choice)
 
-<!-- Per-platform `SOURCE_DECAY_DAYS` dict + `decay_days_for` helper SHIPPED in cycle 14 AC10/AC11. Call-site wiring into `_flag_stale_results` and lint staleness scan remains deferred — see cycle-15 follow-up above. `×1.1 volatility multiplier on LLM/React/Docker/Claude topics` remains unshipped. -->
+<!-- Per-platform `SOURCE_DECAY_DAYS` dict + `decay_days_for` helper SHIPPED in cycle 14 AC10/AC11. Cycle 15 wired call sites into `_flag_stale_results` and lint staleness scan, and shipped the topic volatility multiplier. -->
 
-<!-- `CONTEXT_TIER1_SPLIT` 60/20/5/15 constants + `tier1_budget_for` helper SHIPPED in cycle 14 AC7/AC8. Call-site wiring into `_build_query_context` remains deferred — see cycle-15 follow-up above. -->
-- Per-topic volatility multiplier on source decay — ×1.1 for LLM/React/Docker/Claude topic tags. Cycle 14 shipped only the hostname-based per-platform decay; topic-based volatility is a separate extension.
-  (effort: Low — topic-tag detection + multiplier on `decay_days_for` result)
+<!-- `CONTEXT_TIER1_SPLIT` 60/20/5/15 constants + `tier1_budget_for` helper SHIPPED in cycle 14 AC7/AC8. Cycle 15 wired `_build_query_context` to `tier1_budget_for("wiki_pages")`. -->
 
 - Deferred "graph topology gap analysis" — expose as card types: "Isolated (degree ≤ 1)", "Bridge (connects ≥ 3 clusters)", "Sparse community (cohesion < 0.15)" — each with one-click trigger that dispatches `kb_evolve --research` on the specific gap. Source: nashsu.
   (effort: N/A — card-type taxonomy for existing deferred item)
@@ -386,8 +382,7 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `mcp/core.py` `kb_delete_source` MCP tool — remove raw source file and cascade: delete source summary wiki page, strip source from `source:` field on shared entity/concept pages without deleting them, clean dead wikilinks from remaining wiki pages, update `index.md` and `_sources.md`. Fills the only major operational workflow gap not addressed by existing tooling.
   (effort: Medium — cascade deletion logic + backlink cleanup + atomic index/sources update)
 
-- `mcp/core.py` `kb_query` `save_as` parameter — immediately create a `wiki/synthesis/{slug}.md` page from the query answer with citations mapped to `source:` refs and proper frontmatter; no feedback gate required, faster knowledge accumulation for high-confidence answers. Coexists with feedback-gated conversation→KB promotion as the immediate save path. Source: llm-wiki-agent interactive save.
-  (effort: Low — slug from question + frontmatter builder + atomic write; CLI `--save` flag mirrors it)
+<!-- `kb_query save_as` parameter remains deferred — see Phase 4.5 MEDIUM. -->
 
 - `evolve/analyzer.py` `kb_evolve mode=research` — for each identified coverage gap, decompose into 2–3 web search queries, fetch top results via fetch MCP, save to `raw/articles/` via `kb_save_source`, return file paths for subsequent `kb_ingest`; capped at 5 sources per gap, max 3 rounds (broad → sub-gaps → contradictions). Turns evolve from advisory gap report into actionable source acquisition pipeline. Source: claude-obsidian autoresearch skill.
   (effort: Medium — gap decomposition prompt + fetch MCP integration + 3-round loop with source cap)
@@ -400,20 +395,16 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 - `query/bm25.py` `query/embeddings.py` chunk-level sub-page indexing — split wiki pages into topically coherent chunks using Savitzky-Golay boundary detection (embed sentences with model2vec, compute adjacent cosine similarities, SG smoothing 5-window 3rd-order polynomial, find zero-crossings as topic boundaries); each chunk indexed as `<page_id>:c<n>`; query engine scores chunks, deduplicates to best chunk per page, loads full pages for synthesis. Resolves the weakness where relevant content is buried in long pages. Source: garrytan/gbrain semantic.ts + sage-wiki FTS5 chunking.
   (effort: High — SG chunking module + BM25 index schema change + chunk-to-page dedup aggregation layer)
 
-- `compile/linker.py` cross-reference auto-linking — when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` added to A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`. Builds graph density automatically without requiring typed relations. Source: garrytan/gbrain ingest cross-reference link creation.
-  (effort: Low — post-injection pass over co-mentioned entity pairs; reuses existing inject_wikilinks infrastructure)
+<!-- Cross-reference auto-linking remains deferred — see Phase 4.5 MEDIUM. -->
 
 - `lint/checks.py` `query/engine.py` PageRank-prioritized semantic lint sampling — when `kb_lint_deep` must limit its page budget, select pages by PageRank descending rather than arbitrary order; high-authority pages with quality issues have outsized downstream impact on citing pages. Source: existing `graph_stats` PageRank scores.
   (effort: Low — sort by graph_stats PageRank before sampling; zero new infrastructure required)
 
 ### MEDIUM LEVERAGE — Page Lifecycle & Quality Signals
 
-<!-- `models/` `status` frontmatter vocabulary + validate_frontmatter + query ranking boost SHIPPED in cycle 14 AC1/AC2/AC23. `kb_evolve` targeting `status: seed` and `kb_lint` flagging `status: mature` >90d remain deferred — see cycle-15 follow-up above. -->
-- `models/` `status` evolve/lint consumers — `kb_evolve` should target `status: seed` pages preferentially; `kb_lint` should flag `status: mature` pages not updated in 90+ days. Vocabulary + ranking boost shipped cycle 14; remaining consumers deferred.
-  (effort: Low — rule hooks in evolve and lint)
+<!-- `models/` `status` frontmatter vocabulary + validate_frontmatter + query ranking boost SHIPPED in cycle 14 AC1/AC2/AC23. Cycle 15 shipped `kb_lint` mature-stale flagging; `kb_evolve` status-priority routing remains deferred — see Phase 4.5 MEDIUM AC8-carry. -->
 
-- `wiki/` inline quality callout markers — embed `> [!contradiction]`, `> [!gap]`, `> [!stale]`, `> [!key-insight]` callouts at the point of relevance in wiki page bodies; lint parses callouts for aggregate reporting ("3 pages have unresolved contradictions"); ingest auto-inserts `[!contradiction]` when auto-contradiction detection fires; renders natively in Obsidian. Source: claude-obsidian custom callout system.
-  (effort: Low — callout emitter in ingest/contradiction.py + lint parser for aggregate counts)
+<!-- Inline quality callout markers remain deferred — see Phase 4.5 MEDIUM. -->
 
 - `wiki/hot.md` wake-up context snapshot — ~500-word compressed context updated at session end (recent facts, recent page changes, open questions); read at session start via `SessionStart` hook; survives context compaction and session boundaries; enables cross-session continuity without full wiki crawl. Source: MemPalace concept + claude-obsidian hot cache.
   (effort: Low — append-on-ingest + SessionStart hook reads + one markdown file)
