@@ -186,6 +186,36 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _NOTES_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
+# Cycle 17 AC11-AC13 — shared run-id validator for `kb_lint(resume=...)`.
+# Exact 8 hex chars eliminates `Path.glob` prefix-collision ambiguity
+# (design gate Q8 decision): the augment manifest filename is
+# `augment-run-<run_id[:8]>.json`, so a full exact-8-hex input matches
+# a deterministic filename with no wildcard interpolation.
+# `re.fullmatch` (not `re.match` + `$`) because Python's `$` matches before a
+# trailing `\n` by default — `re.fullmatch` requires the pattern to cover the
+# entire string, rejecting `"abc12345\n"` and similar trailing-junk inputs.
+_RUN_ID_RE = re.compile(r"[0-9a-f]{8}")
+
+
+def _validate_run_id(run_id: str) -> str | None:
+    """Validate a resume run id for `kb_lint(resume=...)` / `kb lint --resume`.
+
+    Empty string is the sentinel for "no resume" (bypasses validation).
+
+    Args:
+        run_id: Candidate id, either ``""`` (no resume) or exactly 8 hex chars.
+
+    Returns:
+        Error message string on invalid input (caller prepends ``"Error:"``
+        for MCP surfaces or raises ``click.UsageError``/``ValueError``), or
+        ``None`` when valid.
+    """
+    if run_id == "":
+        return None
+    if not _RUN_ID_RE.fullmatch(run_id):
+        return f"Invalid resume id: {run_id!r}. Must be exactly 8 hex chars (0-9a-f)."
+    return None
+
 
 def _validate_notes(notes: str, field_name: str) -> str | None:
     """Validate free-text MCP notes after stripping control and bidi characters."""

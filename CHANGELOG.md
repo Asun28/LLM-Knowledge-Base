@@ -20,6 +20,7 @@ Full detail: [history archive](CHANGELOG-history.md#<anchor>).
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| cycle 17 | 2026-04-20 | 16 AC / 11 src / 14 commits | 2464 → 2548 (+84) | manifest lock symmetry, capture two-pass, lint augment resume, shared run-id validator, MCP lazy imports (narrowed), thin-tool coverage |
 | cycle 16 | 2026-04-20 | 24 AC / 8 src / 14 commits | 2334 → 2464 (+130) | enrichment targets, query rephrasings, duplicate-slug + inline-callout lint, kb_query `save_as`, per-page siblings + sitemap publish |
 | cycle 15 | 2026-04-20 | 26 AC / 6 src / 7 commits | 2245 → 2334 (+89) | authored-by boost, source volatility, per-source decay, incremental publish, lint decay/status wiring |
 | cycle 14 | 2026-04-20 | 21 AC / 9 src / 8 commits | 2140 → 2235 (+95) | Epistemic-Integrity 2.0 vocabularies, coverage-confidence refusal gate, `kb publish` module (/llms.txt, /llms-full.txt, /graph.jsonld), status ranking boost |
@@ -47,6 +48,37 @@ Full detail: [history archive](CHANGELOG-history.md#<anchor>).
 ---
 
 ### Cycle summaries
+
+#### Phase 4.5 — cycle 17 (2026-04-20)
+
+16 AC / 11 src / 12 commits (incl. Step-11 T2 same-class-peer follow-up).
+Closes three manifest RMW races (`compile_wiki` tail + exception path + `find_changed_sources`
+save branch) via `file_lock(manifest_path)` symmetry. Adds shared
+`_validate_run_id` helper (exact 8-hex via `re.fullmatch`) at
+`src/kb/mcp/app.py`; wires `run_augment(resume=...)` through CLI
+(`kb lint --resume`) and MCP (`kb_lint(resume=...)`) with `--augment`
+dependency check. Switches `Manifest.resume` from glob-prefix to exact-match
+direct path (eliminates the prefix-collision branch as structurally
+unreachable). Adds `templates/capture_prompt.txt` (AC9) and restructures
+`capture._write_item_files` to all-or-nothing two-pass with hidden-temp
+`.{slug}.reserving` reservations + `os.replace` atomic promote +
+rollback-all on mid-batch failure. MCP lazy imports narrowed (AC4): keeps
+kb.query.engine/kb.ingest.pipeline/etc. at module level for legacy-test
+monkeypatch compat; defers `kb.graph.export` from `mcp/health.py` +
+`anthropic`/`frontmatter`/`kb.utils.llm.LLMError`/`kb.utils.pages.save_page_frontmatter`
+inside tool bodies. AC8 documents `WikiPage`/`RawSource` as Phase-5
+migration targets via module docstring + AST inventory test.
+`tmp_kb_env` fixture clears `load_purpose` / `_load_template_cached` /
+`_build_schema_cached` LRU caches on setup (AC16 / Q3). Adds 13 new
+thin-coverage tests for 5 MCP tools (kb_stats, kb_graph_viz,
+kb_verdict_trends, kb_detect_drift, kb_compile_scan). AC14 pins
+`query_wiki(wiki_dir=tmp)` threads `purpose.md` into the synthesis prompt.
+AC18 regression pin prevents a future `KB_PROJECT_ROOT` fallback in
+`load_purpose`. Deferred to cycle 18: AC15 (e2e workflow test), AC19 / AC20
+(ingest observability + IndexWriter helper), AC21 (linker batch). Security:
+all in-scope threats IMPLEMENTED after T2 peer closure; 0 Dependabot
+alerts; empty pip-audit diff; same-class peer scan (cycle-16 L1) closed
+by the `find_changed_sources` save-branch lock.
 
 #### Phase 4.5 — cycle 16 (2026-04-20)
 

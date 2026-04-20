@@ -458,7 +458,9 @@ class TestKbGraphVizMaxNodes:
             calls.append(max_nodes)
             return "graph LR"
 
-        monkeypatch.setattr("kb.mcp.health.export_mermaid", mock_export, raising=False)
+        # Cycle 17 AC6: export_mermaid is imported function-locally inside
+        # kb_graph_viz; monkeypatch the owner module instead of the MCP wrapper.
+        monkeypatch.setattr("kb.graph.export.export_mermaid", mock_export, raising=True)
 
         mcp_health.kb_graph_viz(max_nodes=99999)
         assert calls and calls[0] <= 500, f"max_nodes not clamped: got {calls}"

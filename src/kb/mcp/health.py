@@ -1,10 +1,14 @@
-"""Health MCP tools — lint, evolve."""
+"""Health MCP tools — lint, evolve.
+
+Cycle 17 AC6: `kb.graph.export` (which pulls networkx) is deferred to the
+`kb_graph_viz` tool body. See `tests/test_cycle17_lazy_imports.py` for the
+regression pin.
+"""
 
 import logging
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
-from kb.graph.export import export_mermaid
 from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 
 logger = logging.getLogger(__name__)
@@ -23,6 +27,7 @@ def kb_lint(
     auto_ingest: bool = False,
     max_gaps: int = 5,
     wiki_dir: str | None = None,
+    resume: str = "",
 ) -> str:
     """Run health checks on the wiki. Reports dead links, orphans, staleness, etc.
 
@@ -34,6 +39,9 @@ def kb_lint(
         auto_ingest: With augment+execute, also pre-extract + ingest. Requires execute=True.
         max_gaps: Max stub gaps to attempt per augment run (default 5; hard ceiling 10).
         wiki_dir: Override wiki directory (default: kb.config.WIKI_DIR).
+        resume: Cycle 17 AC13. Resume an incomplete augment run by its exact
+            8-hex-char id (e.g. "abc12345"). Requires augment=True. Empty
+            string (default) = no resume.
 
     Returns:
         Formatted lint report. When augment=True, appends ## Augment Summary section.
@@ -41,11 +49,19 @@ def kb_lint(
     # Three-gate dependency validation — parity with CLI (cli.py:167-175).
     # MCP tools return "Error: ..." strings instead of raising to the client.
     from kb.config import AUGMENT_FETCH_MAX_CALLS_PER_RUN
+    from kb.mcp.app import _validate_run_id
 
     if execute and not augment:
         return "Error: --execute requires --augment"
     if auto_ingest and not execute:
         return "Error: --auto-ingest requires --execute (and --augment)"
+    # Cycle 17 AC13 — resume requires augment; validated via shared helper.
+    if resume and not augment:
+        return "Error: resume requires augment=true"
+    if resume:
+        rid_err = _validate_run_id(resume)
+        if rid_err:
+            return f"Error: {rid_err}"
     # B4 (Phase 5 three-round MEDIUM): reject non-positive values so negative
     # max_gaps doesn't silently truncate proposals via Python slicing.
     if max_gaps < 1:
@@ -102,6 +118,7 @@ def kb_lint(
                 mode=mode,
                 max_gaps=max_gaps,
                 dry_run=dry_run,
+                resume=resume or None,
             )
             result += "\n\n" + augment_result["summary"]
         except Exception as e:
@@ -179,6 +196,9 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         )
     max_nodes = max(1, min(max_nodes, 500))
     try:
+        # Cycle 17 AC6 — lazy import keeps networkx out of MCP cold boot.
+        from kb.graph.export import export_mermaid
+
         wiki_path, err = _validate_health_wiki_dir(wiki_dir)
         if err:
             return f"Error: {err}"

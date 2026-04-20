@@ -236,7 +236,34 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
         monkeypatch.setattr(capture_module, "_captures_resolved", captures.resolve())
         monkeypatch.setattr(capture_module, "_project_resolved", project.resolve())
 
+    # Cycle 17 AC16 / design gate Q3 — clear every production `@lru_cache`
+    # keyed on a path or source-type so the fixture's new sandbox paths are
+    # read fresh. Without this, a prior test's cached `load_purpose(other_wiki)`
+    # could survive into this test if keys happen to collide (they shouldn't,
+    # but the fixture's documented contract is "production sees tmp paths"
+    # and a stale-cache leak would violate that contract silently).
+    for cached_callable_path in (
+        "kb.utils.pages.load_purpose",
+        "kb.ingest.extractors._load_template_cached",
+        "kb.ingest.extractors._build_schema_cached",
+    ):
+        module_name, _, attr = cached_callable_path.rpartition(".")
+        mod = sys.modules.get(module_name)
+        if mod is None:
+            continue
+        func = getattr(mod, attr, None)
+        if func is None:
+            continue
+        cache_clear = getattr(func, "cache_clear", None)
+        if callable(cache_clear):
+            cache_clear()
+
     return project
+
+
+# Cycle 17 AC16 — `_kb_sandbox` is an alias for `tmp_kb_env` kept for the
+# design-gate naming convention. New code should prefer `tmp_kb_env` (cycle 12).
+_kb_sandbox = tmp_kb_env
 
 
 @pytest.fixture

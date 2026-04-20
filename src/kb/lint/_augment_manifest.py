@@ -97,20 +97,48 @@ class Manifest:
         return cls(run_id=run_id, path=path, data=data, data_dir=resolved)
 
     @classmethod
-    def resume(cls, *, run_id_prefix: str, data_dir: Path | None = None) -> Manifest | None:
+    def resume(cls, *, run_id: str, data_dir: Path | None = None) -> Manifest | None:
+        """Resume an incomplete run by EXACT 8-char hex id (cycle 17 AC11 + Q8).
+
+        The manifest filename stem is `augment-run-<run_id[:8]>.json`, so a
+        fully-specified exact-8-char id maps to one deterministic filename with
+        no glob wildcard interpolation. Returns None when the file is missing
+        or when the run already completed (ended_at set).
+
+        **Contract (cycle 17 PR R1 Sonnet MAJOR + R3 NIT clarifications):**
+
+        - The ``run_id`` PARAMETER is the 8-char STEM that appears in the
+          filename ``augment-run-<stem>.json``. It is NOT the full UUID
+          stored inside the JSON (``data["run_id"]``) — `Manifest.start`
+          truncates that UUID to 8 chars for the filename. Callers must
+          therefore pass the 8-char stem, not the full UUID.
+        - The returned Manifest INSTANCE's ``run_id`` FIELD holds the full
+          UUID (pulled from ``data["run_id"]`` inside the JSON), mirroring
+          the value set by ``Manifest.start``. Downstream use of
+          ``manifest.run_id`` is audit-only (run-ID in log prefixes, summary
+          strings) — never used to construct filenames, so the parameter/field
+          asymmetry is safe at runtime.
+        - Direct callers that receive ``None`` should decide whether to treat
+          a miss as "no incomplete run exists" (silent) or "id invalid"
+          (raise). The production caller `run_augment` raises ``ValueError``
+          on ``None`` return. `_validate_run_id` in `kb.mcp.app` enforces the
+          8-hex format at the CLI and MCP boundaries before this method is
+          reached.
+        """
         resolved = _resolve_data_dir(data_dir)
         if not resolved.exists():
             return None
-        for f in resolved.glob(f"augment-run-{run_id_prefix}*.json"):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as e:
-                logger.warning("Skipping corrupt manifest %s: %s", f, e)
-                continue
-            if data.get("ended_at"):
-                continue  # already complete
-            return cls(run_id=data["run_id"], path=f, data=data, data_dir=resolved)
-        return None
+        path = resolved / f"augment-run-{run_id}.json"
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Skipping corrupt manifest %s: %s", path, e)
+            return None
+        if data.get("ended_at"):
+            return None  # already complete
+        return cls(run_id=data["run_id"], path=path, data=data, data_dir=resolved)
 
     # ---- mutators ----
 

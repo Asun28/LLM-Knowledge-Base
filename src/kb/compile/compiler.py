@@ -16,6 +16,7 @@ from kb.config import (
 )
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
+from kb.utils.io import file_lock
 from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,13 @@ def find_changed_sources(
 
     Returns:
         Tuple of (new_sources, changed_sources).
+
+    Cycle 17 T2 same-class peer — when ``save_hashes=True`` the
+    ``load_manifest → prune → save_manifest`` block below is the manifest RMW
+    pair that AC3 covers for ``compile_wiki``'s tail. It is wrapped in
+    ``file_lock(manifest_path)`` at the save site to preserve the same
+    concurrent-writer invariant at every manifest RMW. The ``save_hashes=False``
+    branch is read-only and does not need the lock.
     """
     manifest = load_manifest(manifest_path)
     all_sources = scan_raw_sources(raw_dir)
@@ -196,9 +204,17 @@ def find_changed_sources(
                     changed_source_set.add(f.resolve())
 
     if save_hashes:
-        # Update manifest with current template hashes and save (includes pruned entries)
-        manifest.update(current_tpl_hashes)
-        save_manifest(manifest, manifest_path)
+        # Cycle 17 T2 same-class peer — manifest RMW must hold file_lock so a
+        # concurrent kb_ingest between our load_manifest (above) and save does
+        # not lose its entry. Re-reading under the lock closes the RMW window.
+        with file_lock(manifest_path):
+            latest_manifest = load_manifest(manifest_path)
+            # Re-apply our pruning + template updates on the freshly-loaded
+            # manifest so we do not clobber concurrent writes.
+            for k in deleted_keys:
+                latest_manifest.pop(k, None)
+            latest_manifest.update(current_tpl_hashes)
+            save_manifest(latest_manifest, manifest_path)
     # Cycle 4 PR R1 Codex MAJOR 3 — previously `elif deleted_keys: save_manifest(...)`
     # ran even when save_hashes=False, which made detect_source_drift (the
     # documented read-only caller) mutate the manifest. The side effect caused
@@ -409,12 +425,15 @@ def compile_wiki(
         except Exception as e:
             logger.exception("compile_wiki: ingest failed for %s", source)
             results["errors"].append({"source": str(source), "error": str(e)})
-            # Record failed hash so the source is retried on next compile.
+            # Cycle 17 AC3 — exception-path manifest RMW must hold file_lock so
+            # a concurrent kb_ingest that updates the manifest in this window
+            # cannot be clobbered by our load → update → save sequence.
             # pre_hash is already captured above; no need to re-call content_hash.
             try:
-                manifest = load_manifest(manifest_path)
-                manifest[rel_path] = f"failed:{pre_hash}"
-                save_manifest(manifest, manifest_path)
+                with file_lock(manifest_path):
+                    manifest = load_manifest(manifest_path)
+                    manifest[rel_path] = f"failed:{pre_hash}"
+                    save_manifest(manifest, manifest_path)
             except Exception as inner_exc:
                 logger.warning("Failed to record failed hash for %s: %s", source, inner_exc)
 
@@ -422,19 +441,29 @@ def compile_wiki(
     # In incremental mode, find_changed_sources already wrote template hashes and
     # ingest_source already persisted per-source hashes — no additional save needed.
     if not incremental:
-        current_manifest = load_manifest(manifest_path)
-        current_manifest.update(_template_hashes())
-        # Prune manifest entries for sources that no longer exist on disk
-        stale_keys = [
-            k
-            for k in current_manifest
-            if not k.startswith("_template/") and not (raw_dir.parent / k).exists()
-        ]
-        if stale_keys:
-            for k in stale_keys:
-                del current_manifest[k]
-            logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
-        save_manifest(current_manifest, manifest_path)
+        # Cycle 17 AC3 — wrap full-mode tail reload+prune+save in file_lock so
+        # a concurrent kb_ingest between our load_manifest and save_manifest does
+        # not lose its entry. Matches the per-source lock convention used by the
+        # ingest pipeline (manifest_path is the last lock in the documented order).
+        # Cycle 17 AC1 — prune base uses raw_dir.resolve().parent to match
+        # _canonical_rel_path's base under relative / symlinked / dotted raw_dir
+        # inputs; raw_dir.parent alone produces cwd-relative semantics that can
+        # diverge from the canonical key base.
+        prune_base = raw_dir.resolve().parent
+        with file_lock(manifest_path):
+            current_manifest = load_manifest(manifest_path)
+            current_manifest.update(_template_hashes())
+            # Prune manifest entries for sources that no longer exist on disk
+            stale_keys = [
+                k
+                for k in current_manifest
+                if not k.startswith("_template/") and not (prune_base / k).exists()
+            ]
+            if stale_keys:
+                for k in stale_keys:
+                    del current_manifest[k]
+                logger.info("Pruned %d stale manifest entries in full mode", len(stale_keys))
+            save_manifest(current_manifest, manifest_path)
 
     # H17 fix: single vector index rebuild after all sources are processed.
     # Per-source ingest_source calls used _skip_vector_rebuild=True to avoid

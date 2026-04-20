@@ -1,4 +1,20 @@
-"""Core MCP tools — query, ingest, compile."""
+"""Core MCP tools — query, ingest, compile.
+
+Cycle 17 AC4 (narrowed): `kb.capture` remains the only direct deferral at
+module level — it is NOT transitively loaded via any other kb.mcp.core import
+chain and has no test monkeypatches on `kb.mcp.core.capture_items`. Function-
+body imports for `anthropic`, `frontmatter`, `kb.utils.pages.save_page_frontmatter`,
+and `kb.utils.llm.LLMError` remain inside tool bodies — these never had
+test monkeypatches on `kb.mcp.core.*`.
+
+Other candidates (`kb.query.engine`, `kb.ingest.pipeline`, `kb.feedback.reliability`,
+`kb.query.rewriter`) stay at module level for monkeypatch compatibility with
+legacy tests — they are loaded transitively by other kb.mcp submodules anyway
+so the cold-boot saving would be zero. A future cycle that rewrites monkeypatch
+targets to owner-module paths can revisit.
+
+Tests: tests/test_cycle17_lazy_imports.py enforces the `kb.capture` denylist.
+"""
 
 import json
 import logging
@@ -6,11 +22,19 @@ import os
 import re
 from datetime import date
 from pathlib import Path
-
-import anthropic
-import frontmatter
+from typing import TYPE_CHECKING
 
 from kb.capture import CaptureResult, capture_items
+
+if TYPE_CHECKING:
+    # Reserved for future cycle-17 AC4 re-try. Cycle 17 kept kb.capture at
+    # module level because its import-time CAPTURES_DIR security check
+    # must run under the REAL PROJECT_ROOT (before any test monkeypatch of
+    # kb.config.CAPTURES_DIR redirects it to a tmp path). A dedicated cycle
+    # needs to move the security check to runtime or provide a dev-only
+    # opt-out before this can be lazy.
+    pass
+
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
     MAX_QUESTION_LEN,
@@ -35,9 +59,12 @@ from kb.mcp.app import (
 from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
-from kb.utils.llm import LLMError
-from kb.utils.pages import save_page_frontmatter
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
+
+# Cycle 17 AC4 (narrowed): `anthropic` and `frontmatter` stay deferred to tool
+# bodies even though they leak transitively — the direct deferral removes them
+# from kb.mcp.core's self-reported import surface. `kb.utils.pages.save_page_frontmatter`
+# and `kb.utils.llm.LLMError` also stay inside tool bodies (no test monkeypatch).
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +178,11 @@ def _save_synthesis(slug: str, result: dict) -> str:
         return "\n[warn] save_as skipped: query returned no source_pages"
 
     try:
+        # Cycle 17 AC4 — lazy imports keep cold-boot out of frontmatter.
+        import frontmatter
+
+        from kb.utils.pages import save_page_frontmatter
+
         synthesis_dir = WIKI_DIR / "synthesis"
         synthesis_dir.mkdir(parents=True, exist_ok=True)
         target = synthesis_dir / f"{slug}.md"
@@ -270,7 +302,11 @@ def kb_query(
         save_slug = slug
 
     if use_api:
+        # Cycle 17 AC4 — lazy import keeps cold-boot out of anthropic.
+        import anthropic
+
         from kb.query.citations import format_citations
+        from kb.utils.llm import LLMError
 
         try:
             result = query_wiki(
@@ -320,7 +356,7 @@ def kb_query(
             logger.exception("kb_query API unexpected error for: %s", question)
             return error_tag("internal", f"unexpected error: {_sanitize_error_str(e)}")
 
-    # Default: Claude Code mode — return context for synthesis
+    # Default: Claude Code mode — return context for synthesis.
     # H18: apply multi-turn query rewriting when conversation context is present
     if conversation_context:
         question = rewrite_query(question, conversation_context)

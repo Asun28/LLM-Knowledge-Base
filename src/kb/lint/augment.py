@@ -532,6 +532,7 @@ def run_augment(
     mode: Mode = "propose",
     max_gaps: int = 5,
     dry_run: bool = False,
+    resume: str | None = None,
 ) -> dict[str, Any]:
     """Three-gate augment orchestrator. See module docstring.
 
@@ -553,8 +554,13 @@ def run_augment(
     it forces every side-effect-having run to go through a human-reviewable
     artifact first, honoring CLAUDE.md's "Human curates sources" principle.
 
-    Note: Manifest.resume() is implemented but not yet wired through the
-    CLI/MCP surface. Crash-resume support is tracked in BACKLOG Phase 5.
+    Cycle 17 AC11 — resume support:
+      - resume=None: fresh run (default).
+      - resume="<8 hex>": resume an incomplete run; Phase A is SKIPPED (no
+        new proposals are written) and iteration restarts from
+        ``manifest.incomplete_gaps()``. Raises ValueError if input fails
+        ``_validate_run_id`` (exact 8 hex chars) or if no matching incomplete
+        manifest exists.
     """
     from urllib.parse import urlparse
 
@@ -563,9 +569,17 @@ def run_augment(
         AUGMENT_FETCH_MAX_CALLS_PER_RUN,
         AUGMENT_RELEVANCE_THRESHOLD,
     )
-    from kb.lint._augment_manifest import Manifest
+    from kb.lint._augment_manifest import RESUME_COMPLETE_STATES, Manifest
     from kb.lint._augment_rate import RateLimiter
     from kb.lint.fetcher import AugmentFetcher
+    from kb.mcp.app import _validate_run_id
+
+    # Cycle 17 AC11 — validate resume id before any filesystem lookup.
+    resume_manifest: Manifest | None = None
+    if resume is not None:
+        err = _validate_run_id(resume)
+        if err:
+            raise ValueError(err)
 
     wiki_dir = wiki_dir or WIKI_DIR
     raw_dir = _resolve_raw_dir(wiki_dir, raw_dir)
@@ -594,7 +608,19 @@ def run_augment(
             f"AUGMENT_FETCH_MAX_CALLS_PER_RUN={AUGMENT_FETCH_MAX_CALLS_PER_RUN}"
         )
 
-    run_id = str(uuid.uuid4())
+    # Cycle 17 AC11 — resume path: load the incomplete manifest and re-use its
+    # run_id so all downstream filenames + audit refs align. Also skip Phase A
+    # (no fresh proposals) and hand incomplete_gaps to the execution phase.
+    if resume is not None:
+        resume_manifest = Manifest.resume(run_id=resume, data_dir=effective_data_dir)
+        if resume_manifest is None:
+            raise ValueError(
+                f"No incomplete run found for id {resume!r} "
+                f"(expected .data/augment-run-{resume}.json with ended_at=null)"
+            )
+        run_id = resume_manifest.run_id
+    else:
+        run_id = str(uuid.uuid4())
     proposals: list[dict[str, Any]] = []
     fetches: list[dict[str, Any]] | None = None
     ingests: list[dict[str, Any]] | None = None
@@ -603,10 +629,20 @@ def run_augment(
     manifest: Manifest | None = None
     proposals_path = wiki_dir / "_augment_proposals.md"
 
+    # Cycle 17 AC11 — resume path skips Phase A entirely and restarts
+    # iteration from the manifest's incomplete gaps.
+    if resume_manifest is not None:
+        incomplete = [
+            {"stub_id": g["page_id"], "title": g.get("title", ""), "action": "resume"}
+            for g in resume_manifest.data.get("gaps", [])
+            if g.get("state") not in RESUME_COMPLETE_STATES
+        ]
+        proposals = incomplete
+        eligible = [{"page_id": p["stub_id"], "title": p.get("title", "")} for p in proposals]
     # Gate 2/3: execute / auto_ingest MUST consume a prior human-reviewed
     # proposals file. We refuse to re-propose silently, because that bypasses
     # the review checkpoint the three-gate contract exists for.
-    if mode in ("execute", "auto_ingest"):
+    elif mode in ("execute", "auto_ingest"):
         parsed_proposals = _parse_proposals_md(proposals_path)
         if parsed_proposals is None:
             early_summary = (
@@ -663,13 +699,20 @@ def run_augment(
         if dry_run:
             fetches = [{"stub_id": p["stub_id"], "status": "dry_run_skipped"} for p in proposals]
         else:
-            manifest = Manifest.start(
-                run_id=run_id,
-                mode=mode,
-                max_gaps=max_gaps,
-                stubs=[{"page_id": p["stub_id"], "title": p["title"]} for p in proposals],
-                data_dir=effective_data_dir,
-            )
+            # Cycle 17 PR R1 Sonnet BLOCKER — when resuming, REUSE the existing
+            # manifest object instead of calling `Manifest.start` which would
+            # overwrite the resumed JSON file (filename = augment-run-<run_id[:8]>.json)
+            # and destroy the audit trail of previous state transitions.
+            if resume_manifest is not None:
+                manifest = resume_manifest
+            else:
+                manifest = Manifest.start(
+                    run_id=run_id,
+                    mode=mode,
+                    max_gaps=max_gaps,
+                    stubs=[{"page_id": p["stub_id"], "title": p["title"]} for p in proposals],
+                    data_dir=effective_data_dir,
+                )
             manifest_path = str(manifest.path)
             limiter = RateLimiter(data_dir=effective_data_dir)
             fetches = []
