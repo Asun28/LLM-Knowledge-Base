@@ -9,8 +9,10 @@ from kb.lint.checks import (
     check_authored_by_drift,
     check_cycles,
     check_dead_links,
+    check_duplicate_slugs,
     check_frontmatter,
     check_frontmatter_staleness,
+    check_inline_callouts,
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
@@ -134,11 +136,24 @@ def run_all_checks(
     all_issues.extend(stubs)
     checks_run.append({"name": "stub_pages", "issues": len(stubs)})
 
+    # Cycle 16 AC14-AC16 — new lint checks stored as top-level report keys
+    # (their dicts have different shape from issue dicts, so they live
+    # alongside `issues` rather than inside it). Counters still flow into
+    # severity_counts to keep summary totals consistent.
+    duplicate_slugs = check_duplicate_slugs(wiki_dir, pages=shared_pages)
+    inline_callouts = check_inline_callouts(wiki_dir, pages=shared_pages)
+    checks_run.append({"name": "duplicate_slugs", "issues": len(duplicate_slugs)})
+    checks_run.append({"name": "inline_callouts", "issues": len(inline_callouts)})
+
     # Summarize by severity
     severity_counts = {"error": 0, "warning": 0, "info": 0}
     for issue in all_issues:
         sev = issue.get("severity", "info")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
+    # Cycle 16 AC14 — duplicate_slugs are warnings, inline_callouts are info.
+    # Q7: severity_counts already seeds "info" at init — no setdefault needed.
+    severity_counts["warning"] += len(duplicate_slugs)
+    severity_counts["info"] += len(inline_callouts)
 
     # Include verdict audit trail summary.
     # Cycle 7 AC27 — route through _safe_call so operators see
@@ -162,6 +177,8 @@ def run_all_checks(
         "issues": all_issues,
         "summary": summary,
         "fixes_applied": fixes_applied,
+        "duplicate_slugs": duplicate_slugs,
+        "inline_callouts": inline_callouts,
     }
     if verdict_error:
         report_dict["verdict_history_error"] = verdict_error
@@ -212,6 +229,29 @@ def format_report(report: dict) -> str:
         lines.append(f"\n## Auto-Fixes Applied ({len(fixes)})\n")
         for fix_item in fixes:
             lines.append(f"- {fix_item['message']}")
+        lines.append("")
+
+    # Cycle 16 AC15/AC16 — duplicate slugs section (omit when empty).
+    dupes = report.get("duplicate_slugs") or []
+    if dupes:
+        lines.append("\n## Duplicate slugs\n")
+        for d in dupes:
+            if d.get("skipped_reason"):
+                lines.append(f"- (skipped — {d['skipped_reason']})")
+            else:
+                lines.append(
+                    f"- {d['slug_a']} <-> {d['slug_b']} (distance {d['distance']}): "
+                    f"{d['page_a']}, {d['page_b']}"
+                )
+        lines.append("")
+
+    # Cycle 16 AC15/AC16 — inline callouts section (omit when empty).
+    callouts = report.get("inline_callouts") or []
+    if callouts:
+        lines.append("\n## Inline callouts\n")
+        for c in callouts:
+            text = str(c.get("text", ""))[:80]
+            lines.append(f"- [{c['marker']}] {c['page_id']}:{c['line']} — {text}")
         lines.append("")
 
     # Verdict audit trail
