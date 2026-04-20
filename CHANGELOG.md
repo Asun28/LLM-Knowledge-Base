@@ -16,10 +16,11 @@ Full detail: [history archive](CHANGELOG-history.md#<anchor>).
 
 ## [Unreleased]
 
-### Quick Reference — cycles 2026-04-16 → 2026-04-20
+### Quick Reference — cycles 2026-04-16 → 2026-04-21
 
 | Cycle | Date | Items | Test Δ | Primary areas |
 |-------|------|-------|--------|---------------|
+| cycle 18 | 2026-04-21 | 16 AC / 5 src / 6 commits | 2548 → 2592 (+44) | ingest observability (request_id + `.data/ingest_log.jsonl`), `inject_wikilinks` per-page TOCTOU lock, wiki_log rotate-in-lock + generic `rotate_if_oversized`, `sanitize_text` + UNC coverage, `_write_index_files` helper (sources-BEFORE-index), `tmp_kb_env` HASH_MANIFEST redirection, 3-scenario e2e workflow test |
 | cycle 17 | 2026-04-20 | 16 AC / 11 src / 14 commits | 2464 → 2548 (+84) | manifest lock symmetry, capture two-pass, lint augment resume, shared run-id validator, MCP lazy imports (narrowed), thin-tool coverage |
 | cycle 16 | 2026-04-20 | 24 AC / 8 src / 14 commits | 2334 → 2464 (+130) | enrichment targets, query rephrasings, duplicate-slug + inline-callout lint, kb_query `save_as`, per-page siblings + sitemap publish |
 | cycle 15 | 2026-04-20 | 26 AC / 6 src / 7 commits | 2245 → 2334 (+89) | authored-by boost, source volatility, per-source decay, incremental publish, lint decay/status wiring |
@@ -48,6 +49,10 @@ Full detail: [history archive](CHANGELOG-history.md#<anchor>).
 ---
 
 ### Cycle summaries
+
+#### Phase 4.5 — cycle 18 (2026-04-21)
+
+16 AC / 5 src / 6 commits. Closes five cycle-17 deferrals (AC15 e2e, AC19 observability, AC20 index-files helper, wiki_log rotate-in-lock Q11, linker scalar lock Q12, `tmp_kb_env` HASH_MANIFEST redirection). Adds **structured ingest audit log** at `<PROJECT_ROOT>/.data/ingest_log.jsonl`: one JSON row per emission at `start`/`duplicate_skip`/`success`/`failure` with 16-hex `request_id` correlation; `file_lock` + `open("a") + fsync` writer (NOT `atomic_text_write`); field allowlist enforced at writer boundary; `sanitize_text` redaction on `error_summary` (truncated 2KB); best-effort OSError swallow so telemetry failure never masks ingest outcome. `wiki/log.md` success messages gain `[req=<16-hex>]` prefix that correlates 1:1 with JSONL; duplicate-skip and failure paths remain JSONL-only per Q15. **Rotate-in-lock**: generic `rotate_if_oversized(path, max_bytes, archive_stem_prefix)` public helper extracts current `_rotate_log_if_oversized` logic; `append_wiki_log._write` moves the rotate call INSIDE `file_lock(log_path)` (closes Phase 4.5 HIGH R5 POSIX handle-holding-stale-file race / threat T2); JSONL rotation reuses the helper under its own lock. **Linker per-page lock**: `inject_wikilinks` wraps read-modify-write in `file_lock(page_path, timeout=0.25s)` with **pre-lock cheap read + under-lock re-read** (TOCTOU mitigation / threat T3); no-match / already-linked / self pages acquire ZERO locks (fast-path, threat T8); bounded timeout + skip-with-warning prevents 100s stalls on stuck locks. **Sanitize UNC**: new `sanitize_text(s: str) -> str` sibling to `sanitize_error_text` with shared `_ABS_PATH_PATTERNS`; regex extended to cover ordinary UNC `\\server\share\path` (threat T1). **`_write_index_files` helper** in `pipeline.py` consolidates `_update_sources_mapping` + `_update_index_batch` with sources-BEFORE-index ordering (behavioural change from previous index-then-sources) + INDEPENDENT per-call try/except; both helpers remain module attributes for legacy monkeypatch compat (threat T10). **`tmp_kb_env` HASH_MANIFEST**: fixture patches `kb.compile.compiler.HASH_MANIFEST` separately from the `kb.config` getattr loop; mirror-rebind covers in-process `kb.*` bindings (threat T5). Tests: 44 new across 6 files (`test_cycle18_conftest`, `test_cycle18_wiki_log`, `test_cycle18_sanitize`, `test_cycle18_linker_lock`, `test_cycle18_ingest_observability`, `test_workflow_e2e`). Security: all 10 threats IMPLEMENTED; same-class peer scan clean; 0 PR-introduced CVEs; existing diskcache `CVE-2025-69872` deferred (no patched upstream). Design-gate Q count 21 + R3 triggers (new FS write surface, vacuous-test risk, new security enforcement, ≥10 questions) → R3 review mandatory.
 
 #### Phase 4.5 — cycle 17 (2026-04-20)
 

@@ -60,13 +60,25 @@ def _read_jsonl(jsonl_path: Path) -> list[dict]:
 # AC10 — [req=] prefix in wiki/log.md matches JSONL request_id.
 # ---------------------------------------------------------------------------
 def test_request_id_prefix_in_log_md(tmp_kb_env: Path) -> None:
-    """AC10 — wiki/log.md line carries [req=<16-hex>] and matches JSONL row."""
+    """AC10 — wiki/log.md line carries [req=<16-hex>] as the FIRST token of the
+    message field AND the hex matches the JSONL row's request_id.
+
+    Threat T9 position pin (Step-11 Sonnet-fallback LOW): the prefix must be
+    the first token inside the `... | ingest | <message>` field — a future
+    refactor prepending other text would slip past a loose `re.search`.
+    """
     _ingest(tmp_kb_env, "ac10-prefix-match")
 
     log_md = (tmp_kb_env / "wiki" / "log.md").read_text(encoding="utf-8")
-    prefix_match = _REQ_PREFIX_RE.search(log_md)
-    assert prefix_match is not None, f"No [req=<hex>] prefix found in log.md:\n{log_md}"
-    log_request_id = prefix_match.group(1)
+    ingest_lines = [line for line in log_md.splitlines() if "| ingest |" in line]
+    assert ingest_lines, f"No `| ingest |` line in log.md:\n{log_md}"
+    # Split on " | " to isolate the message field: "- YYYY-MM-DD | ingest | <msg>"
+    msg_part = ingest_lines[-1].split(" | ", 2)[-1]
+    anchored = _REQ_PREFIX_RE.match(msg_part)
+    assert anchored is not None, (
+        f"[req=<16-hex>] must be the FIRST token of the message field; got: {msg_part!r}"
+    )
+    log_request_id = anchored.group(1)
 
     jsonl = _read_jsonl(tmp_kb_env / ".data" / "ingest_log.jsonl")
     success_rows = [row for row in jsonl if row["stage"] == "success"]
