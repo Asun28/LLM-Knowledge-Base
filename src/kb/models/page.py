@@ -1,4 +1,26 @@
-"""Data models for wiki pages and raw sources."""
+"""Data models for wiki pages and raw sources.
+
+**Phase-5 migration target — DO NOT DELETE.** (Cycle 17 AC8 contract.)
+
+These ``WikiPage`` / ``RawSource`` dataclasses have no production-code readers
+today — ``ingest_source``, ``query_wiki``, and ``load_all_pages`` all return
+plain dicts. The classes are retained as the target shape for the Phase-5
+migration that will introduce typed returns across the ingest/query/lint
+boundary. Tests in ``tests/test_cycle8_models_validation.py``,
+``tests/test_v0914_phase395.py``, and ``tests/test_v0916_task02.py`` pin
+their behavioural contracts; the cycle-17 AST inventory test in
+``tests/test_cycle17_models_dead_code.py`` confirms no production file
+imports them.
+
+**Removing either class requires either:**
+1. A Phase-5 migration cycle that switches production return types, or
+2. An explicit decision that the Phase-5 migration has been abandoned,
+   documented in a new BACKLOG entry, and reflected by removing this
+   docstring block and the re-exports in ``kb/__init__.py`` and
+   ``kb/models/__init__.py``.
+
+Any unrelated PR that deletes these classes should be rejected at review.
+"""
 
 import re
 from dataclasses import dataclass, field
