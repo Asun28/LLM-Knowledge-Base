@@ -29,6 +29,7 @@ from kb.config import (
     CAPTURE_MAX_ITEMS,
     CAPTURES_DIR,
     PROJECT_ROOT,
+    TEMPLATES_DIR,
 )
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
@@ -292,36 +293,13 @@ _CAPTURE_SCHEMA = {
 }
 
 
-_PROMPT_TEMPLATE = """You are atomizing messy text into discrete knowledge items.
-
-Input: up to 50KB of conversation logs, scratch notes, or chat transcripts.
-Output: JSON matching the schema — a list of items, each with:
-  - title (max 100 chars, imperative phrase)
-  - kind: one of "decision" | "discovery" | "correction" | "gotcha"
-  - body (verbatim span from the input — DO NOT reword, summarize, or rewrite)
-  - one_line_summary (max 200 chars, your words, for frontmatter display)
-  - confidence: "stated" | "inferred" | "speculative"
-
-Keep an item only if it is:
-  - a specific decision (something the user or team settled on)
-  - a specific discovery (a new fact learned from evidence)
-  - a correction (something previously believed that turned out wrong)
-  - a gotcha (a pitfall or non-obvious constraint worth remembering)
-
-Filter as noise:
-  - pleasantries, apologies, meta-talk about the chat itself
-  - half-finished thoughts or unresolved questions (unless the question IS the gotcha)
-  - duplicates of items already in your list
-  - off-topic tangents
-  - retried / corrected-in-place content (keep only the final form)
-
-Cap the output at {max_items} items. Also report `filtered_out_count`: the number
-of candidate items you rejected as noise.
-
-{boundary_start}
-{content}
-{boundary_end}
-"""
+# Cycle 17 AC9 — prompt text moved to templates/capture_prompt.txt.
+# This is distinct from templates/*.yaml JSON-Schema extraction templates
+# loaded via `load_template(source_type)`; the capture prompt is a
+# format-string with named placeholders (max_items, boundary_start, content,
+# boundary_end) rather than a JSON-Schema `extract:` mapping. Hardcoded
+# filename keeps the loader path caller-inaccessible (threat T11).
+_PROMPT_TEMPLATE = (TEMPLATES_DIR / "capture_prompt.txt").read_text(encoding="utf-8")
 
 
 _FENCE_END_RE = re.compile(r"-{2,}\s*END\s+INPUT\s*-{2,}", re.IGNORECASE)
