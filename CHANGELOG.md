@@ -36,7 +36,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ### Phase 4.5 -- Backlog-by-file cycle 15 (2026-04-20)
 
-26 AC across 6 source files + 7 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2327 (+82); full suite 2327 passed + 7 skipped.
+26 AC across 6 source files + 11 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2334 (+89); full suite 2334 collected, 2327 passed + 7 skipped (run-time count).
 
 #### Added
 - `src/kb/config.py` — new config constants/helpers: `AUTHORED_BY_BOOST`, `SOURCE_VOLATILITY_TOPICS`, and `volatility_multiplier_for`.
