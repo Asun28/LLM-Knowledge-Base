@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import anthropic
+import frontmatter
 
 from kb.capture import CaptureResult, capture_items
 from kb.config import (
@@ -18,11 +19,13 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     RAW_DIR,
     SOURCE_TYPE_DIRS,
+    WIKI_DIR,
 )
 from kb.feedback.reliability import compute_trust_scores
 from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
 from kb.mcp.app import (
     _format_ingest_result,
+    _is_windows_reserved,
     _rel,
     _sanitize_error_str,
     _validate_wiki_dir,
@@ -33,6 +36,7 @@ from kb.query.engine import query_wiki, search_pages
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import LLMError
+from kb.utils.pages import save_page_frontmatter
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
 
 logger = logging.getLogger(__name__)
@@ -86,6 +90,97 @@ def _validate_file_inputs(filename: str, content: str) -> str | None:
     return None
 
 
+# Cycle 16 AC17-AC19 — kb_query save_as validation.
+# Returns (normalized_slug, None) on success; ("", error_msg) on failure.
+# MUST NOT raise (T15/C2) — callers wrap the error_msg in an MCP error string.
+_SAVE_AS_ASCII_SLUG_RE = re.compile(r"[a-z0-9-]+")
+_SAVE_AS_MAX_LEN = 80
+
+
+def _validate_save_as_slug(slug: str) -> tuple[str, str | None]:
+    """Validate a save_as slug for synthesis file creation.
+
+    Applies belt-and-suspenders character whitelist (cycle-15 L-style pattern):
+      - length cap (80 chars)
+      - no whitespace padding / empty
+      - no path separators / ``..`` / absolute-path indicators
+      - BOTH ``slugify(slug) == slug`` AND ``re.fullmatch(r"[a-z0-9-]+", slug)``
+        (Q3/C4 — slugify alone is insufficient because it preserves CJK /
+        Cyrillic via ``\\w`` without ``re.ASCII``; the explicit ASCII regex
+        catches homoglyphs like Cyrillic ``а`` U+0430 that slugify returns
+        unchanged.)
+      - rejects Windows reserved basenames (``CON``, ``PRN``, etc.)
+    """
+    if not isinstance(slug, str):
+        return "", "Error: save_as must be a string"
+    if len(slug) > _SAVE_AS_MAX_LEN:
+        return "", f"Error: save_as too long (max {_SAVE_AS_MAX_LEN} chars)"
+    if not slug or slug.strip() != slug:
+        return "", "Error: save_as cannot be empty or whitespace-padded"
+    if ".." in slug or slug.startswith("/") or "\\" in slug or os.path.isabs(slug):
+        return "", "Error: save_as cannot contain path separators or .."
+    # Q3/C4 — two independent checks.
+    if slugify(slug) != slug:
+        return "", "Error: save_as must match slug form (lowercase, hyphenated)"
+    if not _SAVE_AS_ASCII_SLUG_RE.fullmatch(slug):
+        return "", "Error: save_as must be ASCII lowercase alphanumeric with hyphens only"
+    if _is_windows_reserved(slug):
+        return "", "Error: save_as uses a Windows reserved device name"
+    return slug, None
+
+
+def _save_synthesis(slug: str, result: dict) -> str:
+    """Persist a synthesized answer to ``wiki/synthesis/{slug}.md``.
+
+    Cycle 16 AC17-AC19 + T1/T2/T15/C1/C2/C4.
+
+    Returns a single-line message for appending to the tool response:
+      - Success: ``\\nSaved synthesis to: <rel_path>``
+      - Skipped (refusal, collision, empty source): ``\\n[info|warn] <reason>``
+      - Invalid state: ``\\n[warn] save_as failed: <reason>``
+
+    Never raises past the boundary (T15/C2).
+    """
+    # Refusal path — skip save; the answer is the static refusal advisory.
+    if result.get("low_confidence"):
+        return "\n[info] save_as skipped: low-coverage refusal (no synthesis to persist)"
+
+    # Q1/C1 — source list MUST be non-empty to pass validate_frontmatter.
+    source_list = [str(p) for p in (result.get("source_pages") or [])]
+    if not source_list:
+        return "\n[warn] save_as skipped: query returned no source_pages"
+
+    try:
+        synthesis_dir = WIKI_DIR / "synthesis"
+        synthesis_dir.mkdir(parents=True, exist_ok=True)
+        target = synthesis_dir / f"{slug}.md"
+        # Belt-and-suspenders containment check (T1).
+        resolved_target = target.resolve()
+        resolved_base = synthesis_dir.resolve()
+        if not str(resolved_target).startswith(str(resolved_base)):
+            return "\n[warn] save_as skipped: target escapes synthesis directory"
+        if target.exists():
+            return f"\n[warn] save_as skipped: target already exists ({_rel(target)})"
+
+        answer_text = result.get("answer") or ""
+        today = date.today().isoformat()
+        post = frontmatter.Post(
+            answer_text,
+            title=slug.replace("-", " ").title(),
+            source=source_list,
+            created=today,
+            updated=today,
+            type="synthesis",
+            confidence="inferred",
+            authored_by="llm",
+        )
+        save_page_frontmatter(target, post)
+        return f"\nSaved synthesis to: {_rel(target)}"
+    except OSError as exc:
+        logger.warning("save_as write failed for slug=%r: %s", slug, exc)
+        return f"\n[warn] save_as failed: {_sanitize_error_str(exc)}"
+
+
 @mcp.tool()
 def kb_query(
     question: str,
@@ -93,6 +188,7 @@ def kb_query(
     use_api: bool = False,
     conversation_context: str = "",
     output_format: str = "",
+    save_as: str = "",
 ) -> str:
     """Query the knowledge base.
 
@@ -107,6 +203,14 @@ def kb_query(
     answer to a file under outputs/ in one of: markdown, marp, html, chart,
     jupyter. Returns "Output written to: <path>" appended to the normal reply.
 
+    NOTE (cycle 16 semantic shift): when ``save_as`` is non-empty, this tool
+    performs a filesystem write to ``wiki/synthesis/{slug}.md`` — it becomes
+    a write, not a read. Frontmatter is hardcoded (``type=synthesis``,
+    ``confidence=inferred``, ``authored_by=llm``); ``source`` is derived
+    from the query's ``source_pages`` list. Requires ``use_api=true`` so
+    an actual synthesis exists to persist. Refusal (low-coverage) path
+    skips the save.
+
     Args:
         question: Natural language question.
         max_results: Maximum pages to search (default 10).
@@ -114,6 +218,10 @@ def kb_query(
         conversation_context: Recent conversation history for follow-up query rewriting.
         output_format: One of markdown|marp|html|chart|jupyter to produce a file,
                        or empty/text for stdout-only response. Requires use_api=true.
+        save_as: Optional slug to persist the synthesized answer to
+                 ``wiki/synthesis/{slug}.md``. Requires ``use_api=true``.
+                 Must match ``[a-z0-9-]+``; traversal / Unicode / Windows
+                 reserved names rejected with error strings.
     """
     if not question or not question.strip():
         return "Error: Question cannot be empty."
@@ -142,6 +250,18 @@ def kb_query(
 
     max_results = max(1, min(max_results, MAX_SEARCH_RESULTS))
 
+    # Cycle 16 AC17-AC19 — validate save_as early so invalid input never
+    # reaches query_wiki. Any save_as usage requires use_api=True so there
+    # is an actual synthesised answer to persist.
+    save_slug: str | None = None
+    if save_as:
+        if not use_api:
+            return "Error: save_as requires use_api=true (synthesis needed)"
+        slug, error = _validate_save_as_slug(save_as)
+        if error:
+            return error
+        save_slug = slug
+
     if use_api:
         from kb.query.citations import format_citations
 
@@ -162,6 +282,12 @@ def kb_query(
                 )
             if result.get("output_error"):
                 parts.append(f"\n[warn] Output format failed: {result['output_error']}")
+
+            # Cycle 16 AC17-AC19 — persist synthesis to wiki/synthesis/.
+            if save_slug is not None:
+                saved_msg = _save_synthesis(save_slug, result)
+                if saved_msg:
+                    parts.append(saved_msg)
             return "\n".join(parts)
         except anthropic.BadRequestError as e:
             logger.warning("kb_query API bad-request for %r: %s", question[:80], e)
