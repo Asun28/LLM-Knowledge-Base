@@ -510,3 +510,21 @@ STATUS_RANKING_BOOST = 0.05
 # (T7 gate). Applied by _apply_authored_by_boost AFTER _apply_status_boost
 # in the query score pipeline.
 AUTHORED_BY_BOOST = 0.02
+
+
+# ── Cycle 16 AC1-AC3 — query refinement + lint quality ──────────
+# QUERY_REPHRASING_MAX: maximum rephrasings surfaced in the low-coverage
+# refusal advisory. Consumed by kb.query.engine._suggest_rephrasings.
+QUERY_REPHRASING_MAX: int = 3
+
+# DUPLICATE_SLUG_DISTANCE_THRESHOLD: maximum edit-distance at which two
+# page slugs are considered near-duplicates. Consumed by
+# kb.lint.checks.check_duplicate_slugs. Levenshtein lower bound
+# abs(len(a) - len(b)) <= distance dictates bucket iteration radius.
+DUPLICATE_SLUG_DISTANCE_THRESHOLD: int = 3
+
+# CALLOUT_MARKERS: recognised Obsidian-style inline callout marker names.
+# Consumed by kb.lint.checks.parse_inline_callouts (regex-escaped per entry
+# before alternation — future additions with metachars cannot corrupt
+# the pattern).
+CALLOUT_MARKERS: tuple[str, ...] = ("contradiction", "gap", "stale", "key-insight")
