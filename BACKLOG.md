@@ -477,35 +477,20 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC
 
 ---
 
-## Cycle 18 candidates (surfaced during cycle 17)
+## Cycle 19 candidates (surfaced during cycle 18)
 
-<!-- Cycle 17 deferrals and Step-11 follow-ups. Effort estimates in parentheses. -->
+<!-- Cycle 18 deferrals and Step-11 follow-ups. Effort estimates in parentheses. -->
 
 ### MEDIUM
 
-- `tests/` MCP monkeypatch owner-module migration — cycle 17 AC4 narrowed lazy-import deferrals because legacy tests monkeypatch `kb.mcp.core.<symbol>` (e.g. `ingest_source`, `query_wiki`, `search_pages`, `rewrite_query`, `compute_trust_scores`). Migrating the ~10 affected test files to patch the owner modules would unlock full AC4 scope (direct removal of those imports from `mcp/core.py` module level). Transitive loads via sibling kb.mcp.* siblings mean the cold-boot saving today is zero, but post-migration savings are real.
+- `tests/` MCP monkeypatch owner-module migration — cycle 17 AC4 narrowed lazy-import deferrals because legacy tests monkeypatch `kb.mcp.core.<symbol>` (e.g. `ingest_source`, `query_wiki`, `search_pages`, `rewrite_query`, `compute_trust_scores`). Migrating the ~10 affected test files to patch the owner modules would unlock full AC4 scope (direct removal of those imports from `mcp/core.py` module level). Transitive loads via sibling kb.mcp.* siblings mean the cold-boot saving today is zero, but post-migration savings are real. *(Carried from cycle-18 queue.)*
   (effort: Medium — grep + per-test rewrite; paired pre-cycle test-audit script recommended)
 
-- `src/kb/utils/wiki_log.py::_rotate_log_if_oversized` runs outside `file_lock(log_path)` — cycle 17 design gate Q11 kept this deferred to preserve batch-by-file scope; pairs with AC19 `.data/ingest_log.jsonl` introduction (also cycle 18).
-  (fix: move rotate call inside `file_lock(log_path)` in `append_wiki_log`; unit test rotate-then-append concurrency)
-
-- `src/kb/compile/linker.py::inject_wikilinks` scalar form lacks per-page `file_lock` around read-modify-`atomic_text_write` (cycle 17 Q12 deferred). Cross-process ingest clobber race exists today; cycle 18 batch helper (AC21 deferred) must land with per-page lock.
-  (fix: wrap the read/modify/write triple in `file_lock(page_path)` at the scalar site; add concurrent-writer regression test)
-
-- `src/kb/ingest/pipeline.py::ingest_source` observability (cycle 17 AC19 deferred) — emit `request_id = uuid.uuid4().hex[:16]` at entry; thread through `wiki/log.md` prefix + NEW `.data/ingest_log.jsonl` line + logger warnings; rotate `.jsonl` at 500KB mirroring `wiki_log.py`. Pairs with the wiki_log rotation-lock fix above.
-  (effort: Medium — additive; new .data file; regression tests for rotation + json injection)
-
-- `src/kb/ingest/pipeline.py::_write_index_files` helper extraction (cycle 17 AC20 deferred) — consolidate the current two separate writes to `index.md` + `_sources.md` into one helper with documented ordering + recovery semantics.
-  (effort: Low — refactor-only)
-
-- `src/kb/compile/linker.py::inject_wikilinks_batch` (cycle 17 AC21 deferred) — batch scanner reading each target page once with a single compiled alternation regex; replaces the N-title × M-page disk-read loop at `ingest/pipeline.py:1113-1120`. Must ship with per-page `file_lock` (see scalar entry above).
+- `src/kb/compile/linker.py::inject_wikilinks_batch` — batch scanner reading each target page once with a single compiled alternation regex; replaces the N-title × M-page disk-read loop at `ingest/pipeline.py::_run_ingest_body` wikilink-injection step. Must ship with per-page `file_lock` (cycle-18 AC7 scalar contract already in place). *(Carried from cycle-18 queue — cycle 17 AC21.)*
   (effort: Medium — new function + callsite switch; ReDoS mitigation via `re.escape` + bounded `MAX_INJECT_TITLES_PER_BATCH=200`)
 
-- `tests/test_workflow_e2e.py` (cycle 17 AC15 deferred) — 3-scenario end-to-end test: ingest → query, ingest → refine → re-query, shared-entity backlinks. Mocks `call_llm` / `call_llm_json` at the boundary; uses `tmp_project` fixture.
-  (effort: Medium — one new test file, ~150 lines; no fixture changes)
-
-- `tests/conftest.py::tmp_kb_env` needs `HASH_MANIFEST` redirection — surfaced during cycle 17 AC17 testing of `kb_compile_scan`. The global `HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"` is not in `_TMP_KB_ENV_PATCHED_NAMES`; tests that exercise compile scan without explicit `wiki_dir` fall through to the real manifest.
-  (fix: add `HASH_MANIFEST` to the fixture's patched constants; verify cycle-14 compile tests still pass)
+- `tests/` HASH_MANIFEST explicit-patch cleanup — cycle-18 D6 chose fixture-only addition. 20 existing test monkeypatches on `kb.compile.compiler.HASH_MANIFEST` remain (additive-compatible, no regression). Dedicated cleanup PR can remove these and tighten via a lint check that flags future tests using `tmp_kb_env` alongside redundant `HASH_MANIFEST` patches.
+  (effort: Low — mechanical grep + per-test removal; one lint rule)
 
 ---
 
