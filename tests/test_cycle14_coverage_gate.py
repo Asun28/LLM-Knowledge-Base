@@ -87,7 +87,7 @@ class TestCoverageBelowThreshold:
     synthesizer NOT called."""
 
     def test_gate_triggers_refusal(self, tiny_wiki, monkeypatch):
-        call_llm_spy = {"invoked": False}
+        call_llm_spy = {"tiers": []}
 
         def fake_search_pages(question, wiki_dir=None, max_results=10, *, search_telemetry=None):
             pages = [
@@ -111,9 +111,13 @@ class TestCoverageBelowThreshold:
                 search_telemetry["vector_scores_by_id"] = {"concepts/consensus": 0.10}
             return pages
 
-        def fake_call_llm(*args, **kwargs):
-            call_llm_spy["invoked"] = True
-            return "should not be called"
+        def fake_call_llm(prompt, *args, tier="orchestrate", **kwargs):
+            # Cycle 16 AC7-AC9 added a scan-tier rephrasings call on the
+            # refusal path. The AC5 invariant is now "synthesis (orchestrate
+            # tier) MUST NOT fire on refusal", NOT "no call_llm ever".
+            call_llm_spy["tiers"].append(tier)
+            # Return empty so rephrasings parses to [].
+            return ""
 
         monkeypatch.setattr(query_engine, "search_pages", fake_search_pages)
         monkeypatch.setattr(query_engine, "call_llm", fake_call_llm)
@@ -123,8 +127,10 @@ class TestCoverageBelowThreshold:
         assert result["coverage_confidence"] == pytest.approx(0.10, abs=0.01)
         assert result["low_confidence"] is True
         assert "advisory" in result
-        assert call_llm_spy["invoked"] is False, (
-            "call_llm must NOT be invoked on refusal (AC5 gate)"
+        # AC5 invariant: orchestrate (synthesis) tier MUST NOT be invoked.
+        assert "orchestrate" not in call_llm_spy["tiers"], (
+            f"orchestrate synthesis must NOT fire on refusal (AC5 gate); "
+            f"got tiers={call_llm_spy['tiers']}"
         )
         assert result["answer"] == result["advisory"]
 
