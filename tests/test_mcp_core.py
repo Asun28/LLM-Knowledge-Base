@@ -399,18 +399,21 @@ class TestKbCaptureWrapper:
                 "filtered_out_count": 0,
             }
         )
-        from kb.capture import _exclusive_atomic_write as orig_write
-
+        # Cycle 17 AC10 — capture two-pass switched from _exclusive_atomic_write
+        # to os.open + os.replace. All-or-nothing semantics: any Phase-3 failure
+        # returns empty `written`. Monkeypatch os.replace to trigger mid-batch.
         call_count = [0]
 
-        def fail_second(path, c):
+        def fail_second(src, dst):
+            import os as _os
+
             call_count[0] += 1
             if call_count[0] == 2:
                 raise OSError(28, "No space left on device")
-            return orig_write(path, c)
+            _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture._exclusive_atomic_write", fail_second)
+        monkeypatch.setattr("kb.capture.os.replace", fail_second)
         result = kb_capture(content)
-        assert "Captured 1" in result
+        # All-or-nothing: no items committed under mid-batch failure.
         assert "Error:" in result
         assert "No space left" in result

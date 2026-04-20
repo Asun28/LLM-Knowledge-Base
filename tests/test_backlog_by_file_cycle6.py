@@ -139,7 +139,9 @@ class TestMcpHealthToolsThreadWikiDir:
         monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(health, "export_mermaid", _fake)
+        # Cycle 17 AC6: export_mermaid is imported function-locally inside
+        # kb_graph_viz; monkeypatch the owner module.
+        monkeypatch.setattr("kb.graph.export.export_mermaid", _fake, raising=True)
         health.kb_graph_viz(max_nodes=10, wiki_dir=str(tmp_path))
         assert received["wiki_dir"] == tmp_path
 

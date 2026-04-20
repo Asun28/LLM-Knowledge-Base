@@ -530,6 +530,58 @@ class CaptureError(Exception):
     """Raised by capture helpers on unrecoverable internal errors."""
 
 
+def _scan_existing_slugs(captures_dir: Path) -> set[str]:
+    """Return the set of slug stems (no `.md` suffix) already on disk."""
+    with os.scandir(captures_dir) as it:
+        return {entry.name[:-3] for entry in it if entry.is_file() and entry.name.endswith(".md")}
+
+
+def _reserve_hidden_temp(item: dict, existing: set[str], captures_dir: Path) -> tuple[str, Path]:
+    """Reserve a hidden-temp `.{slug}.reserving` file atomically via O_EXCL.
+
+    Cycle 17 AC10 / design gate Q9 — hidden-temp suffix (leading dot,
+    `.reserving` ext) prevents concurrent `kb_ingest` scanning `*.md` from
+    picking up the reservation as a legitimate capture. Retries up to 10 times
+    on `FileExistsError` with `_build_slug`-computed alternate.
+    """
+    for _attempt in range(10):
+        slug = _build_slug(item["kind"], item["title"], existing)
+        temp_path = captures_dir / f".{slug}.reserving"
+        if not _is_path_within_captures(temp_path, base_dir=captures_dir):
+            raise CaptureError(f"slug escapes captures dir: {slug!r}")
+        try:
+            fd = os.open(str(temp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.close(fd)
+            return slug, temp_path
+        except FileExistsError:
+            existing = _scan_existing_slugs(captures_dir)
+            existing.add(slug)
+            continue
+    raise CaptureError(f"slug retry exhausted for {item['title']!r}")
+
+
+def _rollback_reservations(reservations: list[tuple[str, Path, dict]]) -> None:
+    """Unlink every hidden-temp file in `reservations`. Best-effort."""
+    for _slug, temp_path, _item in reservations:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Reservation rollback failed for %s: %s", temp_path, e)
+
+
+def _rollback_finalized(written: list[CaptureItem]) -> None:
+    """Unlink every finalized `.md` file in `written`. Best-effort.
+
+    Cycle 17 AC10 all-or-nothing semantics: on Phase-3 mid-batch failure, the
+    batch is treated as a whole. Callers receive `(written=[], error_msg)`.
+    """
+    for item in written:
+        try:
+            item.path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Finalized-file rollback failed for %s: %s", item.path, e)
+
+
 def _write_item_files(
     items: list[dict],
     provenance: str,
@@ -537,94 +589,88 @@ def _write_item_files(
     *,
     captures_dir: Path | None = None,
 ) -> tuple[list[CaptureItem], str | None]:
-    """Resolve slugs, compute captured_alongside, write each file atomically.
+    """All-or-nothing two-pass write — cycle 17 AC10 (was the v1 partial-commit bug).
 
     Spec §4 step 9 + §7 Class D.
 
-    A3 (Phase 5 kb-capture R2 + R3 MEDIUM): accepts keyword-only `captures_dir`
-    override so unit tests can write to an isolated directory without
-    monkeypatching the module-level `CAPTURES_DIR` constant. When None, the
-    module default is used. The override replaces all three bare CAPTURES_DIR
-    references (mkdir, path construction, os.scandir retry).
+    **Phase 1 (reserve):** for each item, reserve a hidden-temp file
+    ``.{slug}.reserving`` atomically via `O_EXCL`. `_build_slug` retries on
+    cross-process collision. On any Phase-1 failure, every previously-reserved
+    temp is unlinked and the call returns ``([], error_msg)`` — no orphaned
+    reservations remain.
 
-    Returns (written_items, error_msg). On partial failure, error_msg is set and
-    `written` contains only the items written before the failure. Accepted v1
-    limitation: captured_alongside refs resolved in Phase B may become stale if
-    a cross-process race forces a slug change in Phase C.
+    **Phase 2 (alongside):** compute ``captured_alongside[i]`` from the
+    **finalised** Phase-1 slugs (NOT the pre-reservation guesses). Closes the
+    original bug where alongside refs froze before Phase-C reassignment.
+
+    **Phase 3 (commit):** render markdown per item, write to the temp path,
+    then ``os.replace(temp, final)`` to atomically promote ``.reserving`` →
+    ``<slug>.md``. On any Phase-3 failure, finalised ``.md`` files AND
+    remaining ``.reserving`` temps are ALL unlinked; the call returns
+    ``([], error_msg)``.
+
+    Keyword-only ``captures_dir`` override lets unit tests pick a sandbox
+    directory without monkeypatching the module-level ``CAPTURES_DIR``.
     """
-    # Early return: no items means no mkdir/scandir work required
     if not items:
         return [], None
 
     _captures_dir = captures_dir if captures_dir is not None else CAPTURES_DIR
     _captures_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initial scan — use context manager to release Windows dir handle promptly
-    with os.scandir(_captures_dir) as it:
-        existing = {
-            entry.name[:-3] for entry in it if entry.is_file() and entry.name.endswith(".md")
-        }
+    # Phase 1 — reserve all N hidden-temp files.
+    existing = _scan_existing_slugs(_captures_dir)
+    reservations: list[tuple[str, Path, dict]] = []
+    try:
+        for item in items:
+            slug, temp_path = _reserve_hidden_temp(item, existing, _captures_dir)
+            existing.add(slug)
+            reservations.append((slug, temp_path, item))
+    except CaptureError as e:
+        _rollback_reservations(reservations)
+        return [], f"Error: {e}"
+    except OSError as e:
+        _rollback_reservations(reservations)
+        return [], f"Error: reservation failed: {e}"
 
-    # Phase A — resolve all slugs in-process
-    slugs: list[str] = []
-    for item in items:
-        slug = _build_slug(item["kind"], item["title"], existing)
-        existing.add(slug)
-        slugs.append(slug)
+    finalized_slugs = [slug for slug, _path, _item in reservations]
 
-    # Phase B — compute captured_alongside per item (excludes self).
-    # O(N²) — safe at CAPTURE_MAX_ITEMS=20; revisit if the per-call item cap
-    # is raised above ~500.
+    # Phase 2 — compute captured_alongside from FINALISED slugs. O(N²) is safe
+    # at CAPTURE_MAX_ITEMS=20; revisit above ~500.
     alongside_for: list[list[str]] = [
-        [s for j, s in enumerate(slugs) if j != i] for i in range(len(items))
+        [s for j, s in enumerate(finalized_slugs) if j != i] for i in range(len(reservations))
     ]
 
-    # Phase C — write each file with cross-process race retry
+    # Phase 3 — write real content then atomic-rename temp → final.
     written: list[CaptureItem] = []
-    for i, item in enumerate(items):
-        slug = slugs[i]
-        alongside = alongside_for[i]
-        markdown = _render_markdown(
-            item=item,
-            captured_alongside=alongside,
-            provenance=provenance,
-            captured_at=captured_at,
-        )
-        success = False
-        for _attempt in range(10):
-            path = _captures_dir / f"{slug}.md"
-            if not _is_path_within_captures(path, base_dir=_captures_dir):
-                return written, f"Error: slug escapes captures dir: {slug!r}"
-            try:
-                _exclusive_atomic_write(path, markdown)
-                written.append(
-                    CaptureItem(
-                        slug=slug,
-                        path=path,
-                        title=item["title"],
-                        kind=item["kind"],
-                        body_chars=len(item["body"]),
-                    )
+    try:
+        for i, (slug, temp_path, item) in enumerate(reservations):
+            markdown = _render_markdown(
+                item=item,
+                captured_alongside=alongside_for[i],
+                provenance=provenance,
+                captured_at=captured_at,
+            )
+            final_path = _captures_dir / f"{slug}.md"
+            if not _is_path_within_captures(final_path, base_dir=_captures_dir):
+                _rollback_finalized(written)
+                _rollback_reservations(reservations[i:])
+                return [], f"Error: slug escapes captures dir: {slug!r}"
+            temp_path.write_text(markdown, encoding="utf-8")
+            os.replace(temp_path, final_path)
+            written.append(
+                CaptureItem(
+                    slug=slug,
+                    path=final_path,
+                    title=item["title"],
+                    kind=item["kind"],
+                    body_chars=len(item["body"]),
                 )
-                success = True
-                break
-            except FileExistsError:
-                # Cross-process race — re-scan and re-resolve (context-managed)
-                with os.scandir(_captures_dir) as it:
-                    existing = {
-                        entry.name[:-3]
-                        for entry in it
-                        if entry.is_file() and entry.name.endswith(".md")
-                    }
-                slug = _build_slug(item["kind"], item["title"], existing)
-            except OSError as e:
-                return (
-                    written,
-                    f"Error: failed to write {slug}: {e}. "
-                    f"{len(written)} of {len(items)} items written.",
-                )
-        if not success:
-            return written, f"Error: slug retry exhausted for {item['title']!r}"
+            )
+    except OSError as e:
+        _rollback_finalized(written)
+        _rollback_reservations(reservations[len(written) :])
+        return [], f"Error: write failed on item {len(written)}: {e}"
 
     return written, None
 

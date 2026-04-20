@@ -76,7 +76,7 @@ def test_resume_finds_incomplete_run(tmp_path, monkeypatch):
         ],
     }
     (tmp_path / f"augment-run-{run_id[:8]}.json").write_text(json.dumps(initial))
-    m = Manifest.resume(run_id_prefix="abcd1234")
+    m = Manifest.resume(run_id="abcd1234")
     assert m is not None
     assert m.run_id == run_id
     incomplete = m.incomplete_gaps()
@@ -87,7 +87,7 @@ def test_resume_returns_none_for_unknown_run(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
     from kb.lint._augment_manifest import Manifest
 
-    assert Manifest.resume(run_id_prefix="zzzzzzzz") is None
+    assert Manifest.resume(run_id="zzzzzzzz") is None
 
 
 def test_runs_index_is_appended_on_close(tmp_path, monkeypatch):

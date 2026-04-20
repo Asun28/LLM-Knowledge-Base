@@ -938,40 +938,46 @@ class TestWriteItemFiles:
         assert err is None
         assert written[0].slug == "decision-foo-2"
 
-    def test_disk_error_partial_success_fail_fast(self, tmp_captures_dir, monkeypatch):
+    def test_disk_error_returns_empty_all_or_nothing(self, tmp_captures_dir, monkeypatch):
+        """Cycle 17 AC10 — Phase-3 disk error must return written=[] (all-or-nothing)."""
         items = [
             self._make_item("decision", "alpha"),
             self._make_item("discovery", "beta"),
             self._make_item("gotcha", "gamma"),
         ]
         call_count = [0]
-        from kb.capture import _exclusive_atomic_write as original
 
-        def maybe_fail(path, content):
+        def maybe_fail(src, dst):
+            import os as _os
+
             call_count[0] += 1
             if call_count[0] == 2:
                 raise OSError(28, "No space left on device")
-            return original(path, content)
+            _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture._exclusive_atomic_write", maybe_fail)
+        monkeypatch.setattr("kb.capture.os.replace", maybe_fail)
         written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
         assert err is not None
         assert "No space left" in err
-        assert len(written) == 1  # only first succeeded
+        # All-or-nothing semantics — the first-written .md file is rolled back too.
+        assert written == []
 
     def test_cross_process_race_retry_succeeds(self, tmp_captures_dir, monkeypatch):
-        # Simulate a FileExistsError on first attempt, success on retry
-        from kb.capture import _exclusive_atomic_write as original
+        """Cycle 17 AC10 — Phase-1 FileExistsError retries with a new slug."""
+        import os as _os
 
+        original_open = _os.open  # capture BEFORE patching to avoid recursion
         attempts = [0]
 
-        def race_then_succeed(path, content):
-            attempts[0] += 1
-            if attempts[0] == 1:
-                raise FileExistsError(f"simulated race: {path}")
-            return original(path, content)
+        def race_then_succeed_open(path, flags, *args, **kwargs):
+            path_str = str(path)
+            if ".reserving" in path_str:
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    raise FileExistsError(f"simulated race: {path}")
+            return original_open(path, flags, *args, **kwargs)
 
-        monkeypatch.setattr("kb.capture._exclusive_atomic_write", race_then_succeed)
+        monkeypatch.setattr("kb.capture.os.open", race_then_succeed_open)
         items = [self._make_item("discovery", "racy")]
         written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
         assert err is None
@@ -979,12 +985,18 @@ class TestWriteItemFiles:
         assert attempts[0] >= 2  # at least one retry
 
     def test_slug_retry_exhausted_errors(self, tmp_captures_dir, monkeypatch):
+        """Cycle 17 AC10 — infinite Phase-1 collision returns empty + error."""
+        import os as _os
+
+        original_open = _os.open  # capture BEFORE patching
         items = [self._make_item("decision", "x")]
 
-        def always_collide(path, content):
-            raise FileExistsError("forever colliding")
+        def always_collide(path, flags, *args, **kwargs):
+            if ".reserving" in str(path):
+                raise FileExistsError("forever colliding")
+            return original_open(path, flags, *args, **kwargs)
 
-        monkeypatch.setattr("kb.capture._exclusive_atomic_write", always_collide)
+        monkeypatch.setattr("kb.capture.os.open", always_collide)
         written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
         assert err is not None
         assert "retry exhausted" in err.lower() or "forever colliding" in err.lower()
@@ -1138,21 +1150,22 @@ class TestCaptureItems:
                 "filtered_out_count": 0,
             }
         )
-        from kb.capture import _exclusive_atomic_write as orig_write
-
         call_count = [0]
 
-        def fail_second(path, c):
+        def fail_second(src, dst):
+            import os as _os
+
             call_count[0] += 1
             if call_count[0] == 2:
                 raise OSError(28, "No space left on device")
-            return orig_write(path, c)
+            _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture._exclusive_atomic_write", fail_second)
+        monkeypatch.setattr("kb.capture.os.replace", fail_second)
         result = capture_items(content)
+        # Cycle 17 AC10 — all-or-nothing: NO items written when Phase-3 fails mid-batch.
         assert result.rejected_reason is not None
         assert "No space left" in result.rejected_reason
-        assert len(result.items) == 1  # first write succeeded
+        assert len(result.items) == 0
 
 
 class TestCaptureTemplate:
