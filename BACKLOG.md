@@ -59,34 +59,20 @@ _All items resolved — see `CHANGELOG.md` `[Unreleased]`._
 
 ### CRITICAL
 
-<!-- All 18 Phase 4.5 CRITICAL items resolved. Cycle 1 (16 items, PR #9 merged 2026-04-16)
-     shipped the code fixes. Cycle 1-docs-sync (items 4 + 5, this PR) aligns version strings
-     across pyproject.toml/__init__.py/README and updates CLAUDE.md stats + adds
-     scripts/verify_docs.py as a pre-push guard against future drift. See CHANGELOG. -->
+_All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-docs-sync, and Backlog-by-file cycle 4._
 
-_All CRITICAL items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1 + docs-sync._
-
-_Items closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 4" (2026-04-17):
-`_rel()` error-string sweep in `mcp/core.py` (#1), `<prior_turn>` sentinel +
-fullwidth angle-bracket fold + control-char strip in `mcp/core.py`
-`conversation_context` (#2), `Error[partial]` on post-create OSError in
-`kb_ingest_content` / `kb_save_source` (#5), `kb_read_page` body cap with
-`[Truncated:]` footer (#7), `kb_affected_pages` `check_exists=True` (#11),
-`add_verdict` per-issue description cap at library boundary (#12),
-`_validate_page_id` Windows-reserved + 255-char cap cross-platform (#13),
-`kb_detect_drift` source-deleted third category (#14), `query/rewriter`
-CJK short-query gate (#15), `_WIKI_BM25_CACHE` + `BM25_TOKENIZER_VERSION`
-in `_RAW_BM25_CACHE` key (#16 + #18 cache-invalidation path), running
-type-diversity quota in `dedup` (#17), STOPWORDS prune of 8 overloaded
-quantifiers (#18), `yaml_sanitize` BOM + U+2028 + U+2029 strip (#19),
-`wiki_log` monthly rotation `log.YYYY-MM.md` + ordinal collision (#20),
-`ingest/pipeline` caller migration to `detect_contradictions_with_metadata`
-+ truncation WARNING (#22), `export_mermaid` Path-shim DeprecationWarning
-(#23), `BM25Index` postings precompute (#24), `_template_hashes`
-VALID_SOURCE_TYPES whitelist (#25), `load_purpose(wiki_dir)` required arg
-(#28), `inject_wikilinks` caller-side `sorted()` by title length (#29).
-Deferred: `[source: X]` → `[[X]]` citation migration (#3, too large for
-mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
+<!-- Cycle 4 closed (2026-04-17): #1 _rel() error-string sweep, #2 <prior_turn> sentinel +
+     fullwidth angle-bracket fold + control-char strip, #5 Error[partial] on post-create
+     OSError in kb_ingest_content/kb_save_source, #7 kb_read_page body cap with [Truncated:]
+     footer, #11 kb_affected_pages check_exists=True, #12 add_verdict per-issue cap,
+     #13 _validate_page_id Windows-reserved + 255-char cap, #14 kb_detect_drift source-deleted
+     category, #15 query/rewriter CJK short-query gate, #16+#18 BM25 cache-invalidation,
+     #17 type-diversity quota in dedup, #18 STOPWORDS prune, #19 yaml_sanitize BOM +
+     U+2028/9 strip, #20 wiki_log monthly rotation, #22 detect_contradictions_with_metadata
+     caller migration, #23 export_mermaid Path-shim, #24 BM25Index postings precompute,
+     #25 _template_hashes VALID_SOURCE_TYPES whitelist, #28 load_purpose(wiki_dir) required,
+     #29 inject_wikilinks caller-side sorted().
+     Deferred: #3 [source: X] → [[X]] citation migration (tracked as dedicated atomic migration). -->
 
 ### HIGH
 
@@ -144,9 +130,9 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 - `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page (line 609) → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes some of the SAME pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Within ONE process this is OK. Under concurrent ingest A + B, the read-then-write windows in different stages of A overlap with different stages of B in non-deterministic order; debugging becomes impossible because each `kb_ingest` run shows different conflict patterns. R5 highlights the **systemic absence of any locking discipline across the entire 11-stage ingest pipeline** — a problem that compounds with every Phase 5 feature. (R5)
   (fix: introduce a per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` and use consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, and `inject_wikilinks`; OR adopt a coarse wiki-wide ingest mutex)
 
-### HIGH — Additional (surfaced post-cycle-2 or deferred from cycle-1)
+### HIGH — Deferred
 
-> All items below are HIGH severity. Grouped here because they were either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
+> HIGH-severity items either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
 
 - `review/refiner.py` `refine_page` write-then-audit ordering — after H1's page-file lock (cycle 1), a crash/OSError on the history-lock step still leaves the page body updated without an audit record. Adopt two-phase write (pending audit first → write page → flip to applied). See `docs/superpowers/decisions/2026-04-16-phase4.5-high-cycle1-design.md` Q_H. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
@@ -156,14 +142,11 @@ mechanical cleanup; tracked as dedicated Phase 4.5 atomic migration)._
 
 ### MEDIUM
 
-_Items closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (2026-04-17):
-`_build_schema_cached` deepcopy (D1), `ingest/contradiction.py` logger
-placement + tokens hoist + single-char language names (E1 + verified
-pre-fixed), `kb_create_page` O_EXCL (F1), `kb_list_sources` cap (G1),
-`kb_refine_page` caps (F2), `_TEXT_EXTENSIONS` library enforcement (C2),
-`query/rewriter.py` length guard (J1), `search_raw_sources` BM25 cache
-(I2), `_flag_stale_results` UTC (I1), `_dedup_by_text_similarity`
-tokens (K1)._
+<!-- Cycle 1 closed (2026-04-17): D1 _build_schema_cached deepcopy, E1 ingest/contradiction.py
+     logger placement + tokens hoist + single-char language names, F1 kb_create_page O_EXCL,
+     G1 kb_list_sources cap, F2 kb_refine_page caps, C2 _TEXT_EXTENSIONS library enforcement,
+     J1 query/rewriter length guard, I2 search_raw_sources BM25 cache, I1 _flag_stale_results
+     UTC, K1 _dedup_by_text_similarity tokens, M1 lint/verdicts load_verdicts mtime cache. -->
 
 - `models/page.py` dataclasses are dead — `WikiPage` / `RawSource` exist but nothing returns them; `load_all_pages` / `ingest_source` / `query_wiki` each return ad-hoc dicts. "What is a page?" has ≥4 answers (dict, `Post`, `Path`, markdown blob); chunk indexing in Phase 5 will fork it again. (R1)
   (fix: delete dataclasses, or make them the canonical return type and migrate callers)
@@ -174,14 +157,11 @@ tokens (K1)._
 - `compile/compiler.py` `compile_wiki` (~320-380) — per-source loop saves manifest after ingest but does not roll back wiki writes if a later manifest save fails; failure-recording branch swallows nested exceptions with a warning; final `append_wiki_log` runs even on partial failure. (R1)
   (fix: per-source "in-progress" marker in manifest cleared only after page write + log append; escalate manifest-write failure to CRITICAL)
 
-_`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unreleased] "Backlog-by-file cycle 1" (M1)._
-
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). `file_lock` polls at 50 ms, adding minimum-latency floor on every verdict add. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
-- **[MEDIUM] `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v)**
-  Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
-  Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
+- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in diskcache cache files. No patched upstream version as of 2026-04-18.
+  (mitigation: diskcache is only used by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; track upstream for a patched release)
 
 - `src/kb/lint/augment.py::_post_ingest_quality` — AC17-drop rationale for future reference: cache-invalidation work was reconsidered and DROPPED. Cycle-13 AC2 intentionally uses uncached `frontmatter.load` to avoid FAT32/OneDrive/SMB coarse-mtime holes. Do not re-open without a concrete failure case.
 
@@ -223,11 +203,11 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ### LOW
 
-<!-- Cycle 13 closed both LOW items: AC7 wired sweep_orphan_tmp into kb.cli:cli
-     boot sweeping {.data, WIKI_DIR}; AC8 + _resolve_raw_dir helper derives
-     run_augment raw_dir from wiki_dir.parent / "raw" when wiki_dir is overridden
-     and raw_dir omitted. See CHANGELOG cycle 13. -->
+_All items resolved — see CHANGELOG cycle 13._
 
+<!-- Cycle 13 closed: AC7 sweep_orphan_tmp on kb.cli:cli boot ({.data, WIKI_DIR}); AC8 +
+     _resolve_raw_dir helper derives run_augment raw_dir from wiki_dir.parent / "raw" when
+     wiki_dir is overridden and raw_dir omitted. -->
 
 ---
 
@@ -471,19 +451,13 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
      running Rounds 1 and 2 against feat/kb-capture. Primary scope: new kb.capture module + supporting changes.
      Items grouped by severity, keyed by file. Round tag in parens (R1/R2). -->
 
-<!-- 2026-04-17 cleanup pass: R1 HIGH items (fence-break, os.close, yaml_escape double-escape,
-     unlink swallow), R1 MEDIUM items (env-var secret false-negative, CAPTURES_DIR.resolve caching,
-     80-char collision cap, _write_item_files hardcoded CAPTURES_DIR), R1 LOW items (Authorization Bearer,
-     env-var export form, body maxLength, normalised superset unconditionally), R2 rating corrections,
-     R3 MEDIUM items (dead slug param, captures_dir threading) — ALL VERIFIED FIXED in current capture.py
-     (see commit history). Remaining entries are genuinely open items. -->
+<!-- 2026-04-17 cleanup pass verified R1/R2/R3 HIGH, MEDIUM, and LOW items fixed in capture.py;
+     remaining entries below are genuinely open. -->
 
 ### CRITICAL
 
 - `capture.py:341-372, 428-460` two-pass write architecture needed — STRUCTURAL: `alongside_for[i]` is a frozen list built from Phase A slugs and never recomputed after a Phase C slug reassignment. Items 0..i-1 already written to disk retain `captured_alongside` entries pointing at item i's Phase A slug (which was never written) under cross-process collision. Only complete fix is two-pass: Pass 1 = `O_EXCL`-reserve all N slugs with retry; Pass 2 = compute `alongside_for` from finalized slugs, write all files. Documented as "v1 limitation" in `_write_item_files` docstring. (R3)
   (fix: implement two-pass `_write_item_files`; OR keep TODO(v2) marker and document explicitly in `CaptureResult` docstring)
-
-### HIGH
 
 ### MEDIUM
 
@@ -508,24 +482,6 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
 
 ---
 
-## Phase 5 three-round code review (2026-04-17)
-
-<!-- Discovered by 3 sequential Codex review rounds against the current tree.
-     R1 focused on correctness and API wiring, R2 on reliability/security/state
-     isolation, R3 on tests/config coverage gaps. -->
-
-### HIGH
-
-_All 3 HIGH items resolved in CHANGELOG `[Unreleased]` "Backlog-by-file cycle 1" (raw_dir threading, ingest raw_dir parameter, manifest failed-state advance)._
-
-### MEDIUM
-
-_All 4 MEDIUM items resolved in CHANGELOG `[Unreleased]` (data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)._
-
-### LOW
-
----
-
 ## Resolved Phases
 
 - **Phase 3.92** — all items resolved in v0.9.11
@@ -535,3 +491,4 @@ _All 4 MEDIUM items resolved in CHANGELOG `[Unreleased]` (data_dir threading, ma
 - **Phase 3.96** — all items resolved in v0.9.15
 - **Phase 3.97** — all items resolved in v0.9.16
 - **Phase 4 post-release audit** — all items resolved (23 HIGH + ~30 MEDIUM + ~30 LOW) in CHANGELOG.md [Unreleased]
+- **Phase 5 three-round code review (2026-04-17)** — all items resolved in CHANGELOG `[Unreleased]` Backlog-by-file cycle 1 (3 HIGH: raw_dir threading, ingest raw_dir parameter, manifest failed-state advance; 4 MEDIUM: data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)
