@@ -550,7 +550,12 @@ def check_status_mature_stale(
 # Cycle 15 AC6 — Evidence Trail span anchor. Mirrors the machine-maintained
 # sentinel convention from src/kb/ingest/evidence.py:96 so the `action:
 # ingest` regex scan fires only within the trail block (threat T5).
-_EVIDENCE_TRAIL_ANCHOR = re.compile(r"^## Evidence Trail\r?\n", re.MULTILINE)
+#
+# R1 MINOR 1 — tolerate trailing horizontal whitespace on the header line so
+# hand-edited pages with ``## Evidence Trail  \n`` still match. Machine-
+# written sentinels never include trailing whitespace, but lint targets
+# human-authored pages too.
+_EVIDENCE_TRAIL_ANCHOR = re.compile(r"^## Evidence Trail[ \t]*\r?\n", re.MULTILINE)
 _NEXT_H2_HEADER = re.compile(r"^## ", re.MULTILINE)
 _ACTION_INGEST_RE = re.compile(r"action:\s*ingest", re.IGNORECASE)
 

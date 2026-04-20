@@ -739,6 +739,13 @@ def _build_query_context(pages: list[dict], max_chars: int = QUERY_CONTEXT_MAX_C
     # the CONTEXT_TIER1_SPLIT["wiki_pages"] proportion shapes context
     # assembly (previously the full CONTEXT_TIER1_BUDGET was used as the
     # summaries cap, ignoring the split vocabulary shipped in cycle 14).
+    #
+    # Key-name note (R1 MAJOR 2): the AC2 spec text cites the shorthand
+    # ``"summaries"`` but the canonical CONTEXT_TIER1_SPLIT key is
+    # ``"wiki_pages"`` (60% of CONTEXT_TIER1_BUDGET, shipped in cycle 14
+    # AC7). The wiki_pages bucket is the summaries container today; when
+    # the split gains a dedicated summaries bucket in a future cycle, this
+    # call must be re-audited.
     summaries_budget = tier1_budget_for("wiki_pages")
     effective_max = min(max_chars, CONTEXT_TIER1_BUDGET + CONTEXT_TIER2_BUDGET)
     summaries = [p for p in pages if p.get("type") == "summary"]

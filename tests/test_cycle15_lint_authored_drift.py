@@ -198,3 +198,12 @@ authored_by: human
         )
         issues = check_authored_by_drift(wiki_dir=tmp_path)
         assert len(issues) == 1, "CRLF line endings must still match anchor"
+
+    def test_trailing_whitespace_on_header_still_matches(self, tmp_path):
+        """R1 MINOR 1 — hand-edited `## Evidence Trail  \\n` (trailing spaces) matches."""
+        body = "## Evidence Trail   \n\n- 2026-04-20 | raw/articles/foo.md | action: ingest\n"
+        _write_page(tmp_path, "ws-header", "human", body)
+        issues = check_authored_by_drift(wiki_dir=tmp_path)
+        assert len(issues) == 1, (
+            "trailing whitespace on Evidence Trail header must not defeat the anchor"
+        )

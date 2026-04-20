@@ -98,7 +98,10 @@ class TestIncrementalSkip:
         out = tmp_path / "out" / "llms.txt"
         publish.build_llms_txt(tmp_path, out)
 
-        # Freshen the page mtime forward by 5 seconds (nanosecond-granular).
+        # R1 MINOR 3 — freshen by +5s to ensure mtime strictly exceeds the
+        # output mtime regardless of write-time clock granularity (NTFS 100ns,
+        # FAT32 2s, SMB coarser). A smaller offset risks flaky failures on
+        # low-resolution filesystems.
         now_ns = time.time_ns() + 5_000_000_000
         os.utime(page_path, ns=(now_ns, now_ns))
 

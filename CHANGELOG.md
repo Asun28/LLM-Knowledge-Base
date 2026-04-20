@@ -36,7 +36,7 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ### Phase 4.5 -- Backlog-by-file cycle 15 (2026-04-20)
 
-26 AC across 6 source files + 7 new test files + doc updates / 6 commits. Tests: 2245 → 2326 (+81); full suite 2326 passed + 7 skipped.
+26 AC across 6 source files + 7 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2327 (+82); full suite 2327 passed + 7 skipped.
 
 #### Added
 - `src/kb/config.py` — new config constants/helpers: `AUTHORED_BY_BOOST`, `SOURCE_VOLATILITY_TOPICS`, and `volatility_multiplier_for`.
@@ -56,6 +56,11 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 #### Fixed
 - `tests/test_cycle11_stale_results.py` — dropped the `20260101` parametrized case because Python 3.11+ parses it as valid ISO.
 - `tests/test_phase4_audit_query.py::test_tier1_budget_allows_multiple_small_summaries` — resized to the new summaries budget.
+- `src/kb/compile/publish.py` (R1 MAJOR 1) — all three builders now partition pages ONCE before the incremental skip check instead of calling `_partition_pages` twice and discarding the first result. Prevents wasted work and removes the misleading "filter runs before skip" comment that did not match actual behaviour. Skip-case semantics unchanged (cycle-13 `sweep_orphan_tmp` + mtime-based gate preserve T10c in practice).
+- `src/kb/query/engine.py` (R1 MAJOR 2) — added key-name clarification comment: AC2 spec cites `"summaries"` but the canonical `CONTEXT_TIER1_SPLIT` key is `"wiki_pages"`; future refactors that introduce a dedicated `"summaries"` bucket must re-audit this call.
+- `src/kb/lint/checks.py` (R1 MINOR 1) — `_EVIDENCE_TRAIL_ANCHOR` now tolerates trailing horizontal whitespace on the header line.
+- `tests/test_cycle15_query_tier1_wiring.py` (R1 MINOR 2) — dropped redundant `config.tier1_budget_for` spy; only the engine-module alias is observable.
+- `tests/test_cycle15_publish_incremental.py` (R1 MINOR 3) — added comment documenting the 5-second mtime offset rationale.
 
 #### Security
 - Step-11 verify (Codex): all 10 threat-model items IMPLEMENTED. Class A Dependabot 0 open; Class B pip-audit diff empty; pre-existing `diskcache` CVE remains informational.

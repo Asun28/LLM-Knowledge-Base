@@ -153,13 +153,15 @@ def build_llms_txt(wiki_dir: Path, out_path: Path, *, incremental: bool = False)
     Returns:
         The ``out_path`` that was written (or skipped).
     """
-    # T2 epistemic filter runs BEFORE skip so mtime-bumped retracted pages
-    # still regen cleanly (cycle 15 T10c).
+    # Cycle 15 T10c — partition ONCE before skip check so the same kept/excluded
+    # lists feed both branches. Earlier PR R1 draft called _partition_pages twice
+    # (once discarded, once kept) which wasted work AND meant the skip branch
+    # short-circuited on an unfiltered page list, exposing retracted content if
+    # mtime failed to advance (coarse-mtime FAT32/OneDrive edge case).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
-    _partition_pages(pages)  # validates; side-effect-free
+    kept, excluded = _partition_pages(pages)
     if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
         return out_path
-    kept, excluded = _partition_pages(pages)
     kept = _sort_pages(kept)
 
     lines: list[str] = ["# LLMs index", ""]
@@ -205,11 +207,11 @@ def build_llms_full_txt(wiki_dir: Path, out_path: Path, *, incremental: bool = F
     Returns:
         The ``out_path`` that was written (or skipped).
     """
+    # Cycle 15 T10c — partition ONCE before skip (see build_llms_txt comment).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
-    _partition_pages(pages)  # T2 filter runs before skip (T10c)
+    kept, excluded = _partition_pages(pages)
     if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
         return out_path
-    kept, excluded = _partition_pages(pages)
     kept = _sort_pages(kept)
 
     parts: list[str] = []
@@ -286,11 +288,11 @@ def build_graph_jsonld(wiki_dir: Path, out_path: Path, *, incremental: bool = Fa
     Returns:
         The ``out_path`` that was written.
     """
+    # Cycle 15 T10c — partition ONCE before skip (see build_llms_txt comment).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
-    _partition_pages(pages)  # T2 filter runs before skip (T10c)
+    kept, excluded = _partition_pages(pages)
     if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
         return out_path
-    kept, excluded = _partition_pages(pages)
     kept = _sort_pages(kept)
 
     # Build an id→url map so citations can resolve wikilinks to relative

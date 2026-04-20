@@ -52,7 +52,13 @@ def test_tier1_wiki_pages_budget_controls_summaries(monkeypatch):
 
 
 def test_tier1_budget_for_is_called(monkeypatch):
-    """AC21 — _build_query_context invokes tier1_budget_for('wiki_pages')."""
+    """AC21 — _build_query_context invokes tier1_budget_for('wiki_pages').
+
+    R1 MINOR 2 — only the engine-module alias is observable at the call site
+    (``_build_query_context`` resolves ``tier1_budget_for`` from its own
+    module namespace), so we patch ONLY the engine import. Patching
+    ``config.tier1_budget_for`` would be redundant noise.
+    """
     spy_calls: list[str] = []
     real = config.tier1_budget_for
 
@@ -60,8 +66,7 @@ def test_tier1_budget_for_is_called(monkeypatch):
         spy_calls.append(component)
         return real(component)
 
-    monkeypatch.setattr(config, "tier1_budget_for", _spy)
-    # Also patch the engine's import alias so the spy is picked up.
+    # Patch the engine's import alias so the spy is picked up.
     import kb.query.engine as engine_mod
 
     monkeypatch.setattr(engine_mod, "tier1_budget_for", _spy)
