@@ -1,4 +1,16 @@
-"""Core MCP tools — query, ingest, compile."""
+"""Core MCP tools — query, ingest, compile.
+
+Cycle 17 AC4: heavy imports (anthropic, frontmatter, kb.capture,
+kb.feedback.reliability, kb.ingest.pipeline, kb.query.engine, kb.query.rewriter)
+are deferred to their consuming tool-body function-local positions. Module-level
+imports are limited to kb.config, kb.mcp.app, kb.utils.*, stdlib. This trims
+MCP cold-boot cost (measured ~1.83s / +89 MB on the pre-cycle-17 path).
+
+Tests: tests/test_cycle17_lazy_imports.py enforces the denylist invariant.
+
+Rule for future edits: if you add a `from kb.<heavy-module> import ...` at
+module level, add the name to the denylist in the test file BEFORE submitting.
+"""
 
 import json
 import logging
@@ -6,11 +18,14 @@ import os
 import re
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import anthropic
-import frontmatter
+if TYPE_CHECKING:
+    # Cycle 17 AC4 — imported at type-check time only so runtime cold-boot
+    # does not pull kb.capture. The `_format_capture_result` helper uses
+    # `CaptureResult` as a type hint but never constructs one directly.
+    from kb.capture import CaptureResult
 
-from kb.capture import CaptureResult, capture_items
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
     MAX_QUESTION_LEN,
@@ -21,8 +36,6 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
 )
-from kb.feedback.reliability import compute_trust_scores
-from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
 from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
@@ -32,12 +45,12 @@ from kb.mcp.app import (
     error_tag,
     mcp,
 )
-from kb.query.engine import query_wiki, search_pages
-from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
-from kb.utils.llm import LLMError
-from kb.utils.pages import save_page_frontmatter
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
+
+# kb.utils.llm pulls `anthropic`; kb.utils.pages pulls `frontmatter`. Both are
+# deferred to tool-body imports (kb_query use_api block and _save_synthesis
+# respectively) per cycle 17 AC4.
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +164,11 @@ def _save_synthesis(slug: str, result: dict) -> str:
         return "\n[warn] save_as skipped: query returned no source_pages"
 
     try:
+        # Cycle 17 AC4 — lazy imports keep cold-boot out of frontmatter.
+        import frontmatter
+
+        from kb.utils.pages import save_page_frontmatter
+
         synthesis_dir = WIKI_DIR / "synthesis"
         synthesis_dir.mkdir(parents=True, exist_ok=True)
         target = synthesis_dir / f"{slug}.md"
@@ -270,7 +288,12 @@ def kb_query(
         save_slug = slug
 
     if use_api:
+        # Cycle 17 AC4 — lazy imports keep cold-boot out of anthropic / query.
+        import anthropic
+
         from kb.query.citations import format_citations
+        from kb.query.engine import query_wiki
+        from kb.utils.llm import LLMError
 
         try:
             result = query_wiki(
@@ -321,6 +344,11 @@ def kb_query(
             return error_tag("internal", f"unexpected error: {_sanitize_error_str(e)}")
 
     # Default: Claude Code mode — return context for synthesis
+    # Cycle 17 AC4 — lazy imports for the Claude Code path.
+    from kb.feedback.reliability import compute_trust_scores
+    from kb.query.engine import search_pages
+    from kb.query.rewriter import rewrite_query
+
     # H18: apply multi-turn query rewriting when conversation context is present
     if conversation_context:
         question = rewrite_query(question, conversation_context)
@@ -395,6 +423,9 @@ def kb_ingest(
             Omit to get the extraction prompt instead.
         use_api: If true, use the Anthropic API for extraction. Default false.
     """
+    # Cycle 17 AC4 — lazy import keeps `import kb.mcp.core` out of kb.ingest.pipeline.
+    from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
+
     path = Path(source_path)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -558,6 +589,9 @@ def kb_ingest_content(
             the extraction dict. Mirrors the ``use_api`` parameter already on
             ``kb_query`` and ``kb_ingest``.
     """
+    # Cycle 17 AC4 — lazy import keeps `import kb.mcp.core` out of kb.ingest.pipeline.
+    from kb.ingest.pipeline import ingest_source
+
     err = _validate_file_inputs(filename, content)
     if err:
         return err
@@ -900,6 +934,9 @@ def kb_capture(content: str, provenance: str | None = None) -> str:
     Returns:
         Plain-text summary of items written and noise filtered, or an Error: message.
     """
+    # Cycle 17 AC4 — lazy import keeps `import kb.mcp.core` out of kb.capture.
+    from kb.capture import capture_items
+
     try:
         result = capture_items(content, provenance=provenance)
     except Exception as e:
@@ -907,7 +944,7 @@ def kb_capture(content: str, provenance: str | None = None) -> str:
     return _format_capture_result(result)
 
 
-def _format_capture_result(result: CaptureResult) -> str:
+def _format_capture_result(result: "CaptureResult") -> str:
     """Format CaptureResult per spec §7 MCP response formats."""
     n_items = len(result.items)
 

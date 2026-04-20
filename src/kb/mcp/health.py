@@ -1,10 +1,14 @@
-"""Health MCP tools — lint, evolve."""
+"""Health MCP tools — lint, evolve.
+
+Cycle 17 AC6: `kb.graph.export` (which pulls networkx) is deferred to the
+`kb_graph_viz` tool body. See `tests/test_cycle17_lazy_imports.py` for the
+regression pin.
+"""
 
 import logging
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
-from kb.graph.export import export_mermaid
 from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
 
 logger = logging.getLogger(__name__)
@@ -179,6 +183,9 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         )
     max_nodes = max(1, min(max_nodes, 500))
     try:
+        # Cycle 17 AC6 — lazy import keeps networkx out of MCP cold boot.
+        from kb.graph.export import export_mermaid
+
         wiki_path, err = _validate_health_wiki_dir(wiki_dir)
         if err:
             return f"Error: {err}"
