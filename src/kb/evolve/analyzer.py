@@ -2,13 +2,14 @@
 
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from kb.config import (
     MAX_PAGES_FOR_TERM,
     MIN_PAGES_FOR_TERM,
     MIN_SHARED_TERMS,
+    PAGE_STATUSES,
     UNDER_COVERED_TYPE_THRESHOLD,
     WIKI_DIR,
 )
@@ -17,6 +18,7 @@ from kb.lint.checks import check_stub_pages
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import WIKI_SUBDIRS, page_id, scan_wiki_pages
+from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +246,97 @@ def suggest_new_pages(wiki_dir: Path | None = None, pages: list | None = None) -
     return result
 
 
+# ── Cycle 16 AC4-AC6 — enrichment targets (status-priority ranking) ──
+_STATUS_EXCLUDE_FROM_ENRICHMENT: frozenset[str] = frozenset({"mature", "evergreen"})
+_STATUS_REASON_BY_BUCKET: dict[str, str] = {
+    "seed": "status=seed — needs initial fleshing out",
+    "developing": "status=developing — needs refinement",
+}
+
+
+def suggest_enrichment_targets(
+    wiki_dir: Path | None = None,
+    pages_dicts: list[dict] | None = None,
+    *,
+    status_priority: Sequence[str] = ("seed", "developing"),
+) -> list[dict]:
+    """Rank EXISTING wiki pages by status for enrichment priority.
+
+    Complementary to :func:`suggest_new_pages` which surfaces dead-link
+    targets. This function iterates currently-existing pages and orders
+    them by ``status_priority``, excluding mature/evergreen pages that
+    do not need enrichment.
+
+    Cycle 16 Q4/C1 contract:
+      - Pages with ``status`` absent, ``None``, or empty string are
+        INCLUDED and sort LAST (matching AC4 wording "sort LAST").
+      - Pages with ``status`` set to an injected/non-vocabulary value
+        (not in :data:`PAGE_STATUSES`) are DROPPED (T13 defence-in-depth).
+      - Pages with ``status in {"mature", "evergreen"}`` are DROPPED
+        per AC4 exclusion rule.
+
+    Args:
+        wiki_dir: Wiki directory (defaults to :data:`WIKI_DIR`).
+        pages_dicts: Pre-loaded page dicts from
+            :func:`kb.utils.pages.load_all_pages`. When ``None``, the
+            function loads internally (adds one disk walk; prefer
+            threading from :func:`generate_evolution_report`).
+        status_priority: Ordered tuple of status values to sort by
+            (keyword-only). Pages with statuses not in this sequence
+            sort after pages whose statuses are in it.
+
+    Returns:
+        List of ``{"page_id": str, "status": str, "reason": str}`` dicts,
+        sorted by ``(priority_index, page_id)`` ascending.
+    """
+    if pages_dicts is None:
+        # Lazy import to avoid circular deps when load_all_pages consumers grow.
+        from kb.utils.pages import load_all_pages
+
+        pages_dicts = load_all_pages(wiki_dir=wiki_dir)
+
+    priority_list = list(status_priority)
+    tail_index = len(priority_list)
+
+    results: list[dict] = []
+    for page in pages_dicts:
+        raw_status = page.get("status")
+        status_str = raw_status if isinstance(raw_status, str) else ""
+        if status_str and status_str not in PAGE_STATUSES:
+            # T13: injected / non-vocabulary value — defence-in-depth drop.
+            continue
+        if status_str in _STATUS_EXCLUDE_FROM_ENRICHMENT:
+            continue
+
+        if status_str in priority_list:
+            reason = _STATUS_REASON_BY_BUCKET.get(
+                status_str, f"status={status_str} — needs refinement"
+            )
+            display_status = status_str
+        else:
+            # Absent / empty / unknown-but-valid — sort last via _priority_key
+            # below (tail_index fallback).
+            reason = "status=<unknown> — needs triage"
+            display_status = status_str or "<unknown>"
+
+        results.append(
+            {
+                "page_id": page.get("id", ""),
+                "status": display_status,
+                "reason": reason,
+            }
+        )
+
+    def _priority_key(entry: dict) -> tuple[int, str]:
+        status = entry.get("status", "")
+        if status in priority_list:
+            return (priority_list.index(status), entry.get("page_id", ""))
+        return (tail_index, entry.get("page_id", ""))
+
+    results.sort(key=_priority_key)
+    return results
+
+
 def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
     """Generate a comprehensive evolution/gap analysis report.
 
@@ -336,6 +429,17 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
         # on read failure hides a real incident.
         logger.warning("Feedback data unavailable for evolve report: %s", e)
 
+    # Cycle 16 AC5/AC6 — rank existing pages for enrichment by status priority.
+    status_priority: Sequence[str] = ("seed", "developing")
+    enrichment_targets = suggest_enrichment_targets(
+        wiki_dir, pages_dicts=pages_dicts, status_priority=status_priority
+    )
+    if enrichment_targets:
+        top_ids = ", ".join(e["page_id"] for e in enrichment_targets[:3])
+        recommendations.append(
+            f"{len(enrichment_targets)} page(s) ranked by status priority. Top: {top_ids}."
+        )
+
     return {
         "coverage": coverage,
         "connection_opportunities": connections,
@@ -346,6 +450,8 @@ def generate_evolution_report(wiki_dir: Path | None = None) -> dict:
             "components": stats["components"],
         },
         "flagged_pages": flagged_pages,
+        "enrichment_targets": enrichment_targets,
+        "status_priority": list(status_priority),
         "recommendations": recommendations,
     }
 
@@ -388,6 +494,18 @@ def format_evolution_report(report: dict) -> str:
             lines.append(
                 f"- {co['page_a']} ↔ {co['page_b']} ({co['shared_term_count']} shared terms)"
             )
+        lines.append("")
+
+    # Cycle 16 AC6 — enrichment targets ranked by status priority.
+    if report.get("enrichment_targets"):
+        lines.append("### Enrichment targets\n")
+        priority_seq = ", ".join(report.get("status_priority") or ("seed", "developing"))
+        lines.append(
+            f"{len(report['enrichment_targets'])} page(s) ranked by status priority "
+            f"({priority_seq}):"
+        )
+        for e in report["enrichment_targets"][:10]:
+            lines.append(f"- {e['page_id']} (status={yaml_escape(e['status'])}): {e['reason']}")
         lines.append("")
 
     # Recommendations

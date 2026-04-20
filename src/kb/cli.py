@@ -347,11 +347,11 @@ def mcp():
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["llms", "llms-full", "graph", "all"]),
+    type=click.Choice(["llms", "llms-full", "graph", "siblings", "sitemap", "all"]),
     default="all",
     help=(
         "Which publish format(s) to emit. Defaults to 'all' "
-        "(llms.txt + llms-full.txt + graph.jsonld)."
+        "(llms.txt + llms-full.txt + graph.jsonld + per-page siblings + sitemap)."
     ),
 )
 @click.option(
@@ -375,7 +375,13 @@ def publish(out_dir: Path | None, fmt: str, incremental: bool):
     cycle-15 ``--incremental/--no-incremental`` flag cannot bypass it
     (threat T8).
     """
-    from kb.compile.publish import build_graph_jsonld, build_llms_full_txt, build_llms_txt
+    from kb.compile.publish import (
+        build_graph_jsonld,
+        build_llms_full_txt,
+        build_llms_txt,
+        build_per_page_siblings,
+        build_sitemap_xml,
+    )
     from kb.config import OUTPUTS_DIR, PROJECT_ROOT, WIKI_DIR
 
     target_dir = out_dir if out_dir is not None else OUTPUTS_DIR
@@ -410,6 +416,13 @@ def publish(out_dir: Path | None, fmt: str, incremental: bool):
             click.echo(f"wrote {p}")
         if fmt in ("graph", "all"):
             p = build_graph_jsonld(WIKI_DIR, resolved / "graph.jsonld", incremental=incremental)
+            click.echo(f"wrote {p}")
+        # Cycle 16 AC23/AC24 — per-page siblings + sitemap formats.
+        if fmt in ("siblings", "all"):
+            written = build_per_page_siblings(WIKI_DIR, resolved, incremental=incremental)
+            click.echo(f"wrote {len(written)} per-page siblings under {resolved / 'pages'}/")
+        if fmt in ("sitemap", "all"):
+            p = build_sitemap_xml(WIKI_DIR, resolved / "sitemap.xml", incremental=incremental)
             click.echo(f"wrote {p}")
     except Exception as exc:
         _error_exit(exc)

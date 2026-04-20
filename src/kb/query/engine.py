@@ -19,6 +19,7 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     QUERY_COVERAGE_CONFIDENCE_THRESHOLD,
     QUERY_MAX_TOKENS,
+    QUERY_REPHRASING_MAX,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
     SOURCE_DECAY_DEFAULT_DAYS,
@@ -35,10 +36,10 @@ from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
 from kb.query.embeddings import _vec_db_path
 from kb.query.hybrid import rrf_fusion
-from kb.utils.llm import call_llm
+from kb.utils.llm import LLMError, call_llm
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.pages import load_all_pages, load_purpose
-from kb.utils.text import wrap_purpose
+from kb.utils.text import wrap_purpose, yaml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,98 @@ _TRUSTED_STATUSES: frozenset[str] = frozenset({"mature", "evergreen"})
 assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
     "_TRUSTED_STATUSES must be a subset of PAGE_STATUSES vocabulary"
 )
+
+
+# ── Cycle 16 AC7-AC9 — low-coverage rephrasing suggestions ─────────
+_BULLET_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s*")
+# R1 Sonnet Minor 5 / R2 N3 — readability cleanup. The prompt is composed
+# via plain string concatenation rather than str.format(named_kwargs) so
+# there is zero interaction between user-supplied question content and
+# Python's formatting machinery. (Note: Python's str.format does NOT
+# re-parse braces inside replacement values, so this is NOT fixing a
+# latent KeyError — R2 correctly flagged the original claim as a phantom
+# failure mode. The concat form is retained because it's marginally
+# easier to audit for prompt-structure drift.)
+
+
+def _build_rephrasing_prompt(question: str, titles_block: str, max_suggestions: int) -> str:
+    """Compose the scan-tier rephrasing prompt without str.format() risk."""
+    return (
+        'The user asked: "' + question + '"\n'
+        "Known wiki pages (titles only):\n"
+        + titles_block
+        + "\nSuggest up to "
+        + str(max_suggestions)
+        + " alternative phrasings that would match different\n"
+        "page titles. Return one phrasing per line. Do not repeat the original question.\n"
+    )
+
+
+def _normalise_for_echo(s: str) -> str:
+    """Collapse punctuation + case + whitespace to a canonical form for echo-filter."""
+    return re.sub(r"[\W_]+", " ", s).strip().lower()
+
+
+def _suggest_rephrasings(
+    question: str,
+    context_pages: list[dict],
+    *,
+    max_suggestions: int = QUERY_REPHRASING_MAX,
+) -> list[str]:
+    """Return up to ``max_suggestions`` alternative phrasings grounded in ``context_pages``.
+
+    Cycle 16 AC7-AC9 contract:
+      - Empty ``context_pages`` → return ``[]`` without LLM call.
+      - Any :class:`LLMError` or :class:`OSError` → return ``[]`` (never raises).
+      - Per-line hardening (Q5/C5): strip bullet/number prefix, drop empty /
+        > 300-char / embedded-newline lines, drop echoes via
+        :func:`_normalise_for_echo` (case + whitespace + punctuation insensitive).
+      - Logs only ``question[:80]`` — never the full question (T11).
+      - Titles in the prompt are truncated to 200 chars each and wrapped in
+        ``<page_title>…</page_title>`` fences to prevent instruction injection (T4).
+    """
+    if not context_pages:
+        return []
+    logger.info("rephrasings request for q=%r", question[:80])
+
+    # Build fenced + truncated titles block. Pull up to 3x max_suggestions titles
+    # so the LLM has room to diversify without us ballooning the prompt.
+    titles: list[str] = []
+    for page in context_pages[: max_suggestions * 3]:
+        raw_title = str(page.get("title") or page.get("id") or "")
+        if not raw_title:
+            continue
+        safe = yaml_escape(raw_title)[:200]
+        titles.append(f"<page_title>{safe}</page_title>")
+    titles_block = "\n".join(titles) if titles else "<page_title></page_title>"
+
+    prompt = _build_rephrasing_prompt(
+        question=question[:80],
+        titles_block=titles_block,
+        max_suggestions=max_suggestions,
+    )
+    try:
+        raw = call_llm(prompt, tier="scan")
+    except (LLMError, OSError) as exc:
+        logger.debug("rephrasings failed: %s", exc)
+        return []
+
+    normalised_question = _normalise_for_echo(question)
+    out: list[str] = []
+    for line in raw.splitlines():
+        candidate = _BULLET_PREFIX_RE.sub("", line.strip()).strip()
+        if not candidate:
+            continue
+        if len(candidate) > 300:
+            continue
+        if "\n" in candidate:
+            continue
+        if _normalise_for_echo(candidate) == normalised_question:
+            continue
+        out.append(candidate)
+        if len(out) >= max_suggestions:
+            break
+    return out
 
 
 def _apply_status_boost(page: dict) -> dict:
@@ -1064,6 +1157,10 @@ INSTRUCTIONS:
             "or widening the query."
         )
         answer = refusal_advisory
+        # Cycle 16 AC7-AC9 — scan-tier rephrasing suggestions grounded in
+        # whatever pages DID match. Helper returns [] on LLM error / empty
+        # context — never raises past boundary (T3/T4/T11/T15).
+        rephrasings = _suggest_rephrasings(normalized_question, matching_pages)
     else:
         answer = call_llm(
             prompt,
@@ -1098,6 +1195,7 @@ INSTRUCTIONS:
     if low_confidence:
         result_dict["low_confidence"] = True
         result_dict["advisory"] = refusal_advisory
+        result_dict["rephrasings"] = rephrasings
 
     # 5. Optional output adapter (Phase 4.11)
     if output_format and output_format.strip().lower() != "text":
