@@ -34,6 +34,40 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 -- Backlog-by-file cycle 16 (2026-04-20)
+
+24 AC across 8 source files + 9 new test files + doc updates / 10 commits (1 Step-11 security-verify N1 fix). Tests: 2334 → 2459 collected (+125); full suite 2452 passed + 7 skipped (run-time count).
+
+#### Added
+- `src/kb/config.py` — new constants `QUERY_REPHRASING_MAX = 3`, `DUPLICATE_SLUG_DISTANCE_THRESHOLD = 3`, `CALLOUT_MARKERS = ("contradiction","gap","stale","key-insight")`.
+- `src/kb/evolve/analyzer.py` — `suggest_enrichment_targets(wiki_dir, pages_dicts, *, status_priority=("seed","developing"))` ranks EXISTING pages by status (complementary to `suggest_new_pages`). Includes absent-status pages sorted LAST (Q4); drops mature/evergreen and invalid non-vocabulary values (T13).
+- `src/kb/query/engine.py` — scan-tier `_suggest_rephrasings` helper + `_normalise_for_echo` filter. Surfaces up to 3 rephrasings on the low-coverage refusal path (cycle 14 AC5 branch) via new `result_dict["rephrasings"]` key.
+- `src/kb/lint/checks.py` — `check_duplicate_slugs` (length-bucketed bounded-Levenshtein, 10K-page cap), `parse_inline_callouts` (Obsidian `[!marker]` regex with 1 MiB + 500-match caps), `check_inline_callouts` (cross-page 10K cap).
+- `src/kb/mcp/core.py` — `kb_query(save_as=...)` keyword argument persists a synthesised answer to `wiki/synthesis/{slug}.md`. New `_validate_save_as_slug` helper (slugify + ASCII regex + Windows-reserved rejection) and `_save_synthesis` writer (hardcoded `type=synthesis`, `confidence=inferred`, `authored_by=llm` — T2).
+- `src/kb/compile/publish.py` — two new builders: `build_per_page_siblings` emits `.txt` + `.json` siblings per kept page (deterministic `sort_keys=True` JSON) with unconditional stale-sibling cleanup (Q2/C3); `build_sitemap_xml` emits `sitemap.org/0.9` XML via `xml.etree.ElementTree` (T7 safe escaping, T8 relative POSIX `<loc>`).
+- `src/kb/cli.py` — `kb publish --format` accepts two new values `siblings` and `sitemap`; `--format=all` now dispatches all five builders.
+- `tests/test_cycle16_*.py` — 9 new test files covering config constants, enrichment targets, rephrasings, duplicate slugs, inline callouts, lint wiring, save_as, publish siblings/sitemap, CLI flags.
+
+#### Changed
+- `src/kb/query/engine.py` — low-coverage refusal branch now adds `rephrasings: list[str]` to result_dict (empty list when LLM unavailable or context empty).
+- `src/kb/lint/runner.py` — `run_all_checks` adds `duplicate_slugs` + `inline_callouts` top-level keys; summary counters increment `warning` / `info` accordingly. `checks_run` count bumped 10 → 12.
+- `src/kb/lint/runner.py` — `format_report` renders new `## Duplicate slugs` and `## Inline callouts` sections only when non-empty.
+- `src/kb/mcp/core.py` — `kb_query` docstring notes the read→write shift when `save_as` is set (Q8 amendment).
+- `src/kb/compile/publish.py` — module docstring documents the single-file-builder (`out_path`) vs multi-file-builder (`out_dir`) signature asymmetry (Q9; intentional — encodes output cardinality).
+- `src/kb/evolve/analyzer.py` — `generate_evolution_report` threads `pages_dicts` into enrichment helper (no extra disk walk) and exposes `enrichment_targets` + `status_priority` keys.
+- `tests/test_cycle14_coverage_gate.py::test_gate_triggers_refusal` — AC5 invariant narrowed from "call_llm never fires" to "orchestrate (synthesis) tier never fires"; cycle 16 adds a scan-tier rephrasings call on refusal which is additive.
+- `tests/test_lint.py::test_run_all_checks` — `checks_run` length pinned to 12 after AC14 wiring.
+- `BACKLOG.md` — deletes closed items (suggest_enrichment_targets cycle-16 target, low-coverage rephrasings, duplicate-slug lint, inline callout markers, kb_query save_as, compile/publish per-page siblings + sitemap).
+
+#### Fixed
+- `src/kb/compile/publish.py` (Step-11 N1 HIGH) — `_is_contained` switched from `str(target).startswith(str(base))` to `Path.is_relative_to`, closing a sibling-prefix-directory traversal hole (`pages_evil` would have string-prefix-matched `pages`). Regression test `test_rejects_sibling_prefix_directory` pins the contract.
+
+#### Security
+- Step-11 verify (Codex): 14/15 threats IMPLEMENTED cleanly; T9 PARTIAL resolved same-cycle with N1 fix. All 15 final status IMPLEMENTED.
+- Class A Dependabot: 0 open alerts (fresh pre-push read).
+- Class B pip-audit diff: empty (no PR-introduced CVEs). Pre-existing `diskcache==5.6.3` CVE-2025-69872 remains informational — no upstream fix_versions.
+- Semantic shift disclosure (Q8): `kb_query(save_as=...)` is now a write path; docstring + non-goals doc flag the shift; hardcoded frontmatter (T2) + path validation (T1/T15) + slugify+ASCII whitelist (Q3/C4) guard the boundary.
+
 ### Phase 4.5 -- Backlog-by-file cycle 15 (2026-04-20)
 
 26 AC across 6 source files + 11 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2334 (+89); full suite 2334 collected, 2327 passed + 7 skipped (run-time count).

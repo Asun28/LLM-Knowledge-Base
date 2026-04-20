@@ -183,21 +183,13 @@ _`lint/verdicts.py` `load_verdicts` mtime cache — closed in CHANGELOG [Unrelea
   Pickle-deserialization RCE in diskcache cache files. No patched version available as of 2026-04-18.
   Mitigation: diskcache is only used by trafilatura's robots.txt cache in `kb.lint.fetcher`; exploit requires local write access to the cache directory. Track upstream for a patched release.
 
-- `src/kb/evolve/analyzer.py` `suggest_enrichment_targets` — AC8-carry (cycle 16): design a new `suggest_enrichment_targets(pages, status_priority=["seed", "developing"])` function that iterates existing pages (not dead-link targets), sorts by status, and surfaces through `kb_evolve`. Requires a dedicated requirements + threat + brainstorm cycle.
-
 - `src/kb/lint/augment.py::_post_ingest_quality` — AC17-drop rationale for future reference: cache-invalidation work was reconsidered and DROPPED. Cycle-13 AC2 intentionally uses uncached `frontmatter.load` to avoid FAT32/OneDrive/SMB coarse-mtime holes. Do not re-open without a concrete failure case.
-
-- `src/kb/query/engine.py::query_wiki` — LLM-suggested rephrasings for low-coverage advisory (deferred from cycle 15 non-goals): implement a scan-tier call that proposes 2-3 alternative phrasings when coverage is low.
 
 - `compile/linker.py` cross-reference auto-linking — deferred: when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` added to A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
 
-- `mcp/core.py` `kb_query` `save_as` parameter — deferred: immediately create a `wiki/synthesis/{slug}.md` page from the query answer with citations mapped to `source:` refs and proper frontmatter; no feedback gate required.
+- `compile/publish.py` compile-time auto-publish hook — deferred: hook `kb publish` into `compile_wiki` so every compile auto-emits the Tier-1 + sibling + sitemap outputs. Cycle 16 shipped the sibling + sitemap BUILDERS standalone; the auto-hook into compile remains deferred pending a dedicated cycle.
 
-- `wiki/` inline callout markers — deferred: embed `> [!contradiction]`, `> [!gap]`, `> [!stale]`, `> [!key-insight]` callouts at the point of relevance in wiki page bodies and have lint parse them for aggregate reporting.
-
-- `lint/checks.py` duplicate-slug lint check — deferred: detect near-duplicate slugs (`attention` vs `attention-mechanism`, `rag` vs `retrieval-augmented`) so merge tooling can resolve drift.
-
-- `compile/publish.py` compile-time auto-publish + sibling `.txt`/`.json` + `sitemap.xml` — deferred: hook `kb publish` into `compile_wiki`, add per-page sibling files, and write a wiki-root sitemap.
+- `compile/publish.py` manifest-based incremental sibling cleanup — deferred from cycle 16 Q2/C3 resolution: cycle 16 cleanup is O(|excluded|) unconditional unlinks per publish. When N(retracted) exceeds ~1000 a `.data/publish-siblings-manifest.json` atomic-state approach becomes preferable; defer until retracted-page counts warrant.
 
 - `ingest/pipeline.py` index-file write order (~653-700) — per ingest: `index.md` → `_sources.md` → manifest → `log.md` → `contradictions.md`. A crash between `_sources.md` and manifest writes can duplicate entries on re-ingest. (R2)
   (fix: introduce an `IndexWriter` helper wrapping all four writes with documented order and recovery)
