@@ -105,13 +105,19 @@ class Manifest:
         no glob wildcard interpolation. Returns None when the file is missing
         or when the run already completed (ended_at set).
 
-        **Contract (cycle 17 PR R1 Sonnet MAJOR clarification):**
+        **Contract (cycle 17 PR R1 Sonnet MAJOR + R3 NIT clarifications):**
 
-        - ``run_id`` is the 8-char STEM that appears in the filename
-          ``augment-run-<stem>.json``. It is NOT the full UUID stored inside
-          the JSON (``data["run_id"]``) — `Manifest.start` truncates that UUID
-          to 8 chars for the filename. Callers must therefore pass the 8-char
-          stem, not the full UUID.
+        - The ``run_id`` PARAMETER is the 8-char STEM that appears in the
+          filename ``augment-run-<stem>.json``. It is NOT the full UUID
+          stored inside the JSON (``data["run_id"]``) — `Manifest.start`
+          truncates that UUID to 8 chars for the filename. Callers must
+          therefore pass the 8-char stem, not the full UUID.
+        - The returned Manifest INSTANCE's ``run_id`` FIELD holds the full
+          UUID (pulled from ``data["run_id"]`` inside the JSON), mirroring
+          the value set by ``Manifest.start``. Downstream use of
+          ``manifest.run_id`` is audit-only (run-ID in log prefixes, summary
+          strings) — never used to construct filenames, so the parameter/field
+          asymmetry is safe at runtime.
         - Direct callers that receive ``None`` should decide whether to treat
           a miss as "no incomplete run exists" (silent) or "id invalid"
           (raise). The production caller `run_augment` raises ``ValueError``
