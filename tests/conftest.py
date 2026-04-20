@@ -20,6 +20,7 @@ _TMP_KB_ENV_PATCHED_NAMES = (
     "VERDICTS_PATH",
     "FEEDBACK_PATH",
     "REVIEW_HISTORY_PATH",
+    "HASH_MANIFEST",  # cycle 18 AC1 — lives on kb.compile.compiler, not kb.config (see tmp_kb_env)
     "WIKI_ENTITIES",
     "WIKI_CONCEPTS",
     "WIKI_COMPARISONS",
@@ -128,11 +129,18 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     """Patch KB paths into a temporary project.
 
     Patched names: PROJECT_ROOT, RAW_DIR, WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR,
-    VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, WIKI_ENTITIES,
-    WIKI_CONCEPTS, WIKI_COMPARISONS, WIKI_SUMMARIES, WIKI_SYNTHESIS,
-    WIKI_INDEX, WIKI_SOURCES, WIKI_LOG, WIKI_CONTRADICTIONS, WIKI_PURPOSE,
-    RAW_ARTICLES, RAW_PAPERS, RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS, RAW_BOOKS,
-    RAW_DATASETS, RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
+    VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, HASH_MANIFEST,
+    WIKI_ENTITIES, WIKI_CONCEPTS, WIKI_COMPARISONS, WIKI_SUMMARIES,
+    WIKI_SYNTHESIS, WIKI_INDEX, WIKI_SOURCES, WIKI_LOG, WIKI_CONTRADICTIONS,
+    WIKI_PURPOSE, RAW_ARTICLES, RAW_PAPERS, RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS,
+    RAW_BOOKS, RAW_DATASETS, RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
+
+    Cycle 18 AC1/AC2 — HASH_MANIFEST lives on `kb.compile.compiler`, not
+    `kb.config`. It is patched separately after the config-attribute loop
+    because the config loop uses `getattr(config, name)` which would raise
+    for HASH_MANIFEST. Note: `tests.*` modules that import HASH_MANIFEST at
+    module top before `tmp_kb_env` runs are NOT covered by the mirror-rebind
+    loop; use `monkeypatch.setattr` in the test itself in that case.
 
     Also patches kb.capture._CAPTURES_DIR_RESOLVED, kb.capture._captures_resolved,
     and kb.capture._project_resolved when kb.capture is already imported.
@@ -145,6 +153,7 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     Update this fixture when new kb.config WRITE-TARGET path constants or
     derived path caches are added.
     """
+    import kb.compile.compiler as compiler  # noqa: PLC0415
     import kb.config as config  # noqa: PLC0415
 
     project = tmp_path
@@ -152,6 +161,7 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     wiki = project / "wiki"
     data = project / ".data"
     captures = raw / "captures"
+    hash_manifest_path = data / "hashes.json"  # cycle 18 AC2 — compiler-scoped
 
     patched = {
         "PROJECT_ROOT": project,
@@ -217,6 +227,20 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     for name, value in patched.items():
         monkeypatch.setattr(config, name, value)
 
+    # Cycle 18 AC2 — HASH_MANIFEST is a kb.compile.compiler attribute, not a
+    # kb.config attribute. Patch it separately after the config loop so the
+    # getattr(config, name) in the original_values build above does not trip.
+    original_hash_manifest = compiler.HASH_MANIFEST
+    monkeypatch.setattr(compiler, "HASH_MANIFEST", hash_manifest_path)
+
+    # Build the mirror-rebind map that covers both config-scoped patches AND
+    # the compiler-scoped HASH_MANIFEST so already-imported `kb.*.HASH_MANIFEST`
+    # bindings get the tmp path too.
+    mirror_patched: dict = dict(patched)
+    mirror_patched["HASH_MANIFEST"] = hash_manifest_path
+    mirror_original: dict = dict(original_values)
+    mirror_original["HASH_MANIFEST"] = original_hash_manifest
+
     # Mirror already-imported `from kb.config import X` bindings that still
     # point at the original config objects. Scoped to ``kb.*`` modules so a
     # third-party module happening to hold a dict/Path that compares equal
@@ -226,8 +250,8 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
             continue
         if not (module_name == "kb" or module_name.startswith("kb.")):
             continue
-        for name, value in patched.items():
-            if getattr(module, name, object()) == original_values[name]:
+        for name, value in mirror_patched.items():
+            if getattr(module, name, object()) == mirror_original[name]:
                 monkeypatch.setattr(module, name, value, raising=False)
 
     capture_module = sys.modules.get("kb.capture")
