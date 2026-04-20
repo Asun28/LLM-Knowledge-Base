@@ -7,7 +7,7 @@ Behavioural regressions on `parse_inline_callouts` and
 from pathlib import Path
 
 from kb.lint.checks import (
-    _CALLOUT_BODY_BYTE_CAP,
+    _CALLOUT_BODY_CHAR_CAP,
     _CALLOUTS_CROSS_PAGE_CAP,
     _CALLOUTS_PER_PAGE_CAP,
     check_inline_callouts,
@@ -69,8 +69,8 @@ class TestParseInlineCallouts:
         assert out == []
 
     def test_body_over_1mb_returns_empty(self) -> None:
-        """T5 — page body > 1 MiB returns [] (DoS bound)."""
-        huge = "x" * (_CALLOUT_BODY_BYTE_CAP + 1)
+        """T5 — page body exceeding 1 M codepoints returns [] (DoS bound)."""
+        huge = "x" * (_CALLOUT_BODY_CHAR_CAP + 1)
         body = f"> [!gap] should-be-skipped\n{huge}"
         out = parse_inline_callouts(body)
         assert out == []

@@ -376,6 +376,36 @@ def _sibling_paths_for(page_id: str, pages_dir: Path) -> tuple[Path, Path]:
     return txt, txt.with_suffix(".json")
 
 
+def _siblings_skip_if_unchanged(wiki_dir: Path, pages_dir: Path) -> bool:
+    """R1 Sonnet Major 3 — file-level incremental skip for per-page siblings.
+
+    ``_publish_skip_if_unchanged`` compares a single output file's mtime
+    against max wiki page mtime — fine for single-file Tier-1 builders,
+    but wrong for the multi-file sibling layout: on NTFS / ext4 the
+    directory's mtime only updates on add/remove, NOT on in-place file
+    writes. A wiki page body update would fail to trigger a re-write.
+
+    Return True only when (a) at least one sibling file exists AND (b)
+    the OLDEST sibling file mtime is at least as new as the NEWEST wiki
+    page mtime — i.e. every sibling is up to date. Empty output dir
+    returns False so the first run always writes.
+    """
+    if not pages_dir.exists():
+        return False
+    sibling_paths = list(pages_dir.rglob("*.txt")) + list(pages_dir.rglob("*.json"))
+    if not sibling_paths:
+        return False
+    try:
+        max_page_mtime_ns = max(
+            (p.stat().st_mtime_ns for p in scan_wiki_pages(wiki_dir)),
+            default=0,
+        )
+        min_sibling_mtime_ns = min(p.stat().st_mtime_ns for p in sibling_paths)
+    except OSError:
+        return False
+    return max_page_mtime_ns <= min_sibling_mtime_ns
+
+
 def _is_contained(target: Path, base: Path) -> bool:
     """Safe containment check: ``target`` must resolve under ``base``.
 
@@ -442,9 +472,14 @@ def build_per_page_siblings(
         if _is_contained(json_path, pages_dir):
             json_path.unlink(missing_ok=True)
 
-    # Incremental short-circuit (cleanup already ran).
-    if incremental and _publish_skip_if_unchanged(wiki_dir, pages_dir):
-        logger.info("build_per_page_siblings skipped — output dir newer than wiki")
+    # Incremental short-circuit (cleanup already ran). R1 Sonnet Major 3:
+    # _publish_skip_if_unchanged compares against a single file's mtime;
+    # passing a directory leaks a coarse-mtime edge case because NTFS/ext4
+    # only update directory mtime on add/remove, not on in-place content
+    # updates. Compute max sibling-file mtime instead and compare against
+    # max wiki page mtime directly.
+    if incremental and _siblings_skip_if_unchanged(wiki_dir, pages_dir):
+        logger.info("build_per_page_siblings skipped — all siblings newer than wiki")
         return sorted(pages_dir.rglob("*.txt")) + sorted(pages_dir.rglob("*.json"))
 
     written: list[Path] = []

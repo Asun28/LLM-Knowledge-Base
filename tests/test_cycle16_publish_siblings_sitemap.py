@@ -117,6 +117,44 @@ class TestBuildPerPageSiblings:
         # Mtime unchanged (no re-write).
         assert first_mtime == second_mtime
 
+    def test_incremental_rewrites_on_page_content_update(self, tmp_project) -> None:
+        """R1 Sonnet Major 3 — when a wiki page is rewritten in place (no
+        add/remove), the sibling incremental skip MUST detect the change
+        and re-write the output. The prior implementation passed the
+        output DIRECTORY to _publish_skip_if_unchanged; on NTFS/ext4 the
+        directory mtime only updates on add/remove, not on content
+        changes — so the skip fired incorrectly. This regression pins
+        the file-mtime-based fix.
+        """
+        wiki = tmp_project / "wiki"
+        _write_page(wiki, "concepts/page-a")
+        out_dir = tmp_project / "out"
+        build_per_page_siblings(wiki, out_dir)
+        pages_dir = (out_dir / "pages").resolve()
+        first_content = (pages_dir / "concepts" / "page-a.txt").read_text(encoding="utf-8")
+
+        # Rewrite the SAME page with updated body. Advance mtime past FAT32 2s quantum.
+        time.sleep(0.05)
+        path = wiki / "concepts" / "page-a.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("body text", "UPDATED body text"),
+            encoding="utf-8",
+        )
+        # Ensure mtime moves forward.
+        import os as _os
+
+        stat = path.stat()
+        _os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+
+        # Run incremental — output MUST be regenerated with new content.
+        build_per_page_siblings(wiki, out_dir, incremental=True)
+        second_content = (pages_dir / "concepts" / "page-a.txt").read_text(encoding="utf-8")
+        assert "UPDATED body text" in second_content, (
+            "incremental sibling publish failed to detect in-place page update; "
+            "directory-mtime skip is coarse on NTFS/ext4"
+        )
+        assert first_content != second_content
+
     def test_subdir_page_id_writes_nested(self, tmp_project) -> None:
         """AC20 — page IDs with one-level subdir (e.g. concepts/foo) produce
         nested paths under pages/. Matches load_all_pages' flat-subdir contract.

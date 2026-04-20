@@ -809,7 +809,13 @@ def check_stub_pages(
 _DUPLICATE_SLUGS_PAGE_CAP: int = 10_000
 _CALLOUTS_PER_PAGE_CAP: int = 500
 _CALLOUTS_CROSS_PAGE_CAP: int = 10_000
-_CALLOUT_BODY_BYTE_CAP: int = 1_048_576  # 1 MiB — T5 DoS bound
+# R1 Sonnet Minor 4 — codepoint-based cap (not byte cap). `len(str)` counts
+# codepoints in Python; CJK UTF-8 encodes at 3 bytes/char so a 1 M-codepoint
+# cap can represent up to ~3 MiB on-disk. The DoS target is regex-engine
+# backtracking time, which is bounded by codepoint count, so the cap is
+# correct for its intent; the prior name `_CALLOUT_BODY_BYTE_CAP` was
+# misleading. T5 bound preserved.
+_CALLOUT_BODY_CHAR_CAP: int = 1_048_576  # ~1 M codepoints
 
 _CALLOUT_MARKER_PATTERN = "|".join(re.escape(m) for m in CALLOUT_MARKERS)
 _CALLOUT_RE = re.compile(
@@ -964,7 +970,7 @@ def parse_inline_callouts(content: str) -> list[dict]:
     DoS mitigation). Per-page cap: ``_CALLOUTS_PER_PAGE_CAP`` matches,
     then appends a ``{"marker": "__truncated__", ...}`` sentinel and stops.
     """
-    if len(content) > _CALLOUT_BODY_BYTE_CAP:
+    if len(content) > _CALLOUT_BODY_CHAR_CAP:
         return []
 
     out: list[dict] = []

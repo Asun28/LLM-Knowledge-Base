@@ -164,35 +164,94 @@ class TestSuggestRephrasingsHelper:
 
 
 class TestLowCoverageWiring:
-    """AC8 — rephrasings key surfaced only on refusal path."""
+    """AC8 — rephrasings key surfaced only on refusal path.
+
+    R1 Sonnet Major 2: the prior test asserted only `callable(_suggest_rephrasings)`
+    which would pass even with the wiring reverted (cycle-11 L2 vacuous test
+    pattern). These tests drive the actual low-confidence refusal branch in
+    `query_wiki` via a minimal search_pages + telemetry patch and assert the
+    `rephrasings` key appears in the returned result_dict.
+    """
+
+    def _fake_search_with_low_coverage(self, tmp_wiki) -> None:
+        """Helper contract — return fake search_pages that seeds
+        coverage_confidence < QUERY_COVERAGE_CONFIDENCE_THRESHOLD via
+        the telemetry side-channel.
+        """
 
     def test_refusal_path_includes_rephrasings_key(self, tmp_wiki, monkeypatch) -> None:
-        """AC8 — low_confidence result_dict has rephrasings key."""
-        monkeypatch.setattr(engine, "_suggest_rephrasings", lambda q, p, **k: ["alt1", "alt2"])
-        # Force the low-coverage branch by pinning coverage_confidence to 0.
-        captured = {}
+        """AC8 — low_confidence path MUST set result_dict['rephrasings']."""
 
-        real_query = engine.query_wiki
+        def fake_search_pages(question, wiki_dir=None, max_results=10, *, search_telemetry=None):
+            pages = [
+                {
+                    "id": "concepts/x",
+                    "path": str(tmp_wiki / "concepts/x.md"),
+                    "title": "x",
+                    "type": "concept",
+                    "confidence": "stated",
+                    "sources": ["raw/articles/x.md"],
+                    "created": "2026-04-20",
+                    "updated": "2026-04-20",
+                    "content": "body",
+                    "score": 0.2,
+                }
+            ]
+            if search_telemetry is not None:
+                search_telemetry["vector_attempts"] = 1
+                search_telemetry["vector_hits"] = 1
+                search_telemetry["vector_scores_by_id"] = {"concepts/x": 0.10}
+            return pages
 
-        def wrapper(*args, **kwargs):
-            # Bypass the LLM entirely — we only care about result_dict shape.
-            return real_query(*args, **kwargs)
+        def fake_suggest(question, context_pages, **kw):
+            return ["alt one", "alt two"]
 
-        # Simpler: call the helper path directly by simulating a result with
-        # low_confidence. We validate that the wiring in query_wiki adds the
-        # key when low_confidence is True.
-        #
-        # Minimal functional check: with empty wiki, coverage_confidence is
-        # None (no vector hits), so low_confidence stays False. Use a mock
-        # path instead — construct a fake refusal result_dict shape and
-        # assert the module-level wiring contract by re-reading query_wiki
-        # behaviour via a direct call path isn't practical without hybrid
-        # vectors. Instead assert the helper is callable and the module
-        # exports the name in the refusal branch:
-        assert callable(engine._suggest_rephrasings)
-        # Contract: when low_confidence branch wires, advisory + rephrasings
-        # are both set. Integration tested implicitly via the module patch.
-        _ = captured, wrapper
+        monkeypatch.setattr(engine, "search_pages", fake_search_pages)
+        monkeypatch.setattr(engine, "_suggest_rephrasings", fake_suggest)
+        result = engine.query_wiki("what is X?", wiki_dir=tmp_wiki)
+        assert result.get("low_confidence") is True
+        # The core AC8 invariant: the key is present.
+        assert "rephrasings" in result
+        assert result["rephrasings"] == ["alt one", "alt two"]
+
+    def test_non_refusal_path_omits_rephrasings_key(self, tmp_wiki, monkeypatch) -> None:
+        """AC8 — rephrasings key absent on non-refusal (happy) path."""
+
+        def fake_search_pages(question, wiki_dir=None, max_results=10, *, search_telemetry=None):
+            # BM25-only path — no vector hits → coverage_confidence is None
+            # → low_confidence branch never fires.
+            return [
+                {
+                    "id": "concepts/y",
+                    "path": str(tmp_wiki / "concepts/y.md"),
+                    "title": "y",
+                    "type": "concept",
+                    "confidence": "stated",
+                    "sources": ["raw/articles/y.md"],
+                    "created": "2026-04-20",
+                    "updated": "2026-04-20",
+                    "content": "body",
+                    "score": 0.9,
+                }
+            ]
+
+        spy_called = {"n": 0}
+
+        def never_call(*a, **k):
+            spy_called["n"] += 1
+            return []
+
+        def fake_call_llm(*a, tier="orchestrate", **k):
+            # Return a minimal synthesised answer for the happy path.
+            return "synthesized answer"
+
+        monkeypatch.setattr(engine, "search_pages", fake_search_pages)
+        monkeypatch.setattr(engine, "_suggest_rephrasings", never_call)
+        monkeypatch.setattr(engine, "call_llm", fake_call_llm)
+        result = engine.query_wiki("what is Y?", wiki_dir=tmp_wiki)
+        assert result.get("low_confidence") is not True
+        assert "rephrasings" not in result
+        assert spy_called["n"] == 0  # helper never invoked on happy path
 
     def test_helper_is_exported_from_module(self) -> None:
         """AC7 — _suggest_rephrasings is importable from kb.query.engine."""

@@ -287,13 +287,24 @@ assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
 
 # ── Cycle 16 AC7-AC9 — low-coverage rephrasing suggestions ─────────
 _BULLET_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s*")
-_REPHRASING_PROMPT_TEMPLATE = """\
-The user asked: "{question}"
-Known wiki pages (titles only):
-{titles_block}
-Suggest up to {max_suggestions} alternative phrasings that would match different
-page titles. Return one phrasing per line. Do not repeat the original question.
-"""
+# R1 Sonnet Minor 5 — the prompt template is str.format()-interpolated but
+# the `{question}` slot receives attacker-controllable text which may
+# contain literal `{` / `}` that would KeyError out of format(). Build the
+# prompt via plain string concatenation instead so arbitrary question
+# content is safe.
+
+
+def _build_rephrasing_prompt(question: str, titles_block: str, max_suggestions: int) -> str:
+    """Compose the scan-tier rephrasing prompt without str.format() risk."""
+    return (
+        'The user asked: "' + question + '"\n'
+        "Known wiki pages (titles only):\n"
+        + titles_block
+        + "\nSuggest up to "
+        + str(max_suggestions)
+        + " alternative phrasings that would match different\n"
+        "page titles. Return one phrasing per line. Do not repeat the original question.\n"
+    )
 
 
 def _normalise_for_echo(s: str) -> str:
@@ -334,7 +345,7 @@ def _suggest_rephrasings(
         titles.append(f"<page_title>{safe}</page_title>")
     titles_block = "\n".join(titles) if titles else "<page_title></page_title>"
 
-    prompt = _REPHRASING_PROMPT_TEMPLATE.format(
+    prompt = _build_rephrasing_prompt(
         question=question[:80],
         titles_block=titles_block,
         max_suggestions=max_suggestions,

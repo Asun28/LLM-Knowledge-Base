@@ -171,9 +171,17 @@ def run_all_checks(
     summary = severity_counts
     summary["verdict_history"] = verdict_history
 
+    # Cycle 16 R1 Codex Major 1 — total_issues must include the new cycle-16
+    # categories so severity summary and "No issues found" banner stay
+    # internally consistent. Report was previously inconsistent: warning /
+    # info counters could be non-zero while total_issues read 0, and the
+    # formatter then emitted "wiki is healthy" while still rendering the
+    # duplicate/callout sections below.
+    total_issues = len(all_issues) + len(duplicate_slugs) + len(inline_callouts)
+
     report_dict = {
         "checks_run": checks_run,
-        "total_issues": len(all_issues),
+        "total_issues": total_issues,
         "issues": all_issues,
         "summary": summary,
         "fixes_applied": fixes_applied,

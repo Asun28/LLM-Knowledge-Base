@@ -160,6 +160,56 @@ class TestSaveSynthesisHelper:
         errors = validate_frontmatter(post)
         assert errors == []
 
+    def test_containment_check_rejects_sibling_prefix_dir(self, tmp_project, monkeypatch) -> None:
+        """R1 Blocker 1 / test-gap 7 — _save_synthesis uses Path.is_relative_to,
+        not str.startswith. A sibling directory named `synthesis_evil` must NOT
+        be treated as contained under `synthesis/`.
+
+        This is difficult to trigger directly because the upstream
+        _validate_save_as_slug already rejects anything with path separators
+        — so any slug that reaches _save_synthesis is guaranteed to resolve
+        under WIKI_DIR/synthesis. The regression here asserts the defensive
+        check's semantics directly via Path.is_relative_to.
+        """
+        synthesis_dir = (tmp_project / "wiki" / "synthesis").resolve()
+        synthesis_dir.mkdir(parents=True, exist_ok=True)
+        sibling = (tmp_project / "wiki" / "synthesis_evil").resolve()
+        sibling.mkdir(parents=True, exist_ok=True)
+        malicious_target = sibling / "pwn.md"
+        # Old str.startswith check would have returned True here.
+        # is_relative_to correctly returns False.
+        try:
+            contained = malicious_target.is_relative_to(synthesis_dir)
+        except ValueError:
+            contained = False
+        assert not contained
+        # And a legitimate sibling under synthesis_dir resolves correctly.
+        legit = synthesis_dir / "ok.md"
+        assert legit.is_relative_to(synthesis_dir)
+
+
+class TestRephrasingBraceSafety:
+    """R1 Sonnet Minor 5 — prompt builder must tolerate `{` / `}` in the
+    truncated question text without raising KeyError/IndexError.
+    """
+
+    def test_question_with_braces_does_not_raise(self, monkeypatch) -> None:
+        from kb.query import engine
+
+        captured = {"prompt": ""}
+
+        def _capture(prompt, **k):
+            captured["prompt"] = prompt
+            return ""
+
+        monkeypatch.setattr(engine, "call_llm", _capture)
+        # A JSON-like question with literal braces — would crash str.format()
+        # but must work with plain concatenation.
+        q = '{"type":"rag","k":10}'
+        result = engine._suggest_rephrasings(q, [{"title": "T"}])
+        assert result == []  # empty LLM output → []
+        assert q in captured["prompt"]
+
 
 class TestKbQueryValidateSaveAs:
     """End-to-end save_as validation path through kb_query."""

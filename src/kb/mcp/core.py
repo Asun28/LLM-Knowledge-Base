@@ -154,10 +154,17 @@ def _save_synthesis(slug: str, result: dict) -> str:
         synthesis_dir = WIKI_DIR / "synthesis"
         synthesis_dir.mkdir(parents=True, exist_ok=True)
         target = synthesis_dir / f"{slug}.md"
-        # Belt-and-suspenders containment check (T1).
+        # Belt-and-suspenders containment check (T1) — uses path-component
+        # comparison, NOT string prefix. A sibling directory named
+        # `synthesis_evil` would falsely pass `.startswith(str(synthesis_dir))`
+        # (Step-11 R1 review finding). `is_relative_to` rejects that cleanly.
         resolved_target = target.resolve()
         resolved_base = synthesis_dir.resolve()
-        if not str(resolved_target).startswith(str(resolved_base)):
+        try:
+            contained = resolved_target.is_relative_to(resolved_base)
+        except ValueError:
+            contained = False
+        if not contained:
             return "\n[warn] save_as skipped: target escapes synthesis directory"
         if target.exists():
             return f"\n[warn] save_as skipped: target already exists ({_rel(target)})"

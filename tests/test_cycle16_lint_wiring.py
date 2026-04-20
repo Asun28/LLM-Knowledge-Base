@@ -149,3 +149,31 @@ class TestChecksRunEntries:
         names = {c["name"] for c in report["checks_run"]}
         assert "duplicate_slugs" in names
         assert "inline_callouts" in names
+
+
+class TestTotalIssuesIncludesCycle16:
+    """R1 Codex Major 1 — total_issues must account for duplicate_slugs and
+    inline_callouts so the summary banner doesn't emit "wiki is healthy"
+    while simultaneously rendering duplicate/callout sections below.
+    """
+
+    def test_total_issues_includes_duplicate_slugs(self, tmp_wiki) -> None:
+        _write_body(tmp_wiki, "concepts/attention")
+        _write_body(tmp_wiki, "concepts/attnetion")
+        report = run_all_checks(wiki_dir=tmp_wiki)
+        # At least 1 duplicate slug pair flagged; total_issues reflects it.
+        assert len(report["duplicate_slugs"]) >= 1
+        total_from_issues = len(report["issues"])
+        expected = (
+            total_from_issues + len(report["duplicate_slugs"]) + len(report["inline_callouts"])
+        )
+        assert report["total_issues"] == expected
+
+    def test_total_issues_includes_inline_callouts(self, tmp_wiki) -> None:
+        _write_body(tmp_wiki, "concepts/a", "> [!gap] hole\n> [!stale] old\n")
+        report = run_all_checks(wiki_dir=tmp_wiki)
+        assert len(report["inline_callouts"]) >= 2
+        expected = (
+            len(report["issues"]) + len(report["duplicate_slugs"]) + len(report["inline_callouts"])
+        )
+        assert report["total_issues"] == expected
