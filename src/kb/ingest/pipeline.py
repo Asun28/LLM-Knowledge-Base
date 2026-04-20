@@ -4,7 +4,8 @@ import json
 import logging
 import os
 import re
-from datetime import date
+import uuid
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import frontmatter
@@ -32,8 +33,13 @@ from kb.utils.hashing import hash_bytes
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
+from kb.utils.sanitize import sanitize_text
 from kb.utils.text import sanitize_extraction_field, slugify, wikilink_display_escape, yaml_escape
-from kb.utils.wiki_log import append_wiki_log
+from kb.utils.wiki_log import (
+    LOG_SIZE_WARNING_BYTES,
+    append_wiki_log,
+    rotate_if_oversized,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +715,137 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
         atomic_text_write(content, index_path)
 
 
+# Cycle 18 AC14 — `_write_index_files` helper consolidates the two index-file
+# writes with a documented ordering contract (sources BEFORE index — the index
+# is the human-facing catalog and references sources that the map already
+# knows about). Each call has its OWN try/except (Q10 decision, R2 BLOCKER)
+# so failure of one does NOT abort the other; preserves the existing
+# `logger.warning` pass-through.
+def _write_index_files(
+    created_entries: list[tuple[str, str, str]],
+    source_ref: str,
+    all_pages: list[str],
+    wiki_dir: Path | None = None,
+) -> None:
+    """Write _sources.md then index.md with independent per-call error handling.
+
+    Ordering contract (cycle 18 AC14): `_update_sources_mapping` runs FIRST;
+    `_update_index_batch` runs SECOND and is attempted even if sources fails.
+    The helper does NOT retry or roll back; partial writes are surfaced via
+    `logger.warning` only (matches existing best-effort semantics).
+
+    Symbol constraint (threat T10): `_update_sources_mapping` and
+    `_update_index_batch` MUST remain callable as module attributes for legacy
+    test monkeypatches — this helper delegates, never inlines.
+    """
+    try:
+        _update_sources_mapping(source_ref, all_pages, wiki_dir=wiki_dir)
+    except Exception as e:  # noqa: BLE001 — best-effort write, warn and continue
+        logger.warning("Failed to update _sources.md for %s: %s", source_ref, e)
+    try:
+        _update_index_batch(created_entries, wiki_dir=wiki_dir)
+    except Exception as e:  # noqa: BLE001 — best-effort write, warn and continue
+        logger.warning("Failed to update index.md for %s: %s", source_ref, e)
+
+
+# Cycle 18 AC11/AC12/AC13 — structured ingest audit log at
+# `.data/ingest_log.jsonl`. One JSON row per emission. Two rows per ingest:
+# `start` + one terminal (`duplicate_skip` | `success` | `failure`).
+# Best-effort (Q8 decision): disk-full / fsync errors are logged at WARNING
+# and do NOT mask the ingest outcome. Use direct `file_lock + open("a")`
+# — NOT `atomic_text_write` (whose temp+rename semantics would destroy the
+# append history). Field allowlist enforced at the writer (Q19).
+_INGEST_JSONL_STAGES = frozenset({"start", "duplicate_skip", "success", "failure"})
+_INGEST_JSONL_ERROR_SUMMARY_MAX = 2048
+_INGEST_JSONL_ALLOWED_OUTCOME_KEYS = frozenset(
+    {"pages_created", "pages_updated", "pages_skipped", "error_summary"}
+)
+
+
+def _emit_ingest_jsonl(
+    stage: str,
+    request_id: str,
+    source_ref: str,
+    source_hash: str,
+    outcome: dict,
+) -> None:
+    """Append one audit row to `<PROJECT_ROOT>/.data/ingest_log.jsonl`.
+
+    Cycle 18 AC11/AC12/AC13 — structured ingest observability.
+
+    Args:
+        stage: One of `start`, `duplicate_skip`, `success`, `failure`.
+            Validated against `_INGEST_JSONL_STAGES`; unknown stage raises
+            `ValueError` at the writer boundary (Q19 field-allowlist).
+        request_id: 16-hex correlation id (uuid4-derived).
+        source_ref: Relative path from `RAW_DIR`.
+        source_hash: SHA-256 hex.
+        outcome: Dict with allowed keys from `_INGEST_JSONL_ALLOWED_OUTCOME_KEYS`.
+            Unexpected keys are DROPPED (WARNING logged) per T1 allowlist.
+            `error_summary` is redacted via `sanitize_text` and truncated to
+            `_INGEST_JSONL_ERROR_SUMMARY_MAX` bytes.
+
+    Writer mechanics (Q8 best-effort): `file_lock(jsonl_path)` wraps rotation
+    + append + fsync. On `OSError`, a WARNING is logged and the caller is not
+    disturbed — JSONL write failure MUST NOT mask an otherwise successful
+    ingest or replace the original exception on the failure path.
+    """
+    if stage not in _INGEST_JSONL_STAGES:
+        raise ValueError(
+            f"Unknown ingest_jsonl stage: {stage!r}; expected one of {_INGEST_JSONL_STAGES}"
+        )
+
+    # Q19 field allowlist — build row from EXPLICIT keys only; never passthrough
+    # a caller-controlled dict. Prevents raw_content / PII / secret leakage.
+    unexpected = set(outcome) - _INGEST_JSONL_ALLOWED_OUTCOME_KEYS
+    if unexpected:
+        logger.warning(
+            "Dropping unexpected ingest_log outcome fields: %s",
+            ", ".join(sorted(unexpected)),
+        )
+    safe_outcome: dict = {}
+    for key in ("pages_created", "pages_updated", "pages_skipped"):
+        if key in outcome:
+            try:
+                safe_outcome[key] = int(outcome[key])
+            except (TypeError, ValueError):
+                pass  # non-integer — silently drop; allowlist enforcement
+    err = outcome.get("error_summary")
+    if isinstance(err, str) and err:
+        safe_outcome["error_summary"] = sanitize_text(err)[:_INGEST_JSONL_ERROR_SUMMARY_MAX]
+
+    row = {
+        "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "request_id": request_id,
+        "source_ref": source_ref,
+        "source_hash": source_hash,
+        "stage": stage,
+        "outcome": safe_outcome,
+    }
+
+    # Read PROJECT_ROOT dynamically so `tmp_kb_env`-style monkeypatches of
+    # `kb.config.PROJECT_ROOT` are always honoured, even when the mirror-
+    # rebind loop's snapshot missed this module (e.g. stale sys.modules state
+    # across test boundaries).
+    from kb import config as _config  # noqa: PLC0415
+
+    jsonl_path = _config.PROJECT_ROOT / ".data" / "ingest_log.jsonl"
+    try:
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock(jsonl_path):
+            # AC12 — rotate INSIDE the same lock that wraps the append, symmetric
+            # with AC4's wiki-log fix. Rotation first so the append lands in a
+            # fresh file when the threshold is crossed.
+            rotate_if_oversized(jsonl_path, LOG_SIZE_WARNING_BYTES, "ingest_log")
+            with jsonl_path.open("a", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except OSError as e:
+        # Q8 — best-effort. JSONL write failure must not mask ingest outcome.
+        logger.warning("Failed to write ingest_log.jsonl (best-effort): %s", e)
+
+
 def _process_item_batch(
     items_raw: object,
     field_name: str,
@@ -919,6 +1056,16 @@ def ingest_source(
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
+    # Cycle 18 AC9 — per-ingest correlation ID. 16-hex (64 bits entropy) is
+    # sufficient for per-process correlation between wiki/log.md lines and
+    # `.data/ingest_log.jsonl` rows; uuid4 is thread-safe and fork-safe.
+    request_id = uuid.uuid4().hex[:16]
+
+    # Cycle 18 AC11 — emit `stage="start"` immediately after request_id + source_ref
+    # are known. `outcome={}` for this stage; counts unknown until the ingest body
+    # completes.
+    _emit_ingest_jsonl("start", request_id, source_ref, source_hash, outcome={})
+
     # Validate caller-provided extractions before manifest reservation. In Claude
     # Code mode, extraction is produced here first, then validated before the
     # same reservation point.
@@ -932,6 +1079,10 @@ def ingest_source(
     # race where two concurrent ingests of the same content both pass the duplicate check.
     if _check_and_reserve_manifest(source_hash, source_ref):
         logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
+        # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
+        # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
+        # correlation surface for duplicate/failure paths.
+        _emit_ingest_jsonl("duplicate_skip", request_id, source_ref, source_hash, outcome={})
         return {
             "source_path": str(source_path),
             "source_type": source_type,
@@ -945,6 +1096,55 @@ def ingest_source(
             "contradictions": [],  # fix item 6: contract key always present
         }
 
+    # Cycle 18 AC11/Q2 — wrap the ingest body in try/except BaseException so
+    # `stage="failure"` fires on propagating exceptions. The except re-raises
+    # after emitting the JSONL row so the caller sees the original exception.
+    try:
+        return _run_ingest_body(
+            source_path=source_path,
+            source_type=source_type,
+            source_ref=source_ref,
+            source_hash=source_hash,
+            request_id=request_id,
+            raw_content=raw_content,
+            extraction=extraction,
+            effective_wiki_dir=effective_wiki_dir,
+            effective_raw_dir=effective_raw_dir,
+            defer_small=defer_small,
+            _skip_vector_rebuild=_skip_vector_rebuild,
+        )
+    except BaseException as exc:
+        err_summary = sanitize_text(str(exc))
+        _emit_ingest_jsonl(
+            "failure",
+            request_id,
+            source_ref,
+            source_hash,
+            outcome={"error_summary": err_summary},
+        )
+        raise
+
+
+def _run_ingest_body(
+    *,
+    source_path: Path,
+    source_type: str,
+    source_ref: str,
+    source_hash: str,
+    request_id: str,
+    raw_content: str,
+    extraction: dict,
+    effective_wiki_dir: Path,
+    effective_raw_dir: Path,
+    defer_small: bool,
+    _skip_vector_rebuild: bool,
+) -> dict:
+    """Cycle 18 AC11 — ingest body wrapped by `ingest_source`'s try/except.
+
+    Split out of `ingest_source` so the outer function's try/except around this
+    body cleanly captures exceptions for JSONL telemetry without mutating the
+    entry/validation/duplicate-check sequence above.
+    """
     # Track created/updated pages
     pages_created = []
     pages_updated = []
@@ -1041,9 +1241,11 @@ def ingest_source(
     pages_skipped.extend(c_skipped)
     new_pages_with_titles.extend(c_new)
 
-    # 4. Update index files (single read/write)
-    # Fix 2.7: use page IDs from created pages for slug consistency (avoids re-slugify divergence)
-    # Precompute slug→display-name dicts (O(n)) to avoid O(n²) linear scans below.
+    # 4 + 5. Update index files (cycle 18 AC14 — helper wraps the sources-then-
+    # index pair with independent per-call try/except and documented ordering).
+    # Fix 2.7: use page IDs from created pages for slug consistency (avoids
+    # re-slugify divergence). Precompute slug→display-name dicts (O(n)) to
+    # avoid O(n²) linear scans below.
     e_name_by_slug: dict[str, str] = {slugify(e): e for e in e_valid}
     c_name_by_slug: dict[str, str] = {slugify(c): c for c in c_valid}
     index_entries: list[tuple[str, str, str]] = [("summary", summary_slug, title)]
@@ -1063,11 +1265,13 @@ def ingest_source(
         slug = pid.split("/", 1)[-1] if "/" in pid else pid
         name = c_name_by_slug.get(slug, slug)
         index_entries.append(("concept", slug, name))
-    _update_index_batch(index_entries, wiki_dir=effective_wiki_dir)
-
-    # 5. Update _sources.md mapping
     all_pages = pages_created + pages_updated
-    _update_sources_mapping(source_ref, all_pages, wiki_dir=effective_wiki_dir)
+    _write_index_files(
+        created_entries=index_entries,
+        source_ref=source_ref,
+        all_pages=all_pages,
+        wiki_dir=effective_wiki_dir,
+    )
 
     # 6. Q_A fix (Phase 4.5 HIGH) — Phase 2: idempotent manifest confirmation.
     # Re-acquires file_lock(HASH_MANIFEST) to write the final hash (Phase 1 already
@@ -1087,10 +1291,14 @@ def ingest_source(
 
     # 7. Append to log (best-effort — page writes already succeeded; a log failure
     # must not crash the caller or hide the successful ingest result).
+    # Cycle 18 AC10 — prefix the message with `[req={request_id}]` so the
+    # wiki/log.md line correlates 1:1 with the JSONL `request_id` field.
+    # The prefix is hex-only (no markdown markers, no `|`/newline) so it flows
+    # through `_escape_markdown_prefix` untouched — verified by regression test.
     try:
         append_wiki_log(
             "ingest",
-            f"Ingested {source_ref} → created {len(pages_created)} pages, "
+            f"[req={request_id}] Ingested {source_ref} → created {len(pages_created)} pages, "
             f"updated {len(pages_updated)} pages",
             effective_wiki_dir / "log.md",
         )
@@ -1183,5 +1391,20 @@ def ingest_source(
             rebuild_vector_index(effective_wiki_dir)
         except Exception as e:
             logger.warning("Vector index rebuild at ingest tail failed: %s", e)
+
+    # Cycle 18 AC11 — emit terminal `stage="success"` with outcome counts.
+    # Runs AFTER the vector-index rebuild so a rebuild failure (logged as
+    # WARNING above) doesn't mask the ingest's primary success signal.
+    _emit_ingest_jsonl(
+        "success",
+        request_id,
+        source_ref,
+        source_hash,
+        outcome={
+            "pages_created": len(pages_created),
+            "pages_updated": len(pages_updated),
+            "pages_skipped": len(pages_skipped),
+        },
+    )
 
     return result

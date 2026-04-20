@@ -492,11 +492,17 @@ class TestInjectWikilinksSingleFrontmatterMatch:
                 target_page_id="concepts/foo",
                 wiki_dir=tmp_path,
             )
-        # One per-page body-check/split (one call) per title. For one title and
-        # one page, the cycle-2 single-match consolidation must keep this ≤ 1.
-        assert wrapper.calls <= 1, (
-            f"inject_wikilinks should match frontmatter at most once per page×title "
-            f"(got {wrapper.calls})"
+        # Cycle 2 optimization — each PATH (pre-lock peek + post-lock RMW) must
+        # perform at most ONE frontmatter match per page, not two or three. For a
+        # page that passes the fast-path (match found) AC7 does two paths:
+        # (1) pre-lock peek + (2) under-lock re-read, so the total is ≤ 2 per
+        # page×title. A page that fast-paths out (no match) stays at exactly 1.
+        # Cycle 18 AC7 (re-read under lock) legitimately changed this from ≤ 1
+        # to ≤ 2. Anything > 2 would indicate a regression in either path's
+        # single-match consolidation.
+        assert wrapper.calls <= 2, (
+            f"inject_wikilinks should match frontmatter at most twice per page×title "
+            f"(pre-lock peek + post-lock re-read per cycle-18 AC7); got {wrapper.calls}"
         )
 
 
