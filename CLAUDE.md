@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2452 passed + 7 skipped (cycle 16; 2459 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2541 passed + 7 skipped (cycle 17; 2548 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 
@@ -170,7 +170,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Run `python -m pytest -v` to list all tests (current full suite: 2457 passed + 7 skipped; 2464 collected — cycle 16; detailed count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_v4_11_markdown.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+Run `python -m pytest -v` to list all tests (current full suite: 2541 passed + 7 skipped; 2548 collected — cycle 17; detailed count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_cycle17_capture_two_pass.py`). Use the `tmp_wiki`/`tmp_project`/`tmp_kb_env` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 
