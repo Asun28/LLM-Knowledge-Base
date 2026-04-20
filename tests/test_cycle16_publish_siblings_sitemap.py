@@ -118,42 +118,69 @@ class TestBuildPerPageSiblings:
         assert first_mtime == second_mtime
 
     def test_incremental_rewrites_on_page_content_update(self, tmp_project) -> None:
-        """R1 Sonnet Major 3 — when a wiki page is rewritten in place (no
-        add/remove), the sibling incremental skip MUST detect the change
-        and re-write the output. The prior implementation passed the
-        output DIRECTORY to _publish_skip_if_unchanged; on NTFS/ext4 the
-        directory mtime only updates on add/remove, not on content
-        changes — so the skip fired incorrectly. This regression pins
-        the file-mtime-based fix.
+        """R1 Sonnet Major 3 / R2 N2 — file-mtime incremental skip must
+        detect in-place page content updates even when the output
+        DIRECTORY mtime has advanced past the page mtime.
+
+        Bug being regressed: on NTFS/ext4 the directory mtime only updates
+        on add/remove, but in test filesystems (or under filesystem noise
+        / explicit `touch`) the dir mtime can drift above the newest page
+        mtime. The OLD ``_publish_skip_if_unchanged(wiki_dir, pages_dir)``
+        compared max page mtime to PAGES_DIR.stat().st_mtime_ns — if the
+        dir mtime was newer, it incorrectly skipped even though a page
+        body had changed.
+
+        This test reproduces that exact divergence: advance pages_dir's
+        mtime to STRICTLY GREATER than the updated page's mtime, leave
+        the individual sibling file mtimes at T0 (older than the updated
+        page), then run incremental. OLD logic (dir-mtime) would skip.
+        NEW logic (min sibling-file mtime) rewrites because at least one
+        sibling is older than the newest wiki page.
         """
+        import os as _os
+        import time as _time
+
         wiki = tmp_project / "wiki"
         _write_page(wiki, "concepts/page-a")
         out_dir = tmp_project / "out"
         build_per_page_siblings(wiki, out_dir)
         pages_dir = (out_dir / "pages").resolve()
-        first_content = (pages_dir / "concepts" / "page-a.txt").read_text(encoding="utf-8")
+        sibling_txt = pages_dir / "concepts" / "page-a.txt"
+        first_content = sibling_txt.read_text(encoding="utf-8")
+        sibling_mtime_ns = sibling_txt.stat().st_mtime_ns
 
-        # Rewrite the SAME page with updated body. Advance mtime past FAT32 2s quantum.
-        time.sleep(0.05)
+        _time.sleep(0.05)
+        # Update the page body in place.
         path = wiki / "concepts" / "page-a.md"
         path.write_text(
             path.read_text(encoding="utf-8").replace("body text", "UPDATED body text"),
             encoding="utf-8",
         )
-        # Ensure mtime moves forward.
-        import os as _os
-
         stat = path.stat()
         _os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+        updated_page_mtime_ns = path.stat().st_mtime_ns
 
-        # Run incremental — output MUST be regenerated with new content.
+        # Force pages_dir mtime strictly greater than both the updated page
+        # mtime AND the sibling file mtimes — simulating the dir-mtime
+        # drift that fooled the old skip logic. Sibling files stay at T0.
+        dir_mtime_target_ns = updated_page_mtime_ns + 50_000_000
+        _os.utime(pages_dir, ns=(dir_mtime_target_ns, dir_mtime_target_ns))
+
+        # Sanity — test preconditions for exercising the bug:
+        assert pages_dir.stat().st_mtime_ns > updated_page_mtime_ns
+        assert sibling_txt.stat().st_mtime_ns < updated_page_mtime_ns
+
+        # Old dir-mtime logic: max_page_mtime (T1) <= dir_mtime (T2) → skip.
+        # New file-mtime logic: min_sibling_mtime (T0) < max_page_mtime (T1) → rewrite.
         build_per_page_siblings(wiki, out_dir, incremental=True)
-        second_content = (pages_dir / "concepts" / "page-a.txt").read_text(encoding="utf-8")
+        second_content = sibling_txt.read_text(encoding="utf-8")
         assert "UPDATED body text" in second_content, (
             "incremental sibling publish failed to detect in-place page update; "
-            "directory-mtime skip is coarse on NTFS/ext4"
+            "file-mtime skip contract is broken"
         )
         assert first_content != second_content
+        # And the sibling mtime itself advanced (confirms a rewrite happened).
+        assert sibling_txt.stat().st_mtime_ns > sibling_mtime_ns
 
     def test_subdir_page_id_writes_nested(self, tmp_project) -> None:
         """AC20 — page IDs with one-level subdir (e.g. concepts/foo) produce

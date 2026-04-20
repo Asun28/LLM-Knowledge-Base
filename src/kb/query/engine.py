@@ -287,11 +287,14 @@ assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
 
 # ── Cycle 16 AC7-AC9 — low-coverage rephrasing suggestions ─────────
 _BULLET_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s*")
-# R1 Sonnet Minor 5 — the prompt template is str.format()-interpolated but
-# the `{question}` slot receives attacker-controllable text which may
-# contain literal `{` / `}` that would KeyError out of format(). Build the
-# prompt via plain string concatenation instead so arbitrary question
-# content is safe.
+# R1 Sonnet Minor 5 / R2 N3 — readability cleanup. The prompt is composed
+# via plain string concatenation rather than str.format(named_kwargs) so
+# there is zero interaction between user-supplied question content and
+# Python's formatting machinery. (Note: Python's str.format does NOT
+# re-parse braces inside replacement values, so this is NOT fixing a
+# latent KeyError — R2 correctly flagged the original claim as a phantom
+# failure mode. The concat form is retained because it's marginally
+# easier to audit for prompt-structure drift.)
 
 
 def _build_rephrasing_prompt(question: str, titles_block: str, max_suggestions: int) -> str:

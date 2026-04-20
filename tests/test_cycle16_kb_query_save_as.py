@@ -160,55 +160,52 @@ class TestSaveSynthesisHelper:
         errors = validate_frontmatter(post)
         assert errors == []
 
-    def test_containment_check_rejects_sibling_prefix_dir(self, tmp_project, monkeypatch) -> None:
-        """R1 Blocker 1 / test-gap 7 — _save_synthesis uses Path.is_relative_to,
-        not str.startswith. A sibling directory named `synthesis_evil` must NOT
-        be treated as contained under `synthesis/`.
+    def test_save_synthesis_rejects_sibling_prefix_via_resolve_redirect(
+        self, tmp_project, monkeypatch
+    ) -> None:
+        """R2 N1 — regression that EXERCISES _save_synthesis's containment check.
 
-        This is difficult to trigger directly because the upstream
-        _validate_save_as_slug already rejects anything with path separators
-        — so any slug that reaches _save_synthesis is guaranteed to resolve
-        under WIKI_DIR/synthesis. The regression here asserts the defensive
-        check's semantics directly via Path.is_relative_to.
+        The prior test only exercised `Path.is_relative_to` directly; reverting
+        _save_synthesis to `str.startswith` would not fail it. This test
+        drives _save_synthesis with a patched `Path.resolve` that redirects
+        any path under `wiki/synthesis/` to `wiki/synthesis_evil/` — exactly
+        the sibling-prefix scenario the fix guards against. Under
+        `is_relative_to` the check correctly returns the "escapes" error;
+        under the reverted `str.startswith` it would write to the attacker's
+        directory because "wiki/synthesis_evil/..." starts with "wiki/synthesis".
         """
+        from pathlib import Path as _Path
+
+        monkeypatch.setattr(mcp_core, "WIKI_DIR", tmp_project / "wiki")
         synthesis_dir = (tmp_project / "wiki" / "synthesis").resolve()
         synthesis_dir.mkdir(parents=True, exist_ok=True)
-        sibling = (tmp_project / "wiki" / "synthesis_evil").resolve()
-        sibling.mkdir(parents=True, exist_ok=True)
-        malicious_target = sibling / "pwn.md"
-        # Old str.startswith check would have returned True here.
-        # is_relative_to correctly returns False.
-        try:
-            contained = malicious_target.is_relative_to(synthesis_dir)
-        except ValueError:
-            contained = False
-        assert not contained
-        # And a legitimate sibling under synthesis_dir resolves correctly.
-        legit = synthesis_dir / "ok.md"
-        assert legit.is_relative_to(synthesis_dir)
+        sibling_dir = (tmp_project / "wiki" / "synthesis_evil").resolve()
+        sibling_dir.mkdir(parents=True, exist_ok=True)
 
+        original_resolve = _Path.resolve
 
-class TestRephrasingBraceSafety:
-    """R1 Sonnet Minor 5 — prompt builder must tolerate `{` / `}` in the
-    truncated question text without raising KeyError/IndexError.
-    """
+        def fake_resolve(self, *a, **k):
+            resolved = original_resolve(self, *a, **k)
+            # Only redirect the target MD file; base dir resolves normally.
+            if resolved.name.endswith(".md"):
+                try:
+                    rel = resolved.relative_to(synthesis_dir)
+                    return sibling_dir / rel
+                except ValueError:
+                    return resolved
+            return resolved
 
-    def test_question_with_braces_does_not_raise(self, monkeypatch) -> None:
-        from kb.query import engine
+        monkeypatch.setattr(_Path, "resolve", fake_resolve)
 
-        captured = {"prompt": ""}
+        result = _make_result(source_pages=["concepts/a"])
+        msg = mcp_core._save_synthesis("legit-slug", result)
 
-        def _capture(prompt, **k):
-            captured["prompt"] = prompt
-            return ""
-
-        monkeypatch.setattr(engine, "call_llm", _capture)
-        # A JSON-like question with literal braces — would crash str.format()
-        # but must work with plain concatenation.
-        q = '{"type":"rag","k":10}'
-        result = engine._suggest_rephrasings(q, [{"title": "T"}])
-        assert result == []  # empty LLM output → []
-        assert q in captured["prompt"]
+        # New code rejects (is_relative_to returns False for sibling dir).
+        # Old str.startswith code would have accepted and tried to write.
+        assert "escapes synthesis directory" in msg
+        # No write happened anywhere.
+        assert not (sibling_dir / "legit-slug.md").exists()
+        assert not (synthesis_dir / "legit-slug.md").exists()
 
 
 class TestKbQueryValidateSaveAs:
