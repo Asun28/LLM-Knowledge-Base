@@ -377,13 +377,23 @@ def _sibling_paths_for(page_id: str, pages_dir: Path) -> tuple[Path, Path]:
 
 
 def _is_contained(target: Path, base: Path) -> bool:
-    """Safe containment check: target's resolved path must live under base."""
+    """Safe containment check: ``target`` must resolve under ``base``.
+
+    Uses ``Path.is_relative_to`` (Python 3.9+) which compares path components,
+    NOT string prefixes. The prior ``str.startswith`` implementation was a
+    Step-11 security-verify HIGH finding — a sibling directory named e.g.
+    ``pages_evil`` would falsely pass because ``'/.../out/pages_evil'`` starts
+    with ``'/.../out/pages'``. ``is_relative_to`` correctly rejects that.
+    """
     try:
         resolved_target = target.resolve()
         resolved_base = base.resolve()
     except OSError:
         return False
-    return str(resolved_target).startswith(str(resolved_base))
+    try:
+        return resolved_target.is_relative_to(resolved_base)
+    except ValueError:
+        return False
 
 
 def build_per_page_siblings(

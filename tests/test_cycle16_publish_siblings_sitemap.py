@@ -166,6 +166,28 @@ class TestBuildPerPageSiblings:
         assert first_txt == second_txt
         assert first_json == second_json
 
+    def test_rejects_sibling_prefix_directory(self, tmp_project, monkeypatch) -> None:
+        """Step-11 N1 regression — containment uses path-component comparison,
+        NOT string prefix. A sibling directory whose name starts with 'pages'
+        (e.g. 'pages_evil') must NOT be treated as contained under 'pages/'.
+
+        Direct test of _is_contained: even when resolved_target.startswith(pages/)
+        in string form, path-component comparison correctly rejects.
+        """
+        from kb.compile.publish import _is_contained
+
+        pages_base = tmp_project / "out" / "pages"
+        pages_base.mkdir(parents=True, exist_ok=True)
+        # Sibling directory with prefix-overlapping name.
+        sibling = tmp_project / "out" / "pages_evil"
+        sibling.mkdir(parents=True, exist_ok=True)
+        malicious_target = sibling / "pwn.txt"
+        # String-prefix check would return True; path-component check must return False.
+        assert not _is_contained(malicious_target, pages_base)
+        # And a legitimate target under pages_base DOES return True.
+        legit = pages_base / "concepts" / "ok.txt"
+        assert _is_contained(legit, pages_base)
+
     def test_rejects_traversal_page_id(self, tmp_project, monkeypatch) -> None:
         """T9 — containment check skips hostile page_ids."""
         wiki = tmp_project / "wiki"
