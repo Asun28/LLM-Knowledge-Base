@@ -30,12 +30,12 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Tool/test/file counts change every cycle — read `CHANGELOG.md` for current numbers, not this file. Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2326 passed + 7 skipped (cycle 15). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 
 - **Core (Phase 1):** `config`, `models`, `utils`, `ingest`, `compile`, `query`, `lint`, `evolve`, `graph`, `mcp` (split package: `app`, `core`, `browse`, `health`, `quality`), `mcp_server` (entry shim), CLI (7 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `publish`, `mcp`).
-- **Publish (Phase 5, cycle 14):** `compile.publish` — `build_llms_txt`, `build_llms_full_txt`, `build_graph_jsonld` builders for Karpathy Tier-1 machine-consumable outputs. JSON-LD uses `json.dump` with schema.org `@context`; all three builders filter pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`. `kb publish` CLI validates `--out-dir` containment via `is_relative_to(PROJECT_ROOT)` OR pre-existing dir.
+- **Publish (Phase 5, cycles 14-15):** `compile.publish` — `build_llms_txt`, `build_llms_full_txt`, `build_graph_jsonld` builders for Karpathy Tier-1 machine-consumable outputs. JSON-LD uses schema.org `@context`; all three builders filter pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`. Builders write via `atomic_text_write` and accept `incremental: bool = False`; `kb publish` defaults to `--incremental` and also exposes `--no-incremental`. First post-upgrade publish should use `--no-incremental` so pre-cycle-14 outputs are regenerated under the current epistemic filter.
 - **Quality (Phase 2):** `feedback` (weighted Bayesian trust — "wrong" penalized 2× vs "incomplete"), `review` (pairing, refiner with audit trail), `lint.semantic` (fidelity / consistency / completeness builders), `lint.verdicts` (persistent verdict store), `.claude/agents/wiki-reviewer.md` (Actor-Critic agent).
 - **Capture (Phase 5):** `capture` — conversation/notes atomization for `raw/captures/`.
 - **Output adapters (Phase 4.11):** `query.formats` — `markdown`, `marp`, `html`, `chart`, `jupyter`. Files land at `PROJECT_ROOT/outputs/{ts}-{slug}.{ext}` with provenance frontmatter. Outputs directory is **OUTSIDE** `wiki/` (gitignored) to prevent search-index poisoning. `kb_query(output_format=...)` requires `use_api=True`. Chart adapter emits a static Python script + JSON sidecar — matplotlib is NOT a kb runtime dependency.
@@ -77,7 +77,7 @@ kb compile [--full]
 kb query "What is compile-not-retrieve?"
 kb lint [--fix]
 kb evolve
-kb publish [--out-dir PATH] [--format llms|llms-full|graph|all]   # /llms.txt + /llms-full.txt + /graph.jsonld (cycle 14)
+kb publish [--out-dir PATH] [--format llms|llms-full|graph|all] [--incremental/--no-incremental]   # /llms.txt + /llms-full.txt + /graph.jsonld
 kb mcp                        # Start MCP server for Claude Code
 
 # Playwright browser (needed by crawl4ai)
@@ -123,6 +123,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
   - `output_path` + `output_format` — populated when `output_format` is non-text AND the Phase 4.11 adapter succeeded (cycle 4 item #27 doc-sync)
   - `output_error` — populated on adapter failure; absent on success or when `output_format` is empty/text
   `output_format` is keyword-only — additive, zero breakage to existing callers.
+  Cycle 15 behavior: stale-result flagging composes source mtime with `decay_days_for(source, topics=...)`; summaries context budget uses `tier1_budget_for("wiki_pages")`; pages with `authored_by: human|hybrid` receive the mild `AUTHORED_BY_BOOST` after validation.
 - `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 - `rebuild_vector_index(wiki_dir, force=False)` — In `kb.query.embeddings`. Rebuilds sqlite-vec index from all pages in `wiki_dir`. Gated on (a) module-load-time `_hybrid_available` flag and (b) mtime check (skipped when `force=True`). Called at tail of `ingest_source()`. Batch callers (`compile_wiki`) pass `_skip_vector_rebuild=True` in loop and invoke once at tail.
 
@@ -169,7 +170,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Run `python -m pytest -v` to list all tests (current count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_v4_11_markdown.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
+Run `python -m pytest -v` to list all tests (current full suite: 2326 passed + 7 skipped; detailed count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_v4_11_markdown.py`). Use the `tmp_wiki`/`tmp_project` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests.
 
 ### Error Handling Conventions
 
@@ -262,7 +263,7 @@ confidence: stated | inferred | speculative
 ---
 ```
 
-**Optional epistemic fields (cycle 14):** `belief_state` is the cross-source aggregate (orthogonal to per-source `confidence`); `authored_by` formalises human vs LLM authorship; `status` tracks the page lifecycle. Query engine applies a +5% `STATUS_RANKING_BOOST` to pages with `status in (mature, evergreen)` whose full metadata passes `validate_frontmatter`. Publish outputs (`kb publish`) skip pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`.
+**Optional epistemic fields (cycles 14-15):** `belief_state` is the cross-source aggregate (orthogonal to per-source `confidence`); `authored_by` formalises human vs LLM authorship; `status` tracks the page lifecycle. Query engine applies a +5% `STATUS_RANKING_BOOST` to pages with `status in (mature, evergreen)` and a mild `AUTHORED_BY_BOOST` to `authored_by: human|hybrid` when full metadata passes `validate_frontmatter`. Publish outputs (`kb publish`) skip pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`.
 
 ## Ingestion Commands
 

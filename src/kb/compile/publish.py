@@ -21,14 +21,47 @@ import json
 import logging
 from pathlib import Path
 
+from kb.utils.io import atomic_text_write
 from kb.utils.markdown import extract_wikilinks
-from kb.utils.pages import load_all_pages
+from kb.utils.pages import load_all_pages, scan_wiki_pages
 
 logger = logging.getLogger(__name__)
 
 # Cycle 14 AC20 — 5 MiB UTF-8 byte cap for llms-full.txt. Includes all
 # separators, headers, and the truncation footer.
 LLMS_FULL_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _publish_skip_if_unchanged(wiki_dir: Path, out_path: Path) -> bool:
+    """Cycle 15 AC12 — mtime-based short-circuit for incremental publish.
+
+    Returns ``True`` when ``out_path`` exists and its mtime is not older
+    than the maximum mtime across canonical wiki pages (as produced by
+    ``scan_wiki_pages``). Uses nanosecond-granular ``st_mtime_ns`` on both
+    sides to avoid Windows/NFS second-granularity flakiness (threat T3).
+
+    Auto-maintained index files (``log.md``, ``_sources.md``, ``index.md``,
+    ``_categories.md``, ``contradictions.md``) are excluded because they
+    mutate on every ingest without warranting a publish regen;
+    ``scan_wiki_pages`` only walks the canonical wiki subdirs.
+
+    **Single-writer assumed.** When another process writes a wiki page
+    BETWEEN this mtime read and the caller's return, the stale output is
+    handed back without regen. Operators who suspect drift should re-run
+    with ``incremental=False`` (``kb publish --no-incremental``).
+    """
+    if not out_path.exists():
+        return False
+    try:
+        max_page_mtime_ns = max(
+            (p.stat().st_mtime_ns for p in scan_wiki_pages(wiki_dir)),
+            default=0,
+        )
+        out_mtime_ns = out_path.stat().st_mtime_ns
+    except OSError:
+        return False
+    return max_page_mtime_ns <= out_mtime_ns
+
 
 # Page separator for llms-full.txt — four-dash horizontal rule + blank
 # lines.
@@ -90,7 +123,7 @@ def _sanitize_line(text: str) -> str:
     )
 
 
-def build_llms_txt(wiki_dir: Path, out_path: Path) -> Path:
+def build_llms_txt(wiki_dir: Path, out_path: Path, *, incremental: bool = False) -> Path:
     """Write a one-line-per-page index grouped by page type.
 
     Format:
@@ -104,15 +137,31 @@ def build_llms_txt(wiki_dir: Path, out_path: Path) -> Path:
     speculative are filtered (threat T2); an ``[!excluded] N pages``
     footer records the count.
 
+    Cycle 15 AC9/AC12 — uses ``atomic_text_write`` for crash-safe
+    writes (temp + rename). With ``incremental=True`` and an output
+    newer than every canonical wiki page, returns ``out_path`` without
+    regen. T2 filter + T1 containment run BEFORE the skip branch
+    (ordering invariant).
+
     Args:
         wiki_dir: Source wiki directory to enumerate.
         out_path: Destination file path (will be overwritten).
+        incremental: When True, short-circuit if wiki pages are older than
+            the existing output. Default False preserves cycle-14 test
+            contracts.
 
     Returns:
-        The ``out_path`` that was written.
+        The ``out_path`` that was written (or skipped).
     """
+    # Cycle 15 T10c — partition ONCE before skip check so the same kept/excluded
+    # lists feed both branches. Earlier PR R1 draft called _partition_pages twice
+    # (once discarded, once kept) which wasted work AND meant the skip branch
+    # short-circuited on an unfiltered page list, exposing retracted content if
+    # mtime failed to advance (coarse-mtime FAT32/OneDrive edge case).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
     kept, excluded = _partition_pages(pages)
+    if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
+        return out_path
     kept = _sort_pages(kept)
 
     lines: list[str] = ["# LLMs index", ""]
@@ -133,11 +182,11 @@ def build_llms_txt(wiki_dir: Path, out_path: Path) -> Path:
             f"[!excluded] {len(excluded)} pages filtered (retracted/contradicted/speculative)"
         )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_text_write("\n".join(lines) + "\n", out_path)
     return out_path
 
 
-def build_llms_full_txt(wiki_dir: Path, out_path: Path) -> Path:
+def build_llms_full_txt(wiki_dir: Path, out_path: Path, *, incremental: bool = False) -> Path:
     """Write full wiki body content separated by ``\\n\\n----\\n\\n``.
 
     UTF-8 byte-capped at ``LLMS_FULL_MAX_BYTES`` including separators,
@@ -147,17 +196,22 @@ def build_llms_full_txt(wiki_dir: Path, out_path: Path) -> Path:
     FIRST page alone exceeds cap, it is included truncated with an
     ``[!oversized]`` marker (graceful fallback — empty output is worse).
 
-    Same T2 filter as ``build_llms_txt``.
+    Same T2 filter as ``build_llms_txt``. Cycle 15 AC10/AC12 — atomic
+    write + incremental skip (see ``build_llms_txt`` docstring).
 
     Args:
         wiki_dir: Source wiki directory.
         out_path: Destination file path.
+        incremental: Short-circuit if wiki unchanged since last write.
 
     Returns:
-        The ``out_path`` that was written.
+        The ``out_path`` that was written (or skipped).
     """
+    # Cycle 15 T10c — partition ONCE before skip (see build_llms_txt comment).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
     kept, excluded = _partition_pages(pages)
+    if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
+        return out_path
     kept = _sort_pages(kept)
 
     parts: list[str] = []
@@ -209,11 +263,11 @@ def build_llms_full_txt(wiki_dir: Path, out_path: Path) -> Path:
         )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("".join(parts + footer_lines), encoding="utf-8")
+    atomic_text_write("".join(parts + footer_lines), out_path)
     return out_path
 
 
-def build_graph_jsonld(wiki_dir: Path, out_path: Path) -> Path:
+def build_graph_jsonld(wiki_dir: Path, out_path: Path, *, incremental: bool = False) -> Path:
     """Write a JSON-LD graph of wiki pages.
 
     Uses ``json.dump(obj, f, ensure_ascii=False, indent=2)`` with a
@@ -234,8 +288,11 @@ def build_graph_jsonld(wiki_dir: Path, out_path: Path) -> Path:
     Returns:
         The ``out_path`` that was written.
     """
+    # Cycle 15 T10c — partition ONCE before skip (see build_llms_txt comment).
     pages = load_all_pages(wiki_dir, include_content_lower=False)
     kept, excluded = _partition_pages(pages)
+    if incremental and _publish_skip_if_unchanged(wiki_dir, out_path):
+        return out_path
     kept = _sort_pages(kept)
 
     # Build an id→url map so citations can resolve wikilinks to relative
@@ -282,7 +339,9 @@ def build_graph_jsonld(wiki_dir: Path, out_path: Path) -> Path:
         )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as fh:
-        json.dump(document, fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
+    # Cycle 15 AC11 — atomic_text_write colocates temp file with out_path
+    # (threat T4 — prevents os.replace degrading to copy+delete across
+    # volumes on Windows/OneDrive). json.dumps preserves the cycle-14 T3
+    # contract (no f-string JSON assembly).
+    atomic_text_write(json.dumps(document, ensure_ascii=False, indent=2) + "\n", out_path)
     return out_path

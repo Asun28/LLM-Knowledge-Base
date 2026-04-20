@@ -34,6 +34,38 @@ Resolved items are *deleted* from BACKLOG (not struck through) — the fix recor
 
 ## [Unreleased]
 
+### Phase 4.5 -- Backlog-by-file cycle 15 (2026-04-20)
+
+26 AC across 6 source files + 11 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2334 (+89); full suite 2334 collected, 2327 passed + 7 skipped (run-time count).
+
+#### Added
+- `src/kb/config.py` — new config constants/helpers: `AUTHORED_BY_BOOST`, `SOURCE_VOLATILITY_TOPICS`, and `volatility_multiplier_for`.
+- `src/kb/query/engine.py` — `_apply_authored_by_boost` query helper for mild `authored_by: human|hybrid` ranking lift.
+- `src/kb/lint/checks.py` / `src/kb/lint/runner.py` — new lint checks `check_status_mature_stale` and `check_authored_by_drift`.
+- `src/kb/compile/publish.py` — `_publish_skip_if_unchanged` helper for incremental publish short-circuiting.
+- `tests/test_cycle15_*.py` — 7 new test files covering authored-by boost, volatility config, lint decay/status/authored wiring, publish atomic/incremental behavior, and query/publish integration.
+
+#### Changed
+- `src/kb/config.py` — `decay_days_for` gained `topics=None` keyword argument and composes hostname decay with topic volatility.
+- `src/kb/query/engine.py` — `_flag_stale_results` composes source mtime and per-source decay gates; `_build_query_context` uses `tier1_budget_for("wiki_pages")`.
+- `src/kb/lint/checks.py` — `check_staleness` uses per-source `decay_days_for` instead of flat staleness only.
+- `src/kb/compile/publish.py` — `build_llms_txt`, `build_llms_full_txt`, and `build_graph_jsonld` migrated to `atomic_text_write` and accept `incremental: bool = False`.
+- `src/kb/cli.py` — `kb publish` gains `--incremental/--no-incremental` flag.
+- `BACKLOG.md` — deletes cycle-15-closed follow-ups and records cycle-16/deferred follow-ups for status-priority evolve routing, dropped `_post_ingest_quality` rationale, low-coverage rephrasings, cross-reference auto-linking, `kb_query save_as`, inline callouts, duplicate-slug lint, and compile-time auto-publish siblings/sitemap.
+
+#### Fixed
+- `tests/test_cycle11_stale_results.py` — dropped the `20260101` parametrized case because Python 3.11+ parses it as valid ISO.
+- `tests/test_phase4_audit_query.py::test_tier1_budget_allows_multiple_small_summaries` — resized to the new summaries budget.
+- `src/kb/compile/publish.py` (R1 MAJOR 1) — all three builders now partition pages ONCE before the incremental skip check instead of calling `_partition_pages` twice and discarding the first result. Prevents wasted work and removes the misleading "filter runs before skip" comment that did not match actual behaviour. Skip-case semantics unchanged (cycle-13 `sweep_orphan_tmp` + mtime-based gate preserve T10c in practice).
+- `src/kb/query/engine.py` (R1 MAJOR 2) — added key-name clarification comment: AC2 spec cites `"summaries"` but the canonical `CONTEXT_TIER1_SPLIT` key is `"wiki_pages"`; future refactors that introduce a dedicated `"summaries"` bucket must re-audit this call.
+- `src/kb/lint/checks.py` (R1 MINOR 1) — `_EVIDENCE_TRAIL_ANCHOR` now tolerates trailing horizontal whitespace on the header line.
+- `tests/test_cycle15_query_tier1_wiring.py` (R1 MINOR 2) — dropped redundant `config.tier1_budget_for` spy; only the engine-module alias is observable.
+- `tests/test_cycle15_publish_incremental.py` (R1 MINOR 3) — added comment documenting the 5-second mtime offset rationale.
+
+#### Security
+- Step-11 verify (Codex): all 10 threat-model items IMPLEMENTED. Class A Dependabot 0 open; Class B pip-audit diff empty; pre-existing `diskcache` CVE remains informational.
+- Operator note (T10c): First post-upgrade `kb publish` run should use `--no-incremental` so any pre-cycle-14 outputs are regenerated under the current epistemic filter (threat T10c).
+
 ### Phase 4.5 -- Backlog-by-file cycle 14 (2026-04-20)
 
 21 AC across 9 source files + 1 new module / 8 implementation commits + planning artifacts + 1 security-verify PARTIAL fix. Tests: 2140 → 2235 (+95); full suite 2235 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 Dependabot alerts, Class B diff empty). Scope: Epistemic-Integrity 2.0 metadata vocabularies (belief_state, authored_by, status), query coverage-confidence refusal gate, per-platform source-decay + tier1-budget helpers, frontmatter-preserving save wrapper with augment write-back migration, Karpathy Tier-1 publish module (`kb publish` + /llms.txt + /llms-full.txt + /graph.jsonld), and status ranking boost.

@@ -20,7 +20,13 @@ def test_flag_stale_results_missing_sources_is_not_stale():
     assert results == [{"updated": "2026-01-01", "stale": False}]
 
 
-@pytest.mark.parametrize("updated", ["yesterday", "04/19/2026", "", 20260101])
+# Cycle 15 AC1 note — removed the `20260101` int parametrize case. Python 3.11+
+# extended `date.fromisoformat` to accept YYYYMMDD "basic format", so the
+# integer 20260101 → str "20260101" parses to 2026-01-01. Combined with the
+# cycle-15 decay gate (90d default for unknown sources), a page "updated" in
+# early January gets flagged stale by April, violating the original intent.
+# The remaining non-ISO fixtures are genuinely unparseable and still round-trip.
+@pytest.mark.parametrize("updated", ["yesterday", "04/19/2026", ""])
 def test_flag_stale_results_non_iso_updated_values_are_not_stale(updated):
     results = _flag_stale_results([{"updated": updated, "sources": ["raw/source.md"]}])
 

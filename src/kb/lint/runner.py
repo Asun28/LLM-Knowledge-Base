@@ -6,6 +6,7 @@ from pathlib import Path
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.graph.builder import build_graph
 from kb.lint.checks import (
+    check_authored_by_drift,
     check_cycles,
     check_dead_links,
     check_frontmatter,
@@ -13,6 +14,7 @@ from kb.lint.checks import (
     check_orphan_pages,
     check_source_coverage,
     check_staleness,
+    check_status_mature_stale,
     check_stub_pages,
     fix_dead_links,
 )
@@ -106,6 +108,15 @@ def run_all_checks(
     fm_stale = check_frontmatter_staleness(wiki_dir, pages=shared_pages)
     all_issues.extend(fm_stale)
     checks_run.append({"name": "frontmatter_staleness", "issues": len(fm_stale)})
+
+    # Cycle 15 AC7 — wire new mature-stale + authored_by-drift checks.
+    mature_stale = check_status_mature_stale(wiki_dir, pages=shared_pages)
+    all_issues.extend(mature_stale)
+    checks_run.append({"name": "status_mature_stale", "issues": len(mature_stale)})
+
+    authored_drift = check_authored_by_drift(wiki_dir, pages=shared_pages)
+    all_issues.extend(authored_drift)
+    checks_run.append({"name": "authored_by_drift", "issues": len(authored_drift)})
 
     fm = check_frontmatter(wiki_dir, pages=shared_pages)
     all_issues.extend(fm)

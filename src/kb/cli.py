@@ -354,13 +354,26 @@ def mcp():
         "(llms.txt + llms-full.txt + graph.jsonld)."
     ),
 )
-def publish(out_dir: Path | None, fmt: str):
+@click.option(
+    "--incremental/--no-incremental",
+    default=True,
+    help=(
+        "Skip regeneration when output files are newer than every wiki page "
+        "(default: on). Use --no-incremental on first post-upgrade run so "
+        "any pre-cycle-14 outputs are regenerated under the current "
+        "epistemic filter (cycle-15 T10c)."
+    ),
+)
+def publish(out_dir: Path | None, fmt: str, incremental: bool):
     """Publish wiki as /llms.txt, /llms-full.txt, and/or /graph.jsonld.
 
-    Cycle 14 AC21. The output directory must either be inside PROJECT_ROOT
-    (auto-created if missing) OR must already exist on disk (operator-
-    managed path outside the project). Rejects UNC paths and paths that
-    resolve outside PROJECT_ROOT and do not pre-exist. See threat T1.
+    Cycle 14 AC21 + Cycle 15 AC13. The output directory must either be
+    inside PROJECT_ROOT (auto-created if missing) OR must already exist on
+    disk (operator-managed path outside the project). Rejects UNC paths
+    and paths that resolve outside PROJECT_ROOT and do not pre-exist.
+    Path-containment check (threat T1) runs BEFORE flag plumbing so the
+    cycle-15 ``--incremental/--no-incremental`` flag cannot bypass it
+    (threat T8).
     """
     from kb.compile.publish import build_graph_jsonld, build_llms_full_txt, build_llms_txt
     from kb.config import OUTPUTS_DIR, PROJECT_ROOT, WIKI_DIR
@@ -390,13 +403,13 @@ def publish(out_dir: Path | None, fmt: str):
 
     try:
         if fmt in ("llms", "all"):
-            p = build_llms_txt(WIKI_DIR, resolved / "llms.txt")
+            p = build_llms_txt(WIKI_DIR, resolved / "llms.txt", incremental=incremental)
             click.echo(f"wrote {p}")
         if fmt in ("llms-full", "all"):
-            p = build_llms_full_txt(WIKI_DIR, resolved / "llms-full.txt")
+            p = build_llms_full_txt(WIKI_DIR, resolved / "llms-full.txt", incremental=incremental)
             click.echo(f"wrote {p}")
         if fmt in ("graph", "all"):
-            p = build_graph_jsonld(WIKI_DIR, resolved / "graph.jsonld")
+            p = build_graph_jsonld(WIKI_DIR, resolved / "graph.jsonld", incremental=incremental)
             click.echo(f"wrote {p}")
     except Exception as exc:
         _error_exit(exc)
