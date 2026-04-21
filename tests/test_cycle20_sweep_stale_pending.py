@@ -216,6 +216,51 @@ class TestSweepAttemptIdMatching:
 class TestSweepDelete:
     """AC13 / T4 — delete writes wiki/log.md audit BEFORE removing rows."""
 
+    def test_delete_audit_write_failure_aborts_without_mutation(
+        self, tmp_project: Path, monkeypatch
+    ) -> None:
+        """Step-11 T4 fix — fail CLOSED when the audit log cannot be written.
+
+        Regression for the PARTIAL gap Codex flagged: previously an OSError
+        from `append_wiki_log` was swallowed and the delete proceeded,
+        producing an irreversible audit-free deletion. Now the sweep raises
+        `StorageError(kind="sweep_audit_failure")` BEFORE touching history.
+        """
+        from kb.errors import StorageError
+        from kb.review import refiner
+
+        history_path = tmp_project / ".data" / "history.json"
+        _write_history(
+            history_path,
+            [
+                {
+                    "page_id": "entities/abort",
+                    "attempt_id": "abortaaa",
+                    "status": "pending",
+                    "timestamp": _iso(300),
+                    "revision_notes": "would-be-deleted",
+                }
+            ],
+        )
+        prev_history = history_path.read_text(encoding="utf-8")
+
+        def _boom_log(*args, **kwargs):
+            raise OSError("simulated log disk failure")
+
+        monkeypatch.setattr(refiner, "append_wiki_log", _boom_log)
+
+        with pytest.raises(StorageError) as excinfo:
+            refiner.sweep_stale_pending(
+                hours=168,
+                action="delete",
+                history_path=history_path,
+                wiki_dir=tmp_project / "wiki",
+            )
+        assert excinfo.value.kind == "sweep_audit_failure"
+
+        # History file UNTOUCHED — fail-closed guarantee.
+        assert history_path.read_text(encoding="utf-8") == prev_history
+
     def test_delete_removes_row_and_writes_audit_first(self, tmp_project: Path) -> None:
         history_path = tmp_project / ".data" / "history.json"
         _write_history(

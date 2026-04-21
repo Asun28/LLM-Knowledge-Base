@@ -35,7 +35,7 @@ from kb.config import (
     REVIEW_HISTORY_PATH,
     WIKI_DIR,
 )
-from kb.errors import ValidationError
+from kb.errors import StorageError, ValidationError
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.wiki_log import append_wiki_log
@@ -476,13 +476,21 @@ def sweep_stale_pending(
                 f"cutoff={cutoff.isoformat()}; "
                 f"attempt_ids={sorted(target_attempt_ids)}"
             )
+            # Step-11 PARTIAL T4 fix — fail CLOSED if the audit can't be
+            # written. Previously this path logged a warning and continued
+            # with the delete, producing an irreversible audit-free deletion
+            # on log disk errors. Now OSError here aborts the sweep BEFORE
+            # save_review_history mutates the store, so the operator sees
+            # the failure and can retry.
             try:
                 append_wiki_log("sweep", audit_msg, log_path)
             except OSError as log_err:
-                logger.warning(
-                    "sweep audit log append failed before delete (continuing): %s",
-                    log_err,
-                )
+                raise StorageError(
+                    f"sweep audit log write failed before delete; "
+                    f"aborting to preserve forensics: {log_err}",
+                    kind="sweep_audit_failure",
+                    path=log_path,
+                ) from log_err
             history = [
                 row for row in history if row.get("attempt_id") not in set(target_attempt_ids)
             ]
