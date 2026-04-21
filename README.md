@@ -1,14 +1,24 @@
-# LLM Knowledge Base
+# 🌪️ LLM Wiki Flywheel
+
+> **Compile, don't retrieve.** Drop a source in. Claude does the rest — extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. No vectors. No chunking. Pure markdown you own, browsable in Obsidian.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1521-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-2585-brightgreen)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
-> **Compile, don't retrieve.** Drop a source in. Everything else is automatic — Claude extracts entities, builds interlinked wiki pages, injects wikilinks into existing pages, tracks trust scores, detects contradictions, and self-maintains. No vectors. No embeddings. No chunking. Just clean markdown you can browse in Obsidian.
+Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 26 MCP tools — **no API key required**.
 
-Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**.
+### 🎯 Why users pick this over RAG
+
+- 🧠 **Structure, not chunks.** Entities, concepts, wikilinks — a real graph, not opaque vectors.
+- ⚡ **Incremental by default.** SHA-256 change detection; only new/changed sources reprocessed.
+- 🔗 **Retroactive linking.** Ingest a new topic → existing pages auto-gain `[[wikilinks]]` to it.
+- 🧪 **Self-healing.** Bayesian trust scoring, contradiction detection, staleness flags, dead-link lint.
+- 🦉 **Obsidian-native.** Open `wiki/` as a vault — free graph view, backlinks, hover preview.
+- 🔌 **MCP-first.** 26 tools in Claude Code. Talk to your wiki: *"ingest this"*, *"what do we know about X?"*
+- 📤 **Publishable.** One command emits `/llms.txt`, `/llms-full.txt`, `/graph.jsonld`, sitemap, per-page siblings — the Karpathy Tier-1 machine-consumable stack.
 
 ## Why Not RAG?
 
@@ -233,7 +243,7 @@ Three Claude tiers balance cost and quality. Override via environment variables:
 |------|-------|---------|----------|
 | `scan` | Haiku 4.5 | `CLAUDE_SCAN_MODEL` | Index reads, link checks, diffs |
 | `write` | Sonnet 4.6 | `CLAUDE_WRITE_MODEL` | Extraction, summaries, page writing |
-| `orchestrate` | Opus 4.6 | `CLAUDE_ORCHESTRATE_MODEL` | Query synthesis, orchestration |
+| `orchestrate` | Opus 4.7 | `CLAUDE_ORCHESTRATE_MODEL` | Query synthesis, orchestration |
 
 ## Supported Sources
 
@@ -273,7 +283,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 1434 tests across 101 files
+  tests/                   # 2585 tests across 215 files
 ```
 
 </details>
@@ -286,7 +296,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 1177 tests
+python -m pytest                # 2585 tests, 7 skipped
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```
@@ -354,7 +364,7 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 
 ## Contributing
 
-This project is actively developed and ideas/issues are welcome.
+This project is actively developed — **⭐ star the repo** to follow along. Each release ships meaningful new features (see [CHANGELOG.md](CHANGELOG.md)).
 
 - **Found a bug?** Open an issue on [GitHub](https://github.com/Asun28/llm-wiki-flywheel/issues)
 - **Have an idea?** Check the [Roadmap](#roadmap) first — if it's not there, open an issue to discuss
