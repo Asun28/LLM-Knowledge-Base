@@ -63,6 +63,15 @@ def _canonical_rel_path(source: Path, raw_dir: Path) -> str:
         return abs_path
 
 
+# Cycle 19 AC11 — public alias for the canonical manifest-key computation.
+# Naming convention matches `decay_days_for` / `tier1_budget_for` / etc.
+# Callers that need a canonical manifest key (e.g. `compile_wiki` threading
+# through `ingest_source(manifest_key=...)`) should import this name; the
+# underscored helper remains the implementation but is no longer the public
+# API. NOT exposed in `kb.__all__` — internal to compile/ingest plumbing.
+manifest_key_for = _canonical_rel_path
+
+
 def load_manifest(manifest_path: Path | None = None) -> dict[str, str]:
     """Load the content hash manifest (source path → hash mapping).
 
@@ -411,7 +420,16 @@ def compile_wiki(
             continue
         try:
             # H17 fix: suppress per-source rebuild; one rebuild happens at loop tail.
-            ingest_result = ingest_source(source, wiki_dir=wiki_dir, _skip_vector_rebuild=True)
+            # Cycle 19 AC13 — thread the canonical rel_path as the explicit
+            # manifest_key so ingest_source's reservation + tail confirmation
+            # both use the SAME key (closes the dual-write divergence class
+            # under non-default raw_dir / Windows case differences).
+            ingest_result = ingest_source(
+                source,
+                wiki_dir=wiki_dir,
+                manifest_key=rel_path,
+                _skip_vector_rebuild=True,
+            )
             results["sources_processed"] += 1
             results["pages_created"].extend(ingest_result["pages_created"])
             results["pages_updated"].extend(ingest_result["pages_updated"])
