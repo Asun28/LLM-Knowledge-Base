@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2585 passed + 7 skipped (cycle 18; 2592 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2631 passed + 8 skipped (cycle 19; 2639 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 
@@ -126,6 +126,10 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
   Cycle 15 behavior: stale-result flagging composes source mtime with `decay_days_for(source, topics=...)`; summaries context budget uses `tier1_budget_for("wiki_pages")`; pages with `authored_by: human|hybrid` receive the mild `AUTHORED_BY_BOOST` after validation.
 - `refine_page(page_id, content, notes)` — In `kb.review.refiner`. Uses regex-based frontmatter split (not YAML parser), rejects content that looks like a frontmatter block (`---\nkey: val\n---`) to prevent corruption.
 - `rebuild_vector_index(wiki_dir, force=False)` — In `kb.query.embeddings`. Rebuilds sqlite-vec index from all pages in `wiki_dir`. Gated on (a) module-load-time `_hybrid_available` flag and (b) mtime check (skipped when `force=True`). Called at tail of `ingest_source()`. Batch callers (`compile_wiki`) pass `_skip_vector_rebuild=True` in loop and invoke once at tail.
+- `inject_wikilinks_batch(new_pages, wiki_dir=None, *, pages=None) -> dict[str, list[str]]` — In `kb.compile.linker` (cycle 19 AC1). Batch variant of `inject_wikilinks` that scans each existing wiki page AT MOST ONCE per chunk via a combined alternation regex; pre-lock peek is candidate-gathering only and the winner is re-derived under per-page `file_lock` from FRESH body content (AC1b). Chunked at `MAX_INJECT_TITLES_PER_BATCH = 200` titles per round; per-title length cap `MAX_INJECT_TITLE_LEN = 500` (overlength titles skipped with warn, batch continues — chunk-level try/except prevents one chunk's failure from blocking others). Reduces N-per-title × M-page reads to ~U + 2M. The existing single-target `inject_wikilinks` is retained for legacy callers; new callers should use the batch.
+- `manifest_key_for(source: Path, raw_dir: Path) -> str` — In `kb.compile.compiler` (cycle 19 AC11). Public alias for `_canonical_rel_path` so callers (`compile_wiki`, plugins) thread a stable opaque dict-key into `ingest_source(manifest_key=...)`. Verb-first naming matches `decay_days_for` / `tier1_budget_for`.
+- `list_stale_pending(hours=24, *, history_path=None) -> list[dict]` — In `kb.review.refiner` (cycle 19 AC8b). Pure-read visibility helper that returns refine-history entries with `status="pending"` older than `hours` — surfaces rows where `refine_page` crashed between the pre-write pending entry and the applied/failed flip (the rare two-phase-write hole). Mutation/sweep tool deferred to a future cycle.
+- `refine_page` two-phase write (cycle 19 AC8/AC9/AC10): pending row written BEFORE page body, flipped to `applied` (or `failed` with `error` field) inside the SAME `file_lock(history_path)` span. Lock order is `page_path FIRST, history_path SECOND` (preserved from cycle-1 H1; AC10 WITHDRAW). Each row carries `attempt_id = uuid4().hex[:8]` so the flip targets the correct row even with concurrent stuck pending rows.
 
 ### Wiki Index Files
 
@@ -170,7 +174,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Run `python -m pytest -v` to list all tests (current full suite: 2585 passed + 7 skipped; 2592 collected — cycle 18; detailed count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_cycle18_ingest_observability.py`). Use the `tmp_wiki`/`tmp_project`/`tmp_kb_env` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests. Cycle 18: `tmp_kb_env` now redirects `kb.compile.compiler.HASH_MANIFEST` to `<tmp>/.data/hashes.json`.
+Run `python -m pytest -v` to list all tests (current full suite: 2631 passed + 8 skipped; 2639 collected — cycle 19; detailed count tracked in `CHANGELOG.md`). New tests per phase go in versioned files (e.g., `test_cycle19_inject_wikilinks_batch.py`). Use the `tmp_wiki`/`tmp_project`/`tmp_kb_env` fixtures for any test that writes files — never write to the real `wiki/` or `raw/` in tests. Cycle 18: `tmp_kb_env` now redirects `kb.compile.compiler.HASH_MANIFEST` to `<tmp>/.data/hashes.json`. **Cycle 19: tests that use `tmp_kb_env` MUST NOT also `monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", ...)`** — the fixture already redirects it, and `tests/test_cycle19_lint_redundant_patches.py` enforces this via AST-based method-scope detection. Tests that monkeypatch one of the four cycle-19-migrated MCP callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) MUST patch the OWNER MODULE (e.g. `patch("kb.ingest.pipeline.ingest_source")`) — not `kb.mcp.core.<callable>`, since cycle-19 AC15 refactored those imports to module-attribute style.
 
 ### Error Handling Conventions
 

@@ -82,9 +82,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `utils/llm.py` — `LLMError` is the only custom exception in the codebase; CLI (`cli.py:54,79,98,121,135`), `compile/compiler.py:349`, and MCP catch bare `Exception` and string-format. Cannot retry selectively, cannot test error paths, bugs in manifest-write are indistinguishable from LLM failures. (R1)
   (fix: `kb.errors` with `KBError` → `IngestError` / `CompileError` / `QueryError` / `ValidationError` / `StorageError`; narrow `except` at the boundary)
 
-- `review/refiner.py` `refine_page` (~114-137) — writes page atomically, THEN appends `review_history.json`, THEN `wiki/log.md`. Crash or disk-full between steps leaves the page mutated with zero audit record, violating the documented refine-has-audit-trail guarantee; `append_wiki_log` further swallows `OSError` with a warning. (R2)
-  (fix: write audit record first with `status="pending"`, write page, flip status to `"applied"`; or stage via a `page.md.pending` sidecar flipped only after log is synced)
-
 - `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes across existing pages. Every step is independently atomic, none reversible. A crash between manifest-write (step 6) and log-append (step 7) leaves the manifest claiming "already ingested" while the log shows nothing; a mid-wikilink-injection failure leaves partial retroactive backlinks. (R2)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests; retries idempotent at step granularity)
 
@@ -133,8 +130,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 ### HIGH — Deferred
 
 > HIGH-severity items either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
-
-- `review/refiner.py` `refine_page` write-then-audit ordering — after H1's page-file lock (cycle 1), a crash/OSError on the history-lock step still leaves the page body updated without an audit record. Adopt two-phase write (pending audit first → write page → flip to applied). See `docs/superpowers/decisions/2026-04-16-phase4.5-high-cycle1-design.md` Q_H. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
 - `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip), but deferred: (1) atomic temp-DB-then-replace rebuild (crash-mid-rebuild leaves empty index), (2) cold-load latency (0.8s+67MB on first query), (3) dim-mismatch (stored embedding dim vs current model not validated), (4) `_index_cache` cross-thread lock symmetry. Bundle into dedicated vector-index lifecycle cycle. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
@@ -477,20 +472,17 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC
 
 ---
 
-## Cycle 19 candidates (surfaced during cycle 18)
+## Cycle 20 candidates (surfaced during cycle 19)
 
-<!-- Cycle 18 deferrals and Step-11 follow-ups. Effort estimates in parentheses. -->
+<!-- Cycle 19 deferrals and Step-11 follow-ups. Effort estimates in parentheses. -->
 
 ### MEDIUM
 
-- `tests/` MCP monkeypatch owner-module migration — cycle 17 AC4 narrowed lazy-import deferrals because legacy tests monkeypatch `kb.mcp.core.<symbol>` (e.g. `ingest_source`, `query_wiki`, `search_pages`, `rewrite_query`, `compute_trust_scores`). Migrating the ~10 affected test files to patch the owner modules would unlock full AC4 scope (direct removal of those imports from `mcp/core.py` module level). Transitive loads via sibling kb.mcp.* siblings mean the cold-boot saving today is zero, but post-migration savings are real. *(Carried from cycle-18 queue.)*
-  (effort: Medium — grep + per-test rewrite; paired pre-cycle test-audit script recommended)
+- `src/kb/review/refiner.py::list_stale_pending` — sweep / auto-promote tool. Cycle-19 AC8b shipped the read-only visibility helper; the matching MUTATION tool (auto-promote `pending` rows older than N days to `failed` with a synthesized `error: "abandoned by sweep"` field, OR auto-delete) is deferred. Needs a policy decision (auto-promote vs auto-delete vs operator-review-only) plus its own lock discipline. *(Carried from cycle-19 AC8b decision.)*
+  (effort: Medium — new MCP tool + CLI command + locking + policy spec)
 
-- `src/kb/compile/linker.py::inject_wikilinks_batch` — batch scanner reading each target page once with a single compiled alternation regex; replaces the N-title × M-page disk-read loop at `ingest/pipeline.py::_run_ingest_body` wikilink-injection step. Must ship with per-page `file_lock` (cycle-18 AC7 scalar contract already in place). *(Carried from cycle-18 queue — cycle 17 AC21.)*
-  (effort: Medium — new function + callsite switch; ReDoS mitigation via `re.escape` + bounded `MAX_INJECT_TITLES_PER_BATCH=200`)
-
-- `tests/` HASH_MANIFEST explicit-patch cleanup — cycle-18 D6 chose fixture-only addition. 20 existing test monkeypatches on `kb.compile.compiler.HASH_MANIFEST` remain (additive-compatible, no regression). Dedicated cleanup PR can remove these and tighten via a lint check that flags future tests using `tmp_kb_env` alongside redundant `HASH_MANIFEST` patches.
-  (effort: Low — mechanical grep + per-test removal; one lint rule)
+- `src/kb/compile/compiler.py::_canonical_rel_path` — Windows tilde-shortened path coverage test (T-13a). Cycle-19 left the Windows-specific divergence test as a placeholder skipif because constructing tilde-shortened paths in pytest requires platform-specific os.environ + symlink fixtures. The portable T-13b symlink test ships and exercises the same canonicalizer. A dedicated Windows-only follow-up could harden the test suite for that platform.
+  (effort: Low — Windows tilde fixture + CI matrix addition)
 
 ---
 

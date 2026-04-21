@@ -56,7 +56,10 @@ def test_cycle12_ac14_conversation_context_sanitised_before_both_branches(
                 "context_pages": [],
             }
 
-        monkeypatch.setattr(core, "query_wiki", fake_query_wiki)
+        # Cycle 19 AC15 — patch owner module so MCP call site intercepts.
+        import kb.query.engine as _qe
+
+        monkeypatch.setattr(_qe, "query_wiki", fake_query_wiki)
     else:
         # Default branch calls rewrite_query + search_pages. Intercept
         # rewrite_query to capture the forwarded context; stub search_pages so
@@ -65,8 +68,12 @@ def test_cycle12_ac14_conversation_context_sanitised_before_both_branches(
             captured.append(conv_ctx)
             return question
 
+        # rewrite_query stays at module level (not in cycle-19 migration scope).
         monkeypatch.setattr(core, "rewrite_query", fake_rewrite_query)
-        monkeypatch.setattr(core, "search_pages", lambda *a, **kw: [])
+        # Cycle 19 AC15 — patch owner module.
+        import kb.query.engine as _qe
+
+        monkeypatch.setattr(_qe, "search_pages", lambda *a, **kw: [])
 
     result = core.kb_query(
         question="what",
@@ -114,14 +121,18 @@ def test_cycle12_ac14_sanitiser_is_called_before_branching(
     monkeypatch.setattr(core, "_sanitize_conversation_context", spy)
 
     # Stub downstream sinks so kb_query does not fail on missing wiki data.
+    # Cycle 19 AC15 — owner-module patch for migrated callables; rewrite_query
+    # stays on kb.mcp.core (not in migration scope).
+    import kb.query.engine as _qe
+
     monkeypatch.setattr(core, "rewrite_query", lambda q, c: q)
-    monkeypatch.setattr(core, "search_pages", lambda *a, **kw: [])
+    monkeypatch.setattr(_qe, "search_pages", lambda *a, **kw: [])
 
     # use_api=False branch
     core.kb_query(question="q1", conversation_context="ctx1", use_api=False)
-    # use_api=True branch — stub query_wiki
+    # use_api=True branch — stub query_wiki on owner module.
     monkeypatch.setattr(
-        core,
+        _qe,
         "query_wiki",
         lambda *a, **kw: {
             "answer": "stub",

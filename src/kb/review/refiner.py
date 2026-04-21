@@ -1,9 +1,32 @@
-"""Page refinement — update content preserving frontmatter, log revisions."""
+"""Page refinement — update content preserving frontmatter, log revisions.
+
+## Concurrency notes (cycle 19 AC10)
+
+`refine_page` acquires two locks. The order is **page_path FIRST, history_path SECOND**
+(preserved from the cycle-1 H1 fix). Cycle-19 AC10 retains this order — flipping
+to history-first would have introduced a liveness regression (every concurrent
+refine across the wiki would serialize on the single history-lock) without
+addressing any deadlock risk in the current call graph.
+
+Inside the page-lock window, the history-lock is acquired ONCE and held across
+the entire page-write window (cycle 19 AC9 — single-span semantic for
+crash-safety). Within that span, `refine_page` writes a `status="pending"`
+history entry tagged with a fresh `attempt_id = uuid4().hex[:8]` BEFORE the page
+body atomic-write, then flips that exact row to `status="applied"` (or
+`"failed"` on OSError) using `attempt_id` equality (cycle 19 AC8). A crash
+between pending-write and the flip leaves the audit row visible as `pending`,
+giving operators a self-describing forensic signal.
+
+`list_stale_pending(hours=24)` (cycle 19 AC8b) is a pure-read reporter helper
+that operators can run to surface pending rows older than a threshold. A full
+sweep / auto-promote tool is deferred to a future cycle.
+"""
 
 import json
 import logging
 import re
-from datetime import date, datetime
+import uuid
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kb.config import (
@@ -83,11 +106,16 @@ def refine_page(
     # H1 fix (Phase 4.5 HIGH): lock the page file for the entire read→write window so
     # concurrent refine_page calls on the same page don't overwrite each other's body.
     # Lock-order: page_path acquired FIRST; history_path acquired SECOND (below).
+    # Cycle 19 AC10 — order PRESERVED (WITHDRAW of the proposed flip; see module
+    # docstring for rationale). T-10 asserts this order.
     try:
         page_lock = file_lock(page_path)
         page_lock.__enter__()
     except TimeoutError as e:
         return {"error": f"Failed to acquire page lock for {page_id}: {e}"}
+
+    # Cycle 19 AC8 — fresh per-refine attempt_id correlates pending → applied/failed.
+    attempt_id = uuid.uuid4().hex[:8]
 
     try:
         try:
@@ -205,40 +233,60 @@ def refine_page(
         body = re.sub(r"\A[\r\n]+", "", updated_content)
         new_text = f"---\n{frontmatter_text}---\n\n{body}\n"
 
-        # Write the page FIRST — if this fails, no history entry is created.
-        try:
-            atomic_text_write(new_text, page_path)
-        except OSError as e:
-            return {"error": f"Failed to write page {page_id}: {e}"}
+        # Cycle 19 AC8/AC9/AC10 — TWO-PHASE WRITE under the existing page_lock.
+        # Resolve the history path BEFORE acquiring history_lock so failure path
+        # diagnostics can still mention the path. Lock-order remains
+        # page_lock OUTER, history_lock INNER (cycle-1 H1 contract).
+        if history_path is not None:
+            resolved_history_path = history_path
+        elif wiki_dir is not None:
+            resolved_history_path = wiki_dir.parent / ".data" / "review_history.json"
+        else:
+            resolved_history_path = REVIEW_HISTORY_PATH
+
+        # Single history_lock span covers pending-write + page-write + applied/failed flip.
+        # (Hold-through semantic per cycle-19 AC9 — release-and-reacquire would race.)
+        with file_lock(resolved_history_path):
+            timestamp = datetime.now().isoformat(timespec="seconds")
+            # Phase 1 — write pending row BEFORE the page body.
+            history = load_review_history(resolved_history_path)
+            history.append(
+                {
+                    "timestamp": timestamp,
+                    "page_id": page_id,
+                    "revision_notes": revision_notes,
+                    "content_length": len(updated_content),
+                    "status": "pending",
+                    "attempt_id": attempt_id,
+                }
+            )
+            if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
+                history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
+            save_review_history(history, resolved_history_path)
+
+            # Phase 2 — write the page body. Exceptions flip pending → failed
+            # under the SAME lock span (no release/re-acquire window).
+            try:
+                atomic_text_write(new_text, page_path)
+            except OSError as e:
+                history = load_review_history(resolved_history_path)
+                for row in history:
+                    if row.get("attempt_id") == attempt_id:
+                        row["status"] = "failed"
+                        row["error"] = str(e)
+                        break
+                save_review_history(history, resolved_history_path)
+                return {"error": f"Failed to write page {page_id}: {e}"}
+
+            # Phase 3 — flip pending → applied (cycle 19 AC8 attempt_id correlation).
+            history = load_review_history(resolved_history_path)
+            for row in history:
+                if row.get("attempt_id") == attempt_id:
+                    row["status"] = "applied"
+                    break
+            save_review_history(history, resolved_history_path)
     finally:
         page_lock.__exit__(None, None, None)
-
-    # Persist audit trail AFTER successful page write (cross-process-safe via file_lock).
-    # Adversarial-review MAJOR: derive history path from wiki_dir when history_path is
-    # not explicit, so tests calling refine_page(wiki_dir=tmp) don't pollute
-    # production .data/review_history.json. Pattern mirrors the project layout:
-    # REVIEW_HISTORY_PATH = PROJECT_ROOT / ".data" / "review_history.json"
-    # wiki_dir = PROJECT_ROOT / "wiki" → wiki_dir.parent = PROJECT_ROOT.
-    if history_path is not None:
-        resolved_history_path = history_path
-    elif wiki_dir is not None:
-        resolved_history_path = wiki_dir.parent / ".data" / "review_history.json"
-    else:
-        resolved_history_path = REVIEW_HISTORY_PATH
-    with file_lock(resolved_history_path):
-        history = load_review_history(resolved_history_path)
-        history.append(
-            {
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "page_id": page_id,
-                "revision_notes": revision_notes,
-                "content_length": len(updated_content),
-                "status": "applied",
-            }
-        )
-        if len(history) > MAX_REVIEW_HISTORY_ENTRIES:
-            history = history[-MAX_REVIEW_HISTORY_ENTRIES:]
-        save_review_history(history, resolved_history_path)
 
     # Append to wiki/log.md (best-effort — page + history already written successfully;
     # a log failure must not crash the caller or hide the successful refine result).
@@ -253,3 +301,46 @@ def refine_page(
         "updated": True,
         "revision_notes": revision_notes,
     }
+
+
+def list_stale_pending(
+    hours: int = 24,
+    *,
+    history_path: Path | None = None,
+) -> list[dict]:
+    """Return review-history entries with status='pending' older than ``hours``.
+
+    Cycle 19 AC8b — pure-read visibility helper that lets operators surface
+    rows where ``refine_page`` crashed between the pending-write and the
+    applied/failed flip (the rare two-phase-write hole). NO mutation, no
+    locks beyond what ``load_review_history`` already does. A full sweep
+    or auto-promote tool is deferred to a future cycle (this one ships
+    visibility only — see ``docs/superpowers/decisions/2026-04-21-cycle19-design.md``
+    AC8b rationale).
+
+    Args:
+        hours: Threshold in hours. Pending rows whose ``timestamp`` is older
+            than ``now - hours`` are returned. Defaults to 24.
+        history_path: Optional override for the review-history JSON file
+            (defaults to ``REVIEW_HISTORY_PATH``).
+
+    Returns:
+        List of pending-status entries (dict copies — caller mutations do
+        not affect the on-disk store).
+    """
+    cutoff = datetime.now() - timedelta(hours=hours)
+    history = load_review_history(history_path)
+    stale: list[dict] = []
+    for row in history:
+        if row.get("status") != "pending":
+            continue
+        ts_raw = row.get("timestamp")
+        if not isinstance(ts_raw, str):
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except ValueError:
+            continue
+        if ts < cutoff:
+            stale.append(row)
+    return stale

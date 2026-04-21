@@ -42,11 +42,13 @@ class TestInjectWikilinksCalledOnIngest:
         source = raw_dir / "articles" / "neural-networks.md"
         source.write_text("# Neural Networks\n\nAbout deep learning and backpropagation.")
 
-        inject_calls = []
+        # Cycle 19 AC6 — pipeline switched from per-title `inject_wikilinks`
+        # to a single `inject_wikilinks_batch` call. Update mock target.
+        batch_calls: list[list[tuple[str, str]]] = []
 
-        def mock_inject(title, target_page_id, wiki_dir=None):
-            inject_calls.append((title, target_page_id))
-            return []
+        def mock_batch(new_pages, wiki_dir=None, *, pages=None):
+            batch_calls.append(list(new_pages))
+            return {}
 
         from kb.ingest.pipeline import ingest_source
 
@@ -56,15 +58,18 @@ class TestInjectWikilinksCalledOnIngest:
             patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
             patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
             patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
-            patch("kb.compile.linker.inject_wikilinks", side_effect=mock_inject),
+            patch("kb.compile.linker.inject_wikilinks_batch", side_effect=mock_batch),
         ):
             ingest_source(source, source_type="article")
 
-        # inject_wikilinks should be called for each created page
-        assert len(inject_calls) > 0, "inject_wikilinks was never called"
+        # Cycle 19 AC6 — inject_wikilinks_batch is called exactly once per ingest
+        # (replacing the legacy per-title loop).
+        assert len(batch_calls) == 1, (
+            f"inject_wikilinks_batch should be called exactly once; got {len(batch_calls)}"
+        )
 
-        # Each call should use the page's title and page ID
-        call_page_ids = [pid for _, pid in inject_calls]
+        # The single batch call must include all new pages (summary + entity + concept).
+        call_page_ids = [pid for _, pid in batch_calls[0]]
         assert any("summaries/" in pid for pid in call_page_ids)
         assert any("entities/" in pid for pid in call_page_ids)
         assert any("concepts/" in pid for pid in call_page_ids)

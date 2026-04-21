@@ -112,7 +112,8 @@ class TestKbQueryExceptionGuard:
 
     def test_kb_query_catches_search_exception(self):
         """kb_query should return Error string when search_pages raises."""
-        with patch("kb.mcp.core.search_pages", side_effect=RuntimeError("BM25 index failed")):
+        # Cycle 19 AC15 — patch owner module.
+        with patch("kb.query.engine.search_pages", side_effect=RuntimeError("BM25 index failed")):
             from kb.mcp.core import kb_query
 
             result = kb_query("test question")

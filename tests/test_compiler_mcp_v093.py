@@ -211,12 +211,12 @@ def test_max_search_results_used_in_kb_query():
 
     # Verify the function uses MAX_SEARCH_RESULTS by checking that it caps at 100
     # We mock search_pages to capture the max_results value passed
-    with patch("kb.mcp.core.search_pages", return_value=[]) as mock_search:
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock_search:
         kb_query("test question", max_results=200)
         call_args = mock_search.call_args
         assert call_args[1]["max_results"] == 100
 
-    with patch("kb.mcp.core.search_pages", return_value=[]) as mock_search:
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock_search:
         kb_query("test question", max_results=0)
         call_args = mock_search.call_args
         assert call_args[1]["max_results"] == 1

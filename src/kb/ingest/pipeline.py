@@ -969,6 +969,7 @@ def ingest_source(
     defer_small: bool = False,
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
+    manifest_key: str | None = None,
     _skip_vector_rebuild: bool = False,
 ) -> dict:
     """Ingest a single raw source into the knowledge base.
@@ -984,6 +985,15 @@ def ingest_source(
             source-type detection plus source_ref canonicalization. Defaults to
             module-level ``RAW_DIR``. Required for custom-project isolation
             (kb_lint --augment auto_ingest mode, multi-project test harnesses).
+        manifest_key: Cycle 19 AC12. Optional opaque dict-key for the
+            ``.data/hashes.json`` manifest. NOT a filesystem path — produced
+            by ``kb.compile.compiler.manifest_key_for(source, raw_dir)`` for
+            ``compile_wiki`` callers, ensuring the duplicate-check reservation
+            and the tail confirmation both write under the same key (closes
+            the case-sensitivity / symlink divergence class). Defense-in-depth:
+            rejects ``..``, leading ``/`` or ``\\``, ``\\x00``, and lengths
+            above 512 chars. Defaults to ``None`` — legacy callers continue
+            using the legacy ``source_ref``-derived key.
         _skip_vector_rebuild: If True, suppress the tail-call to
             ``rebuild_vector_index``. Batch callers (e.g. ``compile_wiki``) pass
             True in the per-source loop and invoke ``rebuild_vector_index`` once
@@ -997,6 +1007,22 @@ def ingest_source(
             to an already-ingested file (all contract keys still present, as empty
             lists for affected_pages / wikilinks_injected / contradictions).
     """
+    # Cycle 19 AC12 — defense-in-depth validation of the opaque manifest_key.
+    # Even though .data/hashes.json keys are NEVER FS-resolved today, validate
+    # against future call sites that might accidentally pass it through
+    # ``Path(manifest_key).resolve()``.
+    # PR #33 R1 Sonnet NIT — empty string previously passed all 4 traversal
+    # checks; reject explicitly so an empty manifest_key cannot create a
+    # false-positive duplicate via the manifest[""] key collision class.
+    if manifest_key is not None:
+        if (
+            not manifest_key
+            or ".." in manifest_key
+            or manifest_key.startswith(("/", "\\"))
+            or "\x00" in manifest_key
+            or len(manifest_key) > 512
+        ):
+            raise ValueError(f"invalid manifest_key: {manifest_key!r}")
     source_path = Path(source_path).resolve()
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
@@ -1061,6 +1087,10 @@ def ingest_source(
 
     # Build source reference early for duplicate check
     source_ref = make_source_ref(source_path, raw_dir=effective_raw_dir)
+    # Cycle 19 AC12/AC13 — derive manifest_ref ONCE; thread to BOTH the Phase-1
+    # reservation AND the Phase-2 confirmation. source_ref is unchanged for
+    # provenance / log entries / page frontmatter.
+    manifest_ref = manifest_key if manifest_key is not None else source_ref
 
     effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
@@ -1088,9 +1118,11 @@ def ingest_source(
 
         # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
         # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
-        # reserves manifest[source_ref] = source_hash before releasing. This prevents the RMW
+        # reserves manifest[manifest_ref] = source_hash before releasing. This prevents the RMW
         # race where two concurrent ingests of the same content both pass the duplicate check.
-        if _check_and_reserve_manifest(source_hash, source_ref):
+        # Cycle 19 AC12 — pass manifest_ref (= manifest_key or source_ref) so caller-supplied
+        # keys from compile_wiki (manifest_key_for) match the Phase-2 confirmation key below.
+        if _check_and_reserve_manifest(source_hash, manifest_ref):
             logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
             # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
             # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
@@ -1117,6 +1149,7 @@ def ingest_source(
             source_path=source_path,
             source_type=source_type,
             source_ref=source_ref,
+            manifest_ref=manifest_ref,
             source_hash=source_hash,
             request_id=request_id,
             raw_content=raw_content,
@@ -1155,6 +1188,7 @@ def _run_ingest_body(
     source_path: Path,
     source_type: str,
     source_ref: str,
+    manifest_ref: str,
     source_hash: str,
     request_id: str,
     raw_content: str,
@@ -1169,6 +1203,11 @@ def _run_ingest_body(
     Split out of `ingest_source` so the outer function's try/except around this
     body cleanly captures exceptions for JSONL telemetry without mutating the
     entry/validation/duplicate-check sequence above.
+
+    Cycle 19 AC12: `manifest_ref` threads through from `ingest_source` as the
+    opaque dict-key for the Phase-2 manifest confirmation write (same key as
+    Phase-1 reservation). `source_ref` remains the unchanged identity used
+    for page frontmatter, log entries, and provenance.
     """
     # Track created/updated pages
     pages_created = []
@@ -1301,12 +1340,15 @@ def _run_ingest_body(
     # 6. Q_A fix (Phase 4.5 HIGH) — Phase 2: idempotent manifest confirmation.
     # Re-acquires file_lock(HASH_MANIFEST) to write the final hash (Phase 1 already
     # reserved it, but this re-confirms after all ingest work completes, consistent with C5).
+    # Cycle 19 AC12 — Phase 2 uses the SAME manifest_ref the Phase-1 reservation
+    # used (R2 M1 fix), so a caller-supplied manifest_key writes to a single key
+    # both times, eliminating the dual-write divergence under non-default raw_dir.
     try:
         from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
 
         with file_lock(HASH_MANIFEST):
             manifest = load_manifest()
-            manifest[source_ref] = source_hash  # idempotent — same value as Phase 1 reservation
+            manifest[manifest_ref] = source_hash  # idempotent — same value as Phase 1 reservation
             save_manifest(manifest)
     except (OSError, json.JSONDecodeError) as e:
         # Fix 2.14: narrow bare except — log at WARNING, not DEBUG
@@ -1340,17 +1382,48 @@ def _run_ingest_body(
         pages=all_wiki_pages,
     )
 
-    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles.
+    # 9. Retroactive wikilink injection — cycle-19 AC6: switched from N
+    # per-title `inject_wikilinks` calls to a single `inject_wikilinks_batch`
+    # call that scans each existing page AT MOST ONCE (per chunk). Reduces
+    # 100·N disk reads at 50 entities + 50 concepts × N existing pages to
+    # ≤ 2·N. Pages bundle `all_wiki_pages` is already pre-loaded above for
+    # affected-pages analysis (cycle-19 AC7 — re-use, don't re-walk disk).
     wikilinks_injected: list[str] = []
     sorted_new_pages = _sort_new_pages_by_title_length(new_pages_with_titles)
-    for pid, ptitle in sorted_new_pages:
+    if sorted_new_pages:
         try:
-            from kb.compile.linker import inject_wikilinks
+            from kb.compile.linker import inject_wikilinks_batch
 
-            updated = inject_wikilinks(ptitle, pid, wiki_dir=effective_wiki_dir)
-            wikilinks_injected.extend(updated)
+            # _sort_new_pages_by_title_length returns [(pid, title), ...];
+            # inject_wikilinks_batch expects [(title, pid), ...].
+            batch_input = [(title, pid) for pid, title in sorted_new_pages]
+            batch_result = inject_wikilinks_batch(
+                batch_input,
+                wiki_dir=effective_wiki_dir,
+                pages=all_wiki_pages,
+            )
+            # Flatten batch result dict to a single list (preserves existing
+            # `wikilinks_injected` shape for downstream consumers).
+            for updated_list in batch_result.values():
+                wikilinks_injected.extend(updated_list)
+            # Cycle-19 AC20: single audit-log line via append_wiki_log.
+            # Inherits cycle-2 _escape_markdown_prefix sanitizer — titles
+            # containing leading #/-/>/!  or [[/]] markers are neutralised.
+            if wikilinks_injected:
+                injected_summary = ", ".join(sorted(set(wikilinks_injected)))
+                if len(injected_summary) > 100:
+                    injected_summary = injected_summary[:100] + "..."
+                try:
+                    log_path = effective_wiki_dir / "log.md"
+                    append_wiki_log(
+                        "inject_wikilinks_batch",
+                        f"injected {len(wikilinks_injected)} link(s): {injected_summary}",
+                        log_path,
+                    )
+                except OSError as log_exc:
+                    logger.warning("inject_wikilinks_batch log append failed: %s", log_exc)
         except Exception as e:
-            logger.debug("inject_wikilinks failed for %s: %s", pid, e)
+            logger.debug("inject_wikilinks_batch failed: %s", e)
 
     # Auto-contradiction detection. Cycle 4 item #22 — migrate to the
     # sibling `detect_contradictions_with_metadata` so truncation is

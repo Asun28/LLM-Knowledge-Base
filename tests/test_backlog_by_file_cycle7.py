@@ -481,7 +481,10 @@ class TestMcpCoreErrorRedaction:
         def raising_ingest(*a, **k):
             raise OSError(2, "No such", r"D:\secret\raw\x.md")
 
-        monkeypatch.setattr(core, "ingest_source", raising_ingest)
+        # Cycle 19 AC15 — patch owner module so MCP call site intercepts.
+        import kb.ingest.pipeline as _pipeline
+
+        monkeypatch.setattr(_pipeline, "ingest_source", raising_ingest)
         # Invoke kb_ingest via its bare function (not MCP wrapper) — the
         # `run` attribute exists on FastMCP-decorated functions.
         kb_ingest = core.kb_ingest.fn if hasattr(core.kb_ingest, "fn") else core.kb_ingest

@@ -427,7 +427,10 @@ class TestKbIngestContentOSError:
         def failing_ingest(*a, **kw):
             raise RuntimeError("ingest boom")
 
-        monkeypatch.setattr("kb.mcp.core.ingest_source", failing_ingest, raising=False)
+        # Cycle 19 AC15 — patch owner module. Drop `raising=False` because the
+        # attribute exists on `kb.ingest.pipeline` (no need for the silent-miss
+        # guard the legacy `kb.mcp.core` patch site needed).
+        monkeypatch.setattr("kb.ingest.pipeline.ingest_source", failing_ingest)
 
         result = mcp_core.kb_ingest_content(
             content="Orphan file content",

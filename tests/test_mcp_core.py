@@ -131,7 +131,9 @@ def test_kb_ingest_content_creates_source_and_pages(tmp_path, monkeypatch):
         "concepts_mentioned": ["LLM"],
     }
 
-    with patch("kb.mcp.core.ingest_source", return_value=mock_result) as mock_ingest:
+    # Cycle 19 AC15 — patch the owner module so the new mcp/core.py call site
+    # `ingest_pipeline.ingest_source(...)` resolves the patched attribute.
+    with patch("kb.ingest.pipeline.ingest_source", return_value=mock_result) as mock_ingest:
         result = kb_ingest_content(
             content="Full article content here.",
             filename="test-one-shot",
@@ -213,7 +215,8 @@ def test_kb_ingest_content_with_url(tmp_path, monkeypatch):
         "concepts_mentioned": [],
     }
 
-    with patch("kb.mcp.core.ingest_source", return_value=mock_result):
+    # Cycle 19 AC15 — patch owner module.
+    with patch("kb.ingest.pipeline.ingest_source", return_value=mock_result):
         result = kb_ingest_content(
             content="Article from URL.",
             filename="url-article",
