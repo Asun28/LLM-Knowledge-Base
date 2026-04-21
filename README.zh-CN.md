@@ -130,6 +130,8 @@ kb --version
 
 **🦉 Obsidian 集成**：将 `wiki/` 目录作为 Vault 打开。按 `Ctrl+G` 查看知识图谱。详见 [Obsidian 完整指南](docs/guides/quickstart-obsidian.md)（[HTML 版](docs/guides/quickstart-obsidian.html)）。
 
+**☁️ Obsidian + 远程存储（可选）**：安装 Obsidian 社区插件 [Remotely Save](https://github.com/remotely-save/remotely-save)（Apache 2.0 协议），可将 `wiki/` Vault 同步至 S3、Azure Blob、OneDrive 或 Dropbox。非技术用户无需命令行即可在任意设备上浏览已编译的知识库——`kb` 流水线写入存储桶，Remotely Save 自动同步至 Obsidian。
+
 **💡 新手建议**：先浏览 `demo/` 文件夹。这是一个基于 Karpathy 推文与 Gist 编译的小型示例知识库，完整展示了目录结构与编译输出（摘要、实体、概念、对比分析、跨源综合）。在添加你自己的资料前，可以直观了解流水线的实际效果。
 
 ---

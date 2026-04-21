@@ -91,7 +91,7 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 ### Three-Layer Content Structure
 
 - **`raw/`** — Immutable source documents. The LLM reads but **never modifies** files here (except raw/captures/, which is the sole LLM-written output directory inside raw/ — atomised via kb_capture, then treated as raw input for subsequent ingest). Subdirs: `articles/`, `papers/`, `repos/`, `videos/`, `podcasts/`, `books/`, `datasets/`, `conversations/`, `assets/`. Use Obsidian Web Clipper for web→markdown; download images to `raw/assets/`.
-- **`wiki/`** — LLM-generated and LLM-maintained markdown. Page subdirs: `entities/`, `concepts/`, `comparisons/`, `summaries/`, `synthesis/`. All pages use YAML frontmatter (see template below).
+- **`wiki/`** — LLM-generated and LLM-maintained markdown. Page subdirs: `entities/`, `concepts/`, `comparisons/`, `summaries/`, `synthesis/`. All pages use YAML frontmatter (see template below). Non-technical users can optionally install the [Remotely Save](https://github.com/remotely-save/remotely-save) Obsidian community plugin (Apache 2.0) to sync `wiki/` to S3, Azure Blob, OneDrive, or Dropbox — the pipeline writes to the bucket, Remotely Save pulls it into Obsidian automatically.
 - **`research/`** — Human-authored analysis, project ideas, and meta-research about the knowledge base approach.
 
 ### Five Operations Cycle: Ingest → Compile → Query → Lint → Evolve

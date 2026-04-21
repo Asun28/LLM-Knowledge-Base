@@ -426,6 +426,9 @@ _All items resolved — see CHANGELOG cycle 13._
 - Multi-mode search depth toggle (`depth=fast|deep`) — `depth=deep` uses Monte Carlo evidence sampling for complex multi-hop questions; `depth=fast` is current BM25 hybrid. Depends on MC sampling infrastructure. Source: Sirchmunk Monte Carlo evidence sampling.
   (effort: High — MC sampler architecture + budget allocation + fast/deep routing logic)
 
+- **Hybrid RAG + Wiki compiler architecture** — two-tier retrieval: RAG layer (pgvector in Postgres) handles high-volume raw corpus at semantic search speed; compiled wiki layer holds curated authoritative pages. Query router scores wiki hits first (high trust), falls back to RAG chunks (flagged `[unverified]`). `kb_evolve` gap analysis scans RAG hit-frequency to surface topics ready for wiki promotion. Ingest pipeline gains an optional embedding step alongside existing BM25 indexing. Enables enterprise-scale corpora (100k+ docs) without sacrificing the auditability and contradiction-detection strengths of the wiki compiler. Source: internal architecture discussion 2026-04-21.
+  (effort: High — pgvector schema + embedding step in ingest + query router blending wiki+RAG citations + evolve promotion heuristic; prerequisite: multi-user storage migration)
+
 - Semantic deduplication pre-ingest — embedding similarity check before ingestion to catch same-topic-different-wording duplicates beyond content hash; flag if cosine similarity >0.85 to any existing raw source. Source: content deduplication research.
   (effort: Medium — embed new source + nearest-neighbor check vs existing vector store)
 
@@ -437,6 +440,139 @@ _All items resolved — see CHANGELOG cycle 13._
 
 - Actionable gap-fill source suggestions — enhance `kb_evolve` to suggest specific real-world sources for each gap ("no sources on MoE, consider the Mixtral paper"). Mostly superseded by `kb_evolve mode=research` (Phase 5) which fetches sources autonomously; keep as fallback for offline/no-fetch environments. Source: nashsu/llm_wiki.
   (effort: Low delta on evolve — add one LLM call per gap; ship only if mode=research is blocked)
+
+### Phase 7 candidates — Enterprise source integrations (not yet scheduled)
+
+> Prerequisite: Phase 6 multi-user storage migration + Hybrid RAG layer must land first.
+> Core design change: `raw/` becomes a logical namespace, not a single folder. Each source root
+> is registered with a connector type, credentials, and sync policy. The ingest pipeline treats
+> them identically once normalized to local markdown.
+
+- **Multi-root raw directory support** — allow `KB_RAW_ROOTS` env var (colon-separated paths) or a `sources.yaml` registry so a single wiki can compile from multiple raw directories (e.g. a personal folder + a shared team folder + a connector-synced cache). `ingest_source`, `compile_wiki`, and `kb_detect_drift` all scope to `raw_dir` today; the change threads an optional `raw_roots: list[Path]` through those APIs and merges hash manifests per-root. Prerequisite for all connector items below.
+  (effort: Medium — config + API threading; no connector logic yet)
+
+- **SharePoint / OneDrive connector** — poll or webhook-triggered sync of SharePoint document libraries and OneDrive shared folders into a designated `raw/sharepoint/<site>/` root. Uses Microsoft Graph API (`sites.read.all` scope). Supports `.docx`, `.pptx`, `.pdf`, `.xlsx` via `markitdown`. Delta-sync via Graph `$deltaToken` to avoid full re-crawl. Permission-aware: respects item-level read permissions so a user only ingests docs they can access.
+  (effort: High — OAuth2 PKCE flow + Graph delta sync + markitdown conversion + permission mapping)
+
+- **Google Drive / Google Shared Drives connector** — sync Google Drive folders and Shared Drives into `raw/gdrive/<drive-id>/`. Uses Drive API v3 `files.list` with `driveId` + `includeItemsFromAllDrives`. Exports Google Docs → markdown via Drive export API; native files (PDF, DOCX) via direct download + markitdown. Change-token polling (not full re-scan) for incremental sync.
+  (effort: High — OAuth2 + Drive export API + change-token polling + markitdown pipeline)
+
+- **Confluence connector** — crawl Confluence Cloud or Server spaces into `raw/confluence/<space-key>/`. Uses Confluence REST API v2 (`/wiki/api/v2/pages`). Exports page body as storage-format HTML → converts via `trafilatura` or `markitdown`. Respects space/page-level permissions via API token scoping. Attachments (PDF, DOCX) downloaded and ingested as sibling raw files.
+  (effort: High — REST API pagination + HTML→markdown conversion + attachment handling + space permission scoping)
+
+- **Notion connector** — sync Notion databases and pages into `raw/notion/<database-id>/`. Uses Notion API v1 (`/v1/blocks`, `/v1/databases/query`). Exports rich text blocks → markdown. Handles inline databases, toggles, callouts. Change detection via `last_edited_time` cursor.
+  (effort: Medium — Notion API pagination + block→markdown renderer + cursor-based incremental sync)
+
+- **GitHub / GitLab repo connector** — ingest markdown docs, READMEs, and wiki pages from repos directly into `raw/repos/<owner>/<repo>/`. Extends existing `repos/` source type. Uses GitHub Contents API or `git clone --depth 1`; respects `.llmwikiignore` patterns to skip source code and focus on docs. Auto-triggered on push webhook for live orgs.
+  (effort: Medium — GitHub API or shallow clone + .llmwikiignore filtering + webhook trigger)
+
+- **Credential & secret store integration** — connector OAuth tokens and API keys stored in system keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service) or a secrets manager (HashiCorp Vault, AWS Secrets Manager) rather than `.env`. `get_connector_creds(service)` abstraction; `.env` fallback for local dev. Required before any connector ships to production.
+  (effort: Medium — keychain adapter + secrets manager client + fallback chain; security prerequisite for all connectors)
+
+- **Sync policy & scheduling** — per-source-root sync schedule (`cron`-style or `on_change` webhook) with last-sync timestamp, retry backoff, and `dry_run` mode. Surfaces as `kb sync [--source <root>] [--dry-run]` CLI command and `kb_sync` MCP tool. Sync state persisted in `.data/sync_state.json`.
+  (effort: Medium — scheduler + state store + CLI/MCP surface; depends on multi-root support)
+
+### Phase 8 candidates — Strategic rewrite / Rust core (not yet scheduled)
+
+> Trigger condition: Phase 6 (multi-user) + Phase 7 (connectors) are shipped and production load
+> reveals Python bottlenecks OR the codebase accumulates enough legacy decisions that greenfield
+> is cheaper than continued patching. This is a "revisit annually" decision, not a scheduled one.
+
+**The honest rewrite question**
+
+The current Python stack has real strengths: 2710+ tests, 20 cycles of hardened edge-case coverage,
+rapid LLM-call iteration, trafilatura/markitdown/playwright in the same ecosystem. A rewrite throws
+all of that away. The question is whether the *architecture* is sound enough to keep extending, or
+whether early single-user decisions (flat-file storage, single-process compile, synchronous LLM
+calls) are now load-bearing walls that block the enterprise path.
+
+- **Keep Python, refactor architecture** — most likely path. Swap storage (Postgres), add async
+  job queue (Celery/ARQ), keep BM25+vector hybrid. Preserves test suite and iteration speed.
+  Python is I/O-bound here — LLM calls dominate; Rust buys nothing for that workload.
+
+- **Rust core for hot paths** — compile BM25 indexer, wikilink injection regex engine, and file
+  scanner as a Rust extension (`PyO18` / `maturin`). Python orchestration layer unchanged.
+  Realistic 5–20× speedup on the scan tier for large corpora (100k+ pages). Feasible without
+  full rewrite — ship as optional `kb[fast]` extra.
+  (effort: Medium — Rust BM25 + regex engine + PyO3 bindings; Python layer untouched)
+
+- **Vibe-coding greenfield with AI agents** — use the current system as the *spec*
+  (CLAUDE.md + CHANGELOG.md + test suite as acceptance criteria) and drive a targeted rewrite
+  of performance-critical modules via Claude Code / Codex agents in parallel worktrees. Each
+  module gets its own agent, outputs integration-tested against Python golden outputs.
+  Worth a spike on one module (e.g. `kb.query.engine`) before committing to broader scope.
+  (effort: Unknown — spike first; scoped to hot-path modules only, not full rewrite)
+
+**Recommended architecture (decided 2026-04-21):**
+
+```
+┌─────────────────────────────────────────────┐
+│  TypeScript / Next.js  (view + API layer)   │  ← Phase 8A
+│  - Three-pane wiki browser                  │
+│  - Graph visualization                      │
+│  - Chat / query interface                   │
+│  - REST / tRPC API → Python KB process      │
+└────────────────────┬────────────────────────┘
+                     │ HTTP / stdio
+┌────────────────────▼────────────────────────┐
+│  Python  (AI brain — keep as-is)            │  ← current stack
+│  - All LLM calls (Anthropic SDK)            │
+│  - ingest / compile / query / lint / evolve │
+│  - MCP server (28 tools)                    │
+│  - connector pipeline (Phase 7)             │
+│  - AI ecosystem: trafilatura, markitdown,   │
+│    playwright, sentence-transformers, etc.  │
+└────────────────────┬────────────────────────┘
+                     │ PyO3 / maturin bindings
+┌────────────────────▼────────────────────────┐
+│  Rust  (hot paths only — optional ext)      │  ← Phase 8B
+│  - BM25 indexer (tantivy)                   │
+│  - Wikilink injection regex engine          │
+│  - File scanner / hash manifest             │
+│  Shipped as kb[fast] optional extra         │
+└─────────────────────────────────────────────┘
+```
+
+- **Phase 8A** — TypeScript view layer (Next.js). Ships as `kb serve` command that starts the
+  Next.js dev server pointed at the local wiki directory. No Python changes required — the UI
+  calls the existing MCP tools via a thin HTTP adapter. Effort: Medium.
+
+- **Phase 8B** — Rust hot-path extension via `maturin`/PyO3. Optional `pip install kb[fast]`
+  extra that replaces the Python BM25 indexer and file scanner with Rust equivalents. Python
+  orchestration layer unchanged. 5–20× throughput on scan tier for large corpora. Effort: Medium.
+
+- **Cloud wiki storage backends** — replace local `wiki/` filesystem with pluggable object storage
+  so the compiled wiki survives beyond a single machine and multiple users/services can read it.
+  Storage abstraction layer (`WikiStorage` protocol) wraps current `atomic_text_write` /
+  `file_lock` calls; local filesystem remains the default, cloud backends are opt-in via
+  `KB_WIKI_STORAGE=s3|azure|gcs` env var.
+
+  | Backend | Use case | SDK |
+  |---|---|---|
+  | **AWS S3 / S3-compatible** (MinIO, R2) | AWS orgs, self-hosted, Cloudflare R2 free tier | `boto3` |
+  | **Azure Blob Storage** | Microsoft 365 orgs (pairs with SharePoint connector) | `azure-storage-blob` |
+  | **Google Cloud Storage** | GCP / Google Workspace orgs | `google-cloud-storage` |
+  | **Local filesystem** | default, dev, Obsidian users | current impl |
+
+  Key design constraints:
+  - Object storage has no atomic rename — `atomic_text_write` must use conditional PUT
+    (`If-None-Match: *` for create, ETag check for update) to preserve crash safety
+  - `file_lock` becomes a distributed lock (Redis `SET NX PX`, DynamoDB conditional write,
+    or Azure Blob lease) — required before any cloud backend ships
+  - `wiki/` path references in MCP tools become storage-relative keys, not filesystem paths
+  - Read path: stream page content; no local cache needed for query (BM25 index cached locally)
+  - `kb publish` outputs (`/llms.txt`, `/graph.jsonld`, sitemap) write to a separate public
+    bucket/container with CDN fronting for the view layer
+  - Prerequisite: Phase 6 multi-user storage migration (distributed lock infra overlaps)
+
+  (effort: High — storage abstraction layer + distributed locking + conditional PUT semantics +
+  per-backend SDK integration; local filesystem fallback must stay zero-overhead)
+
+**Decision criteria (revisit when):**
+- Compile time for 10k sources exceeds 30 min → Phase 8B Rust hot-path spike
+- Concurrent users > 20 with write contention → async job queue refactor (Python, pre-Phase 8)
+- Deployment friction (Python env) blocks enterprise sales → Phase 8A Next.js wrapper first
+- Team spans multiple machines / cloud deploy needed → cloud wiki storage backend
 
 ### Design tensions to document in README (not items to implement)
 

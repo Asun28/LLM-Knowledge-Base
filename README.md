@@ -125,6 +125,8 @@ kb --version
 
 **Obsidian:** Open `wiki/` as a vault. Press `Ctrl+G` for the knowledge graph. See the **[full Obsidian guide](docs/guides/quickstart-obsidian.md)** ([HTML version](docs/guides/quickstart-obsidian.html)).
 
+**Obsidian + remote storage (optional):** Install the [Remotely Save](https://github.com/remotely-save/remotely-save) community plugin (Apache 2.0) to sync your `wiki/` vault to S3, Azure Blob, OneDrive, or Dropbox. This lets non-technical users browse the compiled wiki on any device without touching the command line — your `kb` pipeline writes to the bucket, Remotely Save pulls it into Obsidian automatically.
+
 **New here?** Browse the [`demo/`](demo/) folder — a small working wiki compiled from Karpathy's [X post](https://x.com/karpathy/status/2039805659525644595) and [LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It shows the full folder structure plus a real compiled output — summaries, entities, concepts, a comparison, and a cross-source synthesis — so you can see exactly what the pipeline produces before adding your own sources.
 
 ## Five Operations
