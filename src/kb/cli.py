@@ -447,5 +447,67 @@ def publish(out_dir: Path | None, fmt: str, incremental: bool):
         _error_exit(exc)
 
 
+@cli.command("refine-sweep")
+@click.option(
+    "--age-hours",
+    type=int,
+    default=168,
+    help="Threshold in hours — rows older than this are candidates (>= 1).",
+)
+@click.option(
+    "--action",
+    type=click.Choice(["mark_failed", "delete"]),
+    default="mark_failed",
+    help="Action to apply to candidates (mark_failed is reversible by inspection).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="List candidates without mutating anything.",
+)
+def refine_sweep(age_hours: int, action: str, dry_run: bool):
+    """Sweep stale refine-history pending rows (cycle 20 AC15).
+
+    Flips or removes ``status="pending"`` rows older than ``--age-hours``.
+    ``--action=delete`` writes an audit entry to ``wiki/log.md`` BEFORE the
+    mutation. ``--dry-run`` previews candidates without touching disk.
+    """
+    import json as _json  # noqa: PLC0415
+
+    from kb.review.refiner import sweep_stale_pending  # noqa: PLC0415
+
+    try:
+        result = sweep_stale_pending(hours=age_hours, action=action, dry_run=dry_run)
+    except Exception as exc:
+        _error_exit(exc)
+    click.echo(_json.dumps(result, indent=2, sort_keys=True, default=str))
+
+
+@cli.command("refine-list-stale")
+@click.option(
+    "--hours",
+    type=int,
+    default=24,
+    help="Threshold in hours. Rows pending longer than this are returned.",
+)
+def refine_list_stale(hours: int):
+    """List refine-history pending rows older than ``--hours`` (cycle 20 AC18).
+
+    Returns the FULL helper dict (including ``revision_notes``) — this is the
+    CLI local-use exception to the MCP-side ``notes_length`` projection.
+    """
+    import json as _json  # noqa: PLC0415
+
+    from kb.review.refiner import list_stale_pending  # noqa: PLC0415
+
+    if hours < 1:
+        raise click.UsageError(f"--hours={hours} must be a positive integer")
+    try:
+        rows = list_stale_pending(hours=hours)
+    except Exception as exc:
+        _error_exit(exc)
+    click.echo(_json.dumps(rows, indent=2, sort_keys=True, default=str))
+
+
 if __name__ == "__main__":
     cli()

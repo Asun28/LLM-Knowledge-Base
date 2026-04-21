@@ -568,3 +568,75 @@ confidence: {confidence}
         f"  Confidence: {confidence}\n"
         f"  Sources: {len(sources)}"
     )
+
+
+@mcp.tool()
+def kb_refine_sweep(hours: int = 168, action: str = "mark_failed", dry_run: bool = False) -> str:
+    """Sweep stale refine-history `pending` rows older than ``hours`` (cycle 20 AC14).
+
+    Args:
+        hours: Threshold in hours. Rows with `status="pending"` and
+            ``timestamp < now - hours`` are candidates. Defaults to 168 (1 week).
+        action: One of ``"mark_failed"`` (default — flips status + adds
+            ``sweep_id`` + ``sweep_at`` + ``error="abandoned-by-sweep"``) or
+            ``"delete"`` (removes row, writes audit entry to ``wiki/log.md``
+            BEFORE mutation).
+        dry_run: If True, return candidates without mutation.
+
+    Returns:
+        JSON-encoded result dict on success; ``"Error: ..."`` string on
+        ValidationError or unexpected failure.
+    """
+    from kb.errors import ValidationError as _ValidationError  # noqa: PLC0415
+    from kb.review.refiner import sweep_stale_pending  # noqa: PLC0415
+
+    try:
+        result = sweep_stale_pending(hours=hours, action=action, dry_run=dry_run, wiki_dir=WIKI_DIR)
+    except _ValidationError as e:
+        return f"Error: {e}"
+    except Exception as e:  # noqa: BLE001 — MCP boundary never raises
+        logger.exception("kb_refine_sweep failed")
+        return f"Error: sweep failed: {_sanitize_error_str(e)}"
+    return json.dumps(result)
+
+
+@mcp.tool()
+def kb_refine_list_stale(hours: int = 24) -> str:
+    """List refine-history `pending` rows older than ``hours`` (cycle 20 AC17).
+
+    Returns a JSON array projected to minimal fields for remote-safe MCP
+    consumption (T5 mitigation): each entry has ``attempt_id``, ``page_id``,
+    ``timestamp``, and ``notes_length`` (int; len of ``revision_notes``).
+    Full-dict rows — including ``revision_notes`` — are available via the
+    CLI ``kb refine-list-stale`` (local-use exception) or the library
+    ``kb.review.refiner.list_stale_pending`` helper directly.
+
+    Args:
+        hours: Threshold in hours. Defaults to 24.
+    """
+    from kb.errors import ValidationError as _ValidationError  # noqa: PLC0415
+    from kb.review.refiner import list_stale_pending  # noqa: PLC0415
+
+    if not isinstance(hours, int) or hours < 1:
+        return f"Error: hours must be an integer >= 1; got {hours!r}"
+
+    try:
+        rows = list_stale_pending(hours=hours)
+    except _ValidationError as e:
+        return f"Error: {e}"
+    except Exception as e:  # noqa: BLE001 — MCP boundary never raises
+        logger.exception("kb_refine_list_stale failed")
+        return f"Error: list failed: {_sanitize_error_str(e)}"
+
+    # T5 mitigation — project to minimal field set. revision_notes is NOT
+    # returned via MCP. notes_length exposes the size without leaking content.
+    projected = [
+        {
+            "attempt_id": row.get("attempt_id"),
+            "page_id": row.get("page_id"),
+            "timestamp": row.get("timestamp"),
+            "notes_length": len(row.get("revision_notes") or ""),
+        }
+        for row in rows
+    ]
+    return json.dumps(projected)
