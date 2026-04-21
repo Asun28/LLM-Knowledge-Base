@@ -24,7 +24,7 @@ from kb.config import (
     WIKI_SOURCES,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.errors import IngestError, KBError, StorageError
+from kb.errors import IngestError, KBError, StorageError, ValidationError
 from kb.ingest.contradiction import (
     detect_contradictions_with_metadata,
 )
@@ -1141,6 +1141,7 @@ def ingest_source(
         raise FileNotFoundError(f"Source not found: {source_path}")
 
     effective_raw_dir = raw_dir if raw_dir is not None else RAW_DIR
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
     if source_type in {"comparison", "synthesis"}:
         raise ValueError(
@@ -1163,9 +1164,46 @@ def ingest_source(
     # reliable case-insensitive comparison on Windows (Python 3.12+).
     raw_dir_nc = Path(os.path.normcase(str(effective_raw_dir.resolve())))
     source_path_nc = Path(os.path.normcase(str(source_path)))
+
+    # Cycle 22 AC1-AC4 — reject paths inside wiki_dir FIRST (before the raw-dir
+    # check) so a caller passing a wiki page gets the specific "not inside wiki
+    # directory" ValidationError instead of the generic "must be within raw/"
+    # ValueError. Both sides are normcase'd + resolved so symlinks / junctions
+    # (T1) and Windows case variants (T2) cannot bypass. Message is a FIXED
+    # string — no path interpolation — so an absolute wiki path never leaks
+    # through CLI / MCP logs (T3). Placement is BEFORE the later
+    # ``_emit_ingest_jsonl("start", ...)`` call so a rejected wiki path never
+    # produces an orphan ``stage="start"`` row (cycle-18 L3 orphan-start rule).
+    #
+    # Cycle-18 L1 compliance: this NEW guard is a helper reading WIKI_DIR at
+    # call time, so it looks up ``kb.config.WIKI_DIR`` dynamically (attribute
+    # access on the module object) rather than using the module-top snapshot.
+    # This defeats the reload-leak class where a sibling test's
+    # ``importlib.reload(kb.config)`` leaves this module's snapshot pointing
+    # at a stale Path object while the test's ``tmp_kb_env`` fixture patches
+    # the new ``kb.config.WIKI_DIR``. The existing ``effective_wiki_dir`` is
+    # retained unchanged for downstream use (per the cycle-18 L1 "do not
+    # refactor working patterns proactively" rule — only the new-code site
+    # adopts dynamic lookup).
+    import kb.config as _kb_config  # noqa: PLC0415 — lazy import for test robustness
+
+    _wiki_dir_for_guard = wiki_dir if wiki_dir is not None else _kb_config.WIKI_DIR
+    wiki_dir_nc = Path(os.path.normcase(str(_wiki_dir_for_guard.resolve())))
+    try:
+        source_path_nc.relative_to(wiki_dir_nc)
+    except ValueError:
+        pass  # source is OUTSIDE wiki_dir — guard passes
+    else:
+        raise ValidationError("Source path must not resolve inside wiki/ directory")
+
     try:
         source_path_nc.relative_to(raw_dir_nc)
     except ValueError as e:
+        # NOTE: this raw-dir guard message still embeds ``source_path`` for
+        # backwards compatibility — cycle-22 Q1 design gate accepted the
+        # asymmetry and deferred the raw-dir ``ValidationError`` migration +
+        # path-redaction to cycle 23 (so existing ``except ValueError`` callers
+        # of ``ingest_source`` are not silently broken mid-cycle).
         raise ValueError(f"Source path must be within raw/ directory: {source_path}") from e
 
     if source_type is None:
@@ -1204,8 +1242,6 @@ def ingest_source(
     # reservation AND the Phase-2 confirmation. source_ref is unchanged for
     # provenance / log entries / page frontmatter.
     manifest_ref = manifest_key if manifest_key is not None else source_ref
-
-    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
     # Cycle 18 AC9 — per-ingest correlation ID. 16-hex (64 bits entropy) is
     # sufficient for per-process correlation between wiki/log.md lines and
