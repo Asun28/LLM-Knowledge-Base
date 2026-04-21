@@ -1174,7 +1174,21 @@ def ingest_source(
     # through CLI / MCP logs (T3). Placement is BEFORE the later
     # ``_emit_ingest_jsonl("start", ...)`` call so a rejected wiki path never
     # produces an orphan ``stage="start"`` row (cycle-18 L3 orphan-start rule).
-    wiki_dir_nc = Path(os.path.normcase(str(effective_wiki_dir.resolve())))
+    #
+    # Cycle-18 L1 compliance: this NEW guard is a helper reading WIKI_DIR at
+    # call time, so it looks up ``kb.config.WIKI_DIR`` dynamically (attribute
+    # access on the module object) rather than using the module-top snapshot.
+    # This defeats the reload-leak class where a sibling test's
+    # ``importlib.reload(kb.config)`` leaves this module's snapshot pointing
+    # at a stale Path object while the test's ``tmp_kb_env`` fixture patches
+    # the new ``kb.config.WIKI_DIR``. The existing ``effective_wiki_dir`` is
+    # retained unchanged for downstream use (per the cycle-18 L1 "do not
+    # refactor working patterns proactively" rule — only the new-code site
+    # adopts dynamic lookup).
+    import kb.config as _kb_config  # noqa: PLC0415 — lazy import for test robustness
+
+    _wiki_dir_for_guard = wiki_dir if wiki_dir is not None else _kb_config.WIKI_DIR
+    wiki_dir_nc = Path(os.path.normcase(str(_wiki_dir_for_guard.resolve())))
     try:
         source_path_nc.relative_to(wiki_dir_nc)
     except ValueError:

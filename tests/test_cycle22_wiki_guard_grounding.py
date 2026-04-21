@@ -27,16 +27,38 @@ import pytest
 # ── AC10 — default WIKI_DIR rejection ─────────────────────────────────────────
 
 
-def test_ac10_ingest_source_rejects_path_inside_default_wiki_dir(tmp_kb_env):
+def test_ac10_ingest_source_rejects_path_inside_default_wiki_dir(tmp_path):
     """A path inside the default WIKI_DIR raises ValidationError.
 
     The error message is a fixed string — asserts no absolute path leaks
-    through str(excinfo.value) (closes T3 path disclosure).
-    """
-    from kb.errors import ValidationError
-    from kb.ingest.pipeline import ingest_source
+    through ``str(excinfo.value)`` (closes T3 path disclosure).
 
-    fake_wiki_page = tmp_kb_env / "wiki" / "entities" / "fake.md"
+    Hermetic by construction: passes ``wiki_dir=<tmp>`` + ``raw_dir=<tmp>``
+    explicitly so the test does NOT depend on the ``tmp_kb_env`` fixture's
+    module-attribute mirror-rebind. Under full-suite ordering, a sibling
+    test's ``importlib.reload(kb.config)`` can decouple
+    ``kb.ingest.pipeline.WIKI_DIR`` (cycle-18 L1 snapshot-bind hazard) and
+    cause fixture-based tests to hit the wrong default path.
+
+    ``ValidationError`` is late-bound via ``pipeline_mod.ValidationError`` —
+    NOT imported from ``kb.errors`` at the top of the test function — per
+    cycle-20 L1: a sibling ``importlib.reload(kb.config)`` can cascade-reload
+    ``kb.errors`` so that ``kb.errors.ValidationError`` becomes a NEW class
+    object, while ``kb.ingest.pipeline.ValidationError`` retains the OLD
+    one; ``pytest.raises(OLD_CLS)`` then cannot catch the NEW-CLS instance
+    that production code raises. Late-binding via the production module
+    guarantees the test catches exactly what production raises.
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    ValidationError = pipeline_mod.ValidationError  # late-bind (cycle-20 L1)
+
+    wiki = tmp_path / "wiki"
+    raw = tmp_path / "raw"
+    (wiki / "entities").mkdir(parents=True)
+    (raw / "articles").mkdir(parents=True)
+
+    fake_wiki_page = wiki / "entities" / "fake.md"
     fake_wiki_page.write_text(
         "---\ntitle: Fake\ntype: entity\nconfidence: stated\n"
         "source:\n  - raw/articles/fake.md\n---\n\nFake body.",
@@ -44,7 +66,7 @@ def test_ac10_ingest_source_rejects_path_inside_default_wiki_dir(tmp_kb_env):
     )
 
     with pytest.raises(ValidationError) as excinfo:
-        ingest_source(fake_wiki_page)
+        pipeline_mod.ingest_source(fake_wiki_page, wiki_dir=wiki, raw_dir=raw)
 
     msg = str(excinfo.value)
     assert msg == "Source path must not be inside wiki directory", (
@@ -52,16 +74,21 @@ def test_ac10_ingest_source_rejects_path_inside_default_wiki_dir(tmp_kb_env):
     )
     # T3: absolute path segments must not leak into the error message.
     assert str(fake_wiki_page) not in msg
-    assert str(tmp_kb_env) not in msg
+    assert str(tmp_path) not in msg
 
 
 # ── AC11 — custom wiki_dir= rejection ─────────────────────────────────────────
 
 
 def test_ac11_ingest_source_rejects_path_inside_custom_wiki_dir(tmp_path):
-    """Guard fires for caller-supplied ``wiki_dir=`` outside of WIKI_DIR default."""
-    from kb.errors import ValidationError
-    from kb.ingest.pipeline import ingest_source
+    """Guard fires for caller-supplied ``wiki_dir=`` outside of WIKI_DIR default.
+
+    ``ValidationError`` late-bound via ``pipeline_mod.ValidationError`` per
+    cycle-20 L1 (reload-drift defense — see AC10 docstring).
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    ValidationError = pipeline_mod.ValidationError  # late-bind (cycle-20 L1)
 
     custom_wiki = tmp_path / "custom_wiki"
     (custom_wiki / "entities").mkdir(parents=True)
@@ -74,7 +101,7 @@ def test_ac11_ingest_source_rejects_path_inside_custom_wiki_dir(tmp_path):
     )
 
     with pytest.raises(ValidationError) as excinfo:
-        ingest_source(fake_page, wiki_dir=custom_wiki)
+        pipeline_mod.ingest_source(fake_page, wiki_dir=custom_wiki)
 
     assert str(excinfo.value) == "Source path must not be inside wiki directory"
 
@@ -82,20 +109,38 @@ def test_ac11_ingest_source_rejects_path_inside_custom_wiki_dir(tmp_path):
 # ── AC12 — raw/ path passes the guard (happy-path revert-detector) ────────────
 
 
-def test_ac12_ingest_source_allows_raw_articles_path(tmp_kb_env, monkeypatch):
+def test_ac12_ingest_source_allows_raw_articles_path(tmp_path, monkeypatch):
     """A legitimate ``raw/articles/*.md`` path passes the new wiki-dir guard.
 
     Revert-detector: if AC1-AC4 are reverted such that NO ingest_source path
     is allowed, this test fails at the guard. If the guard is wired to the
     wrong variable (e.g. raw_dir by mistake), this also fails.
 
-    The test monkeypatches the LLM extraction + wikilink cascade so we only
-    exercise the guard → extract → ingest pipeline up to page-write without
-    touching the network or full wikilink scan.
+    Passes ``wiki_dir`` + ``raw_dir`` explicitly (rather than relying on the
+    ``tmp_kb_env`` fixture's module-attribute mirror-rebind) so the test is
+    immune to the cycle-19 L2 reload-leak class where a sibling test's
+    ``importlib.reload(kb.config)`` decouples ``kb.ingest.pipeline.WIKI_DIR``
+    from ``kb.config.WIKI_DIR``.
     """
     import kb.ingest.pipeline as pipeline_mod
 
-    raw_article = tmp_kb_env / "raw" / "articles" / "cycle22_happy_path.md"
+    # Set up an isolated wiki + raw under tmp_path.
+    wiki = tmp_path / "wiki"
+    raw = tmp_path / "raw"
+    for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki / sub).mkdir(parents=True)
+    (raw / "articles").mkdir(parents=True)
+    (wiki / "index.md").write_text(
+        "---\ntitle: Wiki Index\nsource: []\ntype: index\n---\n\n# Wiki Index\n",
+        encoding="utf-8",
+    )
+    (wiki / "_sources.md").write_text(
+        "---\ntitle: Sources\nsource: []\ntype: index\n---\n\n# Sources\n",
+        encoding="utf-8",
+    )
+    (wiki / "log.md").write_text("# Log\n", encoding="utf-8")
+
+    raw_article = raw / "articles" / "cycle22_happy_path.md"
     raw_article.write_text(
         "# Cycle 22 happy path\n\nBody text about the cycle 22 happy-path test.",
         encoding="utf-8",
@@ -112,16 +157,20 @@ def test_ac12_ingest_source_allows_raw_articles_path(tmp_kb_env, monkeypatch):
 
     monkeypatch.setattr(pipeline_mod, "extract_from_source", fake_extract)
     # inject_wikilinks_batch is imported function-locally inside ingest_source
-    # from kb.compile.linker — patch at the source module. With an empty
-    # entities/concepts extraction, the batch is a no-op anyway, but the patch
-    # keeps the test hermetic regardless of pipeline internals.
+    # from kb.compile.linker — patch at the source module.
     import kb.compile.linker as linker_mod
 
     monkeypatch.setattr(linker_mod, "inject_wikilinks_batch", lambda *a, **kw: {})
 
-    # Guard must NOT raise ValidationError for this path. Any OTHER exception
-    # downstream is acceptable — this test only pins the guard-pass behaviour.
-    result = pipeline_mod.ingest_source(raw_article, source_type="article")
+    # Explicit wiki_dir + raw_dir pass the guard without depending on the
+    # module-top WIKI_DIR / RAW_DIR snapshots (which may be stale under
+    # full-suite reload-leak — cycle-19 L2).
+    result = pipeline_mod.ingest_source(
+        raw_article,
+        source_type="article",
+        wiki_dir=wiki,
+        raw_dir=raw,
+    )
     # Result is either a "pages_created" dict or a "duplicate" dict — both are
     # past the guard and prove AC12.
     assert isinstance(result, dict)
@@ -131,7 +180,7 @@ def test_ac12_ingest_source_allows_raw_articles_path(tmp_kb_env, monkeypatch):
 # ── AC13 — grounding clause present AND precedes <source_document> fence ──────
 
 
-def test_ac13_build_extraction_prompt_contains_grounding_before_fence():
+def test_ac13_build_extraction_prompt_contains_grounding_before_fence(monkeypatch):
     """The grounding clause must appear in every extraction prompt, and it must
     sit BEFORE the ``<source_document>`` sentinel fence so adversarial raw
     content inside the fence cannot reflect a counter-instruction (T6).
@@ -139,7 +188,20 @@ def test_ac13_build_extraction_prompt_contains_grounding_before_fence():
     Positive-phrased assertion per Opus 4.7 literal-instruction rule — we
     check for the canonical clause text exactly.
     """
+    from pathlib import Path as _Path
+
+    import kb.ingest.extractors as extractors_mod
     from kb.ingest.extractors import build_extraction_prompt, load_template
+
+    # Cycle-19 L2 reload-leak defense: if a sibling test ran
+    # ``importlib.reload(kb.config)`` under a contaminated ``KB_PROJECT_ROOT``,
+    # the LRU cache on ``_load_template_cached`` holds a stale path and
+    # ``extractors.TEMPLATES_DIR`` itself may point at a tmp path that no
+    # longer exists. Force the module attribute back to the canonical repo
+    # templates directory and clear the cache before calling the builder.
+    _real_templates = _Path(__file__).resolve().parent.parent / "templates"
+    monkeypatch.setattr(extractors_mod, "TEMPLATES_DIR", _real_templates)
+    extractors_mod._load_template_cached.cache_clear()
 
     for source_type in ("article", "paper", "repo", "video", "podcast"):
         tpl = load_template(source_type)
