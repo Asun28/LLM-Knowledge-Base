@@ -229,10 +229,13 @@ def _extract_json_from_text(text: str, schema: dict) -> dict:
         return candidate
 
     # Stage 1: try whole response as JSON.
+    # Only catch JSONDecodeError here — a schema-validation LLMError means the
+    # JSON was valid but wrong; surfacing it immediately is more actionable than
+    # falling through to a "no parseable JSON" fallback error.
     stripped = text.strip()
     try:
         return _validate(json.loads(stripped))
-    except (json.JSONDecodeError, LLMError):
+    except json.JSONDecodeError:
         pass
 
     # Stage 2: strip a single Markdown code fence (bounded input, T4).
@@ -244,7 +247,7 @@ def _extract_json_from_text(text: str, schema: dict) -> dict:
     if fence_match:
         try:
             return _validate(json.loads(fence_match.group(1).strip()))
-        except (json.JSONDecodeError, LLMError):
+        except json.JSONDecodeError:
             pass
 
     # Stage 3: depth-bounded balanced brace scan (capped at MAX_CLI_JSON_SCAN_BYTES).

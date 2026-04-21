@@ -285,6 +285,8 @@ def call_llm(
     overload, network) with exponential backoff. Wraps API errors in
     a descriptive LLMError.
     """
+    # Validate tier up-front for both paths — consistent ValueError regardless of backend.
+    _resolve_model(tier)
     backend = get_cli_backend()
     if backend != "anthropic":
         from kb.utils import cli_backend as _cli_backend  # AC16: lazy import
@@ -349,6 +351,8 @@ def call_llm_json(
         LLMError: On API failures after retries or missing tool_use block.
         ValueError: On invalid tier.
     """
+    # Validate tier up-front for both paths — consistent ValueError regardless of backend.
+    _resolve_model(tier)
     backend = get_cli_backend()
     if backend != "anthropic":
         from kb.utils import cli_backend as _cli_backend  # AC16: lazy import
