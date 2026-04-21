@@ -10,7 +10,7 @@
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
-Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 26 MCP tools — **no API key required**.
+Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 28 MCP tools — **no API key required**. Also runs on any local AI CLI tool (Ollama, Gemini CLI, OpenCode, Codex CLI, and more) via `KB_LLM_BACKEND`.
 
 ### 🎯 Why users pick this over RAG
 
@@ -248,6 +248,38 @@ Three Claude tiers balance cost and quality. Override via environment variables:
 | `scan` | Haiku 4.5 | `CLAUDE_SCAN_MODEL` | Index reads, link checks, diffs |
 | `write` | Sonnet 4.6 | `CLAUDE_WRITE_MODEL` | Extraction, summaries, page writing |
 | `orchestrate` | Opus 4.7 | `CLAUDE_ORCHESTRATE_MODEL` | Query synthesis, orchestration |
+
+## Vibe Coding CLI Backends
+
+Run the full KB pipeline against **any locally-installed AI CLI tool** — no Anthropic API key needed. Set `KB_LLM_BACKEND` and every `call_llm` / `call_llm_json` call routes through that tool's subprocess via stdin (shell injection-safe; stdout/stderr redacted before logging):
+
+```bash
+export KB_LLM_BACKEND=ollama    # pick one: ollama | gemini | opencode | codex | kimi | qwen | deepseek | zai
+kb query "What is the compile-not-retrieve pattern?"
+kb ingest raw/articles/my-notes.md
+kb lint
+```
+
+| Backend | Install | Tier-default models |
+|---------|---------|---------------------|
+| **Ollama** | [ollama.com](https://ollama.com) | `llama3.2` / `qwen2.5-coder:7b` / `qwen2.5-coder:32b` |
+| **Gemini CLI** | `npm install -g @google/gemini-cli` | _(CLI auto-selects)_ |
+| **OpenCode** | `npm install -g opencode-ai` | _(CLI auto-selects)_ |
+| **Codex CLI** | `npm install -g @openai/codex` | _(CLI auto-selects)_ |
+| **Kimi** | `pip install kimi-cli` | _(CLI auto-selects)_ |
+| **QWEN** | `pip install qwen-cli` | _(CLI auto-selects)_ |
+| **DeepSeek** | `pip install deepseek-cli` | _(CLI auto-selects)_ |
+| **ZAI** | `pip install zhipuai-cli` | _(CLI auto-selects)_ |
+
+Override any tier's model with an env var:
+
+```bash
+export KB_CLI_MODEL_SCAN=llama3.2
+export KB_CLI_MODEL_WRITE=qwen2.5-coder:7b
+export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
+```
+
+Unset `KB_LLM_BACKEND` (or set it to `anthropic`) to return to the default Claude path.
 
 ## Supported Sources
 

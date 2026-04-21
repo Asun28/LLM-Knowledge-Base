@@ -7,7 +7,7 @@
 **编译知识，而非检索碎片。**
 丢入原始资料，剩下的交给 Claude——自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。无需向量数据库，无需文本分块。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
 
-灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具——无需配置 API Key 即可运行。
+灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具——无需配置 API Key 即可运行。同样支持通过 `KB_LLM_BACKEND` 接入本地 AI CLI 工具（Ollama、Gemini CLI、OpenCode、Codex CLI 等）。
 
 ---
 
@@ -264,6 +264,40 @@ kb --version
 
 ---
 
+## 🤖 Vibe Coding CLI 后端支持
+
+无需 Anthropic API Key，可直接使用任意**本地已安装的 AI CLI 工具**驱动 KB 的完整流水线。设置 `KB_LLM_BACKEND`，所有 `call_llm` / `call_llm_json` 调用将通过该工具的子进程（stdin 方式，防 Shell 注入；stdout/stderr 在记录前自动脱敏）执行：
+
+```bash
+export KB_LLM_BACKEND=ollama    # 可选：ollama | gemini | opencode | codex | kimi | qwen | deepseek | zai
+kb query "什么是编译而非检索的模式？"
+kb ingest raw/articles/my-notes.md
+kb lint
+```
+
+| 后端 | 安装方式 | 默认分级模型 |
+|------|---------|-------------|
+| **Ollama** | [ollama.com](https://ollama.com) | `llama3.2` / `qwen2.5-coder:7b` / `qwen2.5-coder:32b` |
+| **Gemini CLI** | `npm install -g @google/gemini-cli` | _（CLI 自动选择）_ |
+| **OpenCode** | `npm install -g opencode-ai` | _（CLI 自动选择）_ |
+| **Codex CLI** | `npm install -g @openai/codex` | _（CLI 自动选择）_ |
+| **Kimi** | `pip install kimi-cli` | _（CLI 自动选择）_ |
+| **QWEN** | `pip install qwen-cli` | _（CLI 自动选择）_ |
+| **DeepSeek** | `pip install deepseek-cli` | _（CLI 自动选择）_ |
+| **ZAI** | `pip install zhipuai-cli` | _（CLI 自动选择）_ |
+
+可通过环境变量覆盖任意层级的模型：
+
+```bash
+export KB_CLI_MODEL_SCAN=llama3.2
+export KB_CLI_MODEL_WRITE=qwen2.5-coder:7b
+export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
+```
+
+取消设置 `KB_LLM_BACKEND`（或设为 `anthropic`）即可恢复默认 Claude 路径。
+
+---
+
 ## 📚 支持的资料类型
 
 | 类型 | 捕获方式 |
@@ -334,8 +368,9 @@ ruff format src/ tests/         # 代码格式化
 - **Phase 4 (v0.10.0 已发布 2026-04-12)**：RRF 融合混合检索、4 层检索去重流水线、证据追踪模块、查询时过期事实标记、分层上下文组装、原始资料回退检索、摄入时自动矛盾检测、多轮查询重写。发布后审计已修复所有 HIGH (23) + MEDIUM (~30) + LOW (~30) 问题。
 - **Phase 4.11 (未发布 2026-04-14)**：`kb_query --format={markdown|marp|html|chart|jupyter}` 输出适配器——将合成答案导出为 Markdown 文档、Marp 幻灯片、独立 HTML 页面、matplotlib Python 脚本（附 JSON 数据）或可执行 Jupyter Notebook。文件保存至 `outputs/{ts}-{slug}.{ext}`（已 gitignore），含来源前置元数据。响应 Karpathy Tier 1 #1 需求。
 - **Phase 5.0 (未发布 2026-04-15)**：`kb lint --augment` 响应式盲区填充：Lint 发现残页 → 推荐权威链接（Wikipedia, arxiv）→ DNS 重绑定安全传输抓取 → 以 `confidence: speculative` 摄入。三阶段执行尊重人工审核：`propose → --execute → --auto-ingest`。含 G1-G7 资格门控、扫描层相关性检查、摄入后质量判定、回归 `[!gap]` 提示。跨进程限流：10次/运行 + 60次/小时 + 3次/主机/小时。
-- **Phase 4.5 (未发布，v0.10.0 发布后持续审计，2026-04-16 → 2026-04-21)**：20 个迭代周期，480+ 验收条件，227 个测试文件（+1520 测试：1177 → 2697）。核心交付：`kb.errors` 异常分类体系（`KBError` + 5 个子类，`LLMError`/`CaptureError` 重新继承）；slug 碰撞 O_EXCL 防护（写入阶段失败自动清理零字节残留）；2 个新 MCP 工具 `kb_refine_sweep` + `kb_refine_list_stale`（26 → 28 个）；`inject_wikilinks_batch` 批量注入（N×M 磁盘读改为 ~U+2M，内置 ReDoS 防护）；精炼两阶段写入（含 `attempt_id` 关联）；结构化摄入审计日志（`.data/ingest_log.jsonl`，`request_id` 全程关联）；链接器页面级 TOCTOU 锁；wiki_log 锁内轮转；Epistemic-Integrity 2.0（`belief_state` / `authored_by` / `status` 元数据体系）；`kb publish` 5 种 Tier-1 发布格式（llms.txt、llms-full.txt、graph.jsonld、关联页面、站点地图）；`kb_query(save_as=...)` 综合答案持久化；重复 slug + 内联标注 Lint 检查；manifest key 一致性；60+ 安全威胁全部关闭；所有 ≥25 条 AC 批次均执行三轮 PR 审查。
-- **Phase 5 (延期)**：内联观点级可信度标签 + EXTRACTED Lint 验证、支持 URL 的 `kb_ingest`（5 状态适配器模型）、页面状态生命周期（seed→developing→mature→evergreen）、内联质量提示标记、Evolve 自主研究循环、块级 BM25 子页索引、图谱边类型化语义关系、交互式 vis.js HTML 图谱查看器、LLM 隐式关系推断、动态概览页、可操作盲区填充建议、两阶段编译流水线、多跳检索、对话→KB 提升、时间轴观点追踪、BM25 + LLM 重排序。
+- **Phase 4.5 (未发布，v0.10.0 发布后持续审计，2026-04-16 → 2026-04-21)**：21 个迭代周期，480+ 验收条件，227 个测试文件（+1541 测试：1177 → 2718）。核心交付：`kb.errors` 异常分类体系（`KBError` + 5 个子类，`LLMError`/`CaptureError` 重新继承）；slug 碰撞 O_EXCL 防护（写入阶段失败自动清理零字节残留）；2 个新 MCP 工具 `kb_refine_sweep` + `kb_refine_list_stale`（26 → 28 个）；`inject_wikilinks_batch` 批量注入（N×M 磁盘读改为 ~U+2M，内置 ReDoS 防护）；精炼两阶段写入（含 `attempt_id` 关联）；结构化摄入审计日志（`.data/ingest_log.jsonl`，`request_id` 全程关联）；链接器页面级 TOCTOU 锁；wiki_log 锁内轮转；Epistemic-Integrity 2.0（`belief_state` / `authored_by` / `status` 元数据体系）；`kb publish` 5 种 Tier-1 发布格式（llms.txt、llms-full.txt、graph.jsonld、关联页面、站点地图）；`kb_query(save_as=...)` 综合答案持久化；重复 slug + 内联标注 Lint 检查；manifest key 一致性；60+ 安全威胁全部关闭；所有 ≥25 条 AC 批次均执行三轮 PR 审查；Cycle 21：通过 `KB_LLM_BACKEND` 环境变量路由的 8 个替代 LLM 提供商 CLI 子进程后端（Ollama、Gemini CLI、OpenCode、Codex CLI、Kimi、QWEN、DeepSeek、ZAI），含分层模型选择与结构化 JSON 提取。
+- **Cycle 22 (计划中 — 认知完整性加固)**：wiki 路径摄入防护（通过 `ValidationError` 阻止将 `wiki/` 页面循环摄入为原始资料）；提取提示接地约束（对不在原文中出现的内容强制标注 `confidence: inferred`，仅修改提示词，无代码变更）。来源：2026-04-21 认知审计。
+- **Phase 5 (延期)**：内联观点级可信度标签 + EXTRACTED Lint 验证；观点溯源 BM25 核验（事后幻觉检测——采样观点并逐一核查引用的 `raw/` 原文，不匹配则将 `belief_state` 置为 `uncertain`）；多源确认门控（`belief_state: confirmed` 需要 ≥ 2 个独立原始资料，通过前置元数据字段 `source_count` 追踪）；支持 URL 的 `kb_ingest`（5 状态适配器模型）；页面状态生命周期（seed→developing→mature→evergreen）；内联质量提示标记；Evolve 自主研究循环；块级 BM25 子页索引；图谱边类型化语义关系；交互式 vis.js HTML 图谱查看器；LLM 隐式关系推断；动态概览页；可操作盲区填充建议；两阶段编译流水线；多跳检索；对话→KB 提升；时间轴观点追踪；BM25 + LLM 重排序。
 - **Phase 6 (未来规划)**：DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
 **已完成版本**：
@@ -354,7 +389,7 @@ ruff format src/ tests/         # 代码格式化
 | v0.9.15 | Phase 3.96 — 153 条修复（4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW） | 952 |
 | v0.9.16 | Phase 3.97 — 62 条修复：原子写入、MCP 异常防护、slugify 符号映射、CRLF、整数标题强制转换 | 1033 |
 | v0.10.0 | Phase 4 — RRF 混合检索、4 层去重、证据追踪、查询时过期标记、分层上下文、原始资料回退、自动矛盾检测、多轮重写；发布后修复全部 HIGH/MEDIUM/LOW | 1177（55 文件）|
-| Phase 4.5（未发布） | v0.10.0 后持续审计，20 周期，异常分类体系、O_EXCL 防碰撞、新增 2 个 MCP 工具、批量链接注入、Epistemic-Integrity 2.0、`kb publish` 5 种格式、60+ 安全威胁关闭 | 2697（227 文件）|
+| Phase 4.5（未发布） | v0.10.0 后持续审计，21 周期，异常分类体系、O_EXCL 防碰撞、新增 2 个 MCP 工具、批量链接注入、Epistemic-Integrity 2.0、`kb publish` 5 种格式、60+ 安全威胁关闭、8 提供商 CLI 子进程后端（Cycle 21） | 2718（227 文件）|
 
 ---
 
