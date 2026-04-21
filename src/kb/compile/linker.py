@@ -6,13 +6,19 @@ import uuid
 from pathlib import Path
 
 from kb.config import WIKI_DIR
-from kb.utils.io import atomic_text_write
+from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
 from kb.utils.pages import page_id, scan_wiki_pages
 from kb.utils.text import wikilink_display_escape
 
 logger = logging.getLogger(__name__)
+
+# Cycle 18 AC7/Q21 — bounded per-page lock timeout for inject_wikilinks.
+# Default 5s × N pages would stall ingest 100s+ on pathological stuck locks;
+# 0.25s + skip + warn lets ingest progress and leaves the missed link for the
+# next ingest or `kb lint` cycle to heal.
+_INJECT_LOCK_TIMEOUT = 0.25
 
 
 def _check_not_in_wikilink(match: re.Match, body: str, pid: str, replacement: str) -> str | None:
@@ -203,62 +209,102 @@ def inject_wikilinks(
     for page_path in pages:
         pid = page_id(page_path, wiki_dir)
 
-        # Skip self
+        # Skip self — no lock needed.
         if pid == target_page_id:
             continue
 
+        # Cycle 18 AC7 — pre-lock cheap read + no-match / already-linked fast-
+        # path. Pages that will NOT be modified acquire ZERO locks (threat T8
+        # lock-overhead mitigation for large wikis). The post-lock re-read
+        # below is the authoritative decision; this pre-scan only gates lock
+        # acquisition.
         try:
-            content = page_path.read_text(encoding="utf-8")
+            peek_content = page_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Item 26 (cycle 2): match frontmatter ONCE per page and reuse the
-        # result for both the "existing links" guard and the body/frontmatter
-        # split. At 5k pages × N titles per ingest this halves FRONTMATTER_RE
-        # cost in the inject_wikilinks hot path.
-        fm_match = _FRONTMATTER_RE.match(content)
-        if fm_match:
-            frontmatter_section = fm_match.group(1)
-            body = fm_match.group(2)
-        else:
-            frontmatter_section = ""
-            body = content
-        existing_links = extract_wikilinks(body)
-        if target_page_id in existing_links:
+        peek_fm_match = _FRONTMATTER_RE.match(peek_content)
+        peek_body = peek_fm_match.group(2) if peek_fm_match else peek_content
+        if target_page_id in extract_wikilinks(peek_body):
+            continue  # already linked — no lock
+        peek_masked_body, _peek_mc, _peek_mp = _mask_code_blocks(peek_body)
+        if not pattern.search(peek_masked_body):
+            continue  # title does not appear in body — no lock
+
+        # Cycle 18 AC7 — under-lock RMW. Acquire per-page lock with bounded
+        # timeout (Q21), re-read content, re-validate every fast-path check on
+        # the fresh content (defensive against concurrent injector winning the
+        # race), and only then write. The pre-lock check above skipped pages
+        # that are CERTAINLY no-op; pages reaching this block MIGHT still be
+        # no-op by the time the lock is acquired (TOCTOU). Skip the write in
+        # that case.
+        try:
+            with file_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT):
+                try:
+                    content = page_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+                # Item 26 (cycle 2): match frontmatter ONCE per page and reuse the
+                # result for both the "existing links" guard and the body/frontmatter
+                # split. At 5k pages × N titles per ingest this halves FRONTMATTER_RE
+                # cost in the inject_wikilinks hot path.
+                fm_match = _FRONTMATTER_RE.match(content)
+                if fm_match:
+                    frontmatter_section = fm_match.group(1)
+                    body = fm_match.group(2)
+                else:
+                    frontmatter_section = ""
+                    body = content
+                existing_links = extract_wikilinks(body)
+                if target_page_id in existing_links:
+                    continue  # race lost — concurrent injector won
+
+                # Save original body for final comparison, then mask code blocks
+                # so wikilink injection cannot touch content inside ``` ``` or
+                # `...` spans.
+                original_body = body
+                body, masked_code, mask_prefix = _mask_code_blocks(body)
+
+                # Check if title appears in body (outside code blocks) on fresh
+                # content — race may have removed the match.
+                if not pattern.search(body):
+                    continue
+
+                # Replace first plain-text occurrence in body with wikilink.
+                # Use finditer loop so a blocked match (already inside [[ ]])
+                # doesn't silently skip all subsequent occurrences.
+                safe_title = wikilink_display_escape(title)
+                replacement = f"[[{target_page_id}|{safe_title}]]"
+
+                new_body = body
+                for match in pattern.finditer(body):
+                    start = match.start()
+
+                    result = _check_not_in_wikilink(match, body, pid, replacement)
+                    if result is None:
+                        # This match is inside a wikilink — continue scanning
+                        continue
+                    new_body = body[:start] + replacement + body[match.end() :]
+                    break
+
+                # Restore code blocks before writing (compare against original
+                # to avoid spurious writes when the only match was inside a
+                # code block).
+                new_body = _unmask_code_blocks(new_body, masked_code, mask_prefix)
+                if new_body != original_body:
+                    atomic_text_write(frontmatter_section + new_body, page_path)
+                    updated.append(pid)
+                    logger.info("Injected wikilink to %s in %s", target_page_id, pid)
+        except TimeoutError:
+            # Cycle 18 AC7/Q21 — stuck lock; skip this page and continue. The
+            # missed wikilink will retry on the next ingest or be caught by the
+            # kb_lint dead-link pass.
+            logger.warning(
+                "Skipping inject_wikilinks on %s: lock timeout after %.2fs",
+                pid,
+                _INJECT_LOCK_TIMEOUT,
+            )
             continue
-
-        # Save original body for final comparison, then mask code blocks so
-        # wikilink injection cannot touch content inside ``` ``` or `...` spans.
-        original_body = body
-        body, masked_code, mask_prefix = _mask_code_blocks(body)
-
-        # Check if title appears in body (outside code blocks)
-        if not pattern.search(body):
-            continue
-
-        # Replace first plain-text occurrence in body with wikilink.
-        # Use finditer loop so a blocked match (already inside [[ ]]) doesn't
-        # silently skip all subsequent occurrences.
-        safe_title = wikilink_display_escape(title)
-        replacement = f"[[{target_page_id}|{safe_title}]]"
-
-        new_body = body
-        for match in pattern.finditer(body):
-            start = match.start()
-
-            result = _check_not_in_wikilink(match, body, pid, replacement)
-            if result is None:
-                # This match is inside a wikilink — continue scanning for next
-                continue
-            new_body = body[:start] + replacement + body[match.end() :]
-            break
-
-        # Restore code blocks before writing (compare against original to avoid
-        # spurious writes when the only match was inside a code block)
-        new_body = _unmask_code_blocks(new_body, masked_code, mask_prefix)
-        if new_body != original_body:
-            atomic_text_write(frontmatter_section + new_body, page_path)
-            updated.append(pid)
-            logger.info("Injected wikilink to %s in %s", target_page_id, pid)
 
     return updated

@@ -10,43 +10,62 @@ from kb.utils.io import file_lock
 logger = logging.getLogger(__name__)
 
 
-LOG_SIZE_WARNING_BYTES = 500_000  # Rotation threshold — see _rotate_log_if_oversized.
+LOG_SIZE_WARNING_BYTES = 500_000  # Rotation threshold — see rotate_if_oversized.
 
 
-def _rotate_log_if_oversized(log_path: Path) -> None:
-    """Cycle 4 item #20 — monthly rotation with ordinal collision fallback.
+def rotate_if_oversized(
+    path: Path,
+    max_bytes: int,
+    archive_stem_prefix: str,
+) -> None:
+    """Generic size-based rotation — archive ``path`` when it exceeds ``max_bytes``.
 
-    When ``log_path.stat().st_size`` exceeds ``LOG_SIZE_WARNING_BYTES``, rename
-    the current log to ``log.YYYY-MM.md`` (or ``log.YYYY-MM.2.md`` on collision,
-    etc.) and leave an empty fresh log for the next caller to create. Silent
-    no-op if the file does not exist or is under threshold.
+    Renames the current file to ``<archive_stem_prefix>.YYYY-MM<path.suffix>``
+    (with ordinal collision fallback like ``.2``, ``.3``, ...). Silent no-op if
+    the file does not exist or is under threshold.
 
-    Rotation event is logged at INFO BEFORE the rename so the audit chain is
-    preserved even if the rename fails partway.
+    The pre-rename ``logger.info("Rotating ...")`` audit event (moved here from
+    the old ``_rotate_log_if_oversized`` per cycle 18 AC5) ensures that a mid-
+    rotate crash leaves an audit trail even if the rename fails.
+
+    Cycle 18 AC5 + AC12 — reused by both `append_wiki_log` (for ``wiki/log.md``)
+    AND `kb.ingest.pipeline._emit_ingest_jsonl` (for ``.data/ingest_log.jsonl``).
+    Archive suffix is derived from ``path.suffix`` so ``.jsonl`` files rotate to
+    ``<stem>.YYYY-MM.jsonl``, ``.md`` files rotate to ``<stem>.YYYY-MM.md``, etc.
     """
-    if not log_path.exists():
+    if not path.exists():
         return
     try:
-        if log_path.stat().st_size <= LOG_SIZE_WARNING_BYTES:
+        if path.stat().st_size <= max_bytes:
             return
     except OSError:
         return
-    stem = f"log.{datetime.now(UTC).strftime('%Y-%m')}"
-    archive = log_path.parent / f"{stem}.md"
+    suffix = path.suffix or ""
+    stem = f"{archive_stem_prefix}.{datetime.now(UTC).strftime('%Y-%m')}"
+    archive = path.parent / f"{stem}{suffix}"
     ordinal = 2
     while archive.exists():
-        archive = log_path.parent / f"{stem}.{ordinal}.md"
+        archive = path.parent / f"{stem}.{ordinal}{suffix}"
         ordinal += 1
     logger.info(
         "Rotating %s (%d bytes) → %s",
-        log_path,
-        log_path.stat().st_size,
+        path,
+        path.stat().st_size,
         archive,
     )
     try:
-        log_path.rename(archive)
+        path.rename(archive)
     except OSError as e:
-        logger.warning("Log rotation failed for %s: %s", log_path, e)
+        logger.warning("Log rotation failed for %s: %s", path, e)
+
+
+def _rotate_log_if_oversized(log_path: Path) -> None:
+    """Thin wrapper preserving the existing wiki/log.md call site.
+
+    Cycle 18 AC5 — delegates to the generic ``rotate_if_oversized`` so the
+    same logic can serve ``.data/ingest_log.jsonl`` in AC12.
+    """
+    rotate_if_oversized(log_path, LOG_SIZE_WARNING_BYTES, "log")
 
 
 def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
@@ -104,9 +123,6 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
             )
 
     _reject_if_not_regular_file(log_path)
-    # Cycle 4 item #20 — rotate BEFORE append if already oversized. Runs
-    # outside the file_lock so the rename doesn't contend with readers.
-    _rotate_log_if_oversized(log_path)
     if not log_path.exists():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -119,11 +135,19 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
             _reject_if_not_regular_file(log_path)
 
     def _write() -> None:
-        # Item 29 (cycle 2): force LF on Windows — prevents mixed-EOL files (wiki_log
-        # was the only writer using the default `newline=None` translation while
-        # atomic_*_write already force LF), which breaks content_hash idempotency
-        # and makes `git diff` noisy across Windows/Linux contributors.
+        # Cycle 18 AC4 — rotate INSIDE file_lock to close the POSIX handle-
+        # holding-stale-file race (Phase 4.5 HIGH R5, threat T2). Under the
+        # previous "rotate outside lock" ordering, a concurrent appender
+        # holding an open handle while another process renamed the file
+        # would silently write to the archived (renamed-away) file on POSIX.
+        # Readers are brief; lock contention under rotation is negligible.
+        # Item 29 (cycle 2): force LF on Windows — prevents mixed-EOL files
+        # (wiki_log was the only writer using the default `newline=None`
+        # translation while atomic_*_write already force LF), which breaks
+        # content_hash idempotency and makes `git diff` noisy across Windows/
+        # Linux contributors.
         with file_lock(log_path):
+            _rotate_log_if_oversized(log_path)
             with log_path.open("a", encoding="utf-8", newline="\n") as f:
                 f.write(entry)
 
