@@ -1141,6 +1141,7 @@ def ingest_source(
         raise FileNotFoundError(f"Source not found: {source_path}")
 
     effective_raw_dir = raw_dir if raw_dir is not None else RAW_DIR
+    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
 
     if source_type in {"comparison", "synthesis"}:
         raise ValueError(
@@ -1163,6 +1164,24 @@ def ingest_source(
     # reliable case-insensitive comparison on Windows (Python 3.12+).
     raw_dir_nc = Path(os.path.normcase(str(effective_raw_dir.resolve())))
     source_path_nc = Path(os.path.normcase(str(source_path)))
+
+    # Cycle 22 AC1-AC4 — reject paths inside wiki_dir FIRST (before the raw-dir
+    # check) so a caller passing a wiki page gets the specific "not inside wiki
+    # directory" ValidationError instead of the generic "must be within raw/"
+    # ValueError. Both sides are normcase'd + resolved so symlinks / junctions
+    # (T1) and Windows case variants (T2) cannot bypass. Message is a FIXED
+    # string — no path interpolation — so an absolute wiki path never leaks
+    # through CLI / MCP logs (T3). Placement is BEFORE the later
+    # ``_emit_ingest_jsonl("start", ...)`` call so a rejected wiki path never
+    # produces an orphan ``stage="start"`` row (cycle-18 L3 orphan-start rule).
+    wiki_dir_nc = Path(os.path.normcase(str(effective_wiki_dir.resolve())))
+    try:
+        source_path_nc.relative_to(wiki_dir_nc)
+    except ValueError:
+        pass  # source is OUTSIDE wiki_dir — guard passes
+    else:
+        raise ValidationError("Source path must not be inside wiki directory")
+
     try:
         source_path_nc.relative_to(raw_dir_nc)
     except ValueError as e:
@@ -1204,29 +1223,6 @@ def ingest_source(
     # reservation AND the Phase-2 confirmation. source_ref is unchanged for
     # provenance / log entries / page frontmatter.
     manifest_ref = manifest_key if manifest_key is not None else source_ref
-
-    effective_wiki_dir = wiki_dir if wiki_dir is not None else WIKI_DIR
-
-    # Cycle 22 AC1-AC4 — reject paths inside wiki_dir to prevent the circular-
-    # knowledge loop where an LLM-generated wiki page is re-ingested as if it
-    # were a raw source. Mirrors the raw-dir guard at lines 1162-1169: both
-    # sides are normcase'd for Windows case-insensitive filesystems, and
-    # ``source_path`` is the already-resolved path from line 1139 so symlinks
-    # / junctions are dereferenced before the compare (closes T1 + T2).
-    # Placement rule: AFTER ``effective_wiki_dir`` is known AND BEFORE the
-    # ``_emit_ingest_jsonl("start", ...)`` call at line ~1222 so a rejected
-    # wiki-path never produces an orphan ``stage="start"`` row in
-    # ``.data/ingest_log.jsonl`` (cycle-18 L3 orphan-start rule).
-    # The ValidationError message is a FIXED string — no ``source_path``
-    # interpolation — so an error surfaced through CLI / MCP logs never leaks
-    # an absolute wiki path (closes T3).
-    wiki_dir_nc = Path(os.path.normcase(str(effective_wiki_dir.resolve())))
-    try:
-        source_path_nc.relative_to(wiki_dir_nc)
-    except ValueError:
-        pass  # source is OUTSIDE wiki_dir — guard passes
-    else:
-        raise ValidationError("Source path must not be inside wiki directory")
 
     # Cycle 18 AC9 — per-ingest correlation ID. 16-hex (64 bits entropy) is
     # sufficient for per-process correlation between wiki/log.md lines and
