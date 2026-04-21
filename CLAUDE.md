@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2689 passed + 8 skipped (cycle 20 incl. R1+R3 PR fixes; 2697 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2710 passed + 8 skipped (cycle 21; 2718 collected). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 
@@ -109,7 +109,7 @@ Entry point: `kb = "kb.cli:cli"` in `pyproject.toml`. Version in `src/kb/__init_
 All paths, model tiers, page types, and confidence levels are defined in `kb.config` — import from there, never hardcode. `PROJECT_ROOT` resolves from `config.py`'s location, so it works regardless of working directory.
 
 **Key APIs** (non-obvious behavior — for full signatures, read the source):
-- `call_llm(prompt, tier="write")` / `call_llm_json(prompt, tier, schema)` — In `kb.utils.llm`. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). `call_llm_json` uses forced tool_use for guaranteed structured JSON — no fence-stripping needed. Raises `LLMError` on failure, `ValueError` on invalid tier.
+- `call_llm(prompt, tier="write")` / `call_llm_json(prompt, tier, schema)` — In `kb.utils.llm`. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Routes to a CLI subprocess backend when `KB_LLM_BACKEND` is set (non-`"anthropic"` value); otherwise uses the Anthropic SDK path unchanged. `call_llm_json` uses forced tool_use on the Anthropic path for guaranteed structured JSON; on CLI backends, uses three-stage text extraction + `jsonschema.validate`. Raises `LLMError` on failure, `ValueError` on invalid tier. **Config helpers**: `get_cli_backend() -> str` (reads `KB_LLM_BACKEND` at call time; default `"anthropic"`; raises `ValueError` on unknown); `get_cli_model(tier) -> str` (respects `KB_CLI_MODEL_<TIER>` env override).
 - `ingest_source(path, source_type=None, extraction=None, *, defer_small=False, wiki_dir=None)` — In `kb.ingest.pipeline`. Returns dict with `pages_created`, `pages_updated`, `pages_skipped`, `affected_pages`, `wikilinks_injected`, and `duplicate: True` on hash match. Pass `extraction` dict to skip LLM call (Claude Code mode). Pass `wiki_dir` to write to a custom wiki directory (default: `WIKI_DIR`).
 - `load_all_pages(wiki_dir=None)` / `scan_wiki_pages(wiki_dir=None)` / `page_id(page_path, wiki_dir=None)` — In `kb.utils.pages`. `load_all_pages` returns list of dicts. `page_id` lowercases IDs and preserves subdir separators; use the stored page `path` for filesystem I/O when case matters. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim. Cycle 14 AC23 adds an additive `status` key (empty string when absent).
 - `save_page_frontmatter(path, post)` — In `kb.utils.pages`. Cycle 14 AC16 — the single enforcement point for key-order-preserving writes. Rigid contract: calls `atomic_text_write(frontmatter.dumps(post, sort_keys=False), path)`. USE THIS for any write-back that reads via `frontmatter.load` and needs to preserve metadata insertion order (Evidence Trail sentinel, downstream YAML-diff tools). The three augment write-back sites (`_record_verdict_gap_callout`, `_mark_page_augmented`, `_record_attempt` in `kb.lint.augment`) use this wrapper.

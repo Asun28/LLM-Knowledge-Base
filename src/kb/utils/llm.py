@@ -15,6 +15,8 @@ from kb.config import (
     LLM_RETRY_BASE_DELAY,
     LLM_RETRY_MAX_DELAY,
     MODEL_TIERS,
+    get_cli_backend,
+    get_cli_model,
 )
 from kb.errors import KBError
 from kb.utils.text import truncate
@@ -272,7 +274,10 @@ def call_llm(
     system: str = "",
     max_tokens: int = 4096,
 ) -> str:
-    """Call Claude with the appropriate model tier.
+    """Call the LLM with the appropriate model tier.
+
+    Routes to a CLI subprocess backend when KB_LLM_BACKEND is set to a
+    non-anthropic value; otherwise uses the Anthropic SDK path unchanged.
 
     Tiers: "scan" (Haiku), "write" (Sonnet), "orchestrate" (Opus).
 
@@ -280,6 +285,20 @@ def call_llm(
     overload, network) with exponential backoff. Wraps API errors in
     a descriptive LLMError.
     """
+    # Validate tier up-front for both paths — consistent ValueError regardless of backend.
+    _resolve_model(tier)
+    backend = get_cli_backend()
+    if backend != "anthropic":
+        from kb.utils import cli_backend as _cli_backend  # AC16: lazy import
+
+        merged = f"System: {system}\n\n{prompt}" if system else prompt
+        cli_model = get_cli_model(tier)
+        if max_tokens != 4096:
+            logger.debug("call_llm: max_tokens=%d ignored for CLI backend %s", max_tokens, backend)
+        return _cli_backend.call_cli(
+            merged, backend=backend, model=cli_model, timeout=REQUEST_TIMEOUT
+        )
+
     model = _resolve_model(tier)
 
     messages = [{"role": "user", "content": prompt}]
@@ -308,7 +327,10 @@ def call_llm_json(
     tool_description: str = "Extract structured data from the source document.",
     max_tokens: int = 4096,
 ) -> dict:
-    """Call Claude with forced tool_use for guaranteed structured JSON output.
+    """Call the LLM with forced structured JSON output.
+
+    Routes to a CLI subprocess backend when KB_LLM_BACKEND is set to a
+    non-anthropic value; otherwise uses the Anthropic tool_use path.
 
     Uses the Anthropic API's tool_use feature to get guaranteed valid JSON
     matching the provided schema, eliminating JSON parsing errors.
@@ -329,6 +351,25 @@ def call_llm_json(
         LLMError: On API failures after retries or missing tool_use block.
         ValueError: On invalid tier.
     """
+    # Validate tier up-front for both paths — consistent ValueError regardless of backend.
+    _resolve_model(tier)
+    backend = get_cli_backend()
+    if backend != "anthropic":
+        from kb.utils import cli_backend as _cli_backend  # AC16: lazy import
+
+        merged = f"System: {system}\n\n{prompt}" if system else prompt
+        cli_model = get_cli_model(tier)
+        _default_desc = "Extract structured data from the source document."
+        if tool_name != "extract" or tool_description != _default_desc:
+            logger.debug(
+                "call_llm_json: tool_name=%r tool_description ignored for CLI backend %s",
+                tool_name,
+                backend,
+            )
+        return _cli_backend.call_cli_json(
+            merged, backend=backend, model=cli_model, timeout=REQUEST_TIMEOUT, schema=schema
+        )
+
     model = _resolve_model(tier)
 
     tool_def = {

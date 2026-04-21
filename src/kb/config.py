@@ -182,6 +182,147 @@ LLM_RETRY_BASE_DELAY = 1.0  # seconds
 LLM_RETRY_MAX_DELAY = 30.0  # seconds
 LLM_REQUEST_TIMEOUT = 120.0  # seconds
 
+# ── Cycle 21: CLI subprocess backend ─────────────────────────
+# Supported CLI backends (beyond the default "anthropic" SDK path).
+# Each value is a list of command tokens; {model} is a placeholder
+# substituted at call time from CLI_TOOL_MODELS.
+CLI_TOOL_COMMANDS: Mapping[str, list[str]] = MappingProxyType(
+    {
+        "ollama": ["ollama", "run", "{model}", "--nowordwrap"],
+        "gemini": ["gemini"],  # --prompt <prompt> appended dynamically
+        "opencode": ["opencode", "ask"],
+        "codex": ["codex", "-q"],
+        "kimi": ["kimi"],
+        "qwen": ["qwen"],
+        "deepseek": ["deepseek"],
+        "zai": ["zai"],
+    }
+)
+
+# Gemini does not read stdin in non-interactive mode; prompt is passed
+# as --prompt <arg> instead. Document as weaker isolation (T8).
+CLI_PROMPT_VIA_ARG: frozenset[str] = frozenset({"gemini"})
+
+# Model names per backend per tier. Empty string means the backend ignores
+# the model flag (single-model CLI tools). Ollama requires explicit names.
+CLI_TOOL_MODELS: Mapping[str, dict[str, str]] = MappingProxyType(
+    {
+        "ollama": {
+            "scan": "llama3.2",
+            "write": "qwen2.5-coder:7b",
+            "orchestrate": "qwen2.5-coder:32b",
+        },
+        "gemini": {"scan": "", "write": "", "orchestrate": ""},
+        "opencode": {"scan": "", "write": "", "orchestrate": ""},
+        "codex": {"scan": "", "write": "", "orchestrate": ""},
+        "kimi": {"scan": "", "write": "", "orchestrate": ""},
+        "qwen": {"scan": "", "write": "", "orchestrate": ""},
+        "deepseek": {"scan": "", "write": "", "orchestrate": ""},
+        "zai": {"scan": "", "write": "", "orchestrate": ""},
+    }
+)
+
+# Install hints shown in LLMError(kind="not_installed") messages.
+CLI_INSTALL_HINTS: dict[str, str] = {
+    "ollama": "Install from https://ollama.com",
+    "gemini": "npm install -g @google/gemini-cli",
+    "opencode": "npm install -g opencode-ai",
+    "codex": "npm install -g @openai/codex",
+    "kimi": "pip install kimi-cli",
+    "qwen": "pip install qwen-cli",
+    "deepseek": "pip install deepseek-cli",
+    "zai": "pip install zhipuai-cli",
+}
+
+# Environment keys passed through to the subprocess (allowlist, T3).
+# Per-backend secret keys are injected via CLI_BACKEND_ENV_INJECT.
+CLI_SAFE_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "TEMP",
+        "TMP",
+        "SYSTEMROOT",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERNAME",
+        "LANG",
+        "LC_ALL",
+        "OLLAMA_HOST",
+        "OLLAMA_ORIGINS",
+    }
+)
+
+# Per-backend API key / credential env var names to inject into the
+# subprocess environment. The values are read from os.environ at call time.
+CLI_BACKEND_ENV_INJECT: dict[str, tuple[str, ...]] = {
+    "ollama": (),
+    "gemini": ("GEMINI_API_KEY",),
+    "opencode": ("OPENAI_API_KEY",),
+    "codex": ("OPENAI_API_KEY",),
+    "kimi": ("KIMI_API_KEY",),
+    "qwen": ("QWEN_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "zai": ("ZAI_API_KEY", "ZHIPUAI_API_KEY"),
+}
+
+# Valid backend identifiers (frozenset for O(1) lookup, T7).
+CLI_VALID_BACKENDS: frozenset[str] = frozenset(CLI_TOOL_COMMANDS.keys()) | {"anthropic"}
+
+# Max concurrent subprocesses per backend (threading.Semaphore, T6).
+CLI_MAX_CONCURRENCY: int = 2
+
+# Hard cap on stdout bytes read from CLI subprocess (T5).
+MAX_CLI_STDOUT_BYTES: int = 2_000_000
+
+
+def get_cli_backend() -> str:
+    """Return the active LLM backend, reading KB_LLM_BACKEND at call time.
+
+    Defaults to ``"anthropic"`` when the env var is unset or empty.
+    Validates against ``CLI_VALID_BACKENDS``; raises ``ValueError`` on
+    unknown value. The raw value is never echoed in the error message (T7).
+
+    Raises:
+        ValueError: if the value is not in CLI_VALID_BACKENDS.
+    """
+    raw = os.environ.get("KB_LLM_BACKEND", "").strip()
+    if not raw:
+        return "anthropic"
+    if len(raw) > 32:
+        raise ValueError(
+            f"KB_LLM_BACKEND value is too long (max 32 chars). "
+            f"Valid backends: {sorted(CLI_VALID_BACKENDS)}"
+        )
+    if raw not in CLI_VALID_BACKENDS:
+        raise ValueError(f"Unknown KB_LLM_BACKEND. Valid backends: {sorted(CLI_VALID_BACKENDS)}")
+    return raw
+
+
+_CLI_TIERS: frozenset[str] = frozenset({"scan", "write", "orchestrate"})
+
+
+def get_cli_model(tier: str) -> str:
+    """Return the model name for the active CLI backend and tier.
+
+    Respects ``KB_CLI_MODEL_<TIER>`` env override (read at call time).
+    Returns empty string for backends with no per-model flag.
+
+    Raises:
+        ValueError: if ``tier`` is not one of scan/write/orchestrate.
+    """
+    if tier not in _CLI_TIERS:
+        raise ValueError(f"Unknown CLI model tier {tier!r}. Valid: {sorted(_CLI_TIERS)}")
+    env_override = os.environ.get(f"KB_CLI_MODEL_{tier.upper()}", "").strip()
+    if env_override:
+        return env_override
+    backend = get_cli_backend()
+    if backend == "anthropic":
+        return ""
+    return CLI_TOOL_MODELS[backend][tier]
+
+
 # ── Phase 2: Quality thresholds ──────────────────────────────
 LOW_TRUST_THRESHOLD = 0.4
 MAX_CONSISTENCY_GROUP_SIZE = 5
