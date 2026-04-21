@@ -1011,9 +1011,13 @@ def ingest_source(
     # Even though .data/hashes.json keys are NEVER FS-resolved today, validate
     # against future call sites that might accidentally pass it through
     # ``Path(manifest_key).resolve()``.
+    # PR #33 R1 Sonnet NIT — empty string previously passed all 4 traversal
+    # checks; reject explicitly so an empty manifest_key cannot create a
+    # false-positive duplicate via the manifest[""] key collision class.
     if manifest_key is not None:
         if (
-            ".." in manifest_key
+            not manifest_key
+            or ".." in manifest_key
             or manifest_key.startswith(("/", "\\"))
             or "\x00" in manifest_key
             or len(manifest_key) > 512

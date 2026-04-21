@@ -355,8 +355,9 @@ def inject_wikilinks_batch(
 
     Returns:
         dict mapping ``target_page_id.lower()`` → list of updated existing
-        page IDs. Targets with zero updates have empty lists; targets with no
-        candidate matches are absent from the dict.
+        page IDs. Every sanitized/processed target_page_id appears as a key
+        with a list value (empty when the title produced no injections);
+        skipped invalid/overlength titles are absent from the dict.
 
     Concurrency:
         - Pre-lock scan is CANDIDATE-GATHERING ONLY (cycle 19 AC1b). Winner
@@ -509,15 +510,21 @@ def _process_inject_chunk(
                 original_body = body
                 body_masked, masked_code, mask_prefix = _mask_code_blocks(body)
 
-                # Cycle 19 AC1b — re-derive winner from FRESH body. Filter the
-                # snapshot candidate list against fresh content; pick the first
-                # surviving candidate (sorted_chunk's longest-first order).
+                # Cycle 19 AC1b (PR #33 R1 Codex MAJOR fix) — re-derive winner
+                # from FRESH body using ALL batch titles (sorted_chunk), not the
+                # stale pre-lock candidate snapshot. A title that was absent
+                # from the snapshot but became a match after a concurrent
+                # writer modified the page could otherwise never win. The
+                # pre-lock candidate list is now a pure "skip-the-lock-if-zero"
+                # gate — it does NOT bound the winner search universe.
                 winner: tuple[str, str] | None = None
-                for title, target_pid in candidates:
+                for title, target_pid in sorted_chunk:
+                    if pid == target_pid:
+                        continue  # never inject a self-link
                     if target_pid in fresh_links:
                         continue  # race lost — concurrent injector won
                     if not title_patterns[title].search(body_masked):
-                        continue  # title no longer in fresh body
+                        continue  # title not in fresh body
                     winner = (title, target_pid)
                     break
 
