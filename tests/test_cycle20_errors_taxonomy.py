@@ -1,4 +1,4 @@
-"""Cycle 20 AC1/AC2/AC3/AC6 — exception taxonomy tests.
+"""Cycle 20 AC1/AC2/AC3/AC6/AC7 — exception taxonomy + query AC7 regression.
 
 Pins:
 - `kb.errors` module surface (6 classes via ``KBError`` base).
@@ -6,10 +6,9 @@ Pins:
 - ``StorageError(kind, path)`` redaction contract (T1 mitigation).
 - ``kb`` top-level lazy import surface exposes all 7 names.
 - ``from kb.errors import *`` is NOT used anywhere in the tree (lint).
-
-AC7 regression tests (ingest + query outer-except wrap into IngestError /
-QueryError) are covered separately in the Task 3 / Task 4 test files because
-they require AC5 production wiring to have landed first.
+- AC7 query_wiki unexpected-exception wrap to ``QueryError`` (matching cycle-18
+  test_jsonl_emitted_on_failure + tests/test_cycle20_write_wiki_page_exclusive
+  for the ingest side).
 """
 
 from __future__ import annotations
@@ -187,6 +186,44 @@ class TestNoStarImportFromKbErrors:
             if needle in text:
                 violators.append(py)
         assert not violators, f"star-import violates AC4: {violators}"
+
+
+class TestAC7QueryErrorWraps:
+    """AC7 — unexpected exceptions inside query_wiki wrap into QueryError.
+
+    Mirror of the cycle-18 test_jsonl_emitted_on_failure on the ingest side;
+    the query-side wrap lands in ``query_wiki``'s trampoline around
+    ``_query_wiki_body``.
+    """
+
+    def test_runtime_error_wraps_to_query_error(self, tmp_project, monkeypatch) -> None:
+        """RuntimeError at search_pages → QueryError with __cause__ preserved."""
+        import kb.query.engine as engine
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("search engine explosion")
+
+        # Patch at engine-module attribute — _query_wiki_body resolves the
+        # bound name at call time, so patching `kb.query.engine.search_pages`
+        # reaches the synthesis path.
+        monkeypatch.setattr("kb.query.engine.search_pages", boom, raising=True)
+
+        with pytest.raises(QueryError, match="search engine explosion") as excinfo:
+            engine.query_wiki("hello world", wiki_dir=tmp_project / "wiki")
+        assert isinstance(excinfo.value, QueryError)
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    def test_oserror_passes_through_unchanged(self, tmp_project, monkeypatch) -> None:
+        """AC5 narrowing — OSError is in expected-kind list, passes through."""
+        import kb.query.engine as engine
+
+        def boom(*args, **kwargs):
+            raise OSError("simulated io fail")
+
+        monkeypatch.setattr("kb.query.engine.search_pages", boom, raising=True)
+
+        with pytest.raises(OSError, match="simulated io fail"):
+            engine.query_wiki("hello", wiki_dir=tmp_project / "wiki")
 
 
 def test_kb_errors_module_reimportable() -> None:
