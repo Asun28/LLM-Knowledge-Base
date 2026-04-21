@@ -194,6 +194,40 @@ def test_jsonl_emitted_on_failure(tmp_kb_env: Path) -> None:
     assert "<path>" in err_summary
 
 
+def test_jsonl_emitted_on_pre_body_exception(tmp_kb_env: Path) -> None:
+    """PR #32 R1 Codex BLOCKER pin — validation failure BEFORE body still emits `failure`.
+
+    Raising from `_pre_validate_extraction` (or `extract_from_source`) must
+    emit the terminal `failure` row, not leave an orphan `start`. The fix
+    moved the try/except boundary up so extraction + validation + duplicate
+    reservation are all inside the envelope.
+    """
+    from kb.ingest import pipeline  # noqa: PLC0415
+
+    raw = tmp_kb_env / "raw" / "articles" / "ac11-pre-body-fail.md"
+    raw.write_text("# prebody\n\nBody.\n", encoding="utf-8")
+
+    def boom(*args, **kwargs):
+        raise ValueError("synthetic pre-body validation failure")
+
+    with patch.object(pipeline, "_pre_validate_extraction", side_effect=boom):
+        with pytest.raises(ValueError, match="synthetic pre-body"):
+            pipeline.ingest_source(
+                raw,
+                source_type="article",
+                extraction=_stub_extraction(),
+                wiki_dir=tmp_kb_env / "wiki",
+                raw_dir=tmp_kb_env / "raw",
+            )
+
+    rows = _read_jsonl(tmp_kb_env / ".data" / "ingest_log.jsonl")
+    stages = [r["stage"] for r in rows]
+    assert stages == ["start", "failure"], (
+        f"Pre-body exception must still emit terminal `failure`; got: {stages}"
+    )
+    assert "synthetic pre-body" in rows[1]["outcome"].get("error_summary", "")
+
+
 # ---------------------------------------------------------------------------
 # AC12 — rotation kicks in when jsonl exceeds threshold; new file created,
 # rotation happens inside the same file_lock as the append.
@@ -341,7 +375,11 @@ def test_jsonl_field_allowlist(tmp_kb_env: Path, caplog) -> None:
 # AC11/Q20 — error_summary truncation to 2048 bytes.
 # ---------------------------------------------------------------------------
 def test_jsonl_error_summary_truncation(tmp_kb_env: Path) -> None:
-    """AC11/Q20 — error_summary capped at 2048 bytes after redaction."""
+    """AC11/Q20 — error_summary capped at 2048 BYTES after redaction.
+
+    PR #32 R1 Sonnet M1 pin — truncation is byte-based, not char-based, so
+    PIPE_BUF atomicity (threat T7) survives CJK-heavy errors.
+    """
     from kb.ingest import pipeline  # noqa: PLC0415
 
     pipeline._emit_ingest_jsonl(
@@ -354,7 +392,34 @@ def test_jsonl_error_summary_truncation(tmp_kb_env: Path) -> None:
 
     rows = _read_jsonl(tmp_kb_env / ".data" / "ingest_log.jsonl")
     row = rows[-1]
-    assert len(row["outcome"]["error_summary"]) == 2048
+    assert len(row["outcome"]["error_summary"].encode("utf-8")) <= 2048
+
+
+def test_jsonl_error_summary_truncation_cjk_byte_bounded(tmp_kb_env: Path) -> None:
+    """PR #32 R1 Sonnet M1 pin — CJK (3 UTF-8 bytes per char) stays ≤ 2048 bytes.
+
+    Char-slicing would produce a 6144-byte string for 2048 CJK chars, exceeding
+    PIPE_BUF atomicity. Byte-slicing via encode/decode must enforce the
+    byte cap regardless of character width.
+    """
+    from kb.ingest import pipeline  # noqa: PLC0415
+
+    # 3000 CJK chars → ~9000 UTF-8 bytes pre-truncation.
+    cjk_error = "漢" * 3000
+    pipeline._emit_ingest_jsonl(
+        "failure",
+        "a" * 16,
+        "raw/x",
+        "h" * 64,
+        outcome={"error_summary": cjk_error},
+    )
+
+    rows = _read_jsonl(tmp_kb_env / ".data" / "ingest_log.jsonl")
+    row = rows[-1]
+    encoded_len = len(row["outcome"]["error_summary"].encode("utf-8"))
+    assert encoded_len <= 2048, (
+        f"Expected error_summary <= 2048 bytes; got {encoded_len} bytes (char-slicing regression)"
+    )
 
 
 # ---------------------------------------------------------------------------

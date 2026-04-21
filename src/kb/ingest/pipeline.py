@@ -812,7 +812,15 @@ def _emit_ingest_jsonl(
                 pass  # non-integer — silently drop; allowlist enforcement
     err = outcome.get("error_summary")
     if isinstance(err, str) and err:
-        safe_outcome["error_summary"] = sanitize_text(err)[:_INGEST_JSONL_ERROR_SUMMARY_MAX]
+        # PR #32 R1 Sonnet M1 fix: truncate by UTF-8 BYTES, not characters.
+        # Python `str[:n]` counts code points; a 2048-char CJK string encodes
+        # to ~6144 UTF-8 bytes and would exceed PIPE_BUF atomicity (threat T7).
+        # `errors="ignore"` drops the trailing partial byte sequence.
+        safe_outcome["error_summary"] = (
+            sanitize_text(err)
+            .encode("utf-8")[:_INGEST_JSONL_ERROR_SUMMARY_MAX]
+            .decode("utf-8", errors="ignore")
+        )
 
     row = {
         "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -1063,44 +1071,49 @@ def ingest_source(
 
     # Cycle 18 AC11 — emit `stage="start"` immediately after request_id + source_ref
     # are known. `outcome={}` for this stage; counts unknown until the ingest body
-    # completes.
+    # completes. PR #32 R1 Codex BLOCKER fix: the try/except wrapping the body
+    # MUST start HERE so extraction + validation + duplicate-reservation +
+    # body-run all emit `stage="failure"` on exception — previously only
+    # _run_ingest_body was wrapped, leaving orphan `start` rows when
+    # extract_from_source or _pre_validate_extraction raised.
     _emit_ingest_jsonl("start", request_id, source_ref, source_hash, outcome={})
 
-    # Validate caller-provided extractions before manifest reservation. In Claude
-    # Code mode, extraction is produced here first, then validated before the
-    # same reservation point.
-    if extraction is None:
-        extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
-    _pre_validate_extraction(extraction)
-
-    # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
-    # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
-    # reserves manifest[source_ref] = source_hash before releasing. This prevents the RMW
-    # race where two concurrent ingests of the same content both pass the duplicate check.
-    if _check_and_reserve_manifest(source_hash, source_ref):
-        logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
-        # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
-        # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
-        # correlation surface for duplicate/failure paths.
-        _emit_ingest_jsonl("duplicate_skip", request_id, source_ref, source_hash, outcome={})
-        return {
-            "source_path": str(source_path),
-            "source_type": source_type,
-            "content_hash": source_hash,
-            "pages_created": [],
-            "pages_updated": [],
-            "pages_skipped": [],
-            "duplicate": True,
-            "affected_pages": [],  # fix item 6: contract key always present
-            "wikilinks_injected": [],  # fix item 6: contract key always present
-            "contradictions": [],  # fix item 6: contract key always present
-        }
-
-    # Cycle 18 AC11/Q2 — wrap the ingest body in try/except BaseException so
-    # `stage="failure"` fires on propagating exceptions. The except re-raises
-    # after emitting the JSONL row so the caller sees the original exception.
     try:
-        return _run_ingest_body(
+        # Validate caller-provided extractions before manifest reservation. In
+        # Claude Code mode, extraction is produced here first, then validated
+        # before the same reservation point.
+        if extraction is None:
+            extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
+        _pre_validate_extraction(extraction)
+
+        # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
+        # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
+        # reserves manifest[source_ref] = source_hash before releasing. This prevents the RMW
+        # race where two concurrent ingests of the same content both pass the duplicate check.
+        if _check_and_reserve_manifest(source_hash, source_ref):
+            logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
+            # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
+            # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
+            # correlation surface for duplicate/failure paths.
+            _emit_ingest_jsonl("duplicate_skip", request_id, source_ref, source_hash, outcome={})
+            return {
+                "source_path": str(source_path),
+                "source_type": source_type,
+                "content_hash": source_hash,
+                "pages_created": [],
+                "pages_updated": [],
+                "pages_skipped": [],
+                "duplicate": True,
+                "affected_pages": [],  # fix item 6: contract key always present
+                "wikilinks_injected": [],  # fix item 6: contract key always present
+                "contradictions": [],  # fix item 6: contract key always present
+            }
+
+        # PR #32 R1 Codex MAJOR fix: success emission moved OUT of
+        # _run_ingest_body and INTO ingest_source so all 4 JSONL stage calls
+        # are wired at the same level (start / duplicate_skip / success /
+        # failure), keeping the telemetry envelope symmetric.
+        result = _run_ingest_body(
             source_path=source_path,
             source_type=source_type,
             source_ref=source_ref,
@@ -1113,6 +1126,18 @@ def ingest_source(
             defer_small=defer_small,
             _skip_vector_rebuild=_skip_vector_rebuild,
         )
+        _emit_ingest_jsonl(
+            "success",
+            request_id,
+            source_ref,
+            source_hash,
+            outcome={
+                "pages_created": len(result.get("pages_created", [])),
+                "pages_updated": len(result.get("pages_updated", [])),
+                "pages_skipped": len(result.get("pages_skipped", [])),
+            },
+        )
+        return result
     except BaseException as exc:
         err_summary = sanitize_text(str(exc))
         _emit_ingest_jsonl(
@@ -1392,19 +1417,9 @@ def _run_ingest_body(
         except Exception as e:
             logger.warning("Vector index rebuild at ingest tail failed: %s", e)
 
-    # Cycle 18 AC11 — emit terminal `stage="success"` with outcome counts.
-    # Runs AFTER the vector-index rebuild so a rebuild failure (logged as
-    # WARNING above) doesn't mask the ingest's primary success signal.
-    _emit_ingest_jsonl(
-        "success",
-        request_id,
-        source_ref,
-        source_hash,
-        outcome={
-            "pages_created": len(pages_created),
-            "pages_updated": len(pages_updated),
-            "pages_skipped": len(pages_skipped),
-        },
-    )
-
+    # PR #32 R1 Codex MAJOR fix: `stage="success"` emission moved OUT of
+    # _run_ingest_body and into `ingest_source` so all 4 stage calls are
+    # wired at the same telemetry boundary (start/duplicate_skip/success/
+    # failure). _run_ingest_body is now a pure body — its caller owns the
+    # JSONL envelope.
     return result
