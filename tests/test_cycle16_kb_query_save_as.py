@@ -217,7 +217,10 @@ class TestKbQueryValidateSaveAs:
         def _fake_query(*a, **k):
             return _make_result(source_pages=["concepts/a"])
 
-        monkeypatch.setattr(mcp_core, "query_wiki", _fake_query)
+        # Cycle 19 AC15 — patch owner module so MCP call site intercepts.
+        import kb.query.engine as _qe
+
+        monkeypatch.setattr(_qe, "query_wiki", _fake_query)
         # No save_as → no write.
         result = mcp_core.kb_query("what is rag?", use_api=True)
         assert isinstance(result, str)
@@ -238,7 +241,10 @@ class TestKbQueryValidateSaveAs:
             called["n"] += 1
             return _make_result()
 
-        monkeypatch.setattr(mcp_core, "query_wiki", _fake_query)
+        # Cycle 19 AC15 — patch owner module so MCP call site intercepts.
+        import kb.query.engine as _qe
+
+        monkeypatch.setattr(_qe, "query_wiki", _fake_query)
         monkeypatch.setattr(mcp_core, "WIKI_DIR", tmp_project / "wiki")
         result = mcp_core.kb_query("q", use_api=True, save_as="../evil")
         assert result.startswith("Error:")
@@ -251,7 +257,10 @@ class TestKbQueryValidateSaveAs:
         def _fake_query(*a, **k):
             return _make_result(source_pages=["concepts/rag"])
 
-        monkeypatch.setattr(mcp_core, "query_wiki", _fake_query)
+        # Cycle 19 AC15 — patch owner module so MCP call site intercepts.
+        import kb.query.engine as _qe
+
+        monkeypatch.setattr(_qe, "query_wiki", _fake_query)
         result = mcp_core.kb_query("what is rag?", use_api=True, save_as="rag-intro")
         assert "Saved synthesis to:" in result
         target = tmp_project / "wiki" / "synthesis" / "rag-intro.md"

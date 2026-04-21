@@ -7,13 +7,31 @@ body imports for `anthropic`, `frontmatter`, `kb.utils.pages.save_page_frontmatt
 and `kb.utils.llm.LLMError` remain inside tool bodies — these never had
 test monkeypatches on `kb.mcp.core.*`.
 
-Other candidates (`kb.query.engine`, `kb.ingest.pipeline`, `kb.feedback.reliability`,
-`kb.query.rewriter`) stay at module level for monkeypatch compatibility with
-legacy tests — they are loaded transitively by other kb.mcp submodules anyway
-so the cold-boot saving would be zero. A future cycle that rewrites monkeypatch
-targets to owner-module paths can revisit.
+Cycle 19 AC15 — owner-module-attribute call style for the four migrated callables
+(`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`). The
+imports now bring in the OWNER MODULES (`kb.ingest.pipeline as ingest_pipeline`,
+`kb.query.engine as query_engine`, `kb.feedback.reliability as reliability`)
+and the call sites use ``ingest_pipeline.ingest_source(...)`` /
+``query_engine.query_wiki(...)`` / etc. This means tests should monkeypatch
+the OWNER module attribute (e.g. ``patch("kb.ingest.pipeline.ingest_source")``);
+the MCP tool's call resolves the patched attribute at call time, not at import
+time. See `tests/test_cycle19_mcp_monkeypatch_migration.py` for the four
+vacuity tests that pin this contract.
 
-Tests: tests/test_cycle17_lazy_imports.py enforces the `kb.capture` denylist.
+Cycle 19 AC16 — snapshot-binding asymmetry for CONSTANTS. Constants
+(`PROJECT_ROOT`, `RAW_DIR`, `SOURCE_TYPE_DIRS`) are imported via
+``from kb.config import X`` at module scope, which creates a snapshot binding.
+Tests patching ``kb.config.X`` post-import will NOT propagate to
+``kb.mcp.core.X`` because the local name still references the snapshot value.
+For constants the tests MUST use ``monkeypatch.setattr("kb.mcp.core.X", ...)``
+directly. The asymmetry is intentional: callables go through one extra
+attribute lookup at call time (negligible cost — see R2 N2 in
+`docs/superpowers/decisions/2026-04-21-cycle19-design.md`); constants are
+hot-path values that the import-time snapshot caches for free.
+
+Tests: tests/test_cycle17_lazy_imports.py enforces the `kb.capture` denylist;
+tests/test_cycle19_mcp_monkeypatch_migration.py enforces the AC15 / AC16
+owner-module patch contract.
 """
 
 import json
@@ -45,8 +63,12 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
 )
-from kb.feedback.reliability import compute_trust_scores
-from kb.ingest.pipeline import _TEXT_EXTENSIONS, ingest_source
+from kb.feedback import reliability
+from kb.ingest import pipeline as ingest_pipeline
+
+# `_TEXT_EXTENSIONS` is a constant, not a callable — keep the direct import
+# (no monkeypatch sites; snapshot binding is fine).
+from kb.ingest.pipeline import _TEXT_EXTENSIONS
 from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
@@ -56,7 +78,7 @@ from kb.mcp.app import (
     error_tag,
     mcp,
 )
-from kb.query.engine import query_wiki, search_pages
+from kb.query import engine as query_engine
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
@@ -309,7 +331,9 @@ def kb_query(
         from kb.utils.llm import LLMError
 
         try:
-            result = query_wiki(
+            # Cycle 19 AC15 — owner-module attribute call so tests patching
+            # ``kb.query.engine.query_wiki`` intercept this call site.
+            result = query_engine.query_wiki(
                 question,
                 max_results=max_results,
                 conversation_context=conversation_context or None,
@@ -362,7 +386,9 @@ def kb_query(
         question = rewrite_query(question, conversation_context)
 
     try:
-        results = search_pages(question, max_results=max_results)
+        # Cycle 19 AC15 — owner-module attribute call so tests patching
+        # ``kb.query.engine.search_pages`` intercept this call site.
+        results = query_engine.search_pages(question, max_results=max_results)
     except Exception as e:
         logger.exception("Error in kb_query search for: %s", question)
         return f"Error: Search failed — {_sanitize_error_str(e)}"
@@ -376,7 +402,9 @@ def kb_query(
     # Merge trust scores from feedback (fail-safe)
     pages_with_feedback: set[str] = set()
     try:
-        scores = compute_trust_scores()
+        # Cycle 19 AC15 — owner-module attribute call so tests patching
+        # ``kb.feedback.reliability.compute_trust_scores`` intercept this site.
+        scores = reliability.compute_trust_scores()
         pages_with_feedback = set(scores.keys())
         for r in results:
             trust_data = scores.get(r["id"], {})
@@ -486,7 +514,8 @@ def kb_ingest(
     # ── API mode ──
     if use_api:
         try:
-            result = ingest_source(path, source_type or None)
+            # Cycle 19 AC15 — owner-module attribute call.
+            result = ingest_pipeline.ingest_source(path, source_type or None)
             return _format_ingest_result(
                 _rel(Path(result["source_path"])),
                 result["source_type"],
@@ -523,7 +552,8 @@ def kb_ingest(
             )
 
         try:
-            result = ingest_source(path, source_type, extraction=extraction)
+            # Cycle 19 AC15 — owner-module attribute call.
+            result = ingest_pipeline.ingest_source(path, source_type, extraction=extraction)
             return _format_ingest_result(
                 _rel(path), result["source_type"], result["content_hash"], result
             )
@@ -684,9 +714,10 @@ def kb_ingest_content(
         # ingest_source falls through to its LLM extraction path. Claude
         # Code mode stays default (explicit extraction dict).
         if extraction is None:
-            result = ingest_source(file_path, source_type)
+            # Cycle 19 AC15 — owner-module attribute call.
+            result = ingest_pipeline.ingest_source(file_path, source_type)
         else:
-            result = ingest_source(file_path, source_type, extraction=extraction)
+            result = ingest_pipeline.ingest_source(file_path, source_type, extraction=extraction)
     except Exception as e:
         # Clean up orphaned file before returning error
         try:

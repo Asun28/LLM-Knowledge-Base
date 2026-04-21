@@ -299,7 +299,22 @@ _CAPTURE_SCHEMA = {
 # format-string with named placeholders (max_items, boundary_start, content,
 # boundary_end) rather than a JSON-Schema `extract:` mapping. Hardcoded
 # filename keeps the loader path caller-inaccessible (threat T11).
-_PROMPT_TEMPLATE = (TEMPLATES_DIR / "capture_prompt.txt").read_text(encoding="utf-8")
+#
+# Cycle 19 AC15 — lazy load. Previously this ran at import time, which meant
+# any importlib.reload(kb.config) in a test (e.g. cycle-15 TestContainmentT8)
+# that contaminated TEMPLATES_DIR with a tmp path would leak into subsequent
+# kb.capture import-time reads on other test modules. Loading lazily from a
+# cached function-scope variable makes the read robust to stale
+# PROJECT_ROOT / TEMPLATES_DIR snapshots.
+_PROMPT_TEMPLATE: str | None = None
+
+
+def _get_prompt_template() -> str:
+    """Return the capture prompt template body, loading lazily on first use."""
+    global _PROMPT_TEMPLATE
+    if _PROMPT_TEMPLATE is None:
+        _PROMPT_TEMPLATE = (TEMPLATES_DIR / "capture_prompt.txt").read_text(encoding="utf-8")
+    return _PROMPT_TEMPLATE
 
 
 _FENCE_END_RE = re.compile(r"-{2,}\s*END\s+INPUT\s*-{2,}", re.IGNORECASE)
@@ -344,7 +359,7 @@ def _extract_items_via_llm(content: str) -> dict:
     else:
         raise ValueError("boundary collision after 3 retries — input may be adversarial")
 
-    prompt = _PROMPT_TEMPLATE.format(
+    prompt = _get_prompt_template().format(
         max_items=CAPTURE_MAX_ITEMS,
         boundary_start=boundary_start,
         boundary_end=boundary_end,

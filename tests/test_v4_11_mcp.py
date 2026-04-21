@@ -11,7 +11,8 @@ from kb.mcp.core import kb_query
 
 @pytest.fixture
 def mocked_query_wiki():
-    with patch("kb.mcp.core.query_wiki") as m:
+    # Cycle 19 AC15 — patch owner module.
+    with patch("kb.query.engine.query_wiki") as m:
         yield m
 
 

@@ -7,7 +7,9 @@ class TestKbQueryMaxResultsForwarding:
     """kb_query with use_api=True must forward max_results."""
 
     def test_max_results_forwarded_in_api_mode(self):
-        with patch("kb.mcp.core.query_wiki") as mock_qw:
+        # Cycle 19 AC15 — patch owner module so the new mcp/core.py call site
+        # `query_engine.query_wiki(...)` resolves the patched attribute.
+        with patch("kb.query.engine.query_wiki") as mock_qw:
             mock_qw.return_value = {
                 "answer": "test",
                 "citations": [],
@@ -96,8 +98,9 @@ class TestKbQueryTrustNone:
                 "trust": None,
             }
         ]
-        with patch("kb.mcp.core.search_pages", return_value=mock_results):
-            with patch("kb.mcp.core.compute_trust_scores", return_value={}):
+        # Cycle 19 AC15 — patch owner modules.
+        with patch("kb.query.engine.search_pages", return_value=mock_results):
+            with patch("kb.feedback.reliability.compute_trust_scores", return_value={}):
                 from kb.mcp.core import kb_query
 
                 result = kb_query("test")

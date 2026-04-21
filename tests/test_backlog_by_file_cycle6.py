@@ -45,7 +45,10 @@ class TestKbIngestContentUseApi:
         # Redirect SOURCE_TYPE_DIRS so we don't write into the real raw/.
         fake_dir = tmp_path / "articles"
         monkeypatch.setattr(mcp_core, "SOURCE_TYPE_DIRS", {"article": fake_dir})
-        monkeypatch.setattr(mcp_core, "ingest_source", _fake_ingest_source)
+        # Cycle 19 AC15 — patch owner module.
+        import kb.ingest.pipeline as _pipeline
+
+        monkeypatch.setattr(_pipeline, "ingest_source", _fake_ingest_source)
 
         result = mcp_core.kb_ingest_content(
             content="body",

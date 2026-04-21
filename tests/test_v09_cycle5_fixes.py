@@ -135,8 +135,12 @@ def test_kb_query_claude_code_instructions_use_wikilinks(monkeypatch):
         "score": 1.0,
         "content": "RAG content.",
     }
-    monkeypatch.setattr(core, "search_pages", lambda *args, **kwargs: [page])
-    monkeypatch.setattr(core, "compute_trust_scores", lambda: {})
+    # Cycle 19 AC15 — patch owner modules so MCP call sites intercept.
+    import kb.feedback.reliability as _rel
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "search_pages", lambda *args, **kwargs: [page])
+    monkeypatch.setattr(_rel, "compute_trust_scores", lambda: {})
 
     output = core.kb_query("What is RAG?")
 

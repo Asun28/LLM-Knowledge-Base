@@ -116,7 +116,9 @@ def test_h16_bad_request_too_long_returns_prompt_too_long_tag(monkeypatch):
     def _raise(question, **kw):
         raise err
 
-    monkeypatch.setattr(core_mod, "query_wiki", _raise)
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "query_wiki", _raise)
 
     result = core_mod.kb_query("some question", use_api=True)
 
@@ -134,7 +136,9 @@ def test_h16_bad_request_generic_returns_invalid_input_tag(monkeypatch):
     def _raise(question, **kw):
         raise err
 
-    monkeypatch.setattr(core_mod, "query_wiki", _raise)
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "query_wiki", _raise)
 
     result = core_mod.kb_query("some question", use_api=True)
 
@@ -152,7 +156,9 @@ def test_h16_rate_limit_error_returns_rate_limit_tag(monkeypatch):
     def _raise(question, **kw):
         raise err
 
-    monkeypatch.setattr(core_mod, "query_wiki", _raise)
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "query_wiki", _raise)
 
     result = core_mod.kb_query("some question", use_api=True)
 
@@ -166,7 +172,9 @@ def test_h16_llm_error_returns_internal_tag(monkeypatch):
     def _raise(question, **kw):
         raise LLMError("retry exhausted")
 
-    monkeypatch.setattr(core_mod, "query_wiki", _raise)
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "query_wiki", _raise)
 
     result = core_mod.kb_query("some question", use_api=True)
 
@@ -183,7 +191,9 @@ def test_h16_unexpected_exception_returns_internal_tag(monkeypatch):
     def _raise(question, **kw):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(core_mod, "query_wiki", _raise)
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "query_wiki", _raise)
 
     result = core_mod.kb_query("some question", use_api=True)
 
@@ -207,7 +217,9 @@ def test_h18_claude_code_mode_calls_rewrite_query_with_context(monkeypatch, tmp_
 
     monkeypatch.setattr(core_mod, "rewrite_query", spy_rewrite)
     # Return empty results so we get the "no pages found" path — avoids full wiki setup
-    monkeypatch.setattr(core_mod, "search_pages", lambda *a, **kw: [])
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "search_pages", lambda *a, **kw: [])
 
     core_mod.kb_query("What is it?", conversation_context="User asked about RAG earlier.")
 
@@ -228,7 +240,9 @@ def test_h18_claude_code_mode_skips_rewrite_when_no_context(monkeypatch):
         return question
 
     monkeypatch.setattr(core_mod, "rewrite_query", spy_rewrite)
-    monkeypatch.setattr(core_mod, "search_pages", lambda *a, **kw: [])
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "search_pages", lambda *a, **kw: [])
 
     core_mod.kb_query("What is RAG?", conversation_context="")
 
