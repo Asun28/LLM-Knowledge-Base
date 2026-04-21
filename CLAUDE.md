@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (Quick Reference table at top of `[Unreleased]`). Latest full-suite count: 2725 tests across 230 test files; last full run was 2716 passed + 9 skipped (cycle 22 — includes the 5 cycle-22 regression pins in `tests/test_cycle22_wiki_guard_grounding.py`, 1 of which skips on Windows without admin-symlink privilege). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (brief compact index, newest first; full per-cycle detail in `CHANGELOG-history.md`). Latest full-suite count: 2725 tests across 230 test files; last full run was 2716 passed + 9 skipped (cycle 22 — includes the 5 cycle-22 regression pins in `tests/test_cycle22_wiki_guard_grounding.py`, 1 of which skips on Windows without admin-symlink privilege). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 
@@ -110,7 +110,7 @@ All paths, model tiers, page types, and confidence levels are defined in `kb.con
 
 **Key APIs** (non-obvious behavior — for full signatures, read the source):
 - `call_llm(prompt, tier="write")` / `call_llm_json(prompt, tier, schema)` — In `kb.utils.llm`. Tiers: `scan` (Haiku), `write` (Sonnet), `orchestrate` (Opus). Routes to a CLI subprocess backend when `KB_LLM_BACKEND` is set (non-`"anthropic"` value); otherwise uses the Anthropic SDK path unchanged. `call_llm_json` uses forced tool_use on the Anthropic path for guaranteed structured JSON; on CLI backends, uses three-stage text extraction + `jsonschema.validate`. Raises `LLMError` on failure, `ValueError` on invalid tier. **Config helpers**: `get_cli_backend() -> str` (reads `KB_LLM_BACKEND` at call time; default `"anthropic"`; raises `ValueError` on unknown); `get_cli_model(tier) -> str` (respects `KB_CLI_MODEL_<TIER>` env override).
-- `ingest_source(path, source_type=None, extraction=None, *, defer_small=False, wiki_dir=None)` — In `kb.ingest.pipeline`. Returns dict with `pages_created`, `pages_updated`, `pages_skipped`, `affected_pages`, `wikilinks_injected`, and `duplicate: True` on hash match. Pass `extraction` dict to skip LLM call (Claude Code mode). Pass `wiki_dir` to write to a custom wiki directory (default: `WIKI_DIR`).
+- `ingest_source(path, source_type=None, extraction=None, *, defer_small=False, wiki_dir=None)` — In `kb.ingest.pipeline`. Returns dict with `pages_created`, `pages_updated`, `pages_skipped`, `affected_pages`, `wikilinks_injected`, and `duplicate: True` on hash match. Pass `extraction` dict to skip LLM call (Claude Code mode). Pass `wiki_dir` to write to a custom wiki directory (default: `WIKI_DIR`). Raises `ValidationError` if `path` resolves inside the effective wiki directory — closes the circular-knowledge loop where LLM-generated pages could be re-ingested as raw sources (cycle 22 AC1-AC4; message contains no absolute path).
 - `load_all_pages(wiki_dir=None)` / `scan_wiki_pages(wiki_dir=None)` / `page_id(page_path, wiki_dir=None)` — In `kb.utils.pages`. `load_all_pages` returns list of dicts. `page_id` lowercases IDs and preserves subdir separators; use the stored page `path` for filesystem I/O when case matters. **Gotcha**: `content_lower` field is pre-lowercased (for BM25), not verbatim. Cycle 14 AC23 adds an additive `status` key (empty string when absent).
 - `save_page_frontmatter(path, post)` — In `kb.utils.pages`. Cycle 14 AC16 — the single enforcement point for key-order-preserving writes. Rigid contract: calls `atomic_text_write(frontmatter.dumps(post, sort_keys=False), path)`. USE THIS for any write-back that reads via `frontmatter.load` and needs to preserve metadata insertion order (Evidence Trail sentinel, downstream YAML-diff tools). The three augment write-back sites (`_record_verdict_gap_callout`, `_mark_page_augmented`, `_record_attempt` in `kb.lint.augment`) use this wrapper.
 - `slugify(text)` / `yaml_escape(value)` — In `kb.utils.text`. Single source of truth — imported everywhere, never duplicate.
@@ -322,8 +322,8 @@ Key usage:
 
 ## Implementation History & Roadmap
 
-- **Shipped:** see `CHANGELOG.md` (current cycles) and `CHANGELOG-history.md` (v0.3.0 → v0.10.0 archive). Format: [Keep a Changelog](https://keepachangelog.com/) with Added/Changed/Fixed/Removed.
-- **Open work:** see `BACKLOG.md` — severity levels CRITICAL → LOW, grouped by file. Resolved items are deleted (fix recorded in `CHANGELOG.md`); resolved phases collapse to a one-liner under "Resolved Phases".
+- **Shipped:** see `CHANGELOG.md` (brief compact index, newest first — compact Items / Tests / Scope / Detail per cycle) and `CHANGELOG-history.md` (full per-cycle bullet-level archive). Format: [Keep a Changelog](https://keepachangelog.com/).
+- **Open work:** see `BACKLOG.md` — severity levels CRITICAL → LOW, grouped by file. Resolved items are deleted (brief entry in `CHANGELOG.md`, detail in `CHANGELOG-history.md`); resolved phases collapse to a one-liner under "Resolved Phases".
 - **Roadmap (Phase 5 deferred + Phase 6 cut):** see `BACKLOG.md` §"Phase 5 — Community followup proposals" and §"Phase 6 candidates". Includes the 2026-04-13 Karpathy-gist re-evaluation ("RECOMMENDED NEXT SPRINT") and all deferred features (inline claim tags, URL-aware ingest, semantic chunking, typed graph relations, autonomous research loop, etc.).
 
 ## Automation
@@ -331,11 +331,12 @@ Key usage:
 No auto-commit hooks. Doc updates and commits are done manually when ready to push.
 
 ### BACKLOG.md lifecycle
-Resolved items are **deleted** from `BACKLOG.md` (the fix is recorded in `CHANGELOG.md`). When all items in a phase section are resolved, the section collapses to a one-liner under "Resolved Phases" (e.g., `- **Phase 3.92** — all items resolved in v0.9.11`). This keeps the backlog focused on open work only.
+Resolved items are **deleted** from `BACKLOG.md` (brief entry added to `CHANGELOG.md [Unreleased]` Quick Reference; full detail added to `CHANGELOG-history.md`). When all items in a phase section are resolved, the section collapses to a one-liner under "Resolved Phases" (e.g., `- **Phase 3.92** — all items resolved in v0.9.11`). This keeps the backlog focused on open work only.
 
 ### Doc update checklist (before push)
 When asked to update docs, review `git diff` and update as needed:
-- `CHANGELOG.md` — add entries under `[Unreleased]`
+- `CHANGELOG.md` — add compact Items / Tests / Scope / Detail entry under `[Unreleased]` Quick Reference (newest first)
+- `CHANGELOG-history.md` — add full per-cycle bullet-level detail (newest first)
 - `BACKLOG.md` — **delete** resolved items (never strikethrough); collapse empty phase sections
 - `CLAUDE.md` — update version numbers, test counts, module/tool counts, API docs
 - `README.md` — update if user-facing features or setup changed

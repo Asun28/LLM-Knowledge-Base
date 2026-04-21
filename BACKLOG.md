@@ -25,8 +25,9 @@ Rules:
 - Include line numbers only when they add precision (e.g. `file.py:273`).
 - End with `(fix: ...)` when the remedy is non-obvious or involves a design choice.
 - One bullet = one issue. Don't combine unrelated problems.
-- When resolving an item, delete it (don't strikethrough). Record the fix in CHANGELOG.md.
+- When resolving an item, delete it (don't strikethrough). Record a brief newest-first summary in CHANGELOG.md and put implementation detail in CHANGELOG-history.md.
 - Move resolved phases under "## Resolved Phases" with a one-line summary.
+- Changelog order rule: all changelog entries are newest first by date. CHANGELOG.md stays brief; CHANGELOG-history.md carries the detail.
 -->
 
 ---
@@ -36,10 +37,10 @@ Rules:
 | File | Role | Update rule |
 |------|------|-------------|
 | **BACKLOG.md** ← you are here | Open work only, ranked by severity | Add on discovery; **delete** on resolve |
-| [CHANGELOG.md](CHANGELOG.md) | Every shipped change, newest first (2026-04-16+) | Every merge to main |
-| [CHANGELOG-history.md](CHANGELOG-history.md) | Archive: Phase 4.5 CRITICAL (2026-04-15) and older releases | Read-only after initial split; new archive entries require explicit split from CHANGELOG.md |
+| [CHANGELOG.md](CHANGELOG.md) | Brief shipped-change index, newest first | Add compact Items / Tests / Scope / Detail entry for every shipped cycle |
+| [CHANGELOG-history.md](CHANGELOG-history.md) | Detailed shipped-change archive, newest first | Add or move full per-cycle details here; keep CHANGELOG.md brief |
 
-**Resolve lifecycle:** Delete item here → record fix in `CHANGELOG.md [Unreleased]` → done.
+**Resolve lifecycle:** Delete item here → add brief entry in `CHANGELOG.md [Unreleased]` → add detail in `CHANGELOG-history.md` → done.
 
 > **For all LLMs (Sonnet 4.6 · Opus 4.7 · Codex/GPT-5.4):** BACKLOG = open work; CHANGELOG = shipped fixes. If an item says _"see CHANGELOG"_, it is resolved and can be safely deleted from this file.
 
@@ -172,6 +173,30 @@ _All items resolved — see CHANGELOG cycle 13._
 <!-- Cycle 13 closed: AC7 sweep_orphan_tmp on kb.cli:cli boot ({.data, WIKI_DIR}); AC8 +
      _resolve_raw_dir helper derives run_augment raw_dir from wiki_dir.parent / "raw" when
      wiki_dir is overridden and raw_dir omitted. -->
+
+---
+
+## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
+
+<!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
+     running Rounds 1 and 2 against feat/kb-capture. Primary scope: new kb.capture module + supporting changes.
+     Items grouped by severity, keyed by file. Round tag in parens (R1/R2). -->
+
+<!-- 2026-04-17 cleanup pass verified R1/R2/R3 HIGH, MEDIUM, and LOW items fixed in capture.py;
+     remaining entries below are genuinely open. -->
+
+### CRITICAL
+
+- `capture.py:341-372, 428-460` two-pass write architecture needed — STRUCTURAL: `alongside_for[i]` is a frozen list built from Phase A slugs and never recomputed after a Phase C slug reassignment. Items 0..i-1 already written to disk retain `captured_alongside` entries pointing at item i's Phase A slug (which was never written) under cross-process collision. Only complete fix is two-pass: Pass 1 = `O_EXCL`-reserve all N slugs with retry; Pass 2 = compute `alongside_for` from finalized slugs, write all files. Documented as "v1 limitation" in `_write_item_files` docstring. (R3)
+  (fix: implement two-pass `_write_item_files`; OR keep TODO(v2) marker and document explicitly in `CaptureResult` docstring)
+
+### MEDIUM
+
+- `capture.py:209-238` `_PROMPT_TEMPLATE` inline string vs templates/ convention — all other LLM prompts live as YAML files in `templates/` loaded via `load_template()`. R2 NIT refined: existing `templates/*.yaml` define JSON-Schema `extract:` fields for `build_extraction_schema()` — a structurally different purpose, so a plain format-string prompt does not fit there. (R1 + R2 NIT)
+  (fix: `templates/capture_prompt.txt` in a new `prompts/` subdirectory; OR keep inline but extract to named module-level constant with comment)
+
+- `config.py:40-53` + `CLAUDE.md` architectural contradiction — `CAPTURES_DIR = RAW_DIR / "captures"` places the capture write target inside `raw/`, which CLAUDE.md defines as "Immutable source documents. The LLM reads but **never modifies** files here." `raw/captures/` is the only LLM-written output directory inside `raw/`. (R1)
+  (fix: either (a) move `CAPTURES_DIR` to `captures/` at project root, or (b) carve out an explicit exception in CLAUDE.md and the config comment)
 
 ---
 
@@ -556,67 +581,6 @@ calls) are now load-bearing walls that block the enterprise path.
 - **Enterprise ceiling (Epsilla)** — document explicit scope: personal-scale research KB, not multi-user enterprise; no RBAC, no compliance audit log, file-I/O limits at millions-of-docs scale.
 - **Vibe-thinking critique (HN)** — *"Deep writing means coming up with things through the process of producing"*; defend with mandatory human-review gates on promotion, not optional.
 
----
-
-## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
-
-<!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
-     running Rounds 1 and 2 against feat/kb-capture. Primary scope: new kb.capture module + supporting changes.
-     Items grouped by severity, keyed by file. Round tag in parens (R1/R2). -->
-
-<!-- 2026-04-17 cleanup pass verified R1/R2/R3 HIGH, MEDIUM, and LOW items fixed in capture.py;
-     remaining entries below are genuinely open. -->
-
-### CRITICAL
-
-- `capture.py:341-372, 428-460` two-pass write architecture needed — STRUCTURAL: `alongside_for[i]` is a frozen list built from Phase A slugs and never recomputed after a Phase C slug reassignment. Items 0..i-1 already written to disk retain `captured_alongside` entries pointing at item i's Phase A slug (which was never written) under cross-process collision. Only complete fix is two-pass: Pass 1 = `O_EXCL`-reserve all N slugs with retry; Pass 2 = compute `alongside_for` from finalized slugs, write all files. Documented as "v1 limitation" in `_write_item_files` docstring. (R3)
-  (fix: implement two-pass `_write_item_files`; OR keep TODO(v2) marker and document explicitly in `CaptureResult` docstring)
-
-### MEDIUM
-
-- `capture.py:209-238` `_PROMPT_TEMPLATE` inline string vs templates/ convention — all other LLM prompts live as YAML files in `templates/` loaded via `load_template()`. R2 NIT refined: existing `templates/*.yaml` define JSON-Schema `extract:` fields for `build_extraction_schema()` — a structurally different purpose, so a plain format-string prompt does not fit there. (R1 + R2 NIT)
-  (fix: `templates/capture_prompt.txt` in a new `prompts/` subdirectory; OR keep inline but extract to named module-level constant with comment)
-
-- `config.py:40-53` + `CLAUDE.md` architectural contradiction — `CAPTURES_DIR = RAW_DIR / "captures"` places the capture write target inside `raw/`, which CLAUDE.md defines as "Immutable source documents. The LLM reads but **never modifies** files here." `raw/captures/` is the only LLM-written output directory inside `raw/`. (R1)
-  (fix: either (a) move `CAPTURES_DIR` to `captures/` at project root, or (b) carve out an explicit exception in CLAUDE.md and the config comment)
-
----
-
-## Phase 5 pre-merge (feat/phase-5-kb-lint-augment, 2026-04-15)
-
-<!-- All items resolved in cycle 17. See CHANGELOG.md cycle 17. -->
-
-_All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC12/AC13 — `run_augment(resume=...)` wired through CLI + MCP with shared `_validate_run_id` 8-hex validator)._
-
----
-
-## Cycle 22 candidates (surfaced during cycle 21 — epistemic hardening)
-
-<!-- Surfaced from "bad info in the wiki" audit (2026-04-21). Four targeted hardening items
-     that close the gap between the architecture's epistemic intent and its enforcement.
-     Items 1-2 are low-effort correctness fixes; items 3-4 are feature additions. -->
-
-### LOW
-
-- `ingest/pipeline.py` `ingest_source` — no guard prevents ingesting a `wiki/` path as a raw source. If a caller passes a path inside `WIKI_DIR` (e.g. `kb ingest wiki/entities/foo.md`), the file is treated as an external source, extracted, and its LLM-generated content re-enters as if it were ground truth. Closes the circular-knowledge loop that the `raw/`-immutability invariant is meant to prevent.
-  (fix: at the top of `ingest_source`, validate that `path.resolve()` is NOT inside `WIKI_DIR.resolve()`; raise `ValidationError("wiki pages cannot be used as ingest sources")`)
-
-- `ingest/extractors.py` + `templates/*.yaml` extraction grounding constraint — the extraction LLM call has no explicit instruction to stay within the source text. The model can silently inject "known" facts from its training data that are absent from the source; `confidence: stated` on such claims is misleading. The `authored_by` and `confidence` fields exist in the schema but the prompt doesn't enforce them.
-  (fix: add a grounding constraint to every extraction system prompt: "Only include claims that appear verbatim or paraphrasably in the provided source text. Anything you infer without direct textual support must be marked `confidence: inferred`, not `stated`." No code changes — prompt-template edit only)
-
----
-
-## Cycle 21 candidates (surfaced during cycle 20)
-
-<!-- Cycle 20 follow-ups. Effort estimates in parentheses. -->
-
-### LOW
-
-- `tests/` inspect.getsource regression pins (cycle-11 L1 anti-pattern) — `tests/test_cycle5_hardening.py::test_synthesis_prompt_uses_wikilink_citation_format` still uses `inspect.getsource(query_wiki) + inspect.getsource(_query_wiki_body)` to assert the wikilink prompt format. Cycle-20 updated it to concatenate both functions after the trampoline refactor, but the assertion remains source-string-based and would survive a full revert of the prompt as long as the string appears anywhere in either function body. A behavioural rewrite would monkeypatch `call_llm` and assert the rendered prompt contains `[[page_id]]` in the actual prompt argument — catches revert properly. *(Deferred — not a regression; existing coverage is adequate.)*
-  (effort: Low — replace source-scan with monkeypatched call_llm prompt inspection)
-
----
-
 ## Resolved Phases
 
 - **Phase 3.92** — all items resolved in v0.9.11
@@ -627,3 +591,5 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC
 - **Phase 3.97** — all items resolved in v0.9.16
 - **Phase 4 post-release audit** — all items resolved (23 HIGH + ~30 MEDIUM + ~30 LOW) in CHANGELOG.md [Unreleased]
 - **Phase 5 three-round code review (2026-04-17)** — all items resolved in CHANGELOG `[Unreleased]` Backlog-by-file cycle 1 (3 HIGH: raw_dir threading, ingest raw_dir parameter, manifest failed-state advance; 4 MEDIUM: data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)
+- **Phase 5 pre-merge lint augment (2026-04-15)** — all items resolved in CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC12/AC13)
+- **Cycle 21/22 candidates** — all open candidate items resolved in CHANGELOG `[Unreleased]` cycle 22 (wiki-path guard, extraction grounding clause, inspect-source test rewrite)

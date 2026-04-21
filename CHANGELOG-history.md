@@ -1,15 +1,95 @@
 # Changelog — Historical Archive
 
-> **Reading guide:** This file is the full-detail reference archive. High-level summaries of all cycles live in [CHANGELOG.md](CHANGELOG.md); per-item bullet-level detail lives here.
+> **Reading guide:** This file is the full-detail reference archive. Keep entries newest first. High-level summaries of all cycles live in [CHANGELOG.md](CHANGELOG.md); per-item bullet-level detail lives here.
 > Cross-reference: [BACKLOG.md](BACKLOG.md) for open work.
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-04-20
+## Active-unreleased archive — 2026-04-16 to 2026-04-22
 
-> Detailed per-cycle entries migrated from CHANGELOG.md. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail lives here.
+> Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
-### Phase 4.5 -- Backlog-by-file cycle 16 (2026-04-20)
+### Phase 4.5 — cycle 22 (2026-04-22)
+
+14 AC / 3 src + 2 new tests / 11 commits. Tests: 2720 → 2725 (+5; 1 Windows-skip).
+
+**Pre-Phase-5 backlog hardening.** Targeted cleanup cycle covering three production gaps (all Cycle 21 / 22 backlog candidates) + nine stale BACKLOG items that were verified already-resolved in prior cycles (17, 18, 19).
+
+**Group A — `src/kb/ingest/pipeline.py` wiki-path guard (AC1-AC4).** `ingest_source` now raises `kb.errors.ValidationError("Source path must not resolve inside wiki/ directory")` when the resolved `source_path` is inside the resolved `effective_wiki_dir`. Closes the circular-knowledge loop where an LLM-generated wiki page could be re-ingested as if it were a raw source, defeating the `raw/` immutability invariant. Guard mirrors the existing raw-dir pattern (`os.path.normcase` on both sides + `Path.relative_to`) so symlinks / junctions (T1) and Windows case variants (T2) cannot bypass. Message is a fixed string — no `source_path` interpolation — so absolute wiki paths never leak through CLI / MCP logs (T3). Placed BEFORE the raw-dir check so wiki paths surface the specific error instead of the generic `ValueError: must be within raw/`; placed BEFORE the `_emit_ingest_jsonl("start", ...)` emission at line ~1222 so rejected wiki paths never produce an orphan `stage="start"` row in `ingest_log.jsonl` (cycle-18 L3 orphan-start rule). `effective_wiki_dir` computation moved up next to `effective_raw_dir` to enable this placement. `ValidationError` added to the existing `from kb.errors import ...` line. Asymmetry with the raw-dir guard's legacy `ValueError` is accepted this cycle — follow-up cycle 23 will migrate under its own caller-grep gate (Q1 design-gate decision).
+
+**Group B — `src/kb/ingest/extractors.py` grounding clause (AC5, AC6).** `build_extraction_prompt` output now contains the exact phrase `Ground every extracted field in verbatim source content. When uncertain whether a claim is in the source, use null.` positioned immediately AFTER the existing "If a field cannot be determined from the source, use null." line AND BEFORE the `<source_document>` sentinel fence, so adversarial raw content inside the fence cannot reflect a counter-instruction (T6). Single-point change in the shared prompt builder applies universally to all 10 source-type extractions — no per-YAML edits. Best-effort advisory only; claim-level provenance verification remains tracked under Phase 5 HIGH LEVERAGE epistemic-integrity backlog items.
+
+**Group C — `tests/test_cycle5_hardening.py` spy replacement (AC7-AC9).** `test_synthesis_prompt_uses_wikilink_citation_format` dropped its `inspect.getsource(engine.query_wiki) + inspect.getsource(engine._query_wiki_body)` substring check (survived a full revert — cycle-11 L1 / `feedback_inspect_source_tests`) in favour of a monkeypatched `kb.query.engine.call_llm` spy that captures the actual prompt string sent to the synthesiser. Assertions now pair: `spy.call_count >= 1` (AC9 vacuous-test guard per cycle-16 L2), `any("[[page_id]]" in p for p in captured_prompts)` (AC8 positive), and `not any("[source: page_id]" in p for p in captured_prompts)` (AC8 negative — Step 08 plan-gate gap close). Module-attribute spy target catches BOTH the trampoline (`query_wiki`) and the inner `_query_wiki_body` call sites without path-dependent assertions. The now-unused top-level `import inspect` removed.
+
+**Group E — `tests/test_cycle22_wiki_guard_grounding.py` (new, AC10-AC13).** Four regression pins: AC10 asserts `ingest_source` raises `ValidationError` for a path inside the default `WIKI_DIR` AND the message contains no absolute path substring (T3 pin); AC11 asserts the same for a caller-supplied `wiki_dir=<custom>` arg; AC12 asserts a legitimate `raw/articles/*.md` path passes the guard and reaches the extraction pipeline (revert-detector — if the guard wires to `raw_dir` by mistake or rejects everything, this test fails); AC13 asserts `build_extraction_prompt` output for article / paper / repo / video / podcast templates all contain the grounding clause AND the clause index < `<source_document>` fence index. `ValidationError` is imported inside each test function to late-bind against the current `kb.errors` module object — defeats the cycle-20 L1 reload-drift class.
+
+**Group F — docs + BACKLOG cleanup (AC14).** Nine verified-resolved items removed from BACKLOG.md:
+1. `tests/test_v0p5_purpose.py` purpose-threading coverage gap — closed by `tests/test_v0p5_purpose.py:97` (`test_cycle17_ac14_query_wiki_threads_purpose_to_synthesis_prompt`).
+2. `compile/compiler.py:367-380` full-mode manifest pruning — closed by cycle-17 AC1 prune-base fix (`raw_dir.resolve().parent` + `file_lock` symmetry).
+3. `compile/compiler.py:343-347` manifest write hash-key inconsistency — closed by cycle-19 AC12/AC13 `manifest_key_for` threading (evidence: `tests/test_cycle19_manifest_key_consistency.py`).
+4. `compile/linker.py:178-241` `inject_wikilinks` cascade-call write race — closed by cycle-19 per-page `file_lock` + `inject_wikilinks_batch`.
+5. `models/page.py` dataclasses are dead — closed by cycle-17 keep-and-document decision (`tests/test_cycle17_models_dead_code.py`).
+6. `ingest/pipeline.py` observability — closed by cycle-18 AC11-AC13 `_emit_ingest_jsonl` + 16-hex `request_id` correlation (`tests/test_cycle18_ingest_observability.py`).
+7. `tests/` thin MCP tool coverage — closed by cycle-17 `tests/test_cycle17_mcp_tool_coverage.py` (covers `kb_compile_scan`, `kb_graph_viz`, `kb_verdict_trends`, `kb_detect_drift`). This discovery at Step-04 R2 Codex review dropped the planned Group D (8 redundant MCP tests) from cycle 22 entirely.
+8. `ingest/pipeline.py:712-721` inject_wikilinks per-page loop — closed by cycle-19 AC1 `inject_wikilinks_batch`.
+9. `ingest/pipeline.py:682-693` manifest hash-key race under concurrent ingest — closed by cycle-19 atomic `_is_duplicate_content_and_reserve` under `file_lock(HASH_MANIFEST)`. CHANGELOG breadcrumb per item mitigates re-add (T11). CLAUDE.md test-count updated atomically at both stale locations (Implementation Status + Testing section) per cycle-20 L2 drift-class rule; count reflects post-cycle-22 `pytest --collect-only` output.
+
+**Step-10 CI reload-drift fixes.** Full-suite pytest exposed two reload-leak classes that isolated-run cycle-22 tests didn't hit:
+1. **cycle-18 L1 snapshot-bind**: the new wiki-path guard used the module-top `from kb.config import WIKI_DIR` snapshot; under full-suite ordering a sibling test's `importlib.reload(kb.config)` decouples the snapshot from the current `kb.config.WIKI_DIR` and `tmp_kb_env`'s mirror-rebind equality check skips the rebind. Fix: guard now does `import kb.config as _kb_config` + attribute access at call time. Existing `effective_wiki_dir` snapshot unchanged (cycle-18 L1 rule: do not refactor working patterns proactively).
+2. **cycle-20 L1 reload-drift on exception classes**: AC10/AC11 test functions imported `ValidationError` from `kb.errors` at entry; under reload-leak cascade, production `kb.ingest.pipeline.ValidationError` retains the OLD class pointer while `kb.errors.ValidationError` is a NEW class — `pytest.raises(OLD_CLS)` couldn't catch the `NEW_CLS` instance. Fix: late-bind via `pipeline_mod.ValidationError` so tests catch exactly what production raises.
+3. **cycle-19 L2 reload-leak on `TEMPLATES_DIR`**: AC13 hit a stale `_load_template_cached` LRU binding after cycle-15's reload. Fix: monkeypatch `kb.ingest.extractors.TEMPLATES_DIR` back to the canonical repo templates dir at test entry.
+4. **AC12 hermetic refactor**: passes explicit `wiki_dir=` + `raw_dir=` args instead of relying on `tmp_kb_env` autouse patching.
+
+**Threat coverage.** All cycle-22 threats IMPLEMENTED. T7 + T10 marked N/A (Group D dropped). **PR-introduced CVE at Step 11:** `lxml CVE-2026-41066` appeared in branch pip-audit (not in Step-02 baseline — advisory dropped mid-cycle). Patched by bumping `requirements.txt` `lxml==5.4.0` → `lxml==6.1.0`; `crawl4ai==0.8.6` declares `lxml~=5.3` but grep confirms no runtime `import crawl4ai` sites in `src/kb/` (used as external `crwl` CLI only). Post-patch pip-audit shows only the pre-existing `diskcache CVE-2025-69872` (Class A, no upstream fix, tracked in BACKLOG Phase 4.5 MEDIUM). 0 open Dependabot alerts.
+
+### Phase 4.5 — cycle 21 (2026-04-21)
+
+30 AC / 4 src / 1 commit. Tests: 2697 → 2710 (+13). **CLI subprocess backend** — adds `KB_LLM_BACKEND` env-var routing so `call_llm` / `call_llm_json` can dispatch prompts to locally-installed AI CLI tools instead of the Anthropic SDK. The Anthropic path is completely unchanged (default `"anthropic"` value is a no-op). **New constants in `src/kb/config.py`**: `CLI_TOOL_COMMANDS` (MappingProxyType, 8 backends), `CLI_TOOL_MODELS` (scan/write/orchestrate per backend; empty string for single-model CLIs), `CLI_INSTALL_HINTS` (one-line install hint per backend), `CLI_SAFE_ENV_KEYS` (13-key env allowlist), `CLI_BACKEND_ENV_INJECT` (per-backend secret key names), `CLI_VALID_BACKENDS` (frozenset), `CLI_MAX_CONCURRENCY = 2`, `MAX_CLI_STDOUT_BYTES = 2_000_000`, `CLI_PROMPT_VIA_ARG = frozenset({"gemini"})`. **New helpers**: `get_cli_backend() -> str` (reads `KB_LLM_BACKEND` at call time; 32-char cap; unknown value raises `ValueError` without echoing raw env — T7); `get_cli_model(tier) -> str` (respects `KB_CLI_MODEL_<TIER>` override). **New module `src/kb/utils/cli_backend.py`**: `check_cli_available(backend)` via `shutil.which`; `call_cli(prompt, *, backend, model, timeout)` with `shell=False`, scrubbed subprocess env (`_scrub_env`), stdin delivery for all backends except Gemini (`--prompt` arg, weaker isolation documented — T8), `MAX_CLI_STDOUT_BYTES` cap + `_redact_secrets` on stdout before return (T3), redacted stderr on non-zero exit (T3), `LLMError(kind="not_installed")` guard before subprocess dispatch (T2), `LLMError(kind="timeout")` on `TimeoutExpired` (T5), per-backend `threading.Semaphore` with double-checked lazy init under `_semaphore_lock` (T6); `call_cli_json(...)` with three-stage JSON extraction (`json.loads` → fenced-block strip bounded at `MAX_CLI_JSON_SCAN_BYTES` → depth-bounded brace scan) + `jsonschema.validate` (T4); `_check_no_secrets_on_argv` called unconditionally on static argv elements + on Gemini `--prompt` value (T8). **Routing gate in `src/kb/utils/llm.py`**: `get_cli_backend` + `get_cli_model` imported at module top from `kb.config`; inside `call_llm` / `call_llm_json`, `from kb.utils import cli_backend` is a **function-local lazy import** inside the non-anthropic branch only (zero import-time side effects for anthropic-only deployments — AC16). System prompt prepended as `"System: {system}\n\n{prompt}"` when `system` is set. API integration (LiteLLM / per-provider SDK) explicitly deferred to BACKLOG. Security: all 8 threats IMPLEMENTED after Codex Step-11 review closed T4.2 (fence regex bounded), T8.3 (argv token check unconditional), and T1.4 test (stdin round-trip). 0 PR-introduced CVEs.
+
+### Phase 4.5 — cycle 20 (2026-04-21)
+
+21 AC / 10 src / 13 commits (10 feature/test + 1 R1-fix + 1 R2-fix + 1 R3-fix). **Exception taxonomy** (`kb.errors` — HIGH #2 closure): new `KBError(Exception)` base + `IngestError` / `CompileError` / `QueryError` / `ValidationError` / `StorageError` specialisations in a new `src/kb/errors.py` (~75 LOC). `LLMError` (at `kb.utils.llm.py:381`) and `CaptureError` (at `kb.capture.py:544`) reparent from `Exception` to `KBError`; MRO preserves `isinstance(err, Exception)` so every existing outer catch still fires. `StorageError(msg, *, kind=None, path=None)` stores `path` for local-debug introspection but `__str__` emits only `f"{kind}: <path_hidden>"` when both fields are set — prevents log-aggregator filesystem-path disclosure (T1 mitigation). `kb/__init__.py` extends `__all__` and adds a PEP 562 `__getattr__` branch so `from kb import KBError, IngestError, CompileError, QueryError, ValidationError, StorageError` resolves lazily without forcing early `kb.config` load (preserves the `--version` short-circuit). **Narrow AC5 hot-path wraps** at ingest + query outer boundaries only (3-site scope after R1-grep confirmed `compile_wiki` has no single outer `except Exception` — dropped from the AC per cycle-17 L1 blast-radius rule): `ingest_source` outer converts unexpected `Exception` subclasses to `IngestError(str(exc)) from exc`; `query_wiki` split into a thin outer trampoline + `_query_wiki_body` so the trampoline wraps unexpected exceptions to `QueryError`. Expected kinds (`KBError`, `OSError`, `ValueError`) pass through unchanged. `BaseException` subclasses NOT inheriting `Exception` (`KeyboardInterrupt`/`SystemExit`/`GeneratorExit`) propagate without wrap. **Slug-collision O_EXCL hardening** (HIGH #16 closure): `_write_wiki_page(path, ..., *, exclusive: bool = False)` gains a keyword-only `exclusive` flag. When True, uses `os.open(O_WRONLY|O_CREAT|O_EXCL)` plus POSIX `O_NOFOLLOW` (guarded by `hasattr(os, "O_NOFOLLOW")`) and `0o644` mode; on `FileExistsError` raises `StorageError("summary_collision", kind="summary_collision", path=...)`; on write-phase exception AFTER successful O_EXCL reservation, unlinks the zero-byte poison so retries can re-reserve cleanly. Default `exclusive=False` preserves byte-identical legacy `atomic_text_write` path. `_run_ingest_body` summary write (`pipeline.py:1254`) and `_process_item_batch` item write (`pipeline.py:957`) pass `exclusive=True`; on `StorageError(kind="summary_collision")` pivot to `_update_existing_page`. **`_update_existing_page` split** into a thin wrapper + `_update_existing_page_body` under unconditional `file_lock(page_path)` (AC11 / D-NEW-1 — R2 finding); `append_evidence_trail` stays OUTSIDE the lock because it acquires its own sidecar lock and `file_lock` is NOT re-entrant. Thread-A's create + evidence-trail append and Thread-B's merge serialise via the `append_evidence_trail` self-lock + the new `_update_existing_page_body` unconditional lock (no caller-held wrapper — would self-deadlock). **`sweep_stale_pending(hours=168, *, action="mark_failed"|"delete", dry_run=False)` mutation tool** (`src/kb/review/refiner.py`) — counterpart to cycle-19 AC8b's read-only `list_stale_pending`. Matches rows by `attempt_id` equality, NEVER `page_id` (prevents concurrent-refine clobber). `mark_failed` default adds `status="failed"` + `error="abandoned-by-sweep"` + `sweep_id=uuid4().hex[:8]` + `sweep_at=<ISO>` while preserving `attempt_id` + `revision_notes`; `delete` writes a pre-mutation audit line to `wiki/log.md` via `append_wiki_log("sweep", ...)` and — per Step-11 Codex T4 fix — fails CLOSED with `StorageError(kind="sweep_audit_failure")` if the audit write raises `OSError` (no silent audit-free delete). `dry_run=True` returns candidates without mutation. Input validation via `ValidationError` (unknown action or `hours < 1`). Lock: single `file_lock(history_path)` span across load → mutate → save per cycle-19 AC9; compatible with refine_page's page-FIRST / history-SECOND order (sweep holds only the history lock — subset, no deadlock). **New MCP surfaces**: `kb_refine_sweep(hours, action, dry_run)` and `kb_refine_list_stale(hours)` in `mcp/quality.py`, listed in `mcp/app.py:26` `_TOOL_GROUPS` Quality tuple (total decorator count 26 → 28). MCP `kb_refine_list_stale` projects to `{attempt_id, page_id, timestamp, notes_length}` only — `revision_notes` NEVER crosses the MCP boundary (T5 mitigation + brainstorm Q8 resolution). **New CLI subcommands**: `kb refine-sweep --age-hours --action [--dry-run]` and `kb refine-list-stale --hours` — CLI returns the FULL helper dict (local-use exception per T5). **Windows tilde-path regression test** (closes cycle-19 T-13a placeholder): `tests/test_cycle20_windows_tilde_path.py` uses `ctypes.windll.kernel32.GetShortPathNameW` with a 260-char `create_unicode_buffer`, performs a `GetLongPathNameW` roundtrip sanity check (skip if the fixture is vacuous on 8.3-disabled filesystems), then asserts `_canonical_rel_path(long_form) == _canonical_rel_path(short_form)`. 55 new tests across 5 new test files (`test_cycle20_errors_taxonomy`, `test_cycle20_write_wiki_page_exclusive`, `test_cycle20_sweep_stale_pending`, `test_cycle20_list_stale_surfaces`, `test_cycle20_windows_tilde_path`). **Cycle-18 test update**: `test_jsonl_emitted_on_failure` now expects `IngestError` wrap with `__cause__` preserved (AC5/AC7 taxonomy behavior change). **Cycle-5 hardening test update**: `test_synthesis_prompt_uses_wikilink_citation_format` inspects both `query_wiki` and `_query_wiki_body` after the trampoline refactor. **Cycle-8 package-exports test**: `__all__` curated list extended with 6 new kb.errors names. Security: all 7 threats IMPLEMENTED after the Step-11 T3 audit-doc correction + T4 fail-closed fix; 0 PR-introduced CVEs (pip-audit diff vs cycle-20 baseline shows only the existing `diskcache CVE-2025-69872`, still no upstream patch — `Re-checked 2026-04-21`); 0 open Dependabot alerts. AC21 status: `diskcache==5.6.3` LATEST=5.6.3 confirmed via `pip index versions`; fix_versions empty; tracking re-check in next cycle's Step 2.
+
+### Phase 4.5 — cycle 19 (2026-04-21)
+
+23 AC / 6 src / 9 commits (incl. 1 R1-fix commit + 2 doc-update commits). Closes cycle-17 AC21 / cycle-18 deferral on **batch wikilink injection**: new `inject_wikilinks_batch(new_pages, *, pages=None) -> dict[str, list[str]]` in `kb.compile.linker` scans each existing wiki page AT MOST ONCE per chunk via a combined alternation regex; pre-lock peek is candidate-gathering only (cycle-19 AC1b) with under-lock re-derivation of the winning title from FRESH body content; `_run_ingest_body` switches from N per-title `inject_wikilinks` calls to one batch call (replaces the documented 500k-disk-reads hot path at 5k pages × 100 entities/concepts). ReDoS bound: `MAX_INJECT_TITLES_PER_BATCH = 200` chunking + per-title `MAX_INJECT_TITLE_LEN = 500` skip-with-warn (T2 null-byte titles also stripped at entry as defense-in-depth). Chunk-level try/except preserves per-failure granularity (AC6). Wiki/log.md gains a single `inject_wikilinks_batch` audit line per ingest via `append_wiki_log` (AC20 / T5 routes through `_escape_markdown_prefix`). **Manifest-key consistency**: `manifest_key_for = _canonical_rel_path` public alias in `kb.compile.compiler`; `compile_wiki` threads `manifest_key=rel_path` into `ingest_source(...)`; `ingest_source` accepts `manifest_key: str | None = None` keyword-only (AFTER `*` sentinel — R2 N1) with traversal-rejection validation at function entry (rejects `..`, leading `/`/`\`, `\x00`, len > 512); `manifest_ref = manifest_key or source_ref` is derived once and threaded into BOTH `_check_and_reserve_manifest` (Phase 1 reservation) AND the tail confirmation (Phase 2) per R2 M1. **Refine two-phase write**: `refine_page` now writes a `status="pending"` history row tagged with `attempt_id = uuid4().hex[:8]` BEFORE the page-body atomic-write, then flips that row to `applied` or `failed` (with `error` field on OSError) under the SAME `file_lock(history_path)` span (single-span hold-through per cycle-19 AC9). Lock order PRESERVED as `page_path FIRST, history_path SECOND` per cycle-1 H1 contract (AC10 WITHDRAW — module docstring documents the rationale). New `list_stale_pending(hours=24, *, history_path=None)` visibility helper for operators to detect rows that crashed between pending and flip. **MCP monkeypatch migration**: 13 callable monkeypatch sites across 7 test files migrated from `kb.mcp.core.<callable>` to the owner modules (`kb.ingest.pipeline.ingest_source`, `kb.query.engine.query_wiki/search_pages`, `kb.feedback.reliability.compute_trust_scores`); `kb.mcp.core` imports refactored to module-attribute style (`from kb.ingest import pipeline as ingest_pipeline`) with corresponding call-site updates. AC16 documents the snapshot-binding asymmetry for constants (PROJECT_ROOT/RAW_DIR/SOURCE_TYPE_DIRS still patched at `kb.mcp.core.X` directly). 7 vacuity tests pin AC15 owner-module-patch contract per migrated callable + AC16 behavioural snapshot test. **Cycle-15 reload state-leak fix**: `kb.capture._PROMPT_TEMPLATE` switched to lazy load via `_get_prompt_template()` cached helper — defeats the `importlib.reload(kb.config)` snapshot leak from `test_cycle15_cli_incremental.py` that broke any subsequent `kb.mcp.core` test import. **AC18** forward-looking lint: AST-based method-scope detection in `tests/test_cycle19_lint_redundant_patches.py` flags any test method that takes `tmp_kb_env` AND patches `HASH_MANIFEST` directly (cycle-18 D6 fixture already redirects). **AC14 DROP** with test-anchor retention (cycle-15 L2 rule): cycle-17 AC1 already shipped the prune-base consistency fix; cycle-19 retains `tests/test_cycle19_prune_base_consistency_anchor.py` to machine-enforce the shipped form. Tests: 47 new across 7 new test files (`test_cycle19_inject_wikilinks_batch`, `test_cycle19_manifest_key_consistency`, `test_cycle19_refiner_two_phase`, `test_cycle19_mcp_monkeypatch_migration`, `test_cycle19_lint_redundant_patches`, `test_cycle19_prune_base_consistency_anchor`, `test_cycle19_inject_batch_e2e`). Security: all 5 threats IMPLEMENTED (T1 ReDoS, T2 null-byte, T3 manifest_key injection, T4 refine liveness, T5 log injection); same-class peer scan clean; 0 PR-introduced CVEs (existing diskcache `CVE-2025-69872` deferred — no patched upstream). Plan-gate REJECT-WITH-AMENDMENTS resolved 5 amendments: AC12 dual-write, T2 null-byte sanitizer, AC17 DROP per cycle-17 L3 (re-grep showed zero current redundancy), T3 docstring, explicit revert-checks. R3 review triggers: 22 ACs (>15 + new security enforcement + new test surface) — mandatory.
+
+### Phase 4.5 — cycle 18 (2026-04-21)
+
+16 AC / 5 src / 6 commits. Closes five cycle-17 deferrals (AC15 e2e, AC19 observability, AC20 index-files helper, wiki_log rotate-in-lock Q11, linker scalar lock Q12, `tmp_kb_env` HASH_MANIFEST redirection). Adds **structured ingest audit log** at `<PROJECT_ROOT>/.data/ingest_log.jsonl`: one JSON row per emission at `start`/`duplicate_skip`/`success`/`failure` with 16-hex `request_id` correlation; `file_lock` + `open("a") + fsync` writer (NOT `atomic_text_write`); field allowlist enforced at writer boundary; `sanitize_text` redaction on `error_summary` (truncated 2KB); best-effort OSError swallow so telemetry failure never masks ingest outcome. `wiki/log.md` success messages gain `[req=<16-hex>]` prefix that correlates 1:1 with JSONL; duplicate-skip and failure paths remain JSONL-only per Q15. **Rotate-in-lock**: generic `rotate_if_oversized(path, max_bytes, archive_stem_prefix)` public helper extracts current `_rotate_log_if_oversized` logic; `append_wiki_log._write` moves the rotate call INSIDE `file_lock(log_path)` (closes Phase 4.5 HIGH R5 POSIX handle-holding-stale-file race / threat T2); JSONL rotation reuses the helper under its own lock. **Linker per-page lock**: `inject_wikilinks` wraps read-modify-write in `file_lock(page_path, timeout=0.25s)` with **pre-lock cheap read + under-lock re-read** (TOCTOU mitigation / threat T3); no-match / already-linked / self pages acquire ZERO locks (fast-path, threat T8); bounded timeout + skip-with-warning prevents 100s stalls on stuck locks. **Sanitize UNC**: new `sanitize_text(s: str) -> str` sibling to `sanitize_error_text` with shared `_ABS_PATH_PATTERNS`; regex extended to cover ordinary UNC `\\server\share\path` (threat T1). **`_write_index_files` helper** in `pipeline.py` consolidates `_update_sources_mapping` + `_update_index_batch` with sources-BEFORE-index ordering (behavioural change from previous index-then-sources) + INDEPENDENT per-call try/except; both helpers remain module attributes for legacy monkeypatch compat (threat T10). **`tmp_kb_env` HASH_MANIFEST**: fixture patches `kb.compile.compiler.HASH_MANIFEST` separately from the `kb.config` getattr loop; mirror-rebind covers in-process `kb.*` bindings (threat T5). Tests: 44 new across 6 files (`test_cycle18_conftest`, `test_cycle18_wiki_log`, `test_cycle18_sanitize`, `test_cycle18_linker_lock`, `test_cycle18_ingest_observability`, `test_workflow_e2e`). Security: all 10 threats IMPLEMENTED; same-class peer scan clean; 0 PR-introduced CVEs; existing diskcache `CVE-2025-69872` deferred (no patched upstream). Design-gate Q count 21 + R3 triggers (new FS write surface, vacuous-test risk, new security enforcement, ≥10 questions) → R3 review mandatory.
+
+### Phase 4.5 — cycle 17 (2026-04-20)
+
+16 AC / 11 src / 12 commits (incl. Step-11 T2 same-class-peer follow-up).
+Closes three manifest RMW races (`compile_wiki` tail + exception path + `find_changed_sources`
+save branch) via `file_lock(manifest_path)` symmetry. Adds shared
+`_validate_run_id` helper (exact 8-hex via `re.fullmatch`) at
+`src/kb/mcp/app.py`; wires `run_augment(resume=...)` through CLI
+(`kb lint --resume`) and MCP (`kb_lint(resume=...)`) with `--augment`
+dependency check. Switches `Manifest.resume` from glob-prefix to exact-match
+direct path (eliminates the prefix-collision branch as structurally
+unreachable). Adds `templates/capture_prompt.txt` (AC9) and restructures
+`capture._write_item_files` to all-or-nothing two-pass with hidden-temp
+`.{slug}.reserving` reservations + `os.replace` atomic promote +
+rollback-all on mid-batch failure. MCP lazy imports narrowed (AC4): keeps
+kb.query.engine/kb.ingest.pipeline/etc. at module level for legacy-test
+monkeypatch compat; defers `kb.graph.export` from `mcp/health.py` +
+`anthropic`/`frontmatter`/`kb.utils.llm.LLMError`/`kb.utils.pages.save_page_frontmatter`
+inside tool bodies. AC8 documents `WikiPage`/`RawSource` as Phase-5
+migration targets via module docstring + AST inventory test.
+`tmp_kb_env` fixture clears `load_purpose` / `_load_template_cached` /
+`_build_schema_cached` LRU caches on setup (AC16 / Q3). Adds 13 new
+thin-coverage tests for 5 MCP tools (kb_stats, kb_graph_viz,
+kb_verdict_trends, kb_detect_drift, kb_compile_scan). AC14 pins
+`query_wiki(wiki_dir=tmp)` threads `purpose.md` into the synthesis prompt.
+AC18 regression pin prevents a future `KB_PROJECT_ROOT` fallback in
+`load_purpose`. Deferred to cycle 18: AC15 (e2e workflow test), AC19 / AC20
+(ingest observability + IndexWriter helper), AC21 (linker batch). Security:
+all in-scope threats IMPLEMENTED after T2 peer closure; 0 Dependabot
+alerts; empty pip-audit diff; same-class peer scan (cycle-16 L1) closed
+by the `find_changed_sources` save-branch lock.
+
+### Phase 4.5 — Backlog-by-file cycle 16 (2026-04-20)
 
 24 AC across 8 source files + 9 new test files + doc updates / 14 commits (1 Step-11 security-verify N1 fix + 1 R1 fix batch + 1 R2 fix batch + 1 R3 NIT batch). Tests: 2334 → 2464 collected (+130); full suite 2457 passed + 7 skipped (run-time count).
 
@@ -43,7 +123,7 @@
 - Class B pip-audit diff: empty (no PR-introduced CVEs). Pre-existing `diskcache==5.6.3` CVE-2025-69872 remains informational — no upstream fix_versions.
 - Semantic shift disclosure (Q8): `kb_query(save_as=...)` is now a write path; docstring + non-goals doc flag the shift; hardcoded frontmatter (T2) + path validation (T1/T15) + slugify+ASCII whitelist (Q3/C4) guard the boundary.
 
-### Phase 4.5 -- Backlog-by-file cycle 15 (2026-04-20)
+### Phase 4.5 — Backlog-by-file cycle 15 (2026-04-20)
 
 26 AC across 6 source files + 11 new test files + doc updates / 6 commits + 1 R1 PR-review fix commit. Tests: 2245 → 2334 (+89); full suite 2334 collected, 2327 passed + 7 skipped (run-time count).
 
@@ -75,7 +155,7 @@
 - Step-11 verify (Codex): all 10 threat-model items IMPLEMENTED. Class A Dependabot 0 open; Class B pip-audit diff empty; pre-existing `diskcache` CVE remains informational.
 - Operator note (T10c): First post-upgrade `kb publish` run should use `--no-incremental` so any pre-cycle-14 outputs are regenerated under the current epistemic filter (threat T10c).
 
-### Phase 4.5 -- Backlog-by-file cycle 14 (2026-04-20)
+### Phase 4.5 — Backlog-by-file cycle 14 (2026-04-20)
 
 21 AC across 9 source files + 1 new module / 8 implementation commits + planning artifacts + 1 security-verify PARTIAL fix. Tests: 2140 → 2235 (+95); full suite 2235 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 Dependabot alerts, Class B diff empty). Scope: Epistemic-Integrity 2.0 metadata vocabularies (belief_state, authored_by, status), query coverage-confidence refusal gate, per-platform source-decay + tier1-budget helpers, frontmatter-preserving save wrapper with augment write-back migration, Karpathy Tier-1 publish module (`kb publish` + /llms.txt + /llms-full.txt + /graph.jsonld), and status ranking boost.
 
@@ -99,7 +179,7 @@
 #### Security
 - Step-11 verify (Codex): all 10 threat-model items IMPLEMENTED after three follow-up fixes. T1 (traversal guard explicit `..` + `is_relative_to`), T2 (publish epistemic filter), T3 (JSON-LD no-f-string), T4 (save wrapper contract), T5 (advisory no-echo), T6 (decay dot-boundary match), T7 (dropped — existing code covers), T8 (relative POSIX url), T9 (status boost validated), T10 (augment migration complete). Class A Dependabot 0 open; Class B diff empty.
 
-### Phase 4.5 -- Backlog-by-file cycle 13 (2026-04-20)
+### Phase 4.5 — Backlog-by-file cycle 13 (2026-04-20)
 
 8 AC across 5 source files / 7 implementation commits + planning artifacts. Tests: 2119 → 2131 (+12); full suite 2131 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs (Class A baseline 0 alerts, Class B diff empty).
 
@@ -123,7 +203,7 @@
 #### Security
 - Step-11 verify (Codex): all 7 threat-model items IMPLEMENTED. T1 (sweep tmp race): mitigated by helper's 3600s threshold. T2 (raw_dir escape): lexical comparison mirrors cycle-7 effective_data_dir pattern. T3 (graph path type): `Path(path)` inside broad try. T4 (cached stale on FAT32/OneDrive): out-of-scope `_post_ingest_quality` stays uncached. T6 (WIKI_DIR third-party tmp): non-recursive glob. Class A Dependabot 0 open; Class B diff empty.
 
-### Phase 4.5 -- Backlog-by-file cycle 12 (2026-04-19)
+### Phase 4.5 — Backlog-by-file cycle 12 (2026-04-19)
 
 17 AC across 13 files / 10 implementation commits + 1 security-verify PARTIAL fix. Tests: 2089 to 2118 (+29); full suite 2111 passed + 7 skipped. No dependency changes; 0 PR-introduced CVEs.
 
@@ -188,32 +268,6 @@
 - `src/kb/capture.py` — AC14: `CaptureError` exception + `raw/captures` side-effect note (commit `46f0e34`).
 - Tests: 2004 → 2041 (+37 new tests); all passing, 7 Windows-skips (case-insensitive FS + symlinks); 0 new Dependabot alerts.
 - STALE at cycle 10 review (already fixed, removed from BACKLOG): `utils/wiki_log.py` torn-last-line (MEDIUM); `mcp/browse.py` query-length-cap + stale-flag (HIGH-Additional).
-
-### Quick Reference — Unreleased cycles (2026-04-16 · 2026-04-19)
-
-| Cycle | Date | Items | Test Δ | Primary areas |
-|-------|------|-------|--------|---------------|
-| [**backlog-by-file cycle 13**](#phase-45--backlog-by-file-cycle-13-2026-04-20) | 2026-04-20 | 8 AC / 5 src files / 7 commits | 2119 → 2131 (+12) | frontmatter migration (5 read-only sites), CLI boot sweep_orphan_tmp wiring, run_augment raw_dir derivation, write-back site negative-pin spy, helper extractions for testability |
-| [**backlog-by-file cycle 12**](#phase-45--backlog-by-file-cycle-12-2026-04-19) | 2026-04-19 | 17 AC / 13 files / 11 commits | 2089 to 2118 (+29) | conftest fixture, io sweep, KB_PROJECT_ROOT, frontmatter LRU cache, lint/checks migration, kb-mcp console script, graph docstring, augment regression coverage, sanitizer pin, security-verify AC2/AC8 fix |
-| [**backlog-by-file cycle 11**](#phase-45--backlog-by-file-cycle-11-2026-04-19) | 2026-04-19 | 14 AC / 14 files / 13 commits | 2041 → 2081 (+40) | ingest coercion + comparison/synthesis reject, page helper relocation, CLI import smoke, stale-result edge cases, test fixture cleanup, MCP same-class guard |
-| [**backlog-by-file cycle 9**](#phase-45--backlog-by-file-cycle-9-2026-04-18) | 2026-04-18 | 30 AC + 2 security fixes / 14 files | 1949 → 2003 (+54) | ingest lazy export, wiki_dir isolation, MCP boundary validation, compile/lint/evolve consistency, capture hardening, LLM redaction, env docs |
-| [**backlog-by-file cycle 8**](#phase-45--backlog-by-file-cycle-8-2026-04-18) | 2026-04-18 | 30 AC / 19 files | 1919 → 1949 (+30) | package surface, model validators, LLM telemetry, wiki_dir plumbing, consistency caps, PageRank→RRF, contradictions idempotency, notes validation helper (PR #22) |
-| [Backlog-by-file cycle 7](#phase-45--backlog-by-file-cycle-7-2026-04-18) | 2026-04-18 | 30 / 22 files | 1868 → 1919 (+51) | mcp/app, mcp/core, mcp/health, lint/_safe_call, lint/checks, lint/verdicts, lint/runner, lint/semantic, query/embeddings, query/engine, graph/builder, graph/export, compile/linker, evolve/analyzer, ingest/pipeline, ingest/extractors, review/context, review/refiner, utils/text, utils/io, config, cli |
-| [Backlog-by-file cycle 6](#phase-45--backlog-by-file-cycle-6-2026-04-18) | 2026-04-18 | 15 / 14 files | 1836 → 1868 (+32) | mcp/core, mcp/health, query/rewriter, query/engine, query/embeddings, query/hybrid, query/dedup, ingest/pipeline, cli, evolve/analyzer, graph/builder, utils/pages |
-| [Cycle 5 redo (hardening)](#phase-45--cycle-5-redo-hardening-2026-04-18) | 2026-04-18 | 6 / 6 files | 1821 → 1836 (+15) | query/engine, query/citations, mcp/app, lint/augment, utils/text, tests |
-| [Backlog-by-file cycle 5](#phase-45--backlog-by-file-cycle-5-2026-04-18) | 2026-04-18 | 14 / 13 files | 1811 → 1820 (+9) | config, text, verdicts, engine, extractors, pipeline, mcp/core, mcp/app, cli, mcp_server, llm, pyproject, tests |
-| [Concurrency fix + docs tidy (PR #17)](#concurrency-fix--docs-tidy-pr-17-2026-04-18) | 2026-04-18 | 3 / 3 files | 1810 → 1811 (+1) | verdicts, capture, test_v0915_task06 |
-| [Backlog-by-file cycle 4](#phase-45--backlog-by-file-cycle-4-2026-04-17) | 2026-04-17 | 22 / 16 files | 1754 → 1810 (+56) | mcp/core, browse, quality, app, health, rewriter, engine, dedup, text, wiki_log, pipeline, bm25, compiler, pages, linker |
-| [Backlog-by-file cycle 3](#phase-45--backlog-by-file-cycle-3-2026-04-17) | 2026-04-17 | 24+2 / 16 files | 1727 → 1754 (+27) | llm, io, feedback, embeddings, engine, hybrid, contradiction, extractors, pipeline, checks, runner, export, browse, health |
-| [Backlog-by-file cycle 2](#phase-45--backlog-by-file-cycle-2-2026-04-17) | 2026-04-17 | 30 / 19 files | → 1727 | hashing, markdown, wiki_log, io, llm, text, evidence, linker, feedback, reliability, analyzer, trends, semantic, citations, hybrid, dedup, rewriter, engine |
-| [Backlog-by-file cycle 1](#phase-45--backlog-by-file-cycle-1-2026-04-17) | 2026-04-17 | 38 / 18 files | → 1697 | pipeline, lint/augment, cli, capture, extractors, contradiction, mcp/quality, mcp/browse, mcp/core, engine, rewriter, dedup, verdicts, checks, markdown, feedback, refiner, wiki_log |
-| [HIGH cycle 2](#phase-45--high-cycle-2-2026-04-17) | 2026-04-17 | 22 / 16 files | → 1645 | markdown, refiner, analyzer, semantic, extractors, compiler, checks, trends, feedback, contradiction, pipeline, engine, hybrid, rewriter, builder, pages |
-| [HIGH cycle 1](#phase-45--high-cycle-1-2026-04-16) | 2026-04-16 | 22 / multi | → baseline | refiner, evidence, pipeline, wiki_log, engine, linker, citations, markdown, rewriter, mcp/core, embeddings, compiler |
-| [CRITICAL docs-sync](#phase-45--critical-cycle-1-docs-sync-2026-04-16) | 2026-04-16 | 2 | 1546 → 1552 | pyproject.toml, CLAUDE.md, scripts/verify_docs.py |
-
-> Older history (Phase 4.5 CRITICAL audit 2026-04-15 + all released versions): [CHANGELOG-history.md](CHANGELOG-history.md)
-
----
 
 ### Phase 4.5 — Backlog-by-file cycle 9 (2026-04-18)
 
@@ -991,7 +1045,7 @@ Test deltas: +112 tests across 8 new `tests/test_v4_11_*.py` files (total 1434 p
 
 ---
 
-## [0.10.0] - 2026-04-12
+## [0.10.0] — 2026-04-12
 
 Phase 4 — 8 features: hybrid search, dedup pipeline, evidence trails, stale flagging, layered context, raw fallback, contradiction detection, query rewriting.
 
@@ -1018,7 +1072,7 @@ Phase 4 — 8 features: hybrid search, dedup pipeline, evidence trails, stale fl
 
 ---
 
-## [0.9.16] - 2026-04-12
+## [0.9.16] — 2026-04-12
 
 Phase 3.97 — 62 fixes from 6-domain code review of v0.9.15.
 
@@ -1146,7 +1200,7 @@ Phase 3.97 — 62 fixes from 6-domain code review of v0.9.15.
 
 ---
 
-## [0.9.14] - 2026-04-09 (Phase 3.95)
+## [0.9.14] — 2026-04-09 (Phase 3.95)
 
 38-item backlog fix pass across 13 source files. No new modules. All fixes have tests in `tests/test_v0914_phase395.py`.
 
@@ -1193,7 +1247,7 @@ Phase 3.97 — 62 fixes from 6-domain code review of v0.9.15.
 
 ---
 
-## [0.9.13] - 2026-04-09 (Phase 3.94)
+## [0.9.13] — 2026-04-09 (Phase 3.94)
 
 54-item backlog fix pass covering BM25, query engine, citations, lint, ingest, compile, MCP, graph, evolve, feedback, refiner, and utils. Ruff clean. Plus cross-cutting rename `raw_content` → `content_lower` in `load_all_pages` and all callers.
 
