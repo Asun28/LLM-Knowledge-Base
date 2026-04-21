@@ -400,3 +400,17 @@ def test_extract_json_no_valid_candidate():
     with pytest.raises(LLMError) as exc_info:
         _extract_json_from_text("no json here at all", schema)
     assert exc_info.value.kind == "json_parse_error"
+
+
+def test_extract_json_unmatched_close_brace_before_valid():
+    """Unmatched } before a valid JSON object must not poison the brace scanner."""
+    schema = {
+        "type": "object",
+        "properties": {"val": {"type": "integer"}},
+        "required": ["val"],
+        "additionalProperties": False,
+    }
+    # The leading "done}" contains an unmatched } — brace scanner must still find the JSON
+    text = 'done} some text {"val": 7} end'
+    result = _extract_json_from_text(text, schema)
+    assert result == {"val": 7}

@@ -186,6 +186,9 @@ def call_cli(
         logger.debug("cli_backend %s stderr: %s", backend, stderr_safe)
 
     # Cap and redact stdout before returning (T3, T5).
+    # Accepted risk: subprocess.run buffers all stdout before this slice runs.
+    # The 2 MB cap limits downstream processing cost; OOM from a giant response
+    # before the slice is the residual risk accepted in cycle-21 plan gate (gap 8).
     raw_stdout = result.stdout[:MAX_CLI_STDOUT_BYTES]
     stdout_text = raw_stdout.decode("utf-8", errors="replace")
     return _redact_secrets(stdout_text).strip()
@@ -245,6 +248,8 @@ def _extract_json_from_text(text: str, schema: dict) -> dict:
             pass
 
     # Stage 3: depth-bounded balanced brace scan (capped at MAX_CLI_JSON_SCAN_BYTES).
+    # Unmatched closing braces are ignored (depth never goes below 0) so that
+    # free-form text like "done}" before a valid JSON object doesn't poison the scan.
     scan_text = text[:MAX_CLI_JSON_SCAN_BYTES]
     depth = 0
     start = -1
@@ -253,7 +258,7 @@ def _extract_json_from_text(text: str, schema: dict) -> dict:
             if depth == 0:
                 start = i
             depth += 1
-        elif ch == "}":
+        elif ch == "}" and depth > 0:
             depth -= 1
             if depth == 0 and start != -1:
                 candidate_str = scan_text[start : i + 1]
