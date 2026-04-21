@@ -19,7 +19,7 @@ Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/44
 - 🔗 **Retroactive linking.** Ingest a new topic → existing pages auto-gain `[[wikilinks]]` to it.
 - 🧪 **Self-healing.** Bayesian trust scoring, contradiction detection, staleness flags, dead-link lint.
 - 🦉 **Obsidian-native.** Open `wiki/` as a vault — free graph view, backlinks, hover preview.
-- 🔌 **MCP-first.** 26 tools in Claude Code. Talk to your wiki: *"ingest this"*, *"what do we know about X?"*
+- 🔌 **MCP-first.** 28 tools in Claude Code. Talk to your wiki: *"ingest this"*, *"what do we know about X?"*
 - 📤 **Publishable.** One command emits `/llms.txt`, `/llms-full.txt`, `/graph.jsonld`, sitemap, per-page siblings — the Karpathy Tier-1 machine-consumable stack.
 
 ## Why Not RAG?
@@ -60,7 +60,7 @@ Karpathy described a pattern where you manually ask an LLM to compile pages. Thi
 | No cross-linking | **Retroactive wikilink injection** — new topics auto-linked into existing pages |
 | No quality checks | **Self-healing** — lint catches problems, trust scoring flags bad pages, contradiction detection |
 | No gap awareness | **Evolve** — automatically identifies missing coverage and connection opportunities |
-| External LLM calls | **MCP-native** — 26 tools inside Claude Code, no API key needed |
+| External LLM calls | **MCP-native** — 28 tools inside Claude Code, no API key needed |
 | Text-only | **Obsidian** — open `wiki/` as a vault, visual knowledge graph for free |
 
 ## The 30-Second Demo
