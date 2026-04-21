@@ -24,6 +24,7 @@ from kb.config import (
     WIKI_SOURCES,
     WIKI_SUBDIR_TO_TYPE,
 )
+from kb.errors import IngestError, KBError, StorageError
 from kb.ingest.contradiction import (
     detect_contradictions_with_metadata,
 )
@@ -315,6 +316,8 @@ def _write_wiki_page(
     confidence: str = "",
     content: str = "",
     path: Path | None = None,
+    *,
+    exclusive: bool = False,
 ) -> None:
     """Write a wiki page with proper YAML frontmatter.
 
@@ -325,6 +328,21 @@ def _write_wiki_page(
 
     Accepts either ``page_path=`` or ``path=`` for backward compatibility
     with existing callers; ``page_path`` is preferred.
+
+    Cycle 20 AC8: when ``exclusive=True``, uses ``os.open(O_CREAT|O_EXCL)`` to
+    atomically reserve the target path — preventing the slug-collision
+    last-writer-wins race HIGH #16 identified. On ``FileExistsError`` raises
+    ``kb.errors.StorageError(kind="summary_collision", path=...)`` so the
+    caller can pivot to ``_update_existing_page`` for merge semantics. On
+    POSIX systems the ``O_NOFOLLOW`` flag is added if available to defeat
+    symlink-target swap; Windows ``CreateFileW(CREATE_NEW)`` refuses existing
+    reparse points by default. Default ``exclusive=False`` preserves the
+    legacy byte-identical ``atomic_text_write`` behaviour.
+
+    Note: ``append_evidence_trail`` is called AFTER the write in both branches;
+    it acquires its own ``file_lock(page_path)`` internally, so callers MUST
+    NOT wrap the ``_write_wiki_page`` call in ``file_lock(page_path)`` — the
+    non-re-entrant sidecar lock would self-deadlock on the nested acquire.
     """
     import frontmatter  # noqa: PLC0415 — library-boundary import
 
@@ -341,11 +359,43 @@ def _write_wiki_page(
         type=page_type,
         confidence=confidence,
     )
-    # PR #21 R1 Codex MAJOR 3: sort_keys=False preserves insertion order so the
-    # frontmatter fields land as title → source → created → updated → type →
-    # confidence, matching the pre-cycle-7 hand-rolled YAML and every downstream
-    # parser that may depend on that ordering.
-    atomic_text_write(frontmatter.dumps(post, sort_keys=False) + "\n", effective_path)
+    # PR #21 R1 Codex MAJOR 3: sort_keys=False preserves insertion order.
+    rendered = frontmatter.dumps(post, sort_keys=False) + "\n"
+    if exclusive:
+        # Cycle 20 AC8 — atomic reserve-or-fail via O_EXCL.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            # POSIX symlink-swap hardening. Windows CPython does not define
+            # O_NOFOLLOW; the default CreateFileW path refuses reparse points.
+            flags |= os.O_NOFOLLOW  # pragma: no cover — branched in Task 3 tests
+        try:
+            fd = os.open(str(effective_path), flags, 0o644)
+        except FileExistsError as e:
+            raise StorageError(
+                "summary_collision",
+                kind="summary_collision",
+                path=effective_path,
+            ) from e
+        fd_closed = False
+        try:
+            try:
+                os.write(fd, rendered.encode("utf-8"))
+                os.fsync(fd)
+            except Exception:
+                # Write-phase failure AFTER successful O_EXCL reservation —
+                # unlink the zero-byte poison so retries can re-reserve.
+                os.close(fd)
+                fd_closed = True
+                try:
+                    os.unlink(str(effective_path))
+                except OSError:
+                    pass
+                raise
+        finally:
+            if not fd_closed:
+                os.close(fd)
+    else:
+        atomic_text_write(rendered, effective_path)
     append_evidence_trail(
         effective_path, source_ref, f"Initial extraction: {page_type} page created"
     )
@@ -500,148 +550,197 @@ def _update_existing_page(
     - ``ctx`` kwarg (optional) lets callers inject context directly when
       ``extraction=`` is unavailable; ``_extract_entity_context`` is still
       used when ``ctx is None`` and ``name`` + ``extraction`` are supplied.
+
+    Cycle 20 AC11 / D-NEW-1: the read → modify → atomic_text_write span is now
+    wrapped unconditionally in ``file_lock(page_path)`` so concurrent callers
+    (including the new AC9/AC10 O_EXCL collision fallback) serialise cleanly.
+    ``append_evidence_trail`` stays OUTSIDE the lock block because it acquires
+    its own ``file_lock(page_path)`` internally and the sidecar lock is NOT
+    re-entrant — nesting would self-deadlock. The lock is released after the
+    body write and before evidence append, letting `append_evidence_trail`
+    re-acquire cleanly.
     """
-    # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
-    content = page_path.read_text(encoding="utf-8")
-    # Cycle 6 AC7 — normalize CRLF → LF so `_SOURCE_BLOCK_RE` (LF-only, line 45)
-    # matches CRLF-encoded frontmatter. Without this, CRLF files fall through
-    # to the weak fallback at line ~456 which doesn't match either ending,
-    # producing silent double `source:` keys. `atomic_text_write` writes LF.
-    content = content.replace("\r\n", "\n")
-    # Check frontmatter sources specifically, not full content
-    try:
-        post = frontmatter.loads(content)
-        existing_sources = normalize_sources(post.metadata.get("source"))
-        if source_ref in existing_sources:
-            return  # Already referenced in frontmatter
-    except (ValueError, AttributeError, yaml.YAMLError) as e:
-        logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
-        return
-
-    # 1. Update frontmatter source: list
-    safe_ref = yaml_escape(source_ref)
-    # Split on the closing '---' to scope the regex to the frontmatter section only
-    fm_match = re.match(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", content, re.DOTALL)
-    if fm_match:
-        fm_text = fm_match.group(1)
-        body_text = fm_match.group(2)
-    else:
-        # Fix 2.9: warn and return early — falling back to full-file treatment risks
-        # corrupting body text that contains "updated: ..." patterns.
-        logger.warning("Could not parse frontmatter block in %s; skipping update", page_path)
-        return
-
-    # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
-    source_match = _SOURCE_BLOCK_RE.search(fm_text)
-    if source_match:
-        block_end = source_match.end()
-        # Detect indentation from the first existing entry to preserve style (2- or 4-space).
-        block_lines = source_match.group(1).split("\n")
-        first_entry_line = block_lines[1] if len(block_lines) > 1 else ""
-        indent = (
-            len(first_entry_line) - len(first_entry_line.lstrip())
-            if first_entry_line.strip()
-            else 2
+    _wrote_page = _update_existing_page_body(
+        page_path=page_path,
+        source_ref=source_ref,
+        name=name,
+        extraction=extraction,
+        verb=verb,
+        ctx=ctx,
+    )
+    if _wrote_page:
+        # Evidence trail acquires its own file_lock(page_path); the body-write
+        # lock is released by this point so no nested-lock self-deadlock.
+        append_evidence_trail(
+            page_path,
+            source_ref,
+            f"{verb} in new source — source reference added",
         )
-        new_source_line = " " * indent + f'- "{safe_ref}"\n'
-        fm_text = fm_text[:block_end] + new_source_line + fm_text[block_end:]
-    elif "source:" in fm_text:
-        fm_text = fm_text.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
 
-    # Fix 2.17: Apply updated date substitution only to fm_text, not body
-    today = date.today().isoformat()
-    fm_text = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", fm_text)
 
-    content = fm_text + body_text
+def _update_existing_page_body(
+    *,
+    page_path: Path,
+    source_ref: str,
+    name: str = "",
+    extraction: dict | None = None,
+    verb: str = "Mentioned",
+    ctx: str | None = None,
+) -> bool:
+    """Body of `_update_existing_page` under `file_lock(page_path)`.
 
-    # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
-    ref_line = f"- {verb} in {source_ref}"
-    # Cycle 7 AC5: mask fenced code blocks / inline code / markdown links
-    # before running the `## References` regex so literal `## References`
-    # text inside a code example cannot misdirect the insertion point. The
-    # `_mask_code_blocks` helper already ships in compile/linker and is the
-    # battle-tested pattern for regex-on-body operations.
-    from kb.compile.linker import _mask_code_blocks, _unmask_code_blocks  # noqa: PLC0415
+    Returns True when the page body was modified + written to disk; caller
+    uses that signal to decide whether to append an evidence-trail entry.
+    Returns False when no update was needed (source already present) OR when
+    frontmatter parsing failed and we skipped the write.
 
-    masked_body, masked_code, mask_prefix = _mask_code_blocks(body_text)
-    if "## References" in masked_body:
-        # Cycle 3 L7: the regex requires each matched line to end with `\n`
-        # and the whole References block to terminate with either `\n## ` or
-        # end-of-string. Files saved by editors that strip the trailing
-        # newline (common for VSCode + `files.insertFinalNewline` off)
-        # matched zero characters after the header, so the new reference
-        # appeared BEFORE any existing refs — silently reversing order and
-        # sometimes dropping the new entry entirely. Normalize by ensuring
-        # body ends with `\n` before substitution.
-        if not masked_body.endswith("\n"):
-            masked_body = masked_body + "\n"
-        # Append new reference at end of References block. PR #21 R1 Codex
-        # MAJOR 2: use ``re.subn`` so we can detect whether the regex
-        # actually matched (header variant like ``## References   `` with
-        # trailing whitespace would otherwise silently no-op, leaving the
-        # frontmatter source updated but the body unchanged).
-        masked_body_new, n_sub = re.subn(
-            r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)",
-            lambda m: m.group(1).rstrip("\n") + "\n" + ref_line + "\n",
-            masked_body,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if n_sub == 0:
-            # Heading present but didn't match the strict regex — append a
-            # fresh References block at the end instead of silently dropping
-            # the new reference.
-            masked_body_new = masked_body.rstrip("\n") + f"\n\n## References\n\n{ref_line}\n"
-        body_text = _unmask_code_blocks(masked_body_new, masked_code, mask_prefix)
-        content = fm_text + body_text
-    elif "## References" not in masked_body:
-        # Preserve the old unmasked body (no need to re-unmask a pure-append).
-        content += f"\n## References\n\n{ref_line}\n"
+    Cycle 20 AC11 / D-NEW-1 — split out so the lock span is visible and so
+    the early-return paths exit the lock cleanly via the `with` context.
+    """
+    with file_lock(page_path):
+        # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
+        content = page_path.read_text(encoding="utf-8")
+        # Cycle 6 AC7 — normalize CRLF → LF so `_SOURCE_BLOCK_RE` (LF-only, line 45)
+        # matches CRLF-encoded frontmatter. Without this, CRLF files fall through
+        # to the weak fallback at line ~456 which doesn't match either ending,
+        # producing silent double `source:` keys. `atomic_text_write` writes LF.
+        content = content.replace("\r\n", "\n")
+        # Check frontmatter sources specifically, not full content
+        try:
+            post = frontmatter.loads(content)
+            existing_sources = normalize_sources(post.metadata.get("source"))
+            if source_ref in existing_sources:
+                return False  # Already referenced in frontmatter
+        except (ValueError, AttributeError, yaml.YAMLError) as e:
+            logger.warning("Failed to parse frontmatter for %s: %s", page_path, e)
+            return False
 
-    # 4. Enrich with context from new source (if extraction provided OR direct ctx)
-    # Cycle 7 AC7: when a ``## Context`` section already exists, append a new
-    # ``### From {source_ref}`` subsection instead of silently dropping the
-    # new context. Compounds with AC5 by masking code blocks first.
-    if ctx is None and name and extraction:
-        ctx = _extract_entity_context(name, extraction)
-    if ctx:
-        masked_c, masked_codes, mask_pfx = _mask_code_blocks(content)
-        if "## Context" in masked_c:
-            # Strip any leading `## Context` header that `_extract_entity_context`
-            # prepends so the incoming ``ctx`` is just the body — the existing
-            # section header stays authoritative. Without this strip a duplicate
-            # `## Context` header would land under the existing one.
-            ctx_body = re.sub(r"\A##\s*Context\s*\n+", "", ctx).rstrip("\n")
-            if not ctx_body:
-                # Nothing left after stripping the header — skip.
-                pass
-            else:
-                subsection = f"\n### From {source_ref}\n\n{ctx_body}\n"
-                # Find END of Context section (next ## header OR end-of-string).
-                match = re.search(
-                    r"(^## Context\n(?:.*\n)*?)(?=^## |\Z)",
-                    masked_c,
-                    flags=re.MULTILINE,
-                )
-                if match:
-                    end = match.end()
-                    masked_c = masked_c[:end].rstrip("\n") + subsection + masked_c[end:]
-                    content = _unmask_code_blocks(masked_c, masked_codes, mask_pfx)
-                else:
-                    # Fallback: append subsection at end of content.
-                    content += subsection
+        # 1. Update frontmatter source: list
+        safe_ref = yaml_escape(source_ref)
+        # Split on the closing '---' to scope the regex to the frontmatter section only
+        fm_match = re.match(r"\A(---\r?\n.*?\r?\n---\r?\n?)(.*)", content, re.DOTALL)
+        if fm_match:
+            fm_text = fm_match.group(1)
+            body_text = fm_match.group(2)
         else:
-            # No existing Context section — insert before References (or append).
-            ref_match = re.search(r"^## References", content, re.MULTILINE)
-            if ref_match:
-                insert_pos = ref_match.start()
-                content = content[:insert_pos] + f"{ctx}\n\n" + content[insert_pos:]
-            else:
-                content += f"\n{ctx}\n"
+            # Fix 2.9: warn and return early — falling back to full-file treatment risks
+            # corrupting body text that contains "updated: ..." patterns.
+            logger.warning("Could not parse frontmatter block in %s; skipping update", page_path)
+            return False
 
-    # Fix 2.1: Use atomic write
-    atomic_text_write(content, page_path)
-    append_evidence_trail(page_path, source_ref, f"{verb} in new source — source reference added")
+        # Fix 2.3: Target only the source: block — not any other YAML list (e.g. tags:)
+        source_match = _SOURCE_BLOCK_RE.search(fm_text)
+        if source_match:
+            block_end = source_match.end()
+            # Detect indentation from the first existing entry to preserve style (2- or 4-space).
+            block_lines = source_match.group(1).split("\n")
+            first_entry_line = block_lines[1] if len(block_lines) > 1 else ""
+            indent = (
+                len(first_entry_line) - len(first_entry_line.lstrip())
+                if first_entry_line.strip()
+                else 2
+            )
+            new_source_line = " " * indent + f'- "{safe_ref}"\n'
+            fm_text = fm_text[:block_end] + new_source_line + fm_text[block_end:]
+        elif "source:" in fm_text:
+            fm_text = fm_text.replace("source:\n", f'source:\n  - "{safe_ref}"\n', 1)
+
+        # Fix 2.17: Apply updated date substitution only to fm_text, not body
+        today = date.today().isoformat()
+        fm_text = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", fm_text)
+
+        content = fm_text + body_text
+
+        # 2. Append to References section (Fix 2.10: append after last ref, Fix 2.11: scope to body)
+        ref_line = f"- {verb} in {source_ref}"
+        # Cycle 7 AC5: mask fenced code blocks / inline code / markdown links
+        # before running the `## References` regex so literal `## References`
+        # text inside a code example cannot misdirect the insertion point. The
+        # `_mask_code_blocks` helper already ships in compile/linker and is the
+        # battle-tested pattern for regex-on-body operations.
+        from kb.compile.linker import _mask_code_blocks, _unmask_code_blocks  # noqa: PLC0415
+
+        masked_body, masked_code, mask_prefix = _mask_code_blocks(body_text)
+        if "## References" in masked_body:
+            # Cycle 3 L7: the regex requires each matched line to end with `\n`
+            # and the whole References block to terminate with either `\n## ` or
+            # end-of-string. Files saved by editors that strip the trailing
+            # newline (common for VSCode + `files.insertFinalNewline` off)
+            # matched zero characters after the header, so the new reference
+            # appeared BEFORE any existing refs — silently reversing order and
+            # sometimes dropping the new entry entirely. Normalize by ensuring
+            # body ends with `\n` before substitution.
+            if not masked_body.endswith("\n"):
+                masked_body = masked_body + "\n"
+            # Append new reference at end of References block. PR #21 R1 Codex
+            # MAJOR 2: use ``re.subn`` so we can detect whether the regex
+            # actually matched (header variant like ``## References   `` with
+            # trailing whitespace would otherwise silently no-op, leaving the
+            # frontmatter source updated but the body unchanged).
+            masked_body_new, n_sub = re.subn(
+                r"(## References\n(?:[^\n].*\n|[ \t]*\n)*?)(?=\n## |\Z)",
+                lambda m: m.group(1).rstrip("\n") + "\n" + ref_line + "\n",
+                masked_body,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if n_sub == 0:
+                # Heading present but didn't match the strict regex — append a
+                # fresh References block at the end instead of silently dropping
+                # the new reference.
+                masked_body_new = masked_body.rstrip("\n") + f"\n\n## References\n\n{ref_line}\n"
+            body_text = _unmask_code_blocks(masked_body_new, masked_code, mask_prefix)
+            content = fm_text + body_text
+        elif "## References" not in masked_body:
+            # Preserve the old unmasked body (no need to re-unmask a pure-append).
+            content += f"\n## References\n\n{ref_line}\n"
+
+        # 4. Enrich with context from new source (if extraction provided OR direct ctx)
+        # Cycle 7 AC7: when a ``## Context`` section already exists, append a new
+        # ``### From {source_ref}`` subsection instead of silently dropping the
+        # new context. Compounds with AC5 by masking code blocks first.
+        if ctx is None and name and extraction:
+            ctx = _extract_entity_context(name, extraction)
+        if ctx:
+            masked_c, masked_codes, mask_pfx = _mask_code_blocks(content)
+            if "## Context" in masked_c:
+                # Strip any leading `## Context` header that `_extract_entity_context`
+                # prepends so the incoming ``ctx`` is just the body — the existing
+                # section header stays authoritative. Without this strip a duplicate
+                # `## Context` header would land under the existing one.
+                ctx_body = re.sub(r"\A##\s*Context\s*\n+", "", ctx).rstrip("\n")
+                if not ctx_body:
+                    # Nothing left after stripping the header — skip.
+                    pass
+                else:
+                    subsection = f"\n### From {source_ref}\n\n{ctx_body}\n"
+                    # Find END of Context section (next ## header OR end-of-string).
+                    match = re.search(
+                        r"(^## Context\n(?:.*\n)*?)(?=^## |\Z)",
+                        masked_c,
+                        flags=re.MULTILINE,
+                    )
+                    if match:
+                        end = match.end()
+                        masked_c = masked_c[:end].rstrip("\n") + subsection + masked_c[end:]
+                        content = _unmask_code_blocks(masked_c, masked_codes, mask_pfx)
+                    else:
+                        # Fallback: append subsection at end of content.
+                        content += subsection
+            else:
+                # No existing Context section — insert before References (or append).
+                ref_match = re.search(r"^## References", content, re.MULTILINE)
+                if ref_match:
+                    insert_pos = ref_match.start()
+                    content = content[:insert_pos] + f"{ctx}\n\n" + content[insert_pos:]
+                else:
+                    content += f"\n{ctx}\n"
+
+        # Fix 2.1: Use atomic write. Cycle 20 AC11 — still inside file_lock(page_path).
+        atomic_text_write(content, page_path)
+    # Lock released — caller (`_update_existing_page`) now safely invokes
+    # `append_evidence_trail`, which acquires its own `file_lock(page_path)`.
+    return True
 
 
 def _update_sources_mapping(
@@ -954,9 +1053,23 @@ def _process_item_batch(
         else:
             ctx = _extract_entity_context(item, extraction)
             content = _build_item_content(item, source_ref, ctx, verb)
-            _write_wiki_page(item_path, item, page_type, source_ref, "stated", content)
-            created.append(f"{subdir}/{item_slug}")
-            new_with_titles.append((f"{subdir}/{item_slug}", item))
+            # Cycle 20 AC10 — O_EXCL reservation defeats slug-collision
+            # last-writer-wins. On StorageError(kind="summary_collision")
+            # pivot to the merge path; _update_existing_page acquires its own
+            # page-lock (AC11 / D-NEW-1) so serialisation is deterministic.
+            try:
+                _write_wiki_page(
+                    item_path, item, page_type, source_ref, "stated", content, exclusive=True
+                )
+                created.append(f"{subdir}/{item_slug}")
+                new_with_titles.append((f"{subdir}/{item_slug}", item))
+            except StorageError as err:
+                if err.kind != "summary_collision":
+                    raise
+                _update_existing_page(
+                    item_path, source_ref, name=item, extraction=extraction, verb=verb
+                )
+                updated.append(f"{subdir}/{item_slug}")
 
     return created, updated, skipped, new_with_titles, valid_items
 
@@ -1180,6 +1293,16 @@ def ingest_source(
             source_hash,
             outcome={"error_summary": err_summary},
         )
+        # Cycle 20 AC5 / AC7 — wrap unexpected exceptions into IngestError so
+        # callers get a stable taxonomy. Expected ingest-path kinds
+        # (KBError subclasses, OSError, ValueError) pass through unchanged so
+        # existing call sites keep working. BaseException subclasses that are
+        # NOT Exception (KeyboardInterrupt, SystemExit, GeneratorExit) also
+        # propagate unchanged to preserve control-flow semantics — they are
+        # BaseException but NOT Exception, so `isinstance(exc, Exception)`
+        # gates the wrap cleanly.
+        if isinstance(exc, Exception) and not isinstance(exc, (KBError, OSError, ValueError)):
+            raise IngestError(str(exc)) from exc
         raise
 
 
@@ -1251,9 +1374,27 @@ def _run_ingest_body(
         # Do NOT add to new_pages_with_titles — wikilinks for this page already exist
     else:
         summary_content = _build_summary_content(extraction, source_type)
-        _write_wiki_page(summary_path, title, "summary", source_ref, "stated", summary_content)
-        pages_created.append(f"summaries/{summary_slug}")
-        new_pages_with_titles.append((f"summaries/{summary_slug}", title))
+        # Cycle 20 AC9 — O_EXCL reservation prevents concurrent summary writes
+        # from dropping one source silently. On StorageError(kind="summary_collision")
+        # fall through to _update_existing_page which acquires its own page-lock
+        # (AC11 / D-NEW-1).
+        try:
+            _write_wiki_page(
+                summary_path,
+                title,
+                "summary",
+                source_ref,
+                "stated",
+                summary_content,
+                exclusive=True,
+            )
+            pages_created.append(f"summaries/{summary_slug}")
+            new_pages_with_titles.append((f"summaries/{summary_slug}", title))
+        except StorageError as err:
+            if err.kind != "summary_collision":
+                raise
+            _update_existing_page(summary_path, source_ref, verb="Summarized")
+            pages_updated.append(f"summaries/{summary_slug}")
 
     # Content-length-aware tiering: short sources get summary only when
     # defer_small is enabled (entity/concept pages deferred to avoid stub proliferation).
