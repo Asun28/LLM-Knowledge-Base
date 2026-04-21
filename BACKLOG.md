@@ -270,6 +270,12 @@ _All items resolved — see CHANGELOG cycle 13._
 - `ingest/pipeline.py` `lint/semantic.py` inline claim-level confidence tags — emit `[EXTRACTED]`, `[INFERRED]`, `[AMBIGUOUS]` inline markers in wiki page bodies during ingest; modify ingest LLM prompts to annotate individual claims at source; `kb_lint_deep` spot-verifies a random sample of EXTRACTED-tagged claims against the raw source file, flagging hallucinated attributions. Complements page-level `confidence` frontmatter without replacing it; directly answers "LLM stated this as sourced fact but it's not in the source." Source: llm-wiki-skill confidence annotation + lint verification model.
   (effort: Medium — ingest prompt update + regex claim parser + lint spot-check against raw source text)
 
+- `lint/checks.py` `lint/semantic.py` claim-to-source grounding verification — after ingest, sample N claims from each wiki page and verify they have supporting text in the cited `raw/` source via BM25 search over the source file body. Pages where sampled claims score below a minimum BM25 match threshold get `belief_state: uncertain` written back and a lint warning emitted. Distinct from `kb_drift_audit` (which diffs wiki-side drift from re-ingest) and inline claim tags (which annotate at write time): this is a retroactive, probabilistic check that catches hallucinated citations in already-written pages. Addresses the central critique — an LLM can write plausible-sounding claims with valid source citations that never appear in the source. Source: cycle 21 epistemic hardening audit.
+  (effort: High — BM25 scorer over raw-source text; sample selector; frontmatter write-back via `save_page_frontmatter`; lint integration; tunable N and threshold in `config.py`)
+
+- `models/frontmatter.py` `lint/checks.py` multi-source confirmation gate — `belief_state: confirmed` currently requires no corroboration; a single source can produce `confidence: stated` which reviews to `confirmed`. Add a `source_count` field (auto-incremented by `ingest_source` each time an existing page gains a new source reference) and a lint rule that flags `belief_state: confirmed` on pages with `source_count < 2` as `belief_state: uncertain`. Makes "confirmed" mean "corroborated by ≥ 2 independent raw sources" — the minimum epistemic bar for high-confidence claims. Source: cycle 21 epistemic hardening audit.
+  (effort: Medium — `source_count` tracking in `_update_existing_page`; lint check in `lint/checks.py`; frontmatter validator update; migration: existing pages without the field treated as `source_count: 1`)
+
 ### HIGH LEVERAGE — Output-Format Polymorphism
 
 <!-- `query/formats/` `kb_query --format=…` adapters SHIPPED in Phase 4.11 (2026-04-14). -->
@@ -470,6 +476,22 @@ _All items resolved — see CHANGELOG cycle 13._
 <!-- All items resolved in cycle 17. See CHANGELOG.md cycle 17. -->
 
 _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC12/AC13 — `run_augment(resume=...)` wired through CLI + MCP with shared `_validate_run_id` 8-hex validator)._
+
+---
+
+## Cycle 22 candidates (surfaced during cycle 21 — epistemic hardening)
+
+<!-- Surfaced from "bad info in the wiki" audit (2026-04-21). Four targeted hardening items
+     that close the gap between the architecture's epistemic intent and its enforcement.
+     Items 1-2 are low-effort correctness fixes; items 3-4 are feature additions. -->
+
+### LOW
+
+- `ingest/pipeline.py` `ingest_source` — no guard prevents ingesting a `wiki/` path as a raw source. If a caller passes a path inside `WIKI_DIR` (e.g. `kb ingest wiki/entities/foo.md`), the file is treated as an external source, extracted, and its LLM-generated content re-enters as if it were ground truth. Closes the circular-knowledge loop that the `raw/`-immutability invariant is meant to prevent.
+  (fix: at the top of `ingest_source`, validate that `path.resolve()` is NOT inside `WIKI_DIR.resolve()`; raise `ValidationError("wiki pages cannot be used as ingest sources")`)
+
+- `ingest/extractors.py` + `templates/*.yaml` extraction grounding constraint — the extraction LLM call has no explicit instruction to stay within the source text. The model can silently inject "known" facts from its training data that are absent from the source; `confidence: stated` on such claims is misleading. The `authored_by` and `confidence` fields exist in the schema but the prompt doesn't enforce them.
+  (fix: add a grounding constraint to every extraction system prompt: "Only include claims that appear verbatim or paraphrasably in the provided source text. Anything you infer without direct textual support must be marked `confidence: inferred`, not `stated`." No code changes — prompt-template edit only)
 
 ---
 
