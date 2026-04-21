@@ -1,5 +1,7 @@
 # 🌪️ LLM Wiki Flywheel
 
+**Language / 语言：** **English** · [简体中文](README.zh-CN.md)
+
 > **Compile, don't retrieve.** Drop a source in. Claude does the rest — extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. No vectors. No chunking. Pure markdown you own, browsable in Obsidian.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
