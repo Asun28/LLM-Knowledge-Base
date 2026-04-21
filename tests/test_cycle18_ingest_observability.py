@@ -163,7 +163,15 @@ def test_jsonl_emitted_on_duplicate(tmp_kb_env: Path, monkeypatch) -> None:
 # AC11 — failure path emits start + failure; original exception propagates.
 # ---------------------------------------------------------------------------
 def test_jsonl_emitted_on_failure(tmp_kb_env: Path) -> None:
-    """AC11 — synthetic exception → start + failure rows; exc re-raised."""
+    """AC11 — synthetic exception → start + failure rows; exc re-raised.
+
+    Cycle 20 AC5 / AC7 — unexpected exceptions (RuntimeError here) are now
+    wrapped in ``kb.errors.IngestError`` so callers get a stable taxonomy.
+    The original ``RuntimeError`` is preserved in ``__cause__`` so the
+    synthetic message text still round-trips to the JSONL ``error_summary``
+    field via ``sanitize_text(str(exc))``.
+    """
+    from kb.errors import IngestError  # noqa: PLC0415
     from kb.ingest import pipeline  # noqa: PLC0415
 
     raw = tmp_kb_env / "raw" / "articles" / "ac11-fail.md"
@@ -173,7 +181,7 @@ def test_jsonl_emitted_on_failure(tmp_kb_env: Path) -> None:
         raise RuntimeError("synthetic cycle18 failure at /home/ci/path")
 
     with patch.object(pipeline, "_process_item_batch", side_effect=boom):
-        with pytest.raises(RuntimeError, match="synthetic cycle18 failure"):
+        with pytest.raises(IngestError, match="synthetic cycle18 failure") as excinfo:
             pipeline.ingest_source(
                 raw,
                 source_type="article",
@@ -181,6 +189,8 @@ def test_jsonl_emitted_on_failure(tmp_kb_env: Path) -> None:
                 wiki_dir=tmp_kb_env / "wiki",
                 raw_dir=tmp_kb_env / "raw",
             )
+    # Cycle 20 AC7 — original RuntimeError preserved in __cause__.
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
 
     rows = _read_jsonl(tmp_kb_env / ".data" / "ingest_log.jsonl")
     stages = [r["stage"] for r in rows]

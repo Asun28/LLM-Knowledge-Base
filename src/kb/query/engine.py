@@ -29,6 +29,7 @@ from kb.config import (
     decay_days_for,
     tier1_budget_for,
 )
+from kb.errors import KBError, QueryError
 from kb.graph.builder import build_graph
 from kb.models.frontmatter import validate_frontmatter
 from kb.query.bm25 import BM25Index, tokenize
@@ -974,7 +975,38 @@ def query_wiki(
                 answer synthesized).
             output_format: str (only when output_path is present).
             output_error: str (only when the adapter failed — answer still usable).
+
+    Cycle 20 AC5 / AC7 — this thin outer wrapper around ``_query_wiki_body``
+    narrows unexpected exceptions into ``kb.errors.QueryError``. Expected
+    kinds (``KBError`` subclasses, ``OSError``, ``ValueError``) pass through
+    unchanged. ``BaseException`` subclasses that are NOT ``Exception``
+    (KeyboardInterrupt, SystemExit, GeneratorExit) propagate without wrap.
     """
+    try:
+        return _query_wiki_body(
+            question,
+            wiki_dir=wiki_dir,
+            max_results=max_results,
+            conversation_context=conversation_context,
+            output_format=output_format,
+            raw_dir=raw_dir,
+        )
+    except (KBError, OSError, ValueError):
+        raise
+    except Exception as exc:  # noqa: BLE001 — AC5/AC7 boundary wrap
+        raise QueryError(str(exc)) from exc
+
+
+def _query_wiki_body(
+    question: str,
+    wiki_dir: Path | None = None,
+    max_results: int = 10,
+    conversation_context: str | None = None,
+    *,
+    output_format: str | None = None,
+    raw_dir: Path | None = None,
+) -> dict:
+    """Body of ``query_wiki`` — unwrapped exceptions; outer `query_wiki` narrows."""
     # Derive effective_raw_dir from wiki_dir when not explicitly provided (item 7 fix).
     # raw_dir is derived from wiki_dir; containment is guaranteed by construction.
     effective_raw_dir = raw_dir

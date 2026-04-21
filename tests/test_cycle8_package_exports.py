@@ -39,6 +39,7 @@ def test_kb_top_level_exports_importable_in_fresh_subprocess():
 def test_kb_top_level_all_is_curated():
     import kb
 
+    # Cycle 20 AC3 — kb.errors taxonomy exports added: KBError + 5 subclasses.
     assert kb.__all__ == [
         "ingest_source",
         "compile_wiki",
@@ -47,6 +48,12 @@ def test_kb_top_level_all_is_curated():
         "WikiPage",
         "RawSource",
         "LLMError",
+        "KBError",
+        "IngestError",
+        "CompileError",
+        "QueryError",
+        "ValidationError",
+        "StorageError",
         "__version__",
     ]
 

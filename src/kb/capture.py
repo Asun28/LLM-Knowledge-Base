@@ -31,6 +31,7 @@ from kb.config import (
     PROJECT_ROOT,
     TEMPLATES_DIR,
 )
+from kb.errors import KBError
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
@@ -541,8 +542,13 @@ class CaptureItem:
     body_chars: int
 
 
-class CaptureError(Exception):
-    """Raised by capture helpers on unrecoverable internal errors."""
+class CaptureError(KBError):
+    """Raised by capture helpers on unrecoverable internal errors.
+
+    Cycle 20 AC2: reparented from ``Exception`` to ``kb.errors.KBError`` so
+    callers can catch the whole kb taxonomy with ``except KBError``. MRO
+    preserves ``isinstance(err, Exception)`` — existing outer catches still fire.
+    """
 
 
 def _scan_existing_slugs(captures_dir: Path) -> set[str]:

@@ -10,8 +10,27 @@ __all__ = [
     "WikiPage",
     "RawSource",
     "LLMError",
+    "KBError",
+    "IngestError",
+    "CompileError",
+    "QueryError",
+    "ValidationError",
+    "StorageError",
     "__version__",
 ]
+
+# Cycle 20 AC3: dispatch table for kb.errors.* lazy re-exports. Mapping avoids
+# repeating six almost-identical `if name == "X"` branches in ``__getattr__``.
+_ERROR_NAMES = frozenset(
+    {
+        "KBError",
+        "IngestError",
+        "CompileError",
+        "QueryError",
+        "ValidationError",
+        "StorageError",
+    }
+)
 
 
 def __getattr__(name: str):
@@ -40,4 +59,8 @@ def __getattr__(name: str):
         from kb.utils.llm import LLMError
 
         return LLMError
+    if name in _ERROR_NAMES:
+        import kb.errors as _errors_mod
+
+        return getattr(_errors_mod, name)
     raise AttributeError(f"module 'kb' has no attribute {name!r}")

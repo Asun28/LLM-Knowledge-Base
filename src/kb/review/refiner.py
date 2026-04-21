@@ -35,6 +35,7 @@ from kb.config import (
     REVIEW_HISTORY_PATH,
     WIKI_DIR,
 )
+from kb.errors import StorageError, ValidationError
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.wiki_log import append_wiki_log
@@ -344,3 +345,168 @@ def list_stale_pending(
         if ts < cutoff:
             stale.append(row)
     return stale
+
+
+_SWEEP_ALLOWED_ACTIONS = frozenset({"mark_failed", "delete"})
+
+
+def sweep_stale_pending(
+    hours: int = 168,
+    *,
+    action: str = "mark_failed",
+    dry_run: bool = False,
+    history_path: Path | None = None,
+    wiki_dir: Path | None = None,
+) -> dict:
+    """Sweep refine-history pending rows older than ``hours`` (cycle 20 AC13).
+
+    Mutation counterpart to ``list_stale_pending``. Flips or removes rows
+    where ``status == "pending"`` and ``timestamp`` is older than the cutoff.
+
+    Args:
+        hours: Threshold in hours. Must be ``>= 1`` (else ``ValidationError``).
+            Defaults to 168 (1 week) — safer default than 24h because a
+            human-timescale operator should get a chance to see the stale row
+            before a sweep silently marks it failed.
+        action: One of ``"mark_failed"`` (default) or ``"delete"``. Unknown
+            values raise ``ValidationError``.
+            - ``"mark_failed"``: flip ``status`` to ``"failed"``, add
+              ``error="abandoned-by-sweep"``, ``sweep_id=uuid4().hex[:8]``,
+              ``sweep_at=<ISO-now>``. Row content (``revision_notes``,
+              ``page_id``, original ``attempt_id``) preserved.
+            - ``"delete"``: remove the row entirely. Writes a one-line audit
+              entry to ``wiki/log.md`` BEFORE the mutation so crash-between
+              audit and save leaves recoverable forensics (T4 mitigation).
+        dry_run: If True, return the candidate list without mutating.
+        history_path: Optional override for the review-history JSON file
+            (defaults to ``REVIEW_HISTORY_PATH``).
+        wiki_dir: Optional override for the directory where ``log.md`` lives
+            (defaults to ``WIKI_DIR``). Only used when ``action="delete"``.
+
+    Returns:
+        Dict with keys:
+            - ``swept`` (int): number of rows affected.
+            - ``action`` (str): echo of the action argument.
+            - ``sweep_id`` (str | None): 8-hex correlation ID for
+              ``mark_failed``; ``None`` for ``delete``.
+            - ``dry_run`` (bool): echo of the dry_run argument.
+            - ``candidates`` (list[dict]): present when ``dry_run=True``; lists
+              the rows that WOULD be affected.
+
+    Concurrency: holds ``file_lock(resolved_history_path)`` across
+    load → mutate → save. Refiner uses the same lock for its pending/applied
+    flip (cycle-19 AC9/AC10) so sweep serialises cleanly with concurrent
+    refine_page runs. Rows are matched by ``attempt_id`` equality — never
+    by ``page_id`` — so a concurrent refine that shares the same page_id
+    but a fresh attempt_id is never clobbered (cycle 20 design gate
+    D-NEW-3 / R2 finding).
+    """
+    # Cycle 20 AC13 — input validation. `not manifest_key`-style leading
+    # emptiness guard isn't needed here since `action` is checked via
+    # membership, but explicit empty-check on `action` stays consistent with
+    # cycle-19 L3 rule.
+    if not isinstance(action, str) or action not in _SWEEP_ALLOWED_ACTIONS:
+        raise ValidationError(
+            f"unknown sweep action: {action!r}; expected one of {sorted(_SWEEP_ALLOWED_ACTIONS)}"
+        )
+    if not isinstance(hours, int) or hours < 1:
+        raise ValidationError(f"hours must be an integer >= 1; got {hours!r}")
+
+    resolved_history_path = history_path or REVIEW_HISTORY_PATH
+    resolved_wiki_dir = wiki_dir or WIKI_DIR
+
+    cutoff = datetime.now() - timedelta(hours=hours)
+
+    def _is_candidate(row: dict) -> bool:
+        if row.get("status") != "pending":
+            return False
+        ts_raw = row.get("timestamp")
+        if not isinstance(ts_raw, str):
+            return False
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except ValueError:
+            return False
+        return ts < cutoff
+
+    # Dry-run path avoids the file_lock (no mutation).
+    if dry_run:
+        history = load_review_history(resolved_history_path)
+        candidates = [dict(row) for row in history if _is_candidate(row)]
+        return {
+            "swept": len(candidates),
+            "action": action,
+            "sweep_id": None,
+            "dry_run": True,
+            "candidates": candidates,
+        }
+
+    sweep_id = uuid.uuid4().hex[:8] if action == "mark_failed" else None
+    sweep_at = datetime.now().isoformat()
+
+    with file_lock(resolved_history_path):
+        history = load_review_history(resolved_history_path)
+        # Match by attempt_id (cycle 20 D-NEW — prevents silent clobber of a
+        # concurrent refine sharing the same page_id with a fresh attempt_id).
+        target_attempt_ids: list[str] = []
+        for row in history:
+            if _is_candidate(row):
+                attempt_id = row.get("attempt_id")
+                if isinstance(attempt_id, str) and attempt_id:
+                    target_attempt_ids.append(attempt_id)
+
+        swept_count = len(target_attempt_ids)
+
+        if swept_count == 0:
+            return {
+                "swept": 0,
+                "action": action,
+                "sweep_id": sweep_id,
+                "dry_run": False,
+            }
+
+        if action == "delete":
+            # T4 mitigation — write the audit entry BEFORE the mutation so a
+            # crash between audit and save leaves a recoverable trail. The
+            # wiki_log append has its OWN file_lock on log.md (not on
+            # history_path), so no nested-lock risk.
+            log_path = resolved_wiki_dir / "log.md"
+            audit_msg = (
+                f"Deleted {swept_count} stale pending row(s); "
+                f"cutoff={cutoff.isoformat()}; "
+                f"attempt_ids={sorted(target_attempt_ids)}"
+            )
+            # Step-11 PARTIAL T4 fix — fail CLOSED if the audit can't be
+            # written. Previously this path logged a warning and continued
+            # with the delete, producing an irreversible audit-free deletion
+            # on log disk errors. Now OSError here aborts the sweep BEFORE
+            # save_review_history mutates the store, so the operator sees
+            # the failure and can retry.
+            try:
+                append_wiki_log("sweep", audit_msg, log_path)
+            except OSError as log_err:
+                raise StorageError(
+                    f"sweep audit log write failed before delete; "
+                    f"aborting to preserve forensics: {log_err}",
+                    kind="sweep_audit_failure",
+                    path=log_path,
+                ) from log_err
+            history = [
+                row for row in history if row.get("attempt_id") not in set(target_attempt_ids)
+            ]
+        else:  # action == "mark_failed"
+            target_set = set(target_attempt_ids)
+            for row in history:
+                if row.get("attempt_id") in target_set and row.get("status") == "pending":
+                    row["status"] = "failed"
+                    row["error"] = "abandoned-by-sweep"
+                    row["sweep_id"] = sweep_id
+                    row["sweep_at"] = sweep_at
+        save_review_history(history, resolved_history_path)
+
+    return {
+        "swept": swept_count,
+        "action": action,
+        "sweep_id": sweep_id,
+        "dry_run": False,
+    }

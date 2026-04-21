@@ -79,9 +79,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `compile/compiler.py` naming inversion (~16-17) — `compile_wiki` is a thin orchestration shell over `ingest_source` + a manifest; real compilation primitives (`linker.py`) live in `compile/` but are consumed by `ingest/`. Dependency arrows invert the directory names; every new feature placement becomes a coin-flip. (R1)
   (fix: rename to `pipeline/orchestrator.py` and treat `compile/` as wikilink primitives only; or collapse `compile/compiler.py` into `kb.ingest.batch`)
 
-- `utils/llm.py` — `LLMError` is the only custom exception in the codebase; CLI (`cli.py:54,79,98,121,135`), `compile/compiler.py:349`, and MCP catch bare `Exception` and string-format. Cannot retry selectively, cannot test error paths, bugs in manifest-write are indistinguishable from LLM failures. (R1)
-  (fix: `kb.errors` with `KBError` → `IngestError` / `CompileError` / `QueryError` / `ValidationError` / `StorageError`; narrow `except` at the boundary)
-
 - `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes across existing pages. Every step is independently atomic, none reversible. A crash between manifest-write (step 6) and log-append (step 7) leaves the manifest claiming "already ingested" while the log shows nothing; a mid-wikilink-injection failure leaves partial retroactive backlinks. (R2)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests; retries idempotent at step granularity)
 
@@ -121,9 +118,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `compile/linker.py:178-241` `inject_wikilinks` cascade-call write race — `ingest_source` calls `inject_wikilinks` once per newly-created page (`pipeline.py:714-721`). For an ingest creating 50 entities + 50 concepts = 100 sequential calls in one process. Each iterates ALL wiki pages, reads each, may rewrite each via `atomic_text_write`. NO file lock. Concurrent ingest_source from another caller is identically iterating and rewriting the SAME pages. Caller A reads page X, caller B reads page X, A writes "X with link to A", B writes "X with link to B" — only B's wikilink survives. The retroactive-link guarantee silently fails under concurrent ingest. Compounds R4 overlapping-title (intra-process); R5 is the cross-process write-write race on the SAME page. (R5)
   (fix: per-target-page lock — `with file_lock(page_path): content = read; if needs_change: write`; or a wiki-wide writer lock during the inject phase since updates are usually fast)
 
-- `ingest/pipeline.py:594-611,715` slug + path collision under concurrent ingest — two concurrent `ingest_source` calls extracting different titles that slugify to the same `summary_slug` (e.g., `"My Article"` and `"My  Article"` both → `my-article`) both check `summary_path.exists()` (603), both see False, both call `_write_wiki_page → atomic_text_write` to the SAME `wiki/summaries/my-article.md`. Last writer wins — first source's summary silently overwritten. Frontmatter `source:` lists only the second source, evidence trail is wrong, all entity references from the first source point to a now-deleted summary. Same flow at line 496 for entities/concepts. R1 flagged `kb_create_page` TOCTOU vs O_EXCL but `_write_wiki_page` and `_process_item_batch` have the SAME pattern AND are the actual hot path. (R5)
-  (fix: replace `_write_wiki_page`'s `atomic_text_write` with exclusive-create — `os.open(O_WRONLY | O_CREAT | O_EXCL)` + temp-file rename; on `FileExistsError`, fall through to `_update_existing_page` (the merge path); same change in `_process_item_batch`)
-
 - `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page (line 609) → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes some of the SAME pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Within ONE process this is OK. Under concurrent ingest A + B, the read-then-write windows in different stages of A overlap with different stages of B in non-deterministic order; debugging becomes impossible because each `kb_ingest` run shows different conflict patterns. R5 highlights the **systemic absence of any locking discipline across the entire 11-stage ingest pipeline** — a problem that compounds with every Phase 5 feature. (R5)
   (fix: introduce a per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` and use consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, and `inject_wikilinks`; OR adopt a coarse wiki-wide ingest mutex)
 
@@ -155,8 +149,8 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). `file_lock` polls at 50 ms, adding minimum-latency floor on every verdict add. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
-- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in diskcache cache files. No patched upstream version as of 2026-04-18.
-  (mitigation: diskcache is only used by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; track upstream for a patched release)
+- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in diskcache cache files. No patched upstream version as of 2026-04-21 (Re-checked 2026-04-21 per cycle-20 AC21: `pip index versions diskcache` shows 5.6.3 = LATEST; `pip-audit` reports empty `fix_versions` for the CVE).
+  (mitigation: diskcache is only used by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports in our code; track upstream for a patched release)
 
 - `src/kb/lint/augment.py::_post_ingest_quality` — AC17-drop rationale for future reference: cache-invalidation work was reconsidered and DROPPED. Cycle-13 AC2 intentionally uses uncached `frontmatter.load` to avoid FAT32/OneDrive/SMB coarse-mtime holes. Do not re-open without a concrete failure case.
 
@@ -472,17 +466,14 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC
 
 ---
 
-## Cycle 20 candidates (surfaced during cycle 19)
+## Cycle 21 candidates (surfaced during cycle 20)
 
-<!-- Cycle 19 deferrals and Step-11 follow-ups. Effort estimates in parentheses. -->
+<!-- Cycle 20 follow-ups. Effort estimates in parentheses. -->
 
-### MEDIUM
+### LOW
 
-- `src/kb/review/refiner.py::list_stale_pending` — sweep / auto-promote tool. Cycle-19 AC8b shipped the read-only visibility helper; the matching MUTATION tool (auto-promote `pending` rows older than N days to `failed` with a synthesized `error: "abandoned by sweep"` field, OR auto-delete) is deferred. Needs a policy decision (auto-promote vs auto-delete vs operator-review-only) plus its own lock discipline. *(Carried from cycle-19 AC8b decision.)*
-  (effort: Medium — new MCP tool + CLI command + locking + policy spec)
-
-- `src/kb/compile/compiler.py::_canonical_rel_path` — Windows tilde-shortened path coverage test (T-13a). Cycle-19 left the Windows-specific divergence test as a placeholder skipif because constructing tilde-shortened paths in pytest requires platform-specific os.environ + symlink fixtures. The portable T-13b symlink test ships and exercises the same canonicalizer. A dedicated Windows-only follow-up could harden the test suite for that platform.
-  (effort: Low — Windows tilde fixture + CI matrix addition)
+- `tests/` inspect.getsource regression pins (cycle-11 L1 anti-pattern) — `tests/test_cycle5_hardening.py::test_synthesis_prompt_uses_wikilink_citation_format` still uses `inspect.getsource(query_wiki) + inspect.getsource(_query_wiki_body)` to assert the wikilink prompt format. Cycle-20 updated it to concatenate both functions after the trampoline refactor, but the assertion remains source-string-based and would survive a full revert of the prompt as long as the string appears anywhere in either function body. A behavioural rewrite would monkeypatch `call_llm` and assert the rendered prompt contains `[[page_id]]` in the actual prompt argument — catches revert properly. *(Deferred — not a regression; existing coverage is adequate.)*
+  (effort: Low — replace source-scan with monkeypatched call_llm prompt inspection)
 
 ---
 

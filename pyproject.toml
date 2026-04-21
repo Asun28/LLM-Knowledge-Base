@@ -40,6 +40,7 @@ markers = [
     "network: marks tests requiring network access",
     "integration: marks integration tests requiring real filesystem or DB",
     "llm: marks tests that invoke a real LLM API",
+    "lint: marks tests that enforce cross-file lint rules (cycle-20 star-import lint)",
 ]
 
 [build-system]

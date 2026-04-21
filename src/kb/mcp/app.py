@@ -74,6 +74,8 @@ _TOOL_GROUPS = (
             ("kb_affected_pages", "find pages impacted by a change."),
             ("kb_save_lint_verdict", "persist lint/review verdicts."),
             ("kb_create_page", "create comparison/synthesis/any wiki page directly."),
+            ("kb_refine_sweep", "sweep stale refine-pending rows (cycle 20 AC14)."),
+            ("kb_refine_list_stale", "list stale refine-pending rows (cycle 20 AC17)."),
         ),
     ),
     (

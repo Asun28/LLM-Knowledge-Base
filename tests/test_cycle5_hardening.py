@@ -33,10 +33,15 @@ def test_synthesis_prompt_uses_wikilink_citation_format():
     mcp/core.py said `[[page_id]]`. Asymmetric. This test pins the engine-side
     prompt to the canonical wikilink format so both paths emit consistent
     citations that ``extract_citations`` can parse.
+
+    Cycle 20 AC5/AC7 — after the ``query_wiki`` trampoline refactor the actual
+    synthesis prompt lives in ``_query_wiki_body``; the public ``query_wiki``
+    symbol is the thin wrapper that narrows exceptions. Inspect both so the
+    regression pin survives future splits.
     """
     from kb.query import engine
 
-    source = inspect.getsource(engine.query_wiki)
+    source = inspect.getsource(engine.query_wiki) + inspect.getsource(engine._query_wiki_body)
     assert "[[page_id]]" in source, "API-mode synthesis prompt must use [[page_id]] format"
     assert "[source: page_id]" not in source, (
         "Legacy [source: page_id] instruction must be removed from synthesis prompt"
