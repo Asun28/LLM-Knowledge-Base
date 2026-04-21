@@ -1340,17 +1340,48 @@ def _run_ingest_body(
         pages=all_wiki_pages,
     )
 
-    # 9. Retroactive wikilink injection — scan existing pages for mentions of new titles.
+    # 9. Retroactive wikilink injection — cycle-19 AC6: switched from N
+    # per-title `inject_wikilinks` calls to a single `inject_wikilinks_batch`
+    # call that scans each existing page AT MOST ONCE (per chunk). Reduces
+    # 100·N disk reads at 50 entities + 50 concepts × N existing pages to
+    # ≤ 2·N. Pages bundle `all_wiki_pages` is already pre-loaded above for
+    # affected-pages analysis (cycle-19 AC7 — re-use, don't re-walk disk).
     wikilinks_injected: list[str] = []
     sorted_new_pages = _sort_new_pages_by_title_length(new_pages_with_titles)
-    for pid, ptitle in sorted_new_pages:
+    if sorted_new_pages:
         try:
-            from kb.compile.linker import inject_wikilinks
+            from kb.compile.linker import inject_wikilinks_batch
 
-            updated = inject_wikilinks(ptitle, pid, wiki_dir=effective_wiki_dir)
-            wikilinks_injected.extend(updated)
+            # _sort_new_pages_by_title_length returns [(pid, title), ...];
+            # inject_wikilinks_batch expects [(title, pid), ...].
+            batch_input = [(title, pid) for pid, title in sorted_new_pages]
+            batch_result = inject_wikilinks_batch(
+                batch_input,
+                wiki_dir=effective_wiki_dir,
+                pages=all_wiki_pages,
+            )
+            # Flatten batch result dict to a single list (preserves existing
+            # `wikilinks_injected` shape for downstream consumers).
+            for updated_list in batch_result.values():
+                wikilinks_injected.extend(updated_list)
+            # Cycle-19 AC20: single audit-log line via append_wiki_log.
+            # Inherits cycle-2 _escape_markdown_prefix sanitizer — titles
+            # containing leading #/-/>/!  or [[/]] markers are neutralised.
+            if wikilinks_injected:
+                injected_summary = ", ".join(sorted(set(wikilinks_injected)))
+                if len(injected_summary) > 100:
+                    injected_summary = injected_summary[:100] + "..."
+                try:
+                    log_path = effective_wiki_dir / "log.md"
+                    append_wiki_log(
+                        "inject_wikilinks_batch",
+                        f"injected {len(wikilinks_injected)} link(s): {injected_summary}",
+                        log_path,
+                    )
+                except OSError as log_exc:
+                    logger.warning("inject_wikilinks_batch log append failed: %s", log_exc)
         except Exception as e:
-            logger.debug("inject_wikilinks failed for %s: %s", pid, e)
+            logger.debug("inject_wikilinks_batch failed: %s", e)
 
     # Auto-contradiction detection. Cycle 4 item #22 — migrate to the
     # sibling `detect_contradictions_with_metadata` so truncation is

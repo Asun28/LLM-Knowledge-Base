@@ -260,6 +260,15 @@ MAX_ENTITIES_PER_INGEST = 50
 MAX_CONCEPTS_PER_INGEST = 50
 MAX_INGEST_CONTENT_CHARS = 160_000
 
+# ── Cycle 19 AC4/AC4b: inject_wikilinks_batch bounds ──────────
+# `MAX_INJECT_TITLES_PER_BATCH` caps the alternation regex width per chunk
+# (ReDoS bound: 200 × ~25 avg chars + re.escape ≈ 5KB regex). Batches larger
+# than this are split into sequential chunks.
+# `MAX_INJECT_TITLE_LEN` caps individual title length within a chunk; titles
+# exceeding this are skipped with `log.warning` (do NOT reject the whole batch).
+MAX_INJECT_TITLES_PER_BATCH = 200
+MAX_INJECT_TITLE_LEN = 500
+
 # ── Content-length ingest tiering ────────────────────────────
 # Sources under this character count get simplified processing:
 # summary page only, entity/concept pages deferred.
