@@ -34,13 +34,16 @@ def _seed_history(tmp_kb_env: Path, rows: list[dict]) -> Path:
 
 
 @pytest.fixture
-def seeded_history(tmp_kb_env: Path) -> Path:
+def seeded_history(tmp_kb_env: Path, monkeypatch) -> Path:
     """Seed review_history.json with 1 stale + 1 fresh pending row.
 
-    tmp_kb_env already redirects REVIEW_HISTORY_PATH to tmp_path/.data so
-    MCP + CLI tools resolve to this fixture without additional monkeypatch.
+    Belt-and-braces: besides the tmp_kb_env mirror-rebind, explicitly patch
+    ``kb.review.refiner.REVIEW_HISTORY_PATH`` (and ``kb.mcp.quality.WIKI_DIR``)
+    so MCP + CLI tools resolve to this fixture's paths even if the owner
+    modules were imported before ``tmp_kb_env`` ran under a full-suite
+    ordering that missed the mirror-rebind window.
     """
-    return _seed_history(
+    path = _seed_history(
         tmp_kb_env,
         [
             {
@@ -59,6 +62,16 @@ def seeded_history(tmp_kb_env: Path) -> Path:
             },
         ],
     )
+    # Defensive explicit monkeypatch — cycle-19 L1 snapshot-binding hazard
+    # resurfaces under full-suite ordering for new modules imported after
+    # mirror-rebind has already run.
+    import kb.mcp.quality as _quality
+    import kb.review.refiner as _refiner
+
+    monkeypatch.setattr(_refiner, "REVIEW_HISTORY_PATH", path, raising=False)
+    monkeypatch.setattr(_refiner, "WIKI_DIR", tmp_kb_env / "wiki", raising=False)
+    monkeypatch.setattr(_quality, "WIKI_DIR", tmp_kb_env / "wiki", raising=False)
+    return path
 
 
 class TestMcpKbRefineSweep:
