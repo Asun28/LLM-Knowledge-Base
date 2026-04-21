@@ -112,6 +112,15 @@ class TestStorageErrorContract:
         err = StorageError("plain", path=Path("/also/secret"))
         assert str(err) == "plain"
 
+    def test_empty_kind_string_does_not_trigger_redaction(self) -> None:
+        """Cycle-20 R1 Sonnet MAJOR 2 — `kind=""` must fall through to raw msg,
+        not render `": <path_hidden>"`. The `__str__` guard uses a truthy check
+        on `self.kind` so an empty string disables redaction (cycle-19 L3
+        rule: empty strings must not bypass a rejection-oriented guard).
+        """
+        err = StorageError("raw msg", kind="", path=Path("/secret"))
+        assert str(err) == "raw msg"
+
     def test_can_be_caught_as_kberror(self) -> None:
         try:
             raise StorageError("x", kind="summary_collision", path=Path("/a"))

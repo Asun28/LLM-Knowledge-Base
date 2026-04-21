@@ -33,6 +33,16 @@ def _iso(delta_hours: float) -> str:
     return (datetime.now() - timedelta(hours=delta_hours)).isoformat()
 
 
+def _iso_older_than(timestamp: str, hours: int) -> bool:
+    """Inline timestamp-gate for the page_id-revert simulation test."""
+    cutoff = datetime.now() - timedelta(hours=hours)
+    try:
+        ts = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return False
+    return ts < cutoff
+
+
 class TestSweepValidation:
     """AC13 — unknown action / bad hours raise ValidationError."""
 
@@ -155,6 +165,14 @@ class TestSweepAttemptIdMatching:
     """AC13 / D-NEW R2 — sweep matches by attempt_id, never by page_id."""
 
     def test_same_page_id_different_attempt_id_is_not_clobbered(self, tmp_path: Path) -> None:
+        """Cycle-20 R1 Sonnet BLOCKER-hardened — the mutation loop must match
+        rows by ``attempt_id``, NEVER by ``page_id``. Fresh pending row is
+        preserved via the timestamp filter (candidate exclusion) AND the
+        attempt_id membership check in the mutation loop — a revert that
+        swaps ``attempt_id`` for ``page_id`` in the mutation loop would flip
+        the fresh row to ``failed`` too because its page_id matches the
+        sweep target's page_id.
+        """
         history_path = tmp_path / "history.json"
         _write_history(
             history_path,
@@ -184,7 +202,78 @@ class TestSweepAttemptIdMatching:
         rows = json.loads(history_path.read_text(encoding="utf-8"))
         by_id = {row["attempt_id"]: row for row in rows}
         assert by_id["stalexx1"]["status"] == "failed"
-        assert by_id["freshxx2"]["status"] == "pending", "concurrent fresh refine must be preserved"
+        assert by_id["freshxx2"]["status"] == "pending", (
+            "concurrent fresh refine must be preserved — fresh row under "
+            "cutoff should NOT be flipped to failed just because its page_id "
+            "matches the swept row. A page_id-matching revert in the mutation "
+            "loop would flip BOTH rows (same page_id + both pending), failing."
+        )
+        # Cycle-20 R1 Sonnet BLOCKER hardening: per-row sweep-metadata pin.
+        # Under a revert where the mutation loop targets page_id, the fresh
+        # row would receive the SAME sweep_id + sweep_at as the stale row.
+        # Asserting their ABSENCE on the fresh row makes the
+        # attempt_id-vs-page_id divergence unambiguous and defeats the
+        # "test passed via timestamp filter alone" vacuity concern.
+        assert by_id["stalexx1"].get("sweep_id") is not None
+        assert by_id["stalexx1"].get("sweep_at") is not None
+        assert by_id["stalexx1"].get("error") == "abandoned-by-sweep"
+        assert "sweep_id" not in by_id["freshxx2"], (
+            "fresh row must NOT carry sweep metadata; presence indicates the "
+            "mutation loop touched it (page_id revert detected)"
+        )
+        assert "sweep_at" not in by_id["freshxx2"]
+        assert "error" not in by_id["freshxx2"]
+
+    def test_page_id_matching_revert_is_detectable_via_explicit_revert_sim(
+        self, tmp_path: Path
+    ) -> None:
+        """Belt-and-braces — explicitly simulate a page_id-matching mutation
+        loop and pin what such a revert would do. Combined with the test
+        above, this shows the attempt_id assertion is NOT vacuous: under
+        page_id-matching, the fresh row WOULD flip, and the above test
+        WOULD fail.
+        """
+        from kb.review.refiner import load_review_history, save_review_history
+
+        history_path = tmp_path / "history.json"
+        rows_in = [
+            {
+                "page_id": "entities/revert-sim",
+                "attempt_id": "revstale",
+                "status": "pending",
+                "timestamp": _iso(300),
+            },
+            {
+                "page_id": "entities/revert-sim",
+                "attempt_id": "revfresh",
+                "status": "pending",
+                "timestamp": _iso(0.1),
+            },
+        ]
+        _write_history(history_path, rows_in)
+
+        # Hand-rolled page_id-matching mutation loop — this is what the
+        # production code DOES NOT do (and must never do).
+        history = load_review_history(history_path)
+        stale_page_ids = {
+            row["page_id"]
+            for row in history
+            if row["status"] == "pending" and _iso_older_than(row["timestamp"], 168)
+        }
+        for row in history:
+            if row["page_id"] in stale_page_ids and row["status"] == "pending":
+                row["status"] = "failed"
+        save_review_history(history, history_path)
+
+        rows_out = json.loads(history_path.read_text(encoding="utf-8"))
+        by_id = {r["attempt_id"]: r for r in rows_out}
+        # Under page_id matching, BOTH rows flip to failed.
+        assert by_id["revstale"]["status"] == "failed"
+        assert by_id["revfresh"]["status"] == "failed", (
+            "simulation of page_id-matching revert must flip the fresh row "
+            "too — that is exactly the regression the attempt_id-matching "
+            "test above guards against"
+        )
 
     def test_unrelated_pending_row_different_page_untouched(self, tmp_path: Path) -> None:
         history_path = tmp_path / "history.json"
@@ -226,8 +315,17 @@ class TestSweepDelete:
         producing an irreversible audit-free deletion. Now the sweep raises
         `StorageError(kind="sweep_audit_failure")` BEFORE touching history.
         """
-        from kb.errors import StorageError
         from kb.review import refiner
+
+        # Cycle-19 L2 defensive binding — under full-suite ordering,
+        # `kb.errors` can be reloaded by cycle-15's `importlib.reload(kb.config)`
+        # cascade, in which case the test-module-top `from kb.errors import
+        # StorageError` captures a different class object than the one
+        # `kb.review.refiner` imported at ITS module top. `pytest.raises`
+        # compares by class identity, so mismatched reloads cause a silent
+        # miss. Late-bind `StorageError` from `refiner`'s module-attribute
+        # lookup so we catch whichever class `refiner` actually raises.
+        StorageError = refiner.StorageError
 
         history_path = tmp_project / ".data" / "history.json"
         _write_history(
@@ -336,15 +434,21 @@ class TestSweepDryRun:
 
 
 class TestSweepLockSerialization:
-    """AC13 — sweep holds file_lock across load + save (locked-RMW invariant).
+    """AC13 — sweep holds ``file_lock(history_path)`` across load + save.
 
-    Spy on load_review_history / save_review_history call order; assert that
-    at least one load precedes each save within the locked span. This catches
-    a regression that would drop the file_lock around the load-mutate-save
-    path (leaving concurrent refine_page interleaving possible).
+    Cycle-20 R1 Codex NIT hardening: the original version spied only on
+    `load_review_history` / `save_review_history` and asserted `["load", "save"]`
+    call order — which would still pass if the `with file_lock(...)` wrapper
+    were removed (loads/saves still happen in order, just without lock).
+    The hardened version spies on `file_lock` itself to record when the lock
+    is held, and spies on load/save to record which calls occur INSIDE the
+    lock span. A revert that drops the `with file_lock(...)` would produce
+    load/save calls OUTSIDE the lock-held window and fail the assertion.
     """
 
-    def test_load_precedes_save_under_lock(self, tmp_path: Path) -> None:
+    def test_load_save_happen_while_lock_is_held(self, tmp_path: Path) -> None:
+        from contextlib import contextmanager
+
         from kb.review import refiner
 
         history_path = tmp_path / "history.json"
@@ -360,24 +464,51 @@ class TestSweepLockSerialization:
             ],
         )
 
-        call_order: list[str] = []
+        # State the spies share: whether we are currently inside the
+        # production `with file_lock(...)` span.
+        lock_held = {"active": False, "entered": 0, "exited": 0}
+        events: list[tuple[str, bool]] = []
         real_load = refiner.load_review_history
         real_save = refiner.save_review_history
+        real_file_lock = refiner.file_lock
+
+        @contextmanager
+        def spy_file_lock(path, *args, **kwargs):
+            # Only treat the history_path acquisition as the sweep lock;
+            # other call sites (wiki_log.append_wiki_log, etc.) don't count.
+            is_history = str(path) == str(history_path)
+            with real_file_lock(path, *args, **kwargs):
+                if is_history:
+                    lock_held["active"] = True
+                    lock_held["entered"] += 1
+                try:
+                    yield
+                finally:
+                    if is_history:
+                        lock_held["active"] = False
+                        lock_held["exited"] += 1
 
         def spy_load(*args, **kwargs):
-            call_order.append("load")
+            events.append(("load", lock_held["active"]))
             return real_load(*args, **kwargs)
 
         def spy_save(*args, **kwargs):
-            call_order.append("save")
+            events.append(("save", lock_held["active"]))
             return real_save(*args, **kwargs)
 
         with (
+            patch.object(refiner, "file_lock", spy_file_lock),
             patch.object(refiner, "load_review_history", spy_load),
             patch.object(refiner, "save_review_history", spy_save),
         ):
             sweep_stale_pending(hours=168, history_path=history_path)
 
-        # Pattern: at least one load precedes each save within the locked RMW.
-        # dry_run=False path does ONE load + ONE save.
-        assert call_order == ["load", "save"], f"unexpected call order: {call_order}"
+        assert lock_held["entered"] == 1, (
+            f"history file_lock must be acquired exactly once (got {lock_held['entered']})"
+        )
+        assert lock_held["exited"] == 1, "history file_lock must be released"
+        # Filter to the load/save events that happened inside the locked span.
+        locked_events = [ev for ev in events if ev[1]]
+        assert [ev[0] for ev in locked_events] == ["load", "save"], (
+            f"load + save must BOTH happen inside file_lock(history_path); got events={events}"
+        )

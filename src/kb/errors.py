@@ -76,6 +76,11 @@ class StorageError(KBError):
 
     def __str__(self) -> str:
         msg = super().__str__()
-        if self.kind is not None and self.path is not None:
+        # Cycle-19 L3 rule — truthy check excludes empty-string kind, so a
+        # future caller that accidentally passes kind="" gets the raw msg
+        # instead of a confusing `": <path_hidden>"` rendering. path is
+        # compared to None explicitly because `Path("")` is falsy in some
+        # Python versions; we want any non-None Path to trigger redaction.
+        if self.kind and self.path is not None:
             return f"{self.kind}: <path_hidden>"
         return msg
