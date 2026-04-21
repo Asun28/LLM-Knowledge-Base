@@ -6,8 +6,8 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-2585-brightgreen)](#development)
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet)](#claude-code-integration-mcp-server)
+[![Tests](https://img.shields.io/badge/tests-2697-brightgreen)](#development)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
 
 Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 26 MCP tools — **no API key required**.
@@ -167,7 +167,7 @@ kb --version
 
 ### Claude Code Integration (MCP Server)
 
-26 tools that work natively in Claude Code. **No API key needed** — Claude Code is the default LLM.
+28 tools that work natively in Claude Code. **No API key needed** — Claude Code is the default LLM.
 
 ```json
 {
@@ -192,7 +192,7 @@ kb --version
 | See the graph | "Show me the knowledge graph" |
 
 <details>
-<summary><b>All 26 MCP tools</b></summary>
+<summary><b>All 28 MCP tools</b></summary>
 
 #### Core
 
@@ -234,6 +234,8 @@ kb --version
 | `kb_affected_pages` | Pages affected by a change (backlinks + shared sources) |
 | `kb_save_lint_verdict` | Record lint/review verdict for audit trail |
 | `kb_create_page` | Create comparison/synthesis/any wiki page directly |
+| `kb_refine_list_stale` | List pending refine rows stale beyond a threshold (hours) — no mutation |
+| `kb_refine_sweep` | Mark stale pending rows as failed or delete them, with audit trail |
 
 </details>
 
@@ -274,7 +276,7 @@ llm-wiki-flywheel/
   src/kb/                  # Python package (~6,200 lines)
     cli.py                 # Click CLI (6 commands)
     config.py              # Paths, model tiers, tuning constants
-    mcp/                   # FastMCP server (25 tools)
+    mcp/                   # FastMCP server (28 tools)
     models/                # WikiPage, RawSource, frontmatter validation
     ingest/                # Pipeline + template-driven extractors
     compile/               # Incremental compiler + wikilink linker
@@ -285,7 +287,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 2585 tests across 215 files
+  tests/                   # 2697 tests across 227 files
 ```
 
 </details>
@@ -298,7 +300,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 2585 tests, 7 skipped
+python -m pytest                # 2697 tests, 8 skipped
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```
@@ -312,7 +314,8 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 - **Phase 4 (v0.10.0 shipped 2026-04-12):** Hybrid search with RRF fusion, 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit (unreleased) resolved all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
 - **Phase 4.11 (unreleased, 2026-04-14):** `kb_query --format={markdown|marp|html|chart|jupyter}` output adapters — synthesized answers saved as Markdown docs, Marp slide decks, self-contained HTML pages, matplotlib Python scripts (+ JSON data sidecar), or executable Jupyter notebooks. Files land at `outputs/{ts}-{slug}.{ext}` (gitignored) with provenance frontmatter. Addresses Karpathy Tier 1 #1.
 - **Phase 5.0 (unreleased, 2026-04-15):** `kb lint --augment` — reactive gap-fill: lint detects a stub → propose authoritative URLs (Wikipedia, arxiv) → fetch with DNS-rebind-safe transport → ingest as `confidence: speculative`. Three-gate execution honors human curation: `propose → --execute → --auto-ingest`. Eligibility gates G1-G7 + scan-tier relevance check + post-ingest quality verdict + `[!gap]` callout on regression. Cross-process rate limiting: 10/run + 60/hour + 3/host/hour.
-- **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification, URL-aware `kb_ingest` with 5-state adapter model, page status lifecycle (seed→developing→mature→evergreen), inline quality callout markers, autonomous research loop in evolve, conversation capture `kb_capture` MCP tool, chunk-level BM25 sub-page indexing, typed semantic relations on graph edges, interactive graph HTML viewer (vis.js), semantic edge inference (LLM-inferred implicit relationships), living overview page, actionable gap-fill source suggestions, two-phase compile pipeline, multi-hop retrieval, conversation→KB promotion, temporal claim tracking, BM25 + LLM reranking
+- **Phase 4.5 (unreleased, post-v0.10.0 audit, 2026-04-16 → 2026-04-21):** 20-cycle backlog blitz — 480+ acceptance criteria across 227 test files (+1520 tests: 1177 → 2697). Key deliverables: `kb.errors` exception taxonomy (`KBError` + 5 subclasses, `LLMError`/`CaptureError` reparented); slug-collision O_EXCL hardening with write-phase poison-unlink; 2 new MCP tools — `kb_refine_sweep` + `kb_refine_list_stale` (26 → 28 tools); `inject_wikilinks_batch` (N×M disk-read hot-path reduced to ~U+2M with ReDoS bounds); refine two-phase write with `attempt_id` correlation; ingest audit log (`.data/ingest_log.jsonl`, request_id correlation); per-page TOCTOU lock in linker; rotate-in-lock for wiki_log; Epistemic-Integrity 2.0 (`belief_state`, `authored_by`, `status` vocabularies); `kb publish` Tier-1 builders (5 formats: llms.txt, llms-full.txt, graph.jsonld, per-page siblings, sitemap); `kb_query(save_as=...)` synthesis persistence; duplicate-slug + inline-callout lint; manifest key consistency; 60+ security threats addressed across all cycles; 3-round PR review pattern for every batch ≥25 ACs.
+- **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification, URL-aware `kb_ingest` with 5-state adapter model, page status lifecycle (seed→developing→mature→evergreen), inline quality callout markers, autonomous research loop in evolve, chunk-level BM25 sub-page indexing, typed semantic relations on graph edges, interactive graph HTML viewer (vis.js), semantic edge inference (LLM-inferred implicit relationships), living overview page, actionable gap-fill source suggestions, two-phase compile pipeline, multi-hop retrieval, conversation→KB promotion, temporal claim tracking, BM25 + LLM reranking
 - **Phase 6 (future):** DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling
 
 <details>
@@ -330,6 +333,7 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 - **v0.9.15:** Phase 3.96 — 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW). 952 tests
 - **v0.9.16:** Phase 3.97 — 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF fix, integer title coercion, contradiction detection improvements. 1033 tests
 - **v0.10.0:** Phase 4 — hybrid search with RRF fusion (BM25 + vector via model2vec + sqlite-vec), 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit resolved all HIGH (23) + MEDIUM (~30) + LOW (~30) items. 1177 tests across 55 files
+- **Phase 4.5 (unreleased, post-v0.10.0):** 20-cycle post-release audit + hardening (2026-04-16 → 2026-04-21). Exception taxonomy, slug-collision O_EXCL, ingest audit log, per-page TOCTOU lock, rotate-in-lock, batch wikilink injection, refine two-phase write, Epistemic-Integrity 2.0, `kb publish` 5 Tier-1 builders, `kb_query(save_as=...)`, duplicate-slug + inline-callout lint, manifest key consistency, 2 new MCP tools (28 total), 60+ security threats closed. 2697 tests across 227 files
 
 </details>
 

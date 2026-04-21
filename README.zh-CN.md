@@ -2,12 +2,12 @@
 
 **Language / 语言：** [English](README.md) · **简体中文**
 
-![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-2585-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-26-blueviolet) ![Version](https://img.shields.io/badge/version-v0.10.0-orange)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-2697-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet) ![Version](https://img.shields.io/badge/version-v0.10.0-orange)
 
 **编译知识，而非检索碎片。**
 丢入原始资料，剩下的交给 Claude——自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。无需向量数据库，无需文本分块。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
 
-灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 26 个 MCP 工具——无需配置 API Key 即可运行。
+灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具——无需配置 API Key 即可运行。
 
 ---
 
@@ -175,7 +175,7 @@ kb --version
 - Obsidian 原生兼容——直接通过 `wiki/` Vault 使用内置图谱视图
 
 ### 🤖 Claude Code 集成 (MCP Server)
-原生支持 26 个工具，无需 API Key（Claude Code 作为默认 LLM）。
+原生支持 28 个工具，无需 API Key（Claude Code 作为默认 LLM）。
 ```json
 {
   "mcpServers": {
@@ -200,7 +200,7 @@ kb --version
 
 ---
 
-## 🧰 全部 26 个 MCP 工具
+## 🧰 全部 28 个 MCP 工具
 
 <details>
 <summary><b>展开查看完整工具列表</b></summary>
@@ -245,6 +245,8 @@ kb --version
 | `kb_affected_pages` | 受变更影响的页面（反向链接+共享来源） |
 | `kb_save_lint_verdict` | 记录 Lint/审查结果用于审计 |
 | `kb_create_page` | 直接创建对比/综合/任意类型维基页 |
+| `kb_refine_list_stale` | 列出超时未完成的 pending 精炼行（仅查询，不修改） |
+| `kb_refine_sweep` | 将过期 pending 行标记为失败或删除，带完整审计追踪 |
 
 </details>
 
@@ -304,7 +306,7 @@ llm-wiki-flywheel/
     feedback/              # 贝叶斯可信度评分
     review/                # 页面-来源配对 + 优化器
     utils/                 # 哈希、LLM 调用、文本处理、I/O
-  tests/                   # 2585 个测试用例（覆盖 215 个文件）
+  tests/                   # 2697 个测试用例（覆盖 227 个文件）
 ```
 
 </details>
@@ -318,7 +320,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix/macOS
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 运行 2585 个测试（7 个跳过）
+python -m pytest                # 运行 2697 个测试（8 个跳过）
 ruff check src/ tests/ --fix    # 代码检查
 ruff format src/ tests/         # 代码格式化
 ```
@@ -332,11 +334,27 @@ ruff format src/ tests/         # 代码格式化
 - **Phase 4 (v0.10.0 已发布 2026-04-12)**：RRF 融合混合检索、4 层检索去重流水线、证据追踪模块、查询时过期事实标记、分层上下文组装、原始资料回退检索、摄入时自动矛盾检测、多轮查询重写。发布后审计已修复所有 HIGH (23) + MEDIUM (~30) + LOW (~30) 问题。
 - **Phase 4.11 (未发布 2026-04-14)**：`kb_query --format={markdown|marp|html|chart|jupyter}` 输出适配器——将合成答案导出为 Markdown 文档、Marp 幻灯片、独立 HTML 页面、matplotlib Python 脚本（附 JSON 数据）或可执行 Jupyter Notebook。文件保存至 `outputs/{ts}-{slug}.{ext}`（已 gitignore），含来源前置元数据。响应 Karpathy Tier 1 #1 需求。
 - **Phase 5.0 (未发布 2026-04-15)**：`kb lint --augment` 响应式盲区填充：Lint 发现残页 → 推荐权威链接（Wikipedia, arxiv）→ DNS 重绑定安全传输抓取 → 以 `confidence: speculative` 摄入。三阶段执行尊重人工审核：`propose → --execute → --auto-ingest`。含 G1-G7 资格门控、扫描层相关性检查、摄入后质量判定、回归 `[!gap]` 提示。跨进程限流：10次/运行 + 60次/小时 + 3次/主机/小时。
-- **Phase 5 (延期)**：内联观点级可信度标签 + EXTRACTED Lint 验证、支持 URL 的 `kb_ingest`（5 状态适配器模型）、页面状态生命周期（seed→developing→mature→evergreen）、内联质量提示标记、Evolve 自主研究循环、`kb_capture` 对话捕获工具、块级 BM25 子页索引、图谱边类型化语义关系、交互式 vis.js HTML 图谱查看器、LLM 隐式关系推断、动态概览页、可操作盲区填充建议、两阶段编译流水线、多跳检索、对话→KB 提升、时间轴观点追踪、BM25 + LLM 重排序。
+- **Phase 4.5 (未发布，v0.10.0 发布后持续审计，2026-04-16 → 2026-04-21)**：20 个迭代周期，480+ 验收条件，227 个测试文件（+1520 测试：1177 → 2697）。核心交付：`kb.errors` 异常分类体系（`KBError` + 5 个子类，`LLMError`/`CaptureError` 重新继承）；slug 碰撞 O_EXCL 防护（写入阶段失败自动清理零字节残留）；2 个新 MCP 工具 `kb_refine_sweep` + `kb_refine_list_stale`（26 → 28 个）；`inject_wikilinks_batch` 批量注入（N×M 磁盘读改为 ~U+2M，内置 ReDoS 防护）；精炼两阶段写入（含 `attempt_id` 关联）；结构化摄入审计日志（`.data/ingest_log.jsonl`，`request_id` 全程关联）；链接器页面级 TOCTOU 锁；wiki_log 锁内轮转；Epistemic-Integrity 2.0（`belief_state` / `authored_by` / `status` 元数据体系）；`kb publish` 5 种 Tier-1 发布格式（llms.txt、llms-full.txt、graph.jsonld、关联页面、站点地图）；`kb_query(save_as=...)` 综合答案持久化；重复 slug + 内联标注 Lint 检查；manifest key 一致性；60+ 安全威胁全部关闭；所有 ≥25 条 AC 批次均执行三轮 PR 审查。
+- **Phase 5 (延期)**：内联观点级可信度标签 + EXTRACTED Lint 验证、支持 URL 的 `kb_ingest`（5 状态适配器模型）、页面状态生命周期（seed→developing→mature→evergreen）、内联质量提示标记、Evolve 自主研究循环、块级 BM25 子页索引、图谱边类型化语义关系、交互式 vis.js HTML 图谱查看器、LLM 隐式关系推断、动态概览页、可操作盲区填充建议、两阶段编译流水线、多跳检索、对话→KB 提升、时间轴观点追踪、BM25 + LLM 重排序。
 - **Phase 6 (未来规划)**：DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
 **已完成版本**：
-`v0.3.0` 5大操作+图谱+CLI+MCP(12) → `v0.4.0` 质量系统 → `v0.5.0` 鲁棒性 → `v0.6.0` DRY重构(180测试) → `v0.7.0` MCP拆分+PageRank(234) → `v0.8.0` BM25引擎(252) → `v0.9.x` 强化/审计/结构化输出(564~1033) → `v0.10.0` Phase4 混合检索+全量审计修复(1177测试)
+
+| 版本 | 核心内容 | 测试数 |
+|---|---|---|
+| v0.3.0 | 5大操作 + 图谱 + CLI + MCP (12 工具) | — |
+| v0.4.0 | 质量系统：贝叶斯可信度、Actor-Critic 审查、语义 Lint | — |
+| v0.5.0 | 鲁棒性：YAML 注入防护、路径规范化 | — |
+| v0.6.0 | DRY 重构：共享工具函数、测试夹具 | 180 |
+| v0.7.0 | MCP 拆包、PageRank、实体丰富、持久化审查记录 | 234 |
+| v0.8.0 | BM25 检索引擎 | 252 |
+| v0.9.0–v0.9.9 | 全面强化、综合审计、结构化输出、内容增长 | 564 |
+| v0.9.10–v0.9.13 | 引用修复、编译扫描、BM25 去重、54 条 Backlog 修复 | 651 |
+| v0.9.14 | Phase 3.95 — 38 条 Backlog 修复 | 692 |
+| v0.9.15 | Phase 3.96 — 153 条修复（4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW） | 952 |
+| v0.9.16 | Phase 3.97 — 62 条修复：原子写入、MCP 异常防护、slugify 符号映射、CRLF、整数标题强制转换 | 1033 |
+| v0.10.0 | Phase 4 — RRF 混合检索、4 层去重、证据追踪、查询时过期标记、分层上下文、原始资料回退、自动矛盾检测、多轮重写；发布后修复全部 HIGH/MEDIUM/LOW | 1177（55 文件）|
+| Phase 4.5（未发布） | v0.10.0 后持续审计，20 周期，异常分类体系、O_EXCL 防碰撞、新增 2 个 MCP 工具、批量链接注入、Epistemic-Integrity 2.0、`kb publish` 5 种格式、60+ 安全威胁关闭 | 2697（227 文件）|
 
 ---
 
