@@ -78,8 +78,7 @@ class TestWriteWikiPageExclusiveFlag:
         """Existing file → StorageError(kind='summary_collision') with path set."""
         page = tmp_wiki / "summaries" / "taken.md"
         existing = (
-            "---\ntitle: Existing\nsource:\n"
-            "  - 'raw/articles/other.md'\ntype: summary\n---\n\nbody"
+            "---\ntitle: Existing\nsource:\n  - 'raw/articles/other.md'\ntype: summary\n---\n\nbody"
         )
         page.write_text(existing, encoding="utf-8")
         prev = page.read_text(encoding="utf-8")
