@@ -18,7 +18,6 @@ Covers gaps surfaced by the Step 2 threat model that cycle 5 shipped without:
 
 from __future__ import annotations
 
-import inspect
 import logging
 
 import pytest
@@ -26,7 +25,7 @@ import pytest
 # ── T1 — citation format coordination ────────────────────────────────
 
 
-def test_synthesis_prompt_uses_wikilink_citation_format():
+def test_synthesis_prompt_uses_wikilink_citation_format(tmp_path, monkeypatch):
     """Regression: API-mode synthesis prompt must instruct `[[page_id]]` format.
 
     Before cycle 5 redo, engine.py:733 said `[source: page_id]` while
@@ -34,17 +33,73 @@ def test_synthesis_prompt_uses_wikilink_citation_format():
     prompt to the canonical wikilink format so both paths emit consistent
     citations that ``extract_citations`` can parse.
 
-    Cycle 20 AC5/AC7 — after the ``query_wiki`` trampoline refactor the actual
-    synthesis prompt lives in ``_query_wiki_body``; the public ``query_wiki``
-    symbol is the thin wrapper that narrows exceptions. Inspect both so the
-    regression pin survives future splits.
-    """
-    from kb.query import engine
+    Cycle 22 AC7-AC9 — replaces the previous ``inspect.getsource`` assertion
+    (which survived a full revert because it only read source text, not
+    runtime behaviour) with a monkeypatched spy over ``kb.query.engine.call_llm``.
+    The spy captures the ACTUAL prompt string sent to the synthesiser and
+    asserts that it contains ``[[page_id]]`` and does NOT contain the legacy
+    ``[source: page_id]`` form. Patching the module attribute covers BOTH
+    the ``query_wiki`` trampoline and the ``_query_wiki_body`` inner function,
+    since they import ``call_llm`` from a single bind at engine.py line ~40.
 
-    source = inspect.getsource(engine.query_wiki) + inspect.getsource(engine._query_wiki_body)
-    assert "[[page_id]]" in source, "API-mode synthesis prompt must use [[page_id]] format"
-    assert "[source: page_id]" not in source, (
-        "Legacy [source: page_id] instruction must be removed from synthesis prompt"
+    Vacuous-test guard (AC9): assert ``spy.call_count >= 1`` unconditionally —
+    if the synthesis path never runs (e.g. no pages seeded), the positive /
+    negative assertions would be no-ops.
+    """
+    from kb.query import engine as query_engine
+    from kb.utils.pages import load_purpose
+
+    tmp_wiki = tmp_path / "wiki"
+    for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (tmp_wiki / sub).mkdir(parents=True)
+
+    # Seed one page so search_pages returns a hit and the synthesis branch fires.
+    (tmp_wiki / "entities" / "seeder.md").write_text(
+        "---\n"
+        "title: Seeder\n"
+        "type: entity\n"
+        "confidence: stated\n"
+        "source:\n"
+        "  - raw/articles/seeder.md\n"
+        "---\n\n"
+        "Content about the seeder entity used for cycle 22 AC7-AC9 regression.",
+        encoding="utf-8",
+    )
+    load_purpose.cache_clear()
+
+    captured_prompts: list[str] = []
+
+    def spy_call_llm(prompt, tier="write", **kwargs):
+        captured_prompts.append(prompt)
+        return "synthesised answer"
+
+    monkeypatch.setattr("kb.query.engine.call_llm", spy_call_llm)
+
+    try:
+        query_engine.query_wiki("What is the seeder?", wiki_dir=tmp_wiki)
+    except Exception:
+        # Any exception downstream of the spy is fine — we only care that the
+        # spy captured at least one prompt. No-match / API-error branches
+        # still exercise the prompt-assembly code path.
+        pass
+
+    # AC9 vacuous-test guard — assert the spy was actually invoked.
+    assert len(captured_prompts) >= 1, (
+        "call_llm spy was never invoked — query_wiki did not reach the "
+        "synthesis path, so the AC8 positive/negative assertions would be "
+        "vacuous. Seed a wiki page that matches the query, or verify the "
+        "monkeypatch target is the correct module attribute."
+    )
+
+    # AC8 positive assertion.
+    assert any("[[page_id]]" in p for p in captured_prompts), (
+        "API-mode synthesis prompt must use [[page_id]] wikilink format; "
+        f"captured prompt snippet: {captured_prompts[0][:300]!r}"
+    )
+
+    # AC8 negative assertion — Step 08 plan-gate close.
+    assert not any("[source: page_id]" in p for p in captured_prompts), (
+        "Legacy [source: page_id] instruction must not appear in any synthesis prompt."
     )
 
 
