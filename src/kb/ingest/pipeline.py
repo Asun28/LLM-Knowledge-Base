@@ -1194,11 +1194,16 @@ def ingest_source(
     except ValueError:
         pass  # source is OUTSIDE wiki_dir — guard passes
     else:
-        raise ValidationError("Source path must not be inside wiki directory")
+        raise ValidationError("Source path must not resolve inside wiki/ directory")
 
     try:
         source_path_nc.relative_to(raw_dir_nc)
     except ValueError as e:
+        # NOTE: this raw-dir guard message still embeds ``source_path`` for
+        # backwards compatibility — cycle-22 Q1 design gate accepted the
+        # asymmetry and deferred the raw-dir ``ValidationError`` migration +
+        # path-redaction to cycle 23 (so existing ``except ValueError`` callers
+        # of ``ingest_source`` are not silently broken mid-cycle).
         raise ValueError(f"Source path must be within raw/ directory: {source_path}") from e
 
     if source_type is None:

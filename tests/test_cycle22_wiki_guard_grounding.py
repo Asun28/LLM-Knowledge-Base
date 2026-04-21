@@ -65,16 +65,43 @@ def test_ac10_ingest_source_rejects_path_inside_default_wiki_dir(tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as excinfo:
-        pipeline_mod.ingest_source(fake_wiki_page, wiki_dir=wiki, raw_dir=raw)
+    # Redirect the ingest_log.jsonl sink to this test's tmp dir so the T4
+    # zero-row assertion reads THIS test's log, not the real project log.
+    # Use monkeypatch via direct setattr on the module's lazy helper hooks
+    # — _emit_ingest_jsonl reads ``kb.config.PROJECT_ROOT`` via the dynamic
+    # attribute lookup added in cycle 18.
+    from pytest import MonkeyPatch
+
+    import kb.config as _kb_config
+
+    mp = MonkeyPatch()
+    try:
+        mp.setattr(_kb_config, "PROJECT_ROOT", tmp_path)
+        with pytest.raises(ValidationError) as excinfo:
+            pipeline_mod.ingest_source(fake_wiki_page, wiki_dir=wiki, raw_dir=raw)
+    finally:
+        mp.undo()
 
     msg = str(excinfo.value)
-    assert msg == "Source path must not be inside wiki directory", (
+    assert msg == "Source path must not resolve inside wiki/ directory", (
         f"ValidationError message must be the fixed string; got: {msg!r}"
     )
     # T3: absolute path segments must not leak into the error message.
     assert str(fake_wiki_page) not in msg
     assert str(tmp_path) not in msg
+
+    # T4 zero-row pin (Step-14 R1 Codex MAJOR / R1 Sonnet MAJOR 2): the guard
+    # fires BEFORE _emit_ingest_jsonl("start",...), so rejected wiki paths
+    # must NOT emit any JSONL row. Under redirected PROJECT_ROOT the log would
+    # land at ``<tmp_path>/.data/ingest_log.jsonl``. The expected behaviour
+    # is either (a) the file does not exist, or (b) it is empty.
+    jsonl_path = tmp_path / ".data" / "ingest_log.jsonl"
+    if jsonl_path.exists():
+        contents = jsonl_path.read_text(encoding="utf-8")
+        assert contents == "", (
+            f"Rejected wiki-path must not emit any ingest_log.jsonl rows "
+            f"(T4 orphan-start guard). Got: {contents[:200]!r}"
+        )
 
 
 # ── AC11 — custom wiki_dir= rejection ─────────────────────────────────────────
@@ -103,7 +130,56 @@ def test_ac11_ingest_source_rejects_path_inside_custom_wiki_dir(tmp_path):
     with pytest.raises(ValidationError) as excinfo:
         pipeline_mod.ingest_source(fake_page, wiki_dir=custom_wiki)
 
-    assert str(excinfo.value) == "Source path must not be inside wiki directory"
+    assert str(excinfo.value) == "Source path must not resolve inside wiki/ directory"
+
+
+# ── AC11b — T1 symlink-into-wiki rejection (Step-14 R1 Sonnet MAJOR 3 pin) ────
+
+
+def test_ac11b_ingest_source_rejects_symlink_into_wiki(tmp_path):
+    """T1 filesystem-level regression pin: a file that LOOKS LIKE a raw path
+    but ``.resolve()`` dereferences to a location inside wiki/ must be rejected.
+
+    The original cycle-22 design claimed the guard closes T1 (symlink bypass)
+    because ``Path(source_path).resolve()`` dereferences symlinks BEFORE the
+    normcase+relative_to compare. This test exercises that path at the
+    filesystem level. The prior AC11 test places the source directly in the
+    wiki dir, which verifies the guard but does NOT verify the resolve-first
+    ordering — a revert that dropped ``source_path = ...resolve()`` would
+    pass the direct-path test while breaking symlink dereferencing.
+
+    Skipped on platforms where os.symlink is unavailable or privileged.
+    """
+    import os as _os
+
+    import kb.ingest.pipeline as pipeline_mod
+
+    ValidationError = pipeline_mod.ValidationError  # late-bind (cycle-20 L1)
+
+    wiki = tmp_path / "wiki"
+    raw = tmp_path / "raw"
+    (wiki / "entities").mkdir(parents=True)
+    (raw / "articles").mkdir(parents=True)
+
+    # Real wiki page (the symlink target).
+    real_wiki_page = wiki / "entities" / "real.md"
+    real_wiki_page.write_text(
+        "---\ntitle: Real\ntype: entity\nconfidence: stated\nsource: []\n---\n\nBody.",
+        encoding="utf-8",
+    )
+
+    # Symlink at raw/articles/sneaky.md → wiki/entities/real.md.
+    symlink_source = raw / "articles" / "sneaky.md"
+    try:
+        _os.symlink(real_wiki_page, symlink_source)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"os.symlink unavailable on this platform / privilege: {e}")
+
+    # Guard MUST dereference the symlink and reject the resolved wiki path.
+    with pytest.raises(ValidationError) as excinfo:
+        pipeline_mod.ingest_source(symlink_source, wiki_dir=wiki, raw_dir=raw)
+
+    assert str(excinfo.value) == "Source path must not resolve inside wiki/ directory"
 
 
 # ── AC12 — raw/ path passes the guard (happy-path revert-detector) ────────────
@@ -203,16 +279,26 @@ def test_ac13_build_extraction_prompt_contains_grounding_before_fence(monkeypatc
     monkeypatch.setattr(extractors_mod, "TEMPLATES_DIR", _real_templates)
     extractors_mod._load_template_cached.cache_clear()
 
+    # Step-14 R1 Sonnet NIT 2: anchor the FULL two-sentence clause rather
+    # than just the first sentence, so a future refactor that splits the
+    # sentences (or drops the null-fallback half) is caught.
+    # Match the exact line-wrapped shape of the clause as it appears in
+    # ``build_extraction_prompt``'s f-string (newline between the two
+    # sentences — see extractors.py).
+    full_clause = (
+        "Ground every extracted field in verbatim source content. When uncertain\n"
+        "whether a claim is in the source, use null."
+    )
+
     for source_type in ("article", "paper", "repo", "video", "podcast"):
         tpl = load_template(source_type)
         prompt = build_extraction_prompt("smoke-test content", tpl)
 
-        clause = "Ground every extracted field in verbatim source content."
-        assert clause in prompt, (
-            f"source_type={source_type!r}: grounding clause missing from prompt"
+        assert full_clause in prompt, (
+            f"source_type={source_type!r}: full grounding clause missing from prompt"
         )
 
-        clause_idx = prompt.index(clause)
+        clause_idx = prompt.index(full_clause)
         fence_idx = prompt.index("<source_document>")
         assert clause_idx < fence_idx, (
             f"source_type={source_type!r}: grounding clause must appear BEFORE "
