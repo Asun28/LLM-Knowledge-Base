@@ -16,6 +16,7 @@ from kb.config import (
     LLM_RETRY_MAX_DELAY,
     MODEL_TIERS,
 )
+from kb.errors import KBError
 from kb.utils.text import truncate
 
 logger = logging.getLogger(__name__)
@@ -378,7 +379,7 @@ def call_llm_json(
     raise LLMError(f"No tool_use block in response from {model}")
 
 
-class LLMError(Exception):
+class LLMError(KBError):
     """Raised when LLM calls fail after retries or with non-retryable errors.
 
     Cycle 3 H1: carries an optional `kind` attribute that classifies the cause
@@ -389,6 +390,10 @@ class LLMError(Exception):
       - ``"permission"`` — 403, RBAC / disabled model.
       - ``"status_error"`` — other non-retryable 4xx.
       - ``None`` (default) — retry-exhausted / connection / timeout / generic.
+
+    Cycle 20 AC2: reparented from ``Exception`` to ``kb.errors.KBError`` so
+    callers can catch the whole kb taxonomy with ``except KBError``. MRO
+    preserves ``isinstance(err, Exception)`` — existing outer catches still fire.
     """
 
     def __init__(self, message: str, *, kind: str | None = None) -> None:
