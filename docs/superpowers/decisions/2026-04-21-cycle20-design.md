@@ -6,7 +6,7 @@
 - `2026-04-21-cycle20-threat-model.md` (Step 2 — T1-T7)
 - `2026-04-21-cycle20-brainstorm.md` (Step 3 — Q1-Q15 + tentative resolutions)
 - R1 Opus design eval (Step 4a — 0 BLOCKERs, 8 MAJORs, 5 NITs, verdict AMEND-INLINE)
-- R2 Codex design eval (Step 4b — 0 BLOCKERs, AMEND-INLINE) — adds AC11 `_update_existing_page` lock + AC13 `attempt_id` matching + `_TOOL_GROUPS` update + MCP tool-count correction (27→29)
+- R2 Codex design eval (Step 4b — 0 BLOCKERs, AMEND-INLINE) — adds AC11 `_update_existing_page` lock + AC13 `attempt_id` matching + `_TOOL_GROUPS` update + MCP tool-count correction (originally logged as 27→29, later corrected to 26→28 during PR #34 R1 Sonnet review — the actual `@mcp.tool()` decorator count pre-cycle-20 is 26 across `src/kb/mcp/*.py`)
 
 ## Decisions (Q1-Q15 + D-NEW-1..5)
 
@@ -102,7 +102,7 @@
 
 **AC4** — CLAUDE.md "Error Handling Conventions" gains:
 - New bullet listing the taxonomy + rule on narrow vs boundary `except Exception`.
-- MCP tool count corrected: "26 → 28 tools" → "27 → 29 tools" (R2 audit).
+- MCP tool count: the R2 audit initially proposed "27 → 29 tools" but PR #34 R1 Sonnet review re-verified the actual `@mcp.tool()` decorator count is 26 pre-cycle-20 (26 → 28 after the new `kb_refine_sweep` + `kb_refine_list_stale`). CLAUDE.md + CHANGELOG Quick Reference were updated to "26 → 28 tools" on PR #34.
 - Pointer to `_TOOL_GROUPS` edits in AC14+AC17.
 
 **AC5** — Narrow hot-path migration — **2 sites only** (revised from 3):

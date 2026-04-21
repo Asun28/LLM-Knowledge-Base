@@ -597,6 +597,22 @@ def kb_refine_sweep(hours: int = 168, action: str = "mark_failed", dry_run: bool
     except Exception as e:  # noqa: BLE001 — MCP boundary never raises
         logger.exception("kb_refine_sweep failed")
         return f"Error: sweep failed: {_sanitize_error_str(e)}"
+    # Cycle-20 R3 Sonnet MAJOR — T5 extension to dry_run candidates. The
+    # underlying `sweep_stale_pending(dry_run=True)` returns full row dicts
+    # (including `revision_notes`) so the CLI can render the preview. The MCP
+    # boundary must project to the same minimal field set used by
+    # `kb_refine_list_stale` — reuse the T5 projection here.
+    if result.get("dry_run") and isinstance(result.get("candidates"), list):
+        result = dict(result)
+        result["candidates"] = [
+            {
+                "attempt_id": row.get("attempt_id"),
+                "page_id": row.get("page_id"),
+                "timestamp": row.get("timestamp"),
+                "notes_length": len(row.get("revision_notes") or ""),
+            }
+            for row in result["candidates"]
+        ]
     return json.dumps(result)
 
 

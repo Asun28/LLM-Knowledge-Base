@@ -113,6 +113,28 @@ class TestMcpKbRefineSweep:
         assert payload["swept"] == 1
         assert any(c["attempt_id"] == "stale001" for c in payload["candidates"])
 
+    def test_dry_run_candidates_omit_revision_notes(self, seeded_history: Path) -> None:
+        """Cycle-20 R3 MAJOR — dry_run candidates must NOT carry revision_notes.
+
+        Regression for T5 extension: the underlying helper returns full row
+        dicts so the CLI can render them, but the MCP boundary projects to
+        the same minimal field set as `kb_refine_list_stale`.
+        """
+        from kb.mcp.quality import kb_refine_sweep
+
+        out = kb_refine_sweep(hours=168, action="mark_failed", dry_run=True)
+        if callable(out):
+            out = out(hours=168, action="mark_failed", dry_run=True)
+        payload = json.loads(out)
+        for cand in payload["candidates"]:
+            assert set(cand.keys()) == {"attempt_id", "page_id", "timestamp", "notes_length"}
+            assert "revision_notes" not in cand, (
+                "MCP must NOT leak revision_notes through dry_run candidates"
+            )
+            # notes_length should reflect the seeded revision_notes length.
+            if cand["attempt_id"] == "stale001":
+                assert cand["notes_length"] == len("this should NOT leak via MCP")
+
 
 class TestMcpKbRefineListStaleProjection:
     """AC17 / AC19 / T5 — MCP projection excludes revision_notes, adds notes_length."""

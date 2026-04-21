@@ -42,13 +42,13 @@ Step 11 security-verify diffs against this baseline — zero new CVEs introduced
 - **Mitigation:** AC13 enforces `action in {"mark_failed", "delete"}` with `mark_failed` as the safe default. `delete` MUST write a one-line summary to `wiki/log.md` via `append_wiki_log("sweep", f"Deleted {N} stale pending rows; action=delete; sweep_id={id}; cutoff={cutoff.isoformat()}")` — creates an audit trail outside the mutated file. `mark_failed` default + `sweep_id` + `sweep_at` + `error="abandoned-by-sweep"` tag preserves the row content, making `mark_failed` fully reversible. `hours` validation `>= 1` blocks the zero-hour DoS. Lock span stays single (no release/reacquire) per cycle-19 AC9 — concurrent refine_page serialises cleanly. ACs: AC13, AC14, AC15, AC16.
 - **Verification:** Codex greps (1) `rg -n "action == \"delete\"" src/kb/review/refiner.py` shows the `append_wiki_log` audit-trail call within the delete branch; (2) AC16 test includes "delete writes wiki/log.md entry" assertion; (3) no path allows `action` values outside the enumerated set.
 
-## T5 — `kb_refine_list_stale` discloses `revision_notes` content to remote MCP callers
+## T5 — `kb_refine_list_stale` / `kb_refine_sweep` dry_run disclose `revision_notes` content to remote MCP callers
 
 - **Severity:** LOW
-- **Surface:** MCP `kb_refine_list_stale` response payload.
+- **Surface:** MCP `kb_refine_list_stale` response payload AND MCP `kb_refine_sweep(dry_run=True)` candidates list (extension added after PR #34 R3 Sonnet review).
 - **Scenario:** Operator-supplied `revision_notes` in `kb_refine_page` calls may contain internal context ("fixing CVE-2025-XXXXX per issue #42"). `list_stale_pending` returns full dict copies including `revision_notes`. AC17 as drafted returns every field. A future MCP deployment exposed to non-operators would leak this.
-- **Mitigation:** AC17 projects a minimal field set: `[{"attempt_id", "page_id", "timestamp", "content_length"}]` — omits `revision_notes`. Library helper `list_stale_pending` keeps full dicts for CLI/local use; the MCP wrapper filters. Document the projection in the MCP tool docstring. ACs: AC17, AC19.
-- **Verification:** Codex greps `rg -n "revision_notes" src/kb/mcp/quality.py` returns zero hits in `kb_refine_list_stale`; AC19 test asserts the returned JSON does NOT contain `revision_notes`.
+- **Mitigation:** AC17 projects a minimal field set: `[{"attempt_id", "page_id", "timestamp", "notes_length"}]` — omits `revision_notes`. The cycle-20 R3 Sonnet review (PR #34) surfaced that `kb_refine_sweep(dry_run=True)` ALSO carries a `candidates` list of full-row dicts that reaches the MCP boundary via `json.dumps(result)`; the mitigation now extends to `kb_refine_sweep` — when `result["dry_run"]` is True, each candidate row in the MCP wrapper is projected to the same `{attempt_id, page_id, timestamp, notes_length}` field set. Library helpers (`list_stale_pending`, `sweep_stale_pending`) keep full dicts for CLI/local use; only the MCP wrappers filter. Document the projection in both MCP tool docstrings. ACs: AC17, AC19 (+ R3-fix for `kb_refine_sweep`).
+- **Verification:** `rg -n "revision_notes" src/kb/mcp/quality.py` returns zero hits in either MCP wrapper; the AC19 tests + new `test_dry_run_candidates_omit_revision_notes` assert returned JSON does NOT contain `revision_notes` for both surfaces.
 
 ## T6 — Windows tilde-path test: `ctypes` buffer overflow / vacuous skip
 
