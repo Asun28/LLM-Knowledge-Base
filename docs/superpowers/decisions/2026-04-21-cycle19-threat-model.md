@@ -49,12 +49,15 @@ CVE baseline: `/tmp/cycle-19-alerts-baseline.json` + `/tmp/cycle-19-cve-baseline
 ### T4 — Refine two-phase write history-lock liveness regression
 **Severity:** MEDIUM
 **Trust boundary crossed:** Cross-process concurrent `refine_page` calls → global `file_lock(history_path)`.
-**Attacker:** N/A — this is a self-inflicted liveness risk, not an external threat. Reordering locks to history-FIRST means the history lock is held across the entire page-write window, serializing every concurrent refine across the wiki.
-**Mitigation (required):** AC8/AC9/AC10 — the pending → applied flip MUST remain inside the history-lock (AC9 mandates this for crash-safety audit). Document in the `refine_page` docstring that (a) lock order is `history_path FIRST, page_path SECOND` and (b) callers should NOT hold either lock before invoking `refine_page`. AC10's test MUST record lock-acquisition order via mocked `file_lock` context managers to prove ordering.
+**Attacker:** N/A — this is a self-inflicted liveness risk, not an external threat. Holding the history-lock across the entire page-write window serializes every concurrent refine across the wiki (history is a single JSON file).
+
+**(R3 SYNTHESIS CORRECTION 2026-04-21)** Earlier drafts of this T4 entry described an `AC10` flip to `history_path FIRST, page_path SECOND` as the mitigation. The Step-5 design gate **WITHDREW** that flip (see `2026-04-21-cycle19-design.md` AC10 WITHDRAW decision) because the existing cycle-1 H1 lock order (`page_path FIRST, history_path SECOND`) is correct for the current call graph and flipping it would have introduced this T4 liveness regression with no compensating deadlock benefit. The shipped mitigation is therefore: **preserve `page_path FIRST, history_path SECOND`** AND have AC8 nest the pending → applied flip INSIDE the existing history-lock span (single hold-through, not release-and-reacquire).
+
+**Mitigation (required, as shipped):** AC8/AC9/AC10. (a) Lock order PRESERVED as `page_path FIRST, history_path SECOND`. (b) Pending → applied/failed flip MUST remain inside the SAME history-lock span (AC9 single-span hold-through for crash-safety audit). (c) `attempt_id = uuid4().hex[:8]` correlation key on each row so the flip targets the correct row even with concurrent stuck pending rows. (d) Module docstring documents the lock order + rationale.
 **Verification (step 11):**
-- T-10 regression asserts history-lock acquired before page-lock.
-- `grep -n "file_lock(history\\|file_lock(resolved_history\\|file_lock(page" src/kb/review/refiner.py` → both acquisitions present in the documented order.
-- Docstring grep: `grep -n "lock order\\|history_path FIRST" src/kb/review/refiner.py` → rationale present.
+- T-10 regression asserts page-lock acquired BEFORE history-lock (test_cycle19_refiner_two_phase.py::test_lock_order_page_outer_history_inner).
+- `grep -n "file_lock(page_path\\|file_lock(resolved_history" src/kb/review/refiner.py` → page lock first, history lock nested inside.
+- Docstring grep: `grep -n "page_path FIRST\\|page OUTER" src/kb/review/refiner.py` → rationale present.
 
 ### T5 — Log injection via malicious page titles in batch wiki_log entry
 **Severity:** LOW

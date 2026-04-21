@@ -82,9 +82,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `utils/llm.py` — `LLMError` is the only custom exception in the codebase; CLI (`cli.py:54,79,98,121,135`), `compile/compiler.py:349`, and MCP catch bare `Exception` and string-format. Cannot retry selectively, cannot test error paths, bugs in manifest-write are indistinguishable from LLM failures. (R1)
   (fix: `kb.errors` with `KBError` → `IngestError` / `CompileError` / `QueryError` / `ValidationError` / `StorageError`; narrow `except` at the boundary)
 
-- `review/refiner.py` `refine_page` (~114-137) — writes page atomically, THEN appends `review_history.json`, THEN `wiki/log.md`. Crash or disk-full between steps leaves the page mutated with zero audit record, violating the documented refine-has-audit-trail guarantee; `append_wiki_log` further swallows `OSError` with a warning. (R2)
-  (fix: write audit record first with `status="pending"`, write page, flip status to `"applied"`; or stage via a `page.md.pending` sidecar flipped only after log is synced)
-
 - `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes across existing pages. Every step is independently atomic, none reversible. A crash between manifest-write (step 6) and log-append (step 7) leaves the manifest claiming "already ingested" while the log shows nothing; a mid-wikilink-injection failure leaves partial retroactive backlinks. (R2)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests; retries idempotent at step granularity)
 
@@ -133,8 +130,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 ### HIGH — Deferred
 
 > HIGH-severity items either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
-
-- `review/refiner.py` `refine_page` write-then-audit ordering — after H1's page-file lock (cycle 1), a crash/OSError on the history-lock step still leaves the page body updated without an audit record. Adopt two-phase write (pending audit first → write page → flip to applied). See `docs/superpowers/decisions/2026-04-16-phase4.5-high-cycle1-design.md` Q_H. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
 - `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip), but deferred: (1) atomic temp-DB-then-replace rebuild (crash-mid-rebuild leaves empty index), (2) cold-load latency (0.8s+67MB on first query), (3) dim-mismatch (stored embedding dim vs current model not validated), (4) `_index_cache` cross-thread lock symmetry. Bundle into dedicated vector-index lifecycle cycle. *(Deferred from Phase 4.5 HIGH cycle 1.)*
 
