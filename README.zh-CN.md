@@ -136,6 +136,22 @@ kb --version
 
 ---
 
+## 📄 支持的文件格式
+
+将源文件放入对应的 `raw/` 子目录，然后运行 `kb ingest <file>` 或 `kb compile`。
+
+| 格式 | 扩展名 | 说明 |
+|---|---|---|
+| Markdown | `.md` | 推荐用于网页剪藏、文章、笔记和已转换文档 |
+| 纯文本 | `.txt` | 适合转录文本、笔记和简单导出 |
+| reStructuredText | `.rst` | 适合 Python/项目文档 |
+| 结构化数据 | `.json`, `.yaml`, `.yml`, `.csv` | 适合数据集、元数据和导出记录 |
+| PDF | `.pdf` | 编译流水线支持；如通过 MCP 直接摄入，建议先转换为 Markdown |
+
+对于 `.docx`、`.pptx` 或 `.xlsx` 等 Office 文档，请先转换为 Markdown 或 CSV，再放入 `raw/`。
+
+---
+
 ## 🛠️ 五大核心操作
 
 | 操作 | 命令 | 功能说明 |

@@ -129,6 +129,20 @@ kb --version
 
 **New here?** Browse the [`demo/`](demo/) folder — a small working wiki compiled from Karpathy's [X post](https://x.com/karpathy/status/2039805659525644595) and [LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It shows the full folder structure plus a real compiled output — summaries, entities, concepts, a comparison, and a cross-source synthesis — so you can see exactly what the pipeline produces before adding your own sources.
 
+## Supported File Formats
+
+Place source files under the matching `raw/` subdirectory, then run `kb ingest <file>` or `kb compile`.
+
+| Format | Extensions | Notes |
+|--------|------------|-------|
+| Markdown | `.md` | Recommended for web clips, articles, notes, and converted documents |
+| Plain text | `.txt` | Good for transcripts, notes, and simple exports |
+| reStructuredText | `.rst` | Useful for Python/project documentation |
+| Structured data | `.json`, `.yaml`, `.yml`, `.csv` | Useful for datasets, metadata, and exported records |
+| PDF | `.pdf` | Supported by the compile pipeline; for direct MCP ingest, convert to Markdown first |
+
+For Office documents such as `.docx`, `.pptx`, or `.xlsx`, convert them to Markdown or CSV first, then place the converted file in `raw/`.
+
 ## Five Operations
 
 | Operation | Command | What happens |
