@@ -30,8 +30,8 @@ def _seed_wiki(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_stale_tmp_unlinked(tmp_path, monkeypatch):
     """AC1 — rebuild_indexes unlinks both <vec_db> and <vec_db>.tmp."""
     # Redirect PROJECT_ROOT so the validator accepts our tmp_path.
-    import kb.config
     import kb.compile.compiler as compiler_mod
+    import kb.config
 
     monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(compiler_mod, "PROJECT_ROOT", tmp_path)
@@ -59,8 +59,8 @@ def test_no_tmp_file_is_tolerant(tmp_path, monkeypatch):
     """AC1 — when no .tmp sibling exists, the cleanup succeeds silently
     (`missing_ok=True`). The main vec_path unlink still sets `cleared=True`.
     """
-    import kb.config
     import kb.compile.compiler as compiler_mod
+    import kb.config
 
     monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(compiler_mod, "PROJECT_ROOT", tmp_path)
@@ -82,8 +82,8 @@ def test_tmp_failure_does_not_blank_vector_cleared(tmp_path, monkeypatch):
     """CONDITION 1 / Q1 — tmp-unlink OSError produces a compound error but
     preserves `cleared=True` (main unlink succeeded).
     """
-    import kb.config
     import kb.compile.compiler as compiler_mod
+    import kb.config
 
     monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(compiler_mod, "PROJECT_ROOT", tmp_path)
@@ -121,8 +121,8 @@ def test_vector_db_override_also_cleans_tmp(tmp_path, monkeypatch):
     """Q9 — when caller passes `vector_db=` override, the sibling `.tmp` is
     derived from THAT path (not from `_vec_db_path(wiki_dir)`).
     """
-    import kb.config
     import kb.compile.compiler as compiler_mod
+    import kb.config
 
     monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(compiler_mod, "PROJECT_ROOT", tmp_path)

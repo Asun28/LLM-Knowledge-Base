@@ -18,7 +18,6 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from kb.query import embeddings as embeddings_mod
 from kb.query.embeddings import VectorIndex, get_dim_mismatch_count
 
 

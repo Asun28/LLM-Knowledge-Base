@@ -15,8 +15,6 @@ import json
 import logging
 from pathlib import Path
 
-import pytest
-
 from kb.compile import compiler as compiler_mod
 from kb.compile.compiler import compile_wiki, load_manifest
 
