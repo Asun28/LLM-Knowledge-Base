@@ -620,12 +620,45 @@ def rebuild_indexes(
     # (2) Vector DB — single-writer contract inside embeddings.py, unlocked
     # unlink is sufficient.  Symlinks are not followed: Path.unlink removes
     # the symlink itself, the target survives by design.
+    vec_error: str | None = None
+    tmp_error: str | None = None
     try:
         if vector_path.exists():
             vector_path.unlink()
         result["vector"]["cleared"] = True
     except OSError as e:
-        result["vector"]["error"] = str(e)
+        vec_error = str(e)
+
+    # Cycle 25 AC1 — also unlink the <vec_db>.tmp sibling produced by
+    # rebuild_vector_index's atomic tmp-then-replace flow (cycle 24 AC5). If
+    # a prior rebuild crashed, a stale `.tmp` survives alongside the main DB
+    # until the next rebuild's AC6 entry-cleanup. Extending rebuild_indexes
+    # to clean it up gives operators a single-command full reset.
+    #
+    # Q9 resolution: derive tmp from the effective `vector_path` (which
+    # already honours the optional `vector_db=` override), NOT from
+    # `_vec_db_path(effective_wiki)` — otherwise a caller using the override
+    # would see its sibling `.tmp` retained.
+    #
+    # Q1 / CONDITION 1: a tmp-unlink failure MUST NOT blank the main
+    # `cleared=True` status when the main unlink succeeded; errors are
+    # reported via the compound error message below.
+    tmp_path = vector_path.parent / (vector_path.name + ".tmp")
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except OSError as e:
+        tmp_error = str(e)
+
+    # Surface compound error covering both paths when either failed. The
+    # `cleared` flag reflects the MAIN vector DB's state; tmp cleanup is
+    # hygiene and does not downgrade a successful main unlink.
+    if vec_error or tmp_error:
+        parts: list[str] = []
+        if vec_error:
+            parts.append(f"vec: {vec_error}")
+        if tmp_error:
+            parts.append(f"tmp: {tmp_error}")
+        result["vector"]["error"] = "; ".join(parts)
 
     # (3) LRU caches — clear every mtime- or path-keyed cache that could
     # otherwise serve pre-rebuild metadata after a subsequent ingest.
