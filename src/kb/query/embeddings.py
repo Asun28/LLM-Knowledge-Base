@@ -1,6 +1,7 @@
 """Embedding wrapper (model2vec) and vector index (sqlite-vec)."""
 
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -76,17 +77,67 @@ def _is_rebuild_needed(wiki_dir: Path) -> bool:
     return newest_page > db_mtime
 
 
+def _evict_vector_index_cache_entry(vec_path: Path) -> None:
+    """Pop the cached ``VectorIndex`` for ``vec_path`` AND close its sqlite3
+    connection before returning.
+
+    Cycle 24 AC5 (CONDITION 2): on Windows NTFS, ``os.replace(tmp, vec_path)``
+    fails with ``PermissionError [WinError 5]`` if any cached ``_conn`` still
+    holds a read handle on ``vec_path``. ``_index_cache.pop`` alone removes the
+    DICT reference but does NOT guarantee the connection closes (other
+    references may pin the instance briefly). Explicit ``.close()`` unpins the
+    sqlite3 fd so ``os.replace`` succeeds cross-platform.
+
+    Cycle 24 PR #38 R1 Sonnet MAJOR M1: the ``.close()`` call and the
+    ``_conn = None`` rebind happen INSIDE ``_index_cache_lock`` so a concurrent
+    query thread that grabbed the instance before the pop cannot race against
+    ``_ensure_conn()``'s ``_conn is not None`` check. Hot-path queries already
+    re-acquire ``_conn_lock`` inside ``_ensure_conn`` before touching
+    ``self._conn``, but the eviction path crossed the lock boundary — a
+    concurrent ``query()`` could observe ``_conn`` non-None at the fast-path
+    check and then fail inside sqlite on the closed handle. Holding
+    ``_index_cache_lock`` across the close serialises the eviction with
+    `get_vector_index`'s slow path (the two paths share the same lock), and
+    the instance is already out of the cache dict so only pre-evict readers
+    can observe it.
+
+    The caller MUST invoke this BEFORE ``os.replace`` per design CONDITION 2.
+    """
+    with _index_cache_lock:
+        popped = _index_cache.pop(str(vec_path), None)
+        if popped is not None and popped._conn is not None:
+            try:
+                popped._conn.close()
+            except Exception:
+                # sqlite3.Connection.close() is idempotent; a double-close or
+                # a connection closed due to earlier extension-load failure
+                # is safe to swallow.
+                pass
+            popped._conn = None
+
+
 def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
     """Rebuild the sqlite-vec index from all pages in wiki_dir.
 
     H17 fix: this is the production entry point that was previously missing,
     leaving Phase 4 "hybrid" search as BM25-only in practice.
 
+    Cycle 24 AC5/AC6/AC8: rebuild now uses a tmp-then-replace flow
+    (``<vec_db>.tmp`` built separately then ``os.replace``-swapped into place)
+    so a crash mid-build leaves the production DB intact. A stale ``.tmp``
+    from a prior crash is unlinked at function entry unconditionally — BEFORE
+    any gate or lock — so the next invocation cleans up even if the gates
+    skip. On exception during build or replace, the tmp is unlinked and the
+    exception re-raised (clean-slate policy).
+
     Gates:
         1. ``_hybrid_available`` — model2vec + sqlite_vec must be importable.
         2. mtime check (skipped when ``force=True``) — if the DB is newer than
            all wiki pages, no rebuild is performed.
-        3. ``_rebuild_lock`` — serializes concurrent callers (double-checked).
+        3. ``_rebuild_lock`` — serializes concurrent in-process callers
+           (double-checked). Cross-process rebuilders still race ``os.replace``
+           but NTFS kernel-level serialisation makes the outcome idempotent
+           since both produce the same content.
 
     Args:
         wiki_dir: Path to the wiki directory (used to locate pages and DB).
@@ -95,6 +146,18 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
     Returns:
         True if the index was (re)built; False if skipped.
     """
+    # Cycle 24 AC6 — stale-tmp cleanup runs unconditionally at entry, BEFORE
+    # every gate. A crashed prior run's <vec_db>.tmp must not persist
+    # indefinitely; even in the "skip this call" path we clean up.
+    vec_path = _vec_db_path(wiki_dir)
+    tmp_path = vec_path.parent / (vec_path.name + ".tmp")
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except OSError:
+        # Best-effort: a stale tmp we cannot unlink will surface later as a
+        # sqlite3 error during the actual rebuild. Avoid masking the real issue.
+        pass
+
     if not _hybrid_available:
         return False
 
@@ -109,31 +172,44 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
         from kb.utils.pages import load_all_pages
 
         pages = load_all_pages(wiki_dir=wiki_dir)
-        vec_path = _vec_db_path(wiki_dir)
         vec_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if not pages:
-            VectorIndex(vec_path).build([])
-            logger.info("Vector index rebuilt: %s (0 entries)", vec_path)
-            # Cycle 3 H8 PR review R1 Sonnet MAJOR: clear stale cache entry
-            # under the index cache lock so a concurrent `get_vector_index`
-            # caller cannot observe the evicted instance after the pop.
-            with _index_cache_lock:
-                _index_cache.pop(str(vec_path), None)
-            return True
+        try:
+            # Cycle 24 AC5 — build to tmp, then atomic-replace. Both branches
+            # (empty and populated) route through the same tmp-then-replace
+            # flow per design CONDITION 5.
+            if not pages:
+                VectorIndex(vec_path).build([], db_path=tmp_path)
+                entry_count = 0
+            else:
+                # Cycle 7 AC2: call model.encode() directly (returns numpy 2D
+                # array) and pass each row via buffer protocol to
+                # VectorIndex.build -> sqlite_vec.serialize_float32. Bypasses
+                # the list[list[float]] round-trip previously paid inside
+                # embed_texts for the batch path.
+                texts = [page.get("content", "") for page in pages]
+                model = _get_model()
+                embeddings_np = model.encode(texts)
+                entries = [(pages[i]["id"], embeddings_np[i]) for i in range(len(pages))]
+                VectorIndex(vec_path).build(entries, db_path=tmp_path)
+                entry_count = len(entries)
 
-        # Cycle 7 AC2: call model.encode() directly (returns numpy 2D array)
-        # and pass each row via buffer protocol to VectorIndex.build ->
-        # sqlite_vec.serialize_float32. Bypasses the list[list[float]] round-
-        # trip previously paid inside embed_texts for the batch path.
-        texts = [page.get("content", "") for page in pages]
-        model = _get_model()
-        embeddings_np = model.encode(texts)
-        entries = [(pages[i]["id"], embeddings_np[i]) for i in range(len(pages))]
-        VectorIndex(vec_path).build(entries)
-        with _index_cache_lock:
-            _index_cache.pop(str(vec_path), None)
-        logger.info("Vector index rebuilt: %s (%d entries)", vec_path, len(entries))
+            # Cycle 24 CONDITION 2 — pop+close cached VectorIndex BEFORE
+            # os.replace so Windows can release the read handle on vec_path.
+            _evict_vector_index_cache_entry(vec_path)
+
+            os.replace(str(tmp_path), str(vec_path))
+        except Exception:
+            # Cycle 24 AC8 — clean-slate on crash: the tmp DB may be partial
+            # or complete-but-unreplaced; either way it is not the production
+            # DB and must not persist.
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+        logger.info("Vector index rebuilt: %s (%d entries)", vec_path, entry_count)
         return True
 
 
@@ -293,25 +369,41 @@ class VectorIndex:
             self._conn = conn
             return conn
 
-    def build(self, entries: list[tuple[str, list[float]]]) -> None:
+    def build(
+        self,
+        entries: list[tuple[str, list[float]]],
+        *,
+        db_path: Path | None = None,
+    ) -> None:
         """Build index from (page_id, embedding) pairs. Replaces existing index.
 
         Cycle 3 L2: the dim used in the f-string `CREATE VIRTUAL TABLE ...
         vec0(embedding float[{dim}])` is validated to be a sane positive
         integer. An attacker-controlled or bug-introduced non-int dim would
         otherwise be interpolated verbatim into SQL.
+
+        Cycle 24 AC7 (CONDITION 11): ``db_path`` is KEYWORD-ONLY and overrides
+        ``self.db_path`` when not None. ``rebuild_vector_index`` uses the
+        override to build into a tmp file for the atomic tmp-then-replace flow.
+        When ``db_path`` is None (default), the call targets ``self.db_path``
+        and ``self._stored_dim`` is updated. When ``db_path`` is passed
+        explicitly, ``self._stored_dim`` is NOT mutated so the instance state
+        stays coherent with its self-described DB file.
         """
+        target_path = db_path if db_path is not None else self.db_path
+
         if not entries:
-            # Create empty DB and reset dim cache.
-            conn = sqlite3.connect(str(self.db_path))
+            # Create empty DB and reset dim cache (only when targeting own DB).
+            conn = sqlite3.connect(str(target_path))
             conn.close()
-            self._stored_dim = 0
+            if db_path is None:
+                self._stored_dim = 0
             return
 
         dim = len(entries[0][1])
         if not (isinstance(dim, int) and 1 <= dim <= self._MAX_DIM):
             raise ValueError(f"Invalid embedding dim={dim!r}; expected int in [1, {self._MAX_DIM}]")
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(target_path))
         try:
             conn.enable_load_extension(True)
             import sqlite_vec
@@ -333,7 +425,8 @@ class VectorIndex:
                 )
 
             conn.commit()
-            self._stored_dim = dim
+            if db_path is None:
+                self._stored_dim = dim
         finally:
             conn.close()
 
