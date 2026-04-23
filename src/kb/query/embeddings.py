@@ -43,6 +43,30 @@ _index_cache: dict[str, "VectorIndex"] = {}
 # `_model_lock` / `_rebuild_lock` double-checked pattern.
 _index_cache_lock = threading.Lock()
 
+# Cycle 25 AC4 — process-level observability counter for dim-mismatch events.
+# Incremented on EVERY query that detects a stored-dim vs query-dim mismatch
+# (NOT once-per-instance). Q8 decision: approximate under concurrent threads
+# (no lock) — adequate for diagnostic observation, not billing-grade telemetry.
+# A counter race can undercount by ≤N under N concurrent mismatch-queries,
+# well within the diagnostic tolerance.
+_dim_mismatches_seen: int = 0
+
+
+def get_dim_mismatch_count() -> int:
+    """Return the process-level count of vector-index dim-mismatch events.
+
+    Cycle 25 AC4 — module-level observability counter, incremented inside
+    ``VectorIndex.query`` whenever the stored dim differs from the query
+    vector's dim. Counter is process-local (resets on restart) and approximate
+    under concurrent thread load per the Q8 design-gate decision. Intended for
+    diagnostic observation (e.g. "did any mismatches happen since boot?"),
+    NOT for billing-grade telemetry.
+
+    The counter is RO: no reset helper is exposed. Tests observe monotonic
+    deltas by snapshotting before/after a call sequence.
+    """
+    return _dim_mismatches_seen
+
 
 def _reset_model() -> None:
     """Reset cached model and index. Call in test teardown.
@@ -475,13 +499,28 @@ class VectorIndex:
             if stored_dim == 0:
                 return []
             if len(query_vec) != stored_dim:
+                # Cycle 25 AC4 — increment process-level counter on EVERY
+                # mismatch (decoupled from _dim_warned's once-per-instance
+                # log-gate so tests see per-query deltas).
+                global _dim_mismatches_seen
+                _dim_mismatches_seen += 1
                 if not self._dim_warned:
+                    # Cycle 25 AC3 + Q7 resolution: self.db_path.parent.parent
+                    # is the inverse of _vec_db_path(wiki_dir) which returns
+                    # wiki_dir.parent / ".data" / "vector_index.db". Emitting
+                    # db_path.parent.parent yields the wiki directory string
+                    # `kb rebuild-indexes --wiki-dir <that>` expects (otherwise
+                    # the `.data/...db` file path would be rejected by
+                    # rebuild_indexes's containment validator).
+                    wiki_dir_hint = self.db_path.parent.parent
                     logger.warning(
-                        "Vector index dim mismatch: query=%d vs stored=%d at %s; "
-                        "returning empty (rebuild index to align)",
+                        "Vector index dim mismatch: query=%d vs stored=%d at %s. "
+                        "Run 'kb rebuild-indexes --wiki-dir %s' to realign, "
+                        "OR ignore if BM25-only search is intended.",
                         len(query_vec),
                         stored_dim,
                         self.db_path,
+                        wiki_dir_hint,
                     )
                     self._dim_warned = True
                 return []
