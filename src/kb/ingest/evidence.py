@@ -82,29 +82,81 @@ def render_initial_evidence_trail(
 _EVIDENCE_TRAIL_HEADER_RE = re.compile(r"^## Evidence Trail[ \t]*\r?\n", re.MULTILINE)
 # Any subsequent ``^## `` heading terminates the Evidence Trail section span.
 _NEXT_H2_RE = re.compile(r"^## ", re.MULTILINE)
-# Cycle 24 PR #38 R1 Sonnet BLOCKER B1 — match fenced code blocks (``` ... ```)
-# so the header regex above does not mis-match a literal `## Evidence Trail`
-# line INSIDE a fenced code example in the page body. ``re.DOTALL`` lets ``.``
-# span newlines; non-greedy ``.*?`` stops at the first closing fence.
-_FENCED_CODE_RE = re.compile(r"^```[^\n]*\n.*?^```[^\n]*$", re.MULTILINE | re.DOTALL)
+# Cycle 24 PR #38 R2 Codex MAJOR — CommonMark fenced code blocks can open with
+# 3+ backticks OR 3+ tildes; the closing fence must use the SAME character and
+# be AT LEAST AS LONG as the opening. A regex `^```[^\n]*\n.*?^```[^\n]*$`
+# (used initially) handles only 3-backtick fences — a 4-backtick opener
+# `` ```` `` or a tilde fence `~~~` slips past, so an attacker embedding
+# `## Evidence Trail` inside `~~~markdown ... ~~~` evades masking. A
+# line-walking parser tracks fence state + char type + length, which is simpler
+# to reason about than a regex with backreferences.
 
 
 def _mask_fenced_blocks(content: str) -> str:
-    """Replace fenced-code-block contents with spaces of equal length so regex
-    searches over the RESULT find headers only in prose — not inside fenced
-    examples. Preserves byte offsets so ``match.start()`` / ``match.end()``
-    computed against the masked string are valid positions in the ORIGINAL
-    ``content``. Fenced-block bytes become spaces (except newlines, which are
-    preserved to keep line-number semantics of ``re.MULTILINE`` anchors).
+    """Replace fenced-code-block contents with whitespace-preserving bytes so
+    regex searches over the RESULT find headers only in prose — not inside
+    fenced examples. Preserves byte offsets so ``match.start()`` /
+    ``match.end()`` computed against the masked string are valid positions in
+    the ORIGINAL ``content``.
+
+    Fence syntax: CommonMark info-string fences using 3+ backticks (``` ``` ```)
+    or 3+ tildes (``` ~~~ ```). The closing fence must use the SAME character
+    as the opening and be AT LEAST AS LONG.
+
+    The opening and closing fence LINES are preserved (so section-level
+    ``^## `` anchors do not accidentally match inside a fence-opener line that
+    contained ``## `` as info-string). Only the INTERIOR bytes get blanked —
+    every non-newline char becomes a space, newlines remain untouched so
+    ``re.MULTILINE`` line anchors still hit real line boundaries.
     """
+    result: list[str] = []
+    in_fence = False
+    fence_char: str | None = None
+    fence_len = 0
 
-    def _blank(match: re.Match) -> str:
-        text = match.group(0)
-        # Replace every non-newline char with a space; keep newlines so `^` / `$`
-        # multiline anchors still hit legitimate line boundaries.
-        return "".join("\n" if ch == "\n" else " " for ch in text)
+    def _count_run(s: str, ch: str) -> int:
+        n = 0
+        for c in s:
+            if c == ch:
+                n += 1
+            else:
+                break
+        return n
 
-    return _FENCED_CODE_RE.sub(_blank, content)
+    for line in content.splitlines(keepends=True):
+        # Fences may be indented up to 3 spaces per CommonMark; strip leading
+        # whitespace to detect them robustly.
+        stripped = line.lstrip()
+        if not in_fence:
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                char = stripped[0]
+                n = _count_run(stripped, char)
+                if n >= 3:
+                    in_fence = True
+                    fence_char = char
+                    fence_len = n
+            result.append(line)
+        else:
+            # Inside a fence: check for a valid closing fence first.
+            is_close = False
+            if fence_char is not None and stripped.startswith(fence_char * fence_len):
+                n = _count_run(stripped, fence_char)
+                # Close must be SAME char type AND length >= opening length.
+                # CommonMark additionally requires the rest of the line to be
+                # whitespace only; accept both strict and lenient close lines.
+                if n >= fence_len:
+                    rest = stripped[n:].rstrip("\r\n")
+                    if rest == "" or rest.strip() == "":
+                        is_close = True
+            if is_close:
+                in_fence = False
+                fence_char = None
+                fence_len = 0
+                result.append(line)  # preserve closing fence line
+            else:
+                # Interior: blank non-newline bytes, preserve newlines.
+                result.append("".join("\n" if c == "\n" else " " for c in line))
+    return "".join(result)
 
 
 def append_evidence_trail(

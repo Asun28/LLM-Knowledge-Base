@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 24 (2026-04-23)
 
-15 AC / 4 src + 5 new tests / 7 commits. Tests: 2743 → 2767 (+24).
+15 AC / 4 src + 5 new test files / 9 commits. Tests: 2743 → 2768 (+25).
 
 **Evidence-trail race closure + vector-index atomic rebuild + file_lock exponential backoff.** Targeted pre-Phase-5 cycle covering two Phase 4.5 HIGH / HIGH-Deferred items (vector-index atomic rebuild sub-item 1, `_write_wiki_page` two-write race) plus three MEDIUM items (file_lock 50ms polling floor, evidence-append error surfacing, stale BACKLOG maintenance). A new Cluster E (sentinel section-span hardening) was surfaced by Step-2 threat model T5 and joined the scope as a load-bearing prerequisite for AC1.
 
@@ -26,6 +26,8 @@
 **Group E — `BACKLOG.md` + `CHANGELOG.md` + `CHANGELOG-history.md` + `CLAUDE.md` (AC11, AC12, AC13).** BACKLOG.md edits: (1) DELETED HIGH-Deferred multiprocessing `tests/` entry (shipped cycle 23); (2) UPDATED vector-index lifecycle entry striking sub-item 1 (atomic rebuild shipped this cycle) and sub-item 4 (`_index_cache` cross-thread lock shipped across cycles 3/6/24); (3) UPDATED `ingest/pipeline.py` body-write + evidence-append entry narrowing to "consolidation still deferred" (AC1 + AC2 shipped); (4) UPDATED `utils/io.py` atomic_json_write entry noting AC9 eliminated the 50ms polling floor (JSONL-migration remains); (5) NEW `utils/io.py` fair-queue lock entry (T3 residual from threat model); (6) NEW `compile/compiler.py` `rebuild_indexes .tmp` awareness entry (R2 Codex observation — belt-and-suspenders hygiene). Diskcache CVE-2025-69872 re-verified 2026-04-23 per AC12: `pip index versions diskcache` confirms 5.6.3 is LATEST + INSTALLED; `pip-audit --format=json` reports empty `fix_versions`. Ragas CVE-2026-6587 re-confirmed 2026-04-23 per AC13: 0.4.3 = LATEST INSTALLED; empty `fix_versions`. CLAUDE.md test count bumped 2743 → 2766; new API notes for `VectorIndex.build(*, db_path=)`, `append_evidence_trail` section-span search, and `file_lock` exponential backoff.
 
 **Step-2 CVE baseline:** 2 open advisories (diskcache 5.6.3 / CVE-2025-69872; ragas 0.4.3 / CVE-2026-6587) — both `fix_versions: []`. **Step-11 PR-introduced diff:** empty — zero new CVEs introduced by cycle-24 changes.
+
+**Step-14 PR review:** R1 Codex APPROVE (zero findings). R1 Sonnet REQUEST_CHANGES — 1 BLOCKER (fenced-code header hijack), 2 MAJOR (`_evict_vector_index_cache_entry` close-outside-lock race; `test_sentinel_only_no_header_creates_fresh_section` not divergent-fail), 2 NITs — all fixed in commit `4e22703`. R2 Codex verification: all R1 findings VERIFIED-FIXED; one new MAJOR (`_FENCED_CODE_RE` missed tilde + 4+ backtick fences) fixed in R2-fix commit with `_mask_fenced_blocks` rewritten as a line-walk CommonMark parser + `test_tilde_fence_and_four_backtick_fence_respected` added (+1 test → 2768 total). R3 Sonnet APPROVE-WITH-NIT: audit-doc drift sweep confirmed threat-model T1..T10 mitigations match shipped code; 3 numeric-drift NITs (test count, commit count, "5 new tests" wording) fixed in this doc pass.
 
 ### Phase 4.5 — cycle 23 (2026-04-23)
 

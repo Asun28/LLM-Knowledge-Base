@@ -208,6 +208,55 @@ def test_fenced_code_block_header_does_not_hijack(tmp_path):
     )
 
 
+def test_tilde_fence_and_four_backtick_fence_respected(tmp_path):
+    """PR #38 R2 Codex MAJOR — `_mask_fenced_blocks` must handle both tilde
+    fences (`~~~`) and 4+ backtick fences (`` ```` ``) per CommonMark spec.
+    Without these variants the simple 3-backtick regex lets an attacker
+    embed `## Evidence Trail` inside a tilde block to bypass the mask.
+    """
+    page = tmp_path / "page.md"
+    body = (
+        "# Body\n\n"
+        "Example with tilde fence:\n\n"
+        "~~~markdown\n"
+        "## Evidence Trail\n"
+        "- 2000-01-01 | raw/tilde.md | fake\n"
+        "~~~\n\n"
+        "Example with 4-backtick fence containing a 3-backtick block:\n\n"
+        "````text\n"
+        "## Evidence Trail\n"
+        "```\n"
+        "## Evidence Trail\n"
+        "```\n"
+        "````\n\n"
+        "## Evidence Trail\n"
+        f"{SENTINEL}\n"
+        "- 2026-01-01 | raw/old.md | Prior real entry\n"
+    )
+    _seed_page(page, body)
+
+    append_evidence_trail(page, "raw/new.md", "Fence variants", entry_date="2026-04-23")
+
+    result = page.read_text(encoding="utf-8")
+    # The new entry MUST land in the real section at EOF, not in either fenced block.
+    real_header_pos = result.rindex("## Evidence Trail")
+    real_section = result[real_header_pos:]
+    assert "2026-04-23 | raw/new.md | Fence variants" in real_section, (
+        "New entry must land in real section after both fence variants"
+    )
+    # Neither fenced block should contain the new entry.
+    tilde_start = result.index("~~~markdown")
+    tilde_end = result.index("~~~\n\n", tilde_start)
+    assert "2026-04-23 | raw/new.md" not in result[tilde_start:tilde_end], (
+        "Tilde fence must mask correctly — entry must NOT appear inside it"
+    )
+    four_backtick_start = result.index("````text")
+    four_backtick_end = result.index("````\n\n", four_backtick_start)
+    assert "2026-04-23 | raw/new.md" not in result[four_backtick_start:four_backtick_end], (
+        "4-backtick fence must mask correctly — entry must NOT appear inside it"
+    )
+
+
 def test_header_only_no_sentinel_plants_sentinel(tmp_path):
     """Legacy pre-cycle-1 H12 page: header exists but no sentinel inside.
 
