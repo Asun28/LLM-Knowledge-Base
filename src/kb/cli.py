@@ -561,5 +561,127 @@ def rebuild_indexes_cmd(wiki_dir: str | None, assume_yes: bool):
     )
 
 
+@cli.command()
+@click.argument("query")
+@click.option(
+    "--limit",
+    "limit",
+    type=int,
+    default=10,
+    help="Maximum results to return (capped at MAX_SEARCH_RESULTS).",
+)
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Wiki directory override (defaults to config WIKI_DIR).",
+)
+def search(query: str, limit: int, wiki_dir: str | None):
+    """Search wiki pages by keyword (BM25 + optional vector fusion).
+
+    Cycle 27 AC1 — CLI parity for MCP `kb_search`. Prints ranked results with
+    type, score, title, snippet, and `[STALE]` markers. Query length and
+    result-count caps match the MCP tool (MAX_QUESTION_LEN, MAX_SEARCH_RESULTS).
+    """
+    # Function-local imports preserve cycle-23 AC4 boot-lean contract.
+    from kb.config import MAX_QUESTION_LEN, MAX_SEARCH_RESULTS  # noqa: PLC0415
+    from kb.mcp.browse import _format_search_results  # noqa: PLC0415
+    from kb.query.engine import search_pages  # noqa: PLC0415
+
+    if not query or not query.strip():
+        click.echo("Error: Query cannot be empty.", err=True)
+        sys.exit(1)
+    if len(query) > MAX_QUESTION_LEN:
+        click.echo(
+            f"Error: Query too long ({len(query)} chars; max {MAX_QUESTION_LEN}).",
+            err=True,
+        )
+        sys.exit(1)
+    capped = max(1, min(limit, MAX_SEARCH_RESULTS))
+    try:
+        wiki_path = Path(wiki_dir) if wiki_dir else None
+        results = search_pages(query, wiki_dir=wiki_path, max_results=capped)
+        click.echo(_format_search_results(results))
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command()
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Wiki directory override (defaults to config WIKI_DIR).",
+)
+def stats(wiki_dir: str | None):
+    """Print wiki health snapshot (page counts, orphans, dead links).
+
+    Cycle 27 AC2 — CLI parity for MCP `kb_stats`. Forwards to the same
+    underlying library helpers.
+    """
+    from kb.mcp.browse import kb_stats  # noqa: PLC0415
+
+    try:
+        output = kb_stats(wiki_dir=wiki_dir)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("list-pages")
+@click.option(
+    "--type",
+    "page_type",
+    type=str,
+    default="",
+    help="Filter by page type (summary / entity / concept / comparison / synthesis).",
+)
+@click.option("--limit", type=int, default=200, help="Maximum pages to list.")
+@click.option("--offset", type=int, default=0, help="Skip this many pages before listing.")
+def list_pages(page_type: str, limit: int, offset: int):
+    """Enumerate wiki pages (optionally filtered by type).
+
+    Cycle 27 AC3 — CLI parity for MCP `kb_list_pages`. `--wiki-dir` override
+    is NOT supported this cycle (Q4 — MCP tool signature would need to change;
+    deferred to a future parity cycle).
+    """
+    from kb.mcp.browse import kb_list_pages  # noqa: PLC0415
+
+    try:
+        output = kb_list_pages(page_type=page_type, limit=limit, offset=offset)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("list-sources")
+@click.option("--limit", type=int, default=200, help="Maximum sources to list.")
+@click.option("--offset", type=int, default=0, help="Skip this many sources before listing.")
+def list_sources(limit: int, offset: int):
+    """Enumerate raw sources with their wiki backlinks.
+
+    Cycle 27 AC4 — CLI parity for MCP `kb_list_sources`. `--wiki-dir` override
+    is NOT supported this cycle (Q4 — MCP tool signature would need to change).
+    """
+    from kb.mcp.browse import kb_list_sources  # noqa: PLC0415
+
+    try:
+        output = kb_list_sources(limit=limit, offset=offset)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()

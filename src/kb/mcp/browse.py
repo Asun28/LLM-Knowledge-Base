@@ -28,6 +28,31 @@ _LIST_SOURCES_TOTAL_CAP_BYTES = 64 * 1024
 
 
 @mcp.tool()
+def _format_search_results(results: list[dict]) -> str:
+    """Format `search_pages` output for human-readable CLI / MCP consumption.
+
+    Cycle 27 AC1b — extracted from `kb_search` so the CLI `kb search`
+    subcommand can reuse the identical output format without re-implementing
+    the snippet-truncation + `[STALE]` marker logic. Callers that need a
+    different format (e.g. JSON) should not use this helper; build a
+    dedicated formatter instead.
+    """
+    if not results:
+        return "No matching pages found."
+    lines = [f"Found {len(results)} matching page(s):\n"]
+    for r in results:
+        snippet = r["content"][:200].replace("\n", " ").strip()
+        # G2 (Phase 4.5 R4 HIGH): surface staleness alongside score so
+        # discoverability matches kb_query's [STALE] treatment.
+        stale_marker = " [STALE]" if r.get("stale") else ""
+        lines.append(
+            f"- **{r['id']}** (type: {r['type']}, score: {r['score']}){stale_marker}\n"
+            f"  Title: {r['title']}\n"
+            f"  Snippet: {snippet}..."
+        )
+    return "\n".join(lines)
+
+
 def kb_search(query: str, max_results: int = 10) -> str:
     """Search wiki pages by keyword. Returns matching pages ranked by relevance.
 
@@ -48,20 +73,7 @@ def kb_search(query: str, max_results: int = 10) -> str:
         from kb.query.engine import search_pages
 
         results = search_pages(query, max_results=max_results)
-        if not results:
-            return "No matching pages found."
-        lines = [f"Found {len(results)} matching page(s):\n"]
-        for r in results:
-            snippet = r["content"][:200].replace("\n", " ").strip()
-            # G2 (Phase 4.5 R4 HIGH): surface staleness alongside score so
-            # discoverability matches kb_query's [STALE] treatment.
-            stale_marker = " [STALE]" if r.get("stale") else ""
-            lines.append(
-                f"- **{r['id']}** (type: {r['type']}, score: {r['score']}){stale_marker}\n"
-                f"  Title: {r['title']}\n"
-                f"  Snippet: {snippet}..."
-            )
-        return "\n".join(lines)
+        return _format_search_results(results)
     except Exception as e:
         logger.exception("Error in kb_search for query: %s", query)
         return f"Error: Search failed — {_sanitize_error_str(e)}"
