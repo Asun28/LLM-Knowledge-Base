@@ -24,7 +24,17 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 LOCK_TIMEOUT_SECONDS = 5.0  # default acquisition deadline
+# Cycle 24 AC9 — exponential backoff cap. Read at call time inside `file_lock`
+# so tests monkeypatching the module attribute (see
+# `tests/test_backlog_by_file_cycle2.py:172,210`) continue to clamp all observed
+# sleeps to the patched value. Also doubles as the default polling ceiling for
+# the normal + stale-lock retry paths.
 LOCK_POLL_INTERVAL = 0.05
+# Cycle 24 AC9 — exponential-backoff floor. First retry sleeps for this
+# duration; subsequent retries double until capped by ``LOCK_POLL_INTERVAL``.
+# Read at call time inside `file_lock` (module attribute, not function-entry
+# snapshot).
+LOCK_INITIAL_POLL_INTERVAL = 0.01
 
 _IS_WINDOWS = sys.platform == "win32"
 _legacy_locks_purged = False
@@ -222,6 +232,23 @@ def _ensure_legacy_locks_purged() -> None:
         _legacy_locks_purged = True
 
 
+def _backoff_sleep_interval(attempt_count: int) -> float:
+    """Cycle 24 AC9 — compute the retry-sleep duration for ``file_lock``.
+
+    Reads ``LOCK_INITIAL_POLL_INTERVAL`` and ``LOCK_POLL_INTERVAL`` from the
+    module at CALL TIME (attribute lookup) so test monkeypatches on either
+    constant take effect. Bounds the exponent at 30 to avoid ``OverflowError``
+    under degenerate conditions (e.g., when ``LOCK_POLL_INTERVAL`` is
+    monkeypatched to 0 and the caller spins); the cap clamps the duration to
+    the current ``LOCK_POLL_INTERVAL`` value regardless.
+    """
+    # `min(..., 30)` prevents `2**attempt_count` from exploding into a bignum.
+    # Once `2**30 * INITIAL` exceeds any reasonable CAP, further doubling is
+    # irrelevant — the outer `min` with CAP already clamps the result.
+    shift = min(attempt_count, 30)
+    return min(LOCK_INITIAL_POLL_INTERVAL * (2**shift), LOCK_POLL_INTERVAL)
+
+
 @contextmanager
 def file_lock(path: Path, timeout: float | None = None):
     """Acquire a cross-process exclusive lock via a PID-stamped lock file.
@@ -255,6 +282,13 @@ def file_lock(path: Path, timeout: float | None = None):
     my_pid_bytes = str(os.getpid()).encode("ascii")
     deadline = time.monotonic() + deadline_timeout
     acquired = False
+    # Cycle 24 AC9 — exponential-backoff counter shared across all three
+    # polling sites (normal retry, POSIX stale-steal, Windows stale-steal) per
+    # design CONDITION 7. Incremented at every `time.sleep` call. Sleep duration
+    # is `min(LOCK_INITIAL_POLL_INTERVAL * (2 ** attempt), LOCK_POLL_INTERVAL)`;
+    # both constants read at CALL TIME (module attribute lookup) so
+    # monkeypatching either one in tests takes effect immediately.
+    attempt_count = 0
     try:
         while not acquired:
             try:
@@ -319,7 +353,8 @@ def file_lock(path: Path, timeout: float | None = None):
                     except ProcessLookupError:
                         # Unambiguous: PID doesn't exist — safe to steal.
                         lock_path.unlink(missing_ok=True)
-                        time.sleep(LOCK_POLL_INTERVAL)
+                        time.sleep(_backoff_sleep_interval(attempt_count))
+                        attempt_count += 1
                         continue
                     except OSError:
                         # Cycle 2 PR review R1: on POSIX a non-ProcessLookupError
@@ -333,7 +368,13 @@ def file_lock(path: Path, timeout: float | None = None):
                         # platform.
                         if _IS_WINDOWS:
                             lock_path.unlink(missing_ok=True)
-                            time.sleep(LOCK_POLL_INTERVAL)
+                            time.sleep(
+                                min(
+                                    LOCK_INITIAL_POLL_INTERVAL * (2**attempt_count),
+                                    LOCK_POLL_INTERVAL,
+                                )
+                            )
+                            attempt_count += 1
                             continue
                         raise TimeoutError(
                             f"Lock {lock_path} held by running PID {stale_pid}. "
@@ -344,7 +385,8 @@ def file_lock(path: Path, timeout: float | None = None):
                             f"Lock {lock_path} held by running PID {stale_pid}. "
                             "Stop that process or delete the lock file."
                         )
-                time.sleep(LOCK_POLL_INTERVAL)
+                time.sleep(_backoff_sleep_interval(attempt_count))
+                attempt_count += 1
         yield
     finally:
         if acquired:
