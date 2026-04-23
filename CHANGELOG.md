@@ -24,8 +24,8 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-24 — cycle 27
 
-- Items: 7 AC / 2 src + 1 new test file / 2 commits
-- Tests: 2790 → 2797 (+7)
+- Items: 7 AC / 2 src + 1 new test file / 3 commits
+- Tests: 2790 → 2801 (+11)
 - Scope:
   CLI ↔ MCP parity — 4 new read-only CLI subcommands (`kb search`,
   `kb stats`, `kb list-pages`, `kb list-sources`) wrapping existing MCP

@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 27 (2026-04-24)
 
-7 AC / 2 src + 1 new test file / 2 commits. Tests: 2790 → 2797 (+7).
+7 AC / 2 src + 1 new test file / 3 commits. Tests: 2790 → 2801 (+11).
 
 **CLI ↔ MCP parity for 4 read-only browse tools.** Narrow-scope cycle closing part of the Phase 4.5 HIGH "CLI ↔ MCP parity" BACKLOG item (BACKLOG.md:151) — operators working from scripts / cron / CI can now use `kb search`, `kb stats`, `kb list-pages`, `kb list-sources` instead of spawning an MCP client or calling `python -c "from kb.mcp.browse import ..."`. Pure internal refactor: no new trust boundaries, no filesystem writes, no new security enforcement points. Step 2 threat model skipped per skill clause; inline mini-threat-model captured 3 residual threats (T1-T3), all covered by existing MCP-tool validators.
 

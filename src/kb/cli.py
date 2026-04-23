@@ -586,6 +586,7 @@ def search(query: str, limit: int, wiki_dir: str | None):
     """
     # Function-local imports preserve cycle-23 AC4 boot-lean contract.
     from kb.config import MAX_QUESTION_LEN, MAX_SEARCH_RESULTS  # noqa: PLC0415
+    from kb.mcp.app import _validate_wiki_dir  # noqa: PLC0415
     from kb.mcp.browse import _format_search_results  # noqa: PLC0415
     from kb.query.engine import search_pages  # noqa: PLC0415
 
@@ -599,8 +600,15 @@ def search(query: str, limit: int, wiki_dir: str | None):
         )
         sys.exit(1)
     capped = max(1, min(limit, MAX_SEARCH_RESULTS))
+    # Cycle-27 R1 Sonnet minor — thread `--wiki-dir` through the cycle-23
+    # dual-anchor containment validator for pattern consistency with `kb stats`
+    # (which routes through `kb_stats` and gets the check for free). Prevents
+    # future write-capable refactors from inheriting an unchecked path.
+    wiki_path, validation_err = _validate_wiki_dir(wiki_dir)
+    if validation_err:
+        click.echo(f"Error: {validation_err}", err=True)
+        sys.exit(1)
     try:
-        wiki_path = Path(wiki_dir) if wiki_dir else None
         results = search_pages(query, wiki_dir=wiki_path, max_results=capped)
         click.echo(_format_search_results(results))
     except Exception as exc:
