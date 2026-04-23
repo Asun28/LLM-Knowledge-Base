@@ -169,7 +169,13 @@ def test_lock_poll_interval_read_at_call_time(
     """
     monkeypatch.setattr(io_mod, "LOCK_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(io_mod, "LOCK_POLL_INTERVAL", 0.0)
-    # When cap is 0, the MIN() clamps everything to 0 — sleeps are no-ops.
+    # With LOCK_POLL_INTERVAL=0 and LOCK_INITIAL_POLL_INTERVAL=0.01 unchanged,
+    # `min(0.01 * 2^attempt_count, 0) = 0` for every attempt, so ALL observed
+    # sleeps clamp to 0. This pins CAP semantics: the module-level CAP is
+    # applied at call time, not snapshotted. A refactor that snapshots the
+    # cap into a function-local at function entry would silently ignore the
+    # monkeypatch (cap would remain at the pre-patch 0.05 default) and the
+    # observed sleeps would be 0.01, 0.02, etc. — the test would fail.
     target = tmp_path / "target.txt"
     target.touch()
     lock_path = target.with_suffix(target.suffix + ".lock")

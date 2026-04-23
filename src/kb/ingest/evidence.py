@@ -82,6 +82,29 @@ def render_initial_evidence_trail(
 _EVIDENCE_TRAIL_HEADER_RE = re.compile(r"^## Evidence Trail[ \t]*\r?\n", re.MULTILINE)
 # Any subsequent ``^## `` heading terminates the Evidence Trail section span.
 _NEXT_H2_RE = re.compile(r"^## ", re.MULTILINE)
+# Cycle 24 PR #38 R1 Sonnet BLOCKER B1 — match fenced code blocks (``` ... ```)
+# so the header regex above does not mis-match a literal `## Evidence Trail`
+# line INSIDE a fenced code example in the page body. ``re.DOTALL`` lets ``.``
+# span newlines; non-greedy ``.*?`` stops at the first closing fence.
+_FENCED_CODE_RE = re.compile(r"^```[^\n]*\n.*?^```[^\n]*$", re.MULTILINE | re.DOTALL)
+
+
+def _mask_fenced_blocks(content: str) -> str:
+    """Replace fenced-code-block contents with spaces of equal length so regex
+    searches over the RESULT find headers only in prose — not inside fenced
+    examples. Preserves byte offsets so ``match.start()`` / ``match.end()``
+    computed against the masked string are valid positions in the ORIGINAL
+    ``content``. Fenced-block bytes become spaces (except newlines, which are
+    preserved to keep line-number semantics of ``re.MULTILINE`` anchors).
+    """
+
+    def _blank(match: re.Match) -> str:
+        text = match.group(0)
+        # Replace every non-newline char with a space; keep newlines so `^` / `$`
+        # multiline anchors still hit legitimate line boundaries.
+        return "".join("\n" if ch == "\n" else " " for ch in text)
+
+    return _FENCED_CODE_RE.sub(_blank, content)
 
 
 def append_evidence_trail(
@@ -120,11 +143,19 @@ def append_evidence_trail(
         d = entry_date or date.today().isoformat()
         entry = format_evidence_entry(d, source_ref, action)
 
-        header_match = _EVIDENCE_TRAIL_HEADER_RE.search(content)
+        # Cycle 24 PR #38 R1 Sonnet BLOCKER B1 — mask fenced code blocks before
+        # regex matching so a literal `## Evidence Trail` line inside a code
+        # example does not hijack header detection. `_mask_fenced_blocks`
+        # preserves byte offsets so match positions remain valid in the
+        # original `content`.
+        masked = _mask_fenced_blocks(content)
+        header_match = _EVIDENCE_TRAIL_HEADER_RE.search(masked)
         if header_match is not None:
             # Section span = [header_end, next_h2_start) or [header_end, EOF).
+            # Both positions computed against `masked` are equally valid in
+            # `content` because _mask_fenced_blocks preserves byte offsets.
             section_start = header_match.end()
-            tail = content[section_start:]
+            tail = masked[section_start:]
             next_h2 = _NEXT_H2_RE.search(tail)
             section_end = section_start + next_h2.start() if next_h2 else len(content)
             span = content[section_start:section_end]

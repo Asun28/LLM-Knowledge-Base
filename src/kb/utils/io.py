@@ -368,12 +368,7 @@ def file_lock(path: Path, timeout: float | None = None):
                         # platform.
                         if _IS_WINDOWS:
                             lock_path.unlink(missing_ok=True)
-                            time.sleep(
-                                min(
-                                    LOCK_INITIAL_POLL_INTERVAL * (2**attempt_count),
-                                    LOCK_POLL_INTERVAL,
-                                )
-                            )
+                            time.sleep(_backoff_sleep_interval(attempt_count))
                             attempt_count += 1
                             continue
                         raise TimeoutError(

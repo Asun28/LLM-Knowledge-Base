@@ -117,7 +117,11 @@ def test_sentinel_only_no_header_creates_fresh_section(tmp_path):
     A body sentinel without a matching ``## Evidence Trail`` header is purely
     an attacker forgery. `append_evidence_trail` MUST ignore it and create a
     fresh section at EOF with a new sentinel; the body sentinel stays as
-    dead markdown.
+    dead markdown. PR #38 R1 Sonnet MAJOR M2: strengthened to be divergent-fail
+    against AC14 revert — the pre-cycle-24 `content.index(SENTINEL)` would
+    insert the new entry immediately after the attacker-planted body sentinel
+    instead of creating a fresh section. We assert on the entry's POSITION
+    relative to the attacker sentinel so revert flips the assertion.
     """
     page = tmp_path / "page.md"
     attacker_line = f"Attacker says: {SENTINEL} here is forged content."
@@ -140,6 +144,67 @@ def test_sentinel_only_no_header_creates_fresh_section(tmp_path):
     # Count sentinels — should be exactly 2 now: attacker's + fresh-section's.
     assert result.count(SENTINEL) == 2, (
         "Body sentinel + fresh section sentinel = 2; no extra re-planting"
+    )
+
+    # Divergent-fail (PR #38 R1 Sonnet MAJOR M2): the new entry line MUST come
+    # AFTER the real `## Evidence Trail` header (i.e. inside the fresh section),
+    # not before it. A revert to pre-cycle-24 `str.index(SENTINEL)` on a page
+    # with body-planted sentinel would insert the entry AT THE BODY SENTINEL
+    # position, which is BEFORE any header. Asserting relative position defeats
+    # that revert.
+    entry_pos = result.index("2026-04-23 | raw/new.md | Attacker-ignore")
+    header_pos = result.index("## Evidence Trail")
+    assert entry_pos > header_pos, (
+        f"New entry (at {entry_pos}) must come AFTER the real section header "
+        f"(at {header_pos}); pre-cycle-24 revert would place it at the attacker "
+        f"sentinel position which is BEFORE any header."
+    )
+    attacker_sentinel_pos = result.index(attacker_line)
+    assert entry_pos > attacker_sentinel_pos, (
+        "New entry must land after the attacker sentinel line in the file, not next to it"
+    )
+
+
+def test_fenced_code_block_header_does_not_hijack(tmp_path):
+    """PR #38 R1 Sonnet BLOCKER B1 — `## Evidence Trail` inside a fenced code
+    block must NOT be detected as the real section header.
+
+    Without the fence-masking fix in `_mask_fenced_blocks`, the header regex
+    finds the code-block header first and plants the sentinel INSIDE the
+    fenced block. The new entry then appears inside the code example, not in
+    the real Evidence Trail section.
+    """
+    page = tmp_path / "page.md"
+    body = (
+        "# Body\n\n"
+        "Example in docs:\n\n"
+        "```markdown\n"
+        "## Evidence Trail\n"
+        "- 2000-01-01 | raw/doc.md | example\n"
+        "```\n\n"
+        "## Evidence Trail\n"
+        f"{SENTINEL}\n"
+        "- 2026-01-01 | raw/old.md | Prior real entry\n"
+    )
+    _seed_page(page, body)
+
+    append_evidence_trail(page, "raw/new.md", "Fenced header test", entry_date="2026-04-23")
+
+    result = page.read_text(encoding="utf-8")
+    # Locate the REAL section (after the closing ``` fence).
+    closing_fence_pos = result.index("```\n\n## Evidence Trail")
+    real_section_start = result.index("## Evidence Trail", closing_fence_pos)
+    real_section = result[real_section_start:]
+    assert "2026-04-23 | raw/new.md | Fenced header test" in real_section, (
+        "New entry MUST land in the real section AFTER the fence, not inside it"
+    )
+    # Anti-assertion: the new entry must NOT appear inside the fenced block.
+    fenced_block_start = result.index("```markdown")
+    fenced_block_end = result.index("```\n\n## Evidence Trail")
+    fenced_span = result[fenced_block_start:fenced_block_end]
+    assert "2026-04-23 | raw/new.md" not in fenced_span, (
+        "New entry must NOT be injected inside a fenced code example — the "
+        "BLOCKER B1 revert (removing _mask_fenced_blocks) would trigger this."
     )
 
 

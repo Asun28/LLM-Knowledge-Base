@@ -24,8 +24,8 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-23 — cycle 24
 
-- Items: 15 AC / 4 src + 4 new tests / 6 commits
-- Tests: 2743 → 2766 (+23)
+- Items: 15 AC / 4 src + 5 new tests / 7 commits
+- Tests: 2743 → 2767 (+24)
 - Scope:
   Evidence-trail inline render at first write + StorageError on update-path
   evidence failure (AC1/AC2); `append_evidence_trail` sentinel search

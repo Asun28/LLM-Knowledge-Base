@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 24 (2026-04-23)
 
-15 AC / 4 src + 4 new tests / 6 commits. Tests: 2743 → 2766 (+23).
+15 AC / 4 src + 5 new tests / 7 commits. Tests: 2743 → 2767 (+24).
 
 **Evidence-trail race closure + vector-index atomic rebuild + file_lock exponential backoff.** Targeted pre-Phase-5 cycle covering two Phase 4.5 HIGH / HIGH-Deferred items (vector-index atomic rebuild sub-item 1, `_write_wiki_page` two-write race) plus three MEDIUM items (file_lock 50ms polling floor, evidence-append error surfacing, stale BACKLOG maintenance). A new Cluster E (sentinel section-span hardening) was surfaced by Step-2 threat model T5 and joined the scope as a load-bearing prerequisite for AC1.
 

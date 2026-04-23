@@ -88,19 +88,32 @@ def _evict_vector_index_cache_entry(vec_path: Path) -> None:
     references may pin the instance briefly). Explicit ``.close()`` unpins the
     sqlite3 fd so ``os.replace`` succeeds cross-platform.
 
+    Cycle 24 PR #38 R1 Sonnet MAJOR M1: the ``.close()`` call and the
+    ``_conn = None`` rebind happen INSIDE ``_index_cache_lock`` so a concurrent
+    query thread that grabbed the instance before the pop cannot race against
+    ``_ensure_conn()``'s ``_conn is not None`` check. Hot-path queries already
+    re-acquire ``_conn_lock`` inside ``_ensure_conn`` before touching
+    ``self._conn``, but the eviction path crossed the lock boundary — a
+    concurrent ``query()`` could observe ``_conn`` non-None at the fast-path
+    check and then fail inside sqlite on the closed handle. Holding
+    ``_index_cache_lock`` across the close serialises the eviction with
+    `get_vector_index`'s slow path (the two paths share the same lock), and
+    the instance is already out of the cache dict so only pre-evict readers
+    can observe it.
+
     The caller MUST invoke this BEFORE ``os.replace`` per design CONDITION 2.
     """
     with _index_cache_lock:
         popped = _index_cache.pop(str(vec_path), None)
-    if popped is not None and popped._conn is not None:
-        try:
-            popped._conn.close()
-        except Exception:
-            # sqlite3.Connection.close() is idempotent; a double-close or a
-            # connection closed due to earlier extension-load failure is safe
-            # to swallow.
-            pass
-        popped._conn = None
+        if popped is not None and popped._conn is not None:
+            try:
+                popped._conn.close()
+            except Exception:
+                # sqlite3.Connection.close() is idempotent; a double-close or
+                # a connection closed due to earlier extension-load failure
+                # is safe to swallow.
+                pass
+            popped._conn = None
 
 
 def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
