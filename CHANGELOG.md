@@ -24,7 +24,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-23 — cycle 23
 
-- Items: 8 AC / 6 src + 4 new tests / 4 commits
+- Items: 8 AC / 6 src + 4 new tests / 6 commits
 - Tests: 2725 → 2743 (+18)
 - Scope:
   MCP boot-leanness via PEP-562 lazy shim (cycle-19 AC15 contract preserved),

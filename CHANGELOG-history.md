@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 23 (2026-04-23)
 
-8 AC / 6 src + 4 new tests / 4 commits. Tests: 2725 → 2743 (+18).
+8 AC / 6 src + 4 new tests / 6 commits. Tests: 2725 → 2743 (+18).
 
 **MCP boot latency + operator-scoped `rebuild_indexes` + cross-module integration coverage.** Targeted pre-Phase-5 cycle covering three Phase 4.5 HIGH items and one HIGH-Deferred test-infra item that prior cycles could not land without the cycle-19 AC15 owner-module monkeypatch contract first landing.
 

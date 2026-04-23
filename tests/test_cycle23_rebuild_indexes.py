@@ -33,15 +33,19 @@ def _word_negation_window(doc: str, word: str, window: int = 200) -> bool:
     multiple times (once in the args block, once in the cycle-23 note block).
     Passing if ANY occurrence is near a negation satisfies the direction-of-
     claim assertion without locking docstring ordering.
+
+    Whitespace is collapsed before the scan so a future bullet-list
+    reflow that wraps ``"vector index"`` onto two lines does not silently
+    break the assertion (R2 Codex NIT — cycle 23 R2 NEW-D).
     """
-    doc_lc = doc.lower()
-    target = word.lower()
+    doc_norm = " ".join(doc.split()).lower()
+    target = " ".join(word.split()).lower()
     start = 0
     while True:
-        idx = doc_lc.find(target, start)
+        idx = doc_norm.find(target, start)
         if idx < 0:
             return False
-        span = doc_lc[idx : idx + window]
+        span = doc_norm[idx : idx + window]
         if " not " in span or "n't " in span or "doesn't" in span or "does not" in span:
             return True
         start = idx + len(target)
