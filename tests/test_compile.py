@@ -223,6 +223,13 @@ def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
     """Regression: Phase 4.5 CRITICAL item 14.
 
     Per-loop manifest save duplicated inner ingest save.
+
+    Cycle 25 AC6 adds an intentional pre-marker save (`in_progress:{hash}`)
+    before each ingest_source call, so the post-cycle-25 expected count is
+    2 saves per source: (1) pre-marker, (2) ingest_source's own success
+    overwrite. The original cycle-17 AC3 intent (no ACCIDENTAL double-writes
+    from the loop body) is preserved — the assertion now pins the precise
+    cycle-25 contract rather than the pre-cycle-25 count.
     """
     import kb.compile.compiler as compiler_mod
     from kb.compile.compiler import compile_wiki
@@ -270,8 +277,13 @@ def test_compile_loop_does_not_double_write_manifest(tmp_project, monkeypatch):
         incremental=True,
     )
 
-    assert call_count["save_manifest"] == 1, (
-        f"manifest saved {call_count['save_manifest']}x per source; expected 1"
+    # Cycle 25 AC6: expected count rose from 1 → 2 because the pre-marker
+    # write intentionally saves before ingest_source. Cycle-17 AC3's "no
+    # accidental double-write" invariant is still pinned — a regression
+    # would produce 3+ saves (one extra accidental loop-body save).
+    assert call_count["save_manifest"] == 2, (
+        f"manifest saved {call_count['save_manifest']}x per source; expected 2 "
+        f"(cycle-25 AC6 pre-marker + cycle-17 AC3 success overwrite)"
     )
     manifest_after_first = load_manifest(manifest_path)
     source_entries = {

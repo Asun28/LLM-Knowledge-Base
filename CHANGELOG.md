@@ -22,6 +22,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-24 — cycle 25
+
+- Items: 10 AC / 2 src + 3 new test files / 6 commits
+- Tests: 2768 → 2782 (+14)
+- Scope:
+  `rebuild_indexes` also unlinks `<vec_db>.tmp` sibling (AC1/AC2 —
+  cycle-24 R2 Codex follow-up); vector-index dim-mismatch warning now
+  includes operator remediation command + module-level observability
+  counter (AC3/AC4/AC5 — HIGH-Deferred sub-item 3 narrow-scope shipped,
+  auto-rebuild remains deferred); `compile_wiki` emits `in_progress:{hash}`
+  pre-markers before each `ingest_source`, stale-marker entry scan on
+  next invocation warns per-source, full-mode prune exempts in_progress
+  values (AC6/AC7/AC8 + CONDITION 13 — MEDIUM M2 narrow observability
+  variant); BACKLOG + diskcache/ragas CVE 2026-04-24 re-verify (AC9/AC10).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-25-2026-04-24)
+
 #### 2026-04-23 — cycle 24
 
 - Items: 15 AC / 4 src + 5 new test files / 9 commits
