@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 26 (2026-04-24)
 
-8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 6 commits. Tests: 2782 → 2790 (+8).
+8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 7 commits. Tests: 2782 → 2790 (+8).
 
 **Vector-model cold-load observability + BACKLOG hygiene.** Narrow observability cycle completing the cold-load-latency half of Phase 4.5 HIGH-Deferred `query/embeddings.py` sub-item 2 (sub-item 3 dim-mismatch observability shipped cycle 25). No new trust boundaries, no new filesystem-write contracts, no new security-enforcement surfaces.
 
