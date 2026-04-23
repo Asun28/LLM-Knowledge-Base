@@ -51,6 +51,18 @@ _index_cache_lock = threading.Lock()
 # well within the diagnostic tolerance.
 _dim_mismatches_seen: int = 0
 
+# Cycle 26 AC3 — WARN threshold (seconds) for `_get_model` cold-load latency.
+# Module-level constant; env override deferred per requirements non-goals.
+VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS: float = 0.3
+
+# Cycle 26 AC4 — process-level observability counter for vector model cold-loads.
+# cf. `_dim_mismatches_seen` above — lock-free per cycle-25 Q8. This cold-load
+# counter piggybacks on `_model_lock` for EXACT counts because cold-loads happen
+# at most once per process under normal operation (the enclosing double-checked
+# lock is already held), so the exact-vs-approximate trade-off flips compared
+# to cycle-25's query-hot-path counter.
+_vector_model_cold_loads_seen: int = 0
+
 
 def get_dim_mismatch_count() -> int:
     """Return the process-level count of vector-index dim-mismatch events.
@@ -66,6 +78,67 @@ def get_dim_mismatch_count() -> int:
     deltas by snapshotting before/after a call sequence.
     """
     return _dim_mismatches_seen
+
+
+def get_vector_model_cold_load_count() -> int:
+    """Return the process-level count of successful vector model cold-loads.
+
+    Cycle 26 AC4. Paired with :func:`get_dim_mismatch_count` (cycle 25) — see
+    that function for the observability-counter conventions. Intentional
+    asymmetry: this cold-load counter is incremented INSIDE ``_model_lock``
+    (exact counts; the lock is already held for the `from_pretrained` call),
+    whereas cycle-25's dim-mismatch counter is lock-free (query-hot-path,
+    approximate counts adequate per Q8). Future maintainers: do NOT
+    "normalise" one to match the other — the rate characteristics differ.
+    """
+    return _vector_model_cold_loads_seen
+
+
+def _warm_load_target(vec_path: Path) -> None:
+    """Daemon-thread target that wraps ``_get_model()`` for T6 exception visibility.
+
+    Cycle 26 AC1 / Q2 / CONDITION 10 — catches any exception inside the
+    warm-load attempt and calls ``logger.exception`` so silent thread
+    failures still produce structured log output. Returns normally
+    otherwise; the model singleton caches the result for subsequent
+    user queries.
+    """
+    try:
+        _get_model()
+    except Exception:
+        logger.exception("Warm-load thread failed for vec_db=%s", vec_path)
+
+
+def maybe_warm_load_vector_model(wiki_dir: Path) -> "threading.Thread | None":
+    """Optional MCP-startup warm-load of the vector embedding model.
+
+    Cycle 26 AC1. Spawns a daemon thread calling :func:`_get_model` when
+    hybrid search is available AND a vector-index DB already exists for
+    ``wiki_dir`` AND the model has not already been loaded this process.
+    Returns the :class:`threading.Thread` so tests can ``.join(timeout=...)``;
+    production callers (``kb.mcp.__init__.main``) ignore the return value.
+
+    Returns ``None`` when any precondition fails (hybrid unavailable,
+    ``_vec_db_path(wiki_dir)`` missing, or ``_model`` already set — idempotent
+    no-op).
+
+    Single-spawn caveat: this helper does NOT lock against concurrent callers.
+    T5 unbounded-spawn acceptance rests on the single-caller production
+    invariant (AC2 — exactly one call site in ``kb.mcp.__init__.main``).
+    Callers outside tests MUST NOT loop this function; the cycle-26 CI-gate
+    grep enforces exactly one production caller.
+    """
+    if not _hybrid_available:
+        return None
+    vec_path = _vec_db_path(wiki_dir)
+    if not vec_path.exists():
+        return None
+    if _model is not None:
+        return None
+    logger.info("Warm-loading vector model in background (vec_db=%s)", vec_path)
+    thread = threading.Thread(target=_warm_load_target, args=(vec_path,), daemon=True)
+    thread.start()
+    return thread
 
 
 def _reset_model() -> None:
@@ -268,14 +341,39 @@ def get_vector_index(vec_path: str) -> "VectorIndex":
 
 
 def _get_model():
-    """Lazy-load model2vec model (thread-safe singleton)."""
-    global _model
+    """Lazy-load model2vec model (thread-safe singleton).
+
+    Cycle 26 AC3 — instrumented with ``time.perf_counter`` around
+    ``StaticModel.from_pretrained``. On successful load, emits an INFO log
+    with elapsed time, increments the AC4 counter, and on threshold breach
+    (``VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS``) emits an additional WARNING
+    nudging operators toward :func:`maybe_warm_load_vector_model`. The
+    log + increment fire ONLY on the success path (not in ``finally:``) so
+    an exception from ``from_pretrained`` leaves ``_model`` as ``None``,
+    produces no misleading "cold-loaded" log line, and the next query
+    re-attempts naturally.
+    """
+    global _model, _vector_model_cold_loads_seen
     if _model is None:
         with _model_lock:
             if _model is None:
+                import time
+
                 from model2vec import StaticModel
 
+                start = time.perf_counter()
                 _model = StaticModel.from_pretrained(EMBEDDING_MODEL, force_download=False)
+                elapsed = time.perf_counter() - start
+                _vector_model_cold_loads_seen += 1
+                logger.info("Vector model cold-loaded in %.2fs", elapsed)
+                if elapsed >= VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS:
+                    logger.warning(
+                        "Vector model cold-load exceeded %.2fs threshold (%.2fs actual). "
+                        "Consider warm-load on startup via "
+                        "maybe_warm_load_vector_model(wiki_dir).",
+                        VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS,
+                        elapsed,
+                    )
     return _model
 
 
