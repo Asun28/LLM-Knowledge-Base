@@ -51,19 +51,29 @@ def _run_probe(code: str, timeout: float = 10.0) -> dict:
 
 
 def test_bare_import_kb_mcp_does_not_pull_heavy_deps():
-    """AC5 — `import kb.mcp` alone keeps heavy modules out of sys.modules."""
+    """AC5 — `import kb.mcp` alone keeps heavy modules out of sys.modules.
+
+    Cycle 26 AC2b / CONDITION 1 — allowlist extended to include
+    ``kb.query.embeddings``. The cycle-26 warm-load wiring in
+    ``kb.mcp.__init__.main()`` uses a FUNCTION-LOCAL import so a
+    bare ``import kb.mcp`` still never pulls the embeddings module.
+    Any future regression that hoists the import to module scope will
+    trip this test.
+    """
     code = (
         "import json, sys\n"
         "import kb.mcp  # noqa: F401 — smoke import for boot-leanness probe\n"
         "heavy = ['anthropic', 'networkx', 'sentence_transformers',\n"
-        "         'kb.query.engine', 'kb.ingest.pipeline', 'kb.feedback.reliability']\n"
+        "         'kb.query.engine', 'kb.ingest.pipeline', 'kb.feedback.reliability',\n"
+        "         'kb.query.embeddings']\n"
         "present = sorted(m for m in heavy if m in sys.modules)\n"
         "missing = sorted(m for m in heavy if m not in sys.modules)\n"
         "print(json.dumps({'present': present, 'missing': missing}))\n"
     )
     result = _run_probe(code)
     assert result["present"] == [], (
-        f"cycle 23 AC4 contract broken — bare `import kb.mcp` pulled: {result['present']}"
+        f"cycle 23 AC4 + cycle 26 AC2b contract broken — bare `import kb.mcp` pulled: "
+        f"{result['present']}"
     )
     assert set(result["missing"]) == {
         "anthropic",
@@ -72,6 +82,7 @@ def test_bare_import_kb_mcp_does_not_pull_heavy_deps():
         "kb.query.engine",
         "kb.ingest.pipeline",
         "kb.feedback.reliability",
+        "kb.query.embeddings",
     }
 
 

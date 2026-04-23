@@ -63,4 +63,21 @@ def main() -> None:
 
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
+
+    # Cycle 26 AC2 — warm-load vector embedding model in background (best-effort).
+    # Function-local imports preserve cycle-23 AC4 boot-lean contract (CONDITION 8):
+    # bare `import kb.mcp` must not pull `kb.query.embeddings` or `kb.config` into
+    # sys.modules. RuntimeError from `Thread.start()` is swallowed (CONDITION 11 /
+    # Q6) so MCP still boots under resource pressure; any other exception in the
+    # warm-load setup path is logged but does not block MCP startup.
+    try:
+        from kb.config import WIKI_DIR
+        from kb.query.embeddings import maybe_warm_load_vector_model
+
+        maybe_warm_load_vector_model(WIKI_DIR)
+    except RuntimeError as exc:
+        logging.getLogger(__name__).warning("Warm-load thread failed to start: %s", exc)
+    except Exception:
+        logging.getLogger(__name__).exception("Warm-load setup failed")
+
     _mcp.run()
