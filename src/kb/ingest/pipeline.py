@@ -58,12 +58,6 @@ _SOURCE_BLOCK_RE = re.compile(r"^(source:\s*\n(?:[ \t]*- [^\n]*\n)*)", re.MULTIL
 # only the computed hash sentinel is suppressed.
 _UNTITLED_SENTINEL_RE = re.compile(r"^untitled-[0-9a-f]{6}$")
 
-# MCP-only allowlist (stricter than SUPPORTED_SOURCE_EXTENSIONS — excludes .pdf
-# which is handled by compile_wiki via the UTF-8 decode "convert first" path).
-# mcp.core re-exports this name; library-boundary enforcement in ingest_source
-# uses SUPPORTED_SOURCE_EXTENSIONS so PDF ingest through compile_wiki still works.
-_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
-
 _SUMMARY_STRING_FIELDS = (
     "title",
     "name",
