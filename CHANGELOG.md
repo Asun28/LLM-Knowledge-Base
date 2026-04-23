@@ -24,8 +24,8 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-24 — cycle 26
 
-- Items: 8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 4 commits
-- Tests: 2782 → 2789 (+7)
+- Items: 8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 6 commits
+- Tests: 2782 → 2790 (+8)
 - Scope:
   Vector-model cold-load observability — new `maybe_warm_load_vector_model(wiki_dir)`
   daemon-thread warm-load hook wired into `kb.mcp.__init__.main()` after tool

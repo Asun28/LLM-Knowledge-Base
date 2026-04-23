@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (brief compact index, newest first; full per-cycle detail in `CHANGELOG-history.md`). Latest full-suite count: 2789 tests across 243 test files; last full run was 2780 passed + 9 skipped (cycle 26 — adds vector-model cold-load observability: `maybe_warm_load_vector_model` MCP warm-load hook + `_get_model` latency instrumentation + `_vector_model_cold_loads_seen` counter, plus BACKLOG hygiene). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (brief compact index, newest first; full per-cycle detail in `CHANGELOG-history.md`). Latest full-suite count: 2790 tests across 243 test files; last full run was 2781 passed + 9 skipped (cycle 26 — adds vector-model cold-load observability: `maybe_warm_load_vector_model` MCP warm-load hook + `_get_model` latency instrumentation + `_vector_model_cold_loads_seen` counter, plus BACKLOG hygiene). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 

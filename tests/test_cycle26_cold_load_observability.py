@@ -49,10 +49,15 @@ def _make_wiki_dir(tmp_path: Path) -> Path:
 
 
 def test_maybe_warm_load_returns_none_when_vec_path_missing(tmp_path, monkeypatch):
-    """AC1 — no vec_db on disk → helper returns None, no thread spawned."""
+    """AC1 — no vec_db on disk → helper returns None, no thread spawned.
+
+    R1 Sonnet N3 fix — explicitly force `_hybrid_available=True` so the assertion
+    exercises the VEC_PATH branch, not the hybrid-unavailable short-circuit.
+    Without this monkeypatch the test could pass vacuously on environments
+    where `model2vec`/`sqlite-vec` are not installed.
+    """
     wiki_dir = _make_wiki_dir(tmp_path)
-    # Ensure _model is None so the "already loaded" short-circuit doesn't mask
-    # the vec_path-missing branch we care about.
+    monkeypatch.setattr(embeddings_mod, "_hybrid_available", True)
     monkeypatch.setattr(embeddings_mod, "_model", None)
 
     thread = embeddings_mod.maybe_warm_load_vector_model(wiki_dir)
@@ -148,9 +153,7 @@ def test_cold_load_logs_latency_info_and_warning(tmp_path, monkeypatch, caplog):
         and "threshold" in r.getMessage()
     ]
     all_msgs = [r.getMessage() for r in caplog.records]
-    assert info_records, (
-        f"Expected INFO 'Vector model cold-loaded in' record; got {all_msgs!r}"
-    )
+    assert info_records, f"Expected INFO 'Vector model cold-loaded in' record; got {all_msgs!r}"
     assert warning_records, (
         f"Expected WARNING 'exceeded ... threshold' record for 0.5s > 0.3s; got {all_msgs!r}"
     )
@@ -215,6 +218,56 @@ def test_bare_import_kb_mcp_does_not_load_embeddings_module():
     )
 
 
+def test_cold_load_exception_suppresses_info_log_and_counter(tmp_path, monkeypatch, caplog):
+    """R1 Sonnet M1 fix — CONDITION 3 post-success ordering divergent-fail.
+
+    Test 4 exercises the success path (0.5s stub returns); Test 7 monkeypatches
+    `_get_model` at the top level so the body is never entered — neither catches
+    a future `finally:` regression that would fire INFO/counter on exceptions.
+
+    This test patches `StaticModel.from_pretrained` (not `_get_model`) to RAISE
+    a known exception; the body of `_get_model` IS entered; a `finally:` block
+    around the log + increment would fire. Under the correct post-success
+    ordering, no INFO record appears and the counter does not advance.
+    Revert to `finally:` flips both assertions.
+    """
+    monkeypatch.setattr(embeddings_mod, "_model", None)
+
+    def _raising_stub(name, force_download=False):
+        raise RuntimeError("simulated HF-Hub failure in from_pretrained")
+
+    import model2vec
+
+    monkeypatch.setattr(model2vec.StaticModel, "from_pretrained", staticmethod(_raising_stub))
+
+    caplog.set_level(logging.INFO, logger="kb.query.embeddings")
+    baseline = embeddings_mod.get_vector_model_cold_load_count()
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="simulated HF-Hub failure"):
+        embeddings_mod._get_model()
+
+    # Post-success ordering contract: on exception, no INFO/WARNING log fires,
+    # counter stays at baseline, `_model` remains None.
+    info_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO and "cold-loaded in" in r.getMessage()
+    ]
+    assert not info_records, (
+        "CONDITION 3 violated: INFO 'cold-loaded in' record fired on exception path. "
+        f"Records: {[r.getMessage() for r in caplog.records]!r}"
+    )
+    delta = embeddings_mod.get_vector_model_cold_load_count() - baseline
+    assert delta == 0, (
+        f"CONDITION 3 violated: counter advanced by {delta} on exception path; expected 0"
+    )
+    assert embeddings_mod._model is None, (
+        "Post-exception invariant: _model must stay None so next query re-attempts"
+    )
+
+
 def test_warm_load_thread_swallows_exception_and_logs(tmp_path, monkeypatch, caplog):
     """AC1 / Q2 / CONDITION 10 / T6 — daemon thread catches + logs on failure."""
     wiki_dir = _make_wiki_dir(tmp_path)
@@ -243,9 +296,7 @@ def test_warm_load_thread_swallows_exception_and_logs(tmp_path, monkeypatch, cap
         if r.levelno == logging.ERROR and "Warm-load thread failed" in r.getMessage()
     ]
     all_msgs = [r.getMessage() for r in caplog.records]
-    assert error_records, (
-        f"Expected ERROR record naming Warm-load failure; got {all_msgs!r}"
-    )
+    assert error_records, f"Expected ERROR record naming Warm-load failure; got {all_msgs!r}"
     # The exception info should include the RuntimeError message.
     assert any("simulated HF-Hub failure" in str(r.exc_info) for r in error_records), (
         "Expected RuntimeError details in the logger.exception record"
