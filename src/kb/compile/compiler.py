@@ -403,6 +403,31 @@ def compile_wiki(
     raw_dir = raw_dir or RAW_DIR
     manifest_path = manifest_path or HASH_MANIFEST
 
+    # Cycle 25 AC7 — scan for stale `in_progress:` markers from a prior
+    # abortive run (hard-kill, power-loss between AC6's pre-marker write and
+    # the subsequent ingest_source manifest overwrite). Log-only per Q2
+    # (operator decides remediation; auto-delete would race a legitimate
+    # concurrent compile per Q10). Truncation dropped per Step-8 plan-gate:
+    # each stale source named individually so operators correlate with the
+    # specific failed ingest.
+    try:
+        _existing_manifest_snapshot = load_manifest(manifest_path)
+    except Exception as e:  # pragma: no cover — defensive
+        logger.warning("compile_wiki: could not scan for stale markers: %s", e)
+        _existing_manifest_snapshot = {}
+    _stale_in_progress = [
+        k for k, v in _existing_manifest_snapshot.items() if str(v).startswith("in_progress:")
+    ]
+    if _stale_in_progress:
+        logger.warning(
+            "compile_wiki: found %d stale in_progress marker(s) from a prior "
+            "abortive run. Sources: %s. Investigate or run `kb rebuild-indexes` "
+            "to clear. Concurrent in-flight compiles from another process may "
+            "also produce this warning (see CLAUDE.md for details).",
+            len(_stale_in_progress),
+            ", ".join(_stale_in_progress),
+        )
+
     if incremental:
         new_sources, changed_sources = find_changed_sources(raw_dir, manifest_path)
         sources_to_process = new_sources + changed_sources
@@ -433,6 +458,30 @@ def compile_wiki(
             logger.warning("compile_wiki: cannot hash %s, skipping: %s", source, e)
             results["errors"].append({"source": str(source), "error": str(e)})
             continue
+
+        # Cycle 25 AC6 — write an in_progress marker AFTER pre_hash succeeds
+        # and BEFORE the try block (Q5 placement). A hard-kill / power-loss
+        # between this write and ingest_source's own manifest overwrite leaves
+        # an `in_progress:{pre_hash}` row that AC7's entry scan surfaces on
+        # the next compile_wiki invocation. Normal Python exceptions are
+        # handled by the existing `except Exception` block below which
+        # overwrites the marker with `failed:{pre_hash}`. Q4: 1.0s lock
+        # timeout matches the cycle-23 rebuild_indexes convention.
+        try:
+            with file_lock(manifest_path, timeout=1.0):
+                _marker_manifest = load_manifest(manifest_path)
+                _marker_manifest[rel_path] = f"in_progress:{pre_hash}"
+                save_manifest(_marker_manifest, manifest_path)
+        except (TimeoutError, OSError) as marker_exc:
+            # Best-effort: if the marker write fails, log and proceed.
+            # ingest_source's own manifest write still provides normal
+            # success/failure state tracking for this source.
+            logger.warning(
+                "compile_wiki: in_progress marker write failed for %s: %s",
+                source,
+                marker_exc,
+            )
+
         try:
             # H17 fix: suppress per-source rebuild; one rebuild happens at loop tail.
             # Cycle 19 AC13 — thread the canonical rel_path as the explicit
@@ -486,11 +535,17 @@ def compile_wiki(
         with file_lock(manifest_path):
             current_manifest = load_manifest(manifest_path)
             current_manifest.update(_template_hashes())
-            # Prune manifest entries for sources that no longer exist on disk
+            # Prune manifest entries for sources that no longer exist on disk.
+            # Cycle 25 CONDITION 13 — EXEMPT `in_progress:`-valued entries
+            # from pruning so AC7's "operator decides remediation" contract
+            # holds: full-mode compile must NOT silently delete the markers
+            # that AC7 says operators should see.
             stale_keys = [
                 k
-                for k in current_manifest
-                if not k.startswith("_template/") and not (prune_base / k).exists()
+                for k, v in current_manifest.items()
+                if not k.startswith("_template/")
+                and not str(v).startswith("in_progress:")
+                and not (prune_base / k).exists()
             ]
             if stale_keys:
                 for k in stale_keys:
