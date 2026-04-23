@@ -57,6 +57,33 @@ def format_evidence_entry(date_str: str, source: str, summary: str) -> str:
     return f"- {date_str} | {_neutralize_pipe(source)} | {_neutralize_pipe(summary)}"
 
 
+def render_initial_evidence_trail(
+    source_ref: str,
+    action: str,
+    entry_date: str | None = None,
+) -> str:
+    """Render the initial ``## Evidence Trail`` section for a new page.
+
+    Cycle 24 AC1 — used by ``_write_wiki_page`` to emit the trail INLINE in the
+    first write, eliminating the two-write race between page body and subsequent
+    ``append_evidence_trail``. Reuses ``format_evidence_entry`` for pipe
+    neutralization so the rendered string stays byte-compatible with the
+    append-time render path.
+    """
+    d = entry_date or date.today().isoformat()
+    entry = format_evidence_entry(d, source_ref, action)
+    return f"\n## Evidence Trail\n{SENTINEL}\n{entry}\n"
+
+
+# Cycle 24 AC14 — header regex tolerates CRLF and trailing whitespace (existing
+# lint convention for section headers). ``re.MULTILINE`` anchors ``^`` to line
+# starts; the pattern matches the HEADER LINE ending including the newline so
+# ``match.end()`` points to the first byte of the section body.
+_EVIDENCE_TRAIL_HEADER_RE = re.compile(r"^## Evidence Trail[ \t]*\r?\n", re.MULTILINE)
+# Any subsequent ``^## `` heading terminates the Evidence Trail section span.
+_NEXT_H2_RE = re.compile(r"^## ", re.MULTILINE)
+
+
 def append_evidence_trail(
     page_path: Path,
     source_ref: str,
@@ -65,16 +92,26 @@ def append_evidence_trail(
 ) -> None:
     """Append an evidence trail entry to a wiki page.
 
-    If the page has no ## Evidence Trail section, one is created at the end.
-    New entries are inserted right after the sentinel (reverse chronological).
+    Cycle 24 AC14 — sentinel search is SPAN-LIMITED within the ``## Evidence
+    Trail`` section (from the header to the next ``^## `` heading or EOF). An
+    attacker-planted ``<!-- evidence-trail:begin -->`` substring in the page
+    body, frontmatter, or any other section is IGNORED by construction — only
+    sentinels that fall inside the real section span are honoured.
 
-    H12 fix (Phase 4.5 HIGH): Uses SENTINEL to anchor new entries.
-    FIRST-match heuristic: when no sentinel exists, finds the FIRST
-    ## Evidence Trail header (not LAST — attacker-planted forgeries land later
-    in body), places the sentinel at end of that section's header line, then
-    inserts new entry after sentinel.  When sentinel already present: inserts
-    new entry right after the sentinel line.  When no ## Evidence Trail exists:
-    creates section with sentinel.
+    Fallback matrix:
+
+    - Header present + sentinel inside section span → insert after sentinel
+      (existing cycle-1 H12 behaviour).
+    - Header present + no sentinel inside section span → plant sentinel at
+      header end + insert entry (sentinel-migration for pre-cycle-1 pages).
+    - No header at all → create fresh ``## Evidence Trail`` section at EOF
+      with sentinel + entry. A body sentinel without a real header is treated
+      as attacker-planted noise and left intact in the body; it is NOT used
+      as an anchor.
+
+    H12 fix (Phase 4.5 HIGH) + cycle 24 AC14 together: the sentinel anchors
+    reverse-chronological inserts WITHIN the Evidence Trail section; no
+    forgery elsewhere in the file can hijack future appends.
     """
     # H2 fix (Phase 4.5 HIGH): lock the page file for the entire read→modify→write window
     # so concurrent append_evidence_trail calls on the same page don't lose entries.
@@ -83,32 +120,42 @@ def append_evidence_trail(
         d = entry_date or date.today().isoformat()
         entry = format_evidence_entry(d, source_ref, action)
 
-        if SENTINEL in content:
-            # Sentinel already present — insert new entry right after the sentinel line.
-            sentinel_pos = content.index(SENTINEL)
-            after_sentinel = sentinel_pos + len(SENTINEL)
-            # Skip the newline immediately after the sentinel
-            if after_sentinel < len(content) and content[after_sentinel] == "\n":
-                after_sentinel += 1
-            content = content[:after_sentinel] + entry + "\n" + content[after_sentinel:]
-        else:
-            # No sentinel yet — use FIRST-match heuristic.
-            trail_match = re.search(r"^## Evidence Trail\r?\n", content, re.MULTILINE)
-            if trail_match:
-                # Place sentinel at end of the header line, then insert new entry.
-                insert_pos = trail_match.end()
-                content = (
-                    content[:insert_pos] + SENTINEL + "\n" + entry + "\n" + content[insert_pos:]
-                )
+        header_match = _EVIDENCE_TRAIL_HEADER_RE.search(content)
+        if header_match is not None:
+            # Section span = [header_end, next_h2_start) or [header_end, EOF).
+            section_start = header_match.end()
+            tail = content[section_start:]
+            next_h2 = _NEXT_H2_RE.search(tail)
+            section_end = section_start + next_h2.start() if next_h2 else len(content)
+            span = content[section_start:section_end]
+
+            if SENTINEL in span:
+                # Sentinel inside section — insert new entry right after it.
+                sentinel_pos = section_start + span.index(SENTINEL)
+                after_sentinel = sentinel_pos + len(SENTINEL)
+                # Skip the newline immediately after the sentinel (if present).
+                if after_sentinel < len(content) and content[after_sentinel] == "\n":
+                    after_sentinel += 1
+                content = content[:after_sentinel] + entry + "\n" + content[after_sentinel:]
             else:
-                # No ## Evidence Trail section exists — create one with sentinel.
+                # Header present but no sentinel in section — plant sentinel at
+                # header end and insert entry (sentinel-migration path for
+                # legacy pre-cycle-1 H12 pages).
                 content = (
-                    content.rstrip("\n")
-                    + "\n\n## Evidence Trail\n"
+                    content[:section_start]
                     + SENTINEL
                     + "\n"
                     + entry
                     + "\n"
+                    + content[section_start:]
                 )
+        else:
+            # No ``## Evidence Trail`` header anywhere — create fresh section
+            # at EOF. Any body-planted sentinel is IGNORED by construction: the
+            # span-limited search above never reaches it. The attacker-planted
+            # bytes remain as dead markdown in the body.
+            content = (
+                content.rstrip("\n") + "\n\n## Evidence Trail\n" + SENTINEL + "\n" + entry + "\n"
+            )
 
         atomic_text_write(content, page_path)
