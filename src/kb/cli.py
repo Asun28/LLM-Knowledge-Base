@@ -509,5 +509,57 @@ def refine_list_stale(hours: int):
     click.echo(_json.dumps(rows, indent=2, sort_keys=True, default=str))
 
 
+@cli.command("rebuild-indexes")
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=str),
+    default=None,
+    help="Target wiki directory (defaults to WIKI_DIR from config).",
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt (for non-interactive callers).",
+)
+def rebuild_indexes_cmd(wiki_dir: str | None, assume_yes: bool):
+    """Wipe derived indices (manifest + vector DB + LRU caches).
+
+    Cycle 23 AC3. Next compile re-ingests all sources from scratch.
+    Imports ``kb.compile.compiler`` lazily so the ``kb --version`` fast-path
+    (cycle 8 L1) is not penalised by this subcommand's existence.
+    """
+    target = f" for {wiki_dir}" if wiki_dir else ""
+    if not assume_yes:
+        click.confirm(
+            f"Wipe manifest + vector index + in-process caches{target}? "
+            "The next compile will re-ingest every raw source.",
+            abort=True,
+        )
+
+    from kb.compile.compiler import rebuild_indexes as _rebuild  # noqa: PLC0415
+
+    try:
+        result = _rebuild(wiki_dir=Path(wiki_dir) if wiki_dir else None)
+    except Exception as exc:
+        _error_exit(exc)
+
+    manifest_status = (
+        "cleared" if result["manifest"]["cleared"] else (result["manifest"]["error"] or "unknown")
+    )
+    vector_status = (
+        "cleared" if result["vector"]["cleared"] else (result["vector"]["error"] or "unknown")
+    )
+    click.echo(
+        f"manifest={manifest_status} "
+        f"vector={vector_status} "
+        f"caches_cleared={len(result['caches_cleared'])} "
+        f"audit_written={result['audit_written']}"
+    )
+
+
 if __name__ == "__main__":
     cli()
