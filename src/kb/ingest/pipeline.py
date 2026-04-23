@@ -28,7 +28,7 @@ from kb.errors import IngestError, KBError, StorageError, ValidationError
 from kb.ingest.contradiction import (
     detect_contradictions_with_metadata,
 )
-from kb.ingest.evidence import append_evidence_trail
+from kb.ingest.evidence import append_evidence_trail, render_initial_evidence_trail
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import hash_bytes
 from kb.utils.io import atomic_text_write, file_lock
@@ -333,10 +333,15 @@ def _write_wiki_page(
     reparse points by default. Default ``exclusive=False`` preserves the
     legacy byte-identical ``atomic_text_write`` behaviour.
 
-    Note: ``append_evidence_trail`` is called AFTER the write in both branches;
-    it acquires its own ``file_lock(page_path)`` internally, so callers MUST
-    NOT wrap the ``_write_wiki_page`` call in ``file_lock(page_path)`` — the
-    non-re-entrant sidecar lock would self-deadlock on the nested acquire.
+    Cycle 24 AC1: the initial ``## Evidence Trail`` section is now rendered
+    INLINE into the first-write payload (via ``render_initial_evidence_trail``)
+    and NO follow-up ``append_evidence_trail`` call runs for new pages. This
+    collapses the prior two-write race (body write → evidence write) into a
+    single atomic operation, closing the window where a crash between the two
+    writes would leave a new page on disk without provenance. Both branches
+    (``exclusive=True`` raw ``os.write`` and ``exclusive=False``
+    ``atomic_text_write``) use the SAME rendered string per design
+    CONDITION 1.
     """
     import frontmatter  # noqa: PLC0415 — library-boundary import
 
@@ -354,7 +359,15 @@ def _write_wiki_page(
         confidence=confidence,
     )
     # PR #21 R1 Codex MAJOR 3: sort_keys=False preserves insertion order.
-    rendered = frontmatter.dumps(post, sort_keys=False) + "\n"
+    rendered_body = frontmatter.dumps(post, sort_keys=False) + "\n"
+    # Cycle 24 AC1 — inline evidence trail eliminates the body→trail two-write
+    # race. `render_initial_evidence_trail` reuses `format_evidence_entry` for
+    # pipe-neutralisation so the rendered row stays byte-compatible with
+    # subsequent `append_evidence_trail` writes.
+    initial_trail = render_initial_evidence_trail(
+        source_ref, f"Initial extraction: {page_type} page created", entry_date=today
+    )
+    rendered = rendered_body + initial_trail
     if exclusive:
         # Cycle 20 AC8 — atomic reserve-or-fail via O_EXCL.
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -390,9 +403,6 @@ def _write_wiki_page(
                 os.close(fd)
     else:
         atomic_text_write(rendered, effective_path)
-    append_evidence_trail(
-        effective_path, source_ref, f"Initial extraction: {page_type} page created"
-    )
 
 
 def _build_summary_content(extraction: dict, source_type: str) -> str:
@@ -565,11 +575,22 @@ def _update_existing_page(
     if _wrote_page:
         # Evidence trail acquires its own file_lock(page_path); the body-write
         # lock is released by this point so no nested-lock self-deadlock.
-        append_evidence_trail(
-            page_path,
-            source_ref,
-            f"{verb} in new source — source reference added",
-        )
+        # Cycle 24 AC2 — wrap OSError to a typed StorageError so callers can
+        # distinguish "body wrote but evidence-append failed" from other failure
+        # modes. Non-`OSError` exceptions (e.g., UnicodeDecodeError) propagate
+        # unchanged for cycle-20 taxonomy coverage in a future cycle.
+        try:
+            append_evidence_trail(
+                page_path,
+                source_ref,
+                f"{verb} in new source — source reference added",
+            )
+        except OSError as e:
+            raise StorageError(
+                "evidence_trail_append_failure",
+                kind="evidence_trail_append_failure",
+                path=page_path,
+            ) from e
 
 
 def _update_existing_page_body(
