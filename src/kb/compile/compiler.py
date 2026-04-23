@@ -574,6 +574,18 @@ def rebuild_indexes(
     """
     effective_wiki = Path(wiki_dir).expanduser() if wiki_dir else WIKI_DIR
     root_resolved = PROJECT_ROOT.resolve()
+    # Cycle 23 Q5 / threat I1 — DUAL-anchor containment. Check the caller-
+    # supplied absolute path AND the resolved path both land under
+    # PROJECT_ROOT. This closes the symlink escape where
+    # ``/outside/link -> /proj/wiki`` would slip through a resolve()-only
+    # check (post-resolve looks clean even though the CALLER aimed at
+    # `/outside`). Relative inputs skip the pre-check because ``resolve()``
+    # absolutifies against CWD, which may legitimately differ from project
+    # root in dev workflows.
+    if effective_wiki.is_absolute() and not (
+        effective_wiki == root_resolved or effective_wiki.is_relative_to(root_resolved)
+    ):
+        raise ValidationError("wiki_dir must be inside project root")
     try:
         wiki_resolved = effective_wiki.resolve()
     except OSError as e:

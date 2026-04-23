@@ -142,6 +142,29 @@ def test_rebuild_indexes_rejects_wiki_dir_outside_project(tmp_project, monkeypat
         compiler.rebuild_indexes(wiki_dir=outside_wiki)
 
 
+def test_rebuild_indexes_rejects_symlinked_wiki_dir_outside_project(tmp_project, monkeypatch):
+    """AC2 / threat I1 dual-anchor — symlink escape must be rejected.
+
+    An absolute ``wiki_dir`` whose resolved target IS under PROJECT_ROOT
+    but whose literal input is OUTSIDE PROJECT_ROOT must still be
+    rejected — the caller's INTENT (the absolute path they supplied) is
+    what the defensive check guards, not merely where resolve() lands
+    (cycle-23 Q5).
+    """
+    monkeypatch.setattr("kb.compile.compiler.PROJECT_ROOT", tmp_project)
+    monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
+    from kb.compile import compiler
+
+    ValidationError = compiler.ValidationError
+
+    # Absolute path whose literal form is outside the project root.
+    # Even if resolve() returned something inside, the literal-form
+    # pre-check must reject it (dual-anchor I1 per Q5 design decision).
+    outside_abs = Path(tmp_project.drive + os.sep + "some_other_root" + os.sep + "wiki").resolve()
+    with pytest.raises(ValidationError):
+        compiler.rebuild_indexes(wiki_dir=outside_abs)
+
+
 def test_rebuild_indexes_clears_lru_caches(tmp_project, monkeypatch):
     """AC2 — in-process LRU caches (template + frontmatter + purpose) cleared."""
     monkeypatch.setattr("kb.compile.compiler.PROJECT_ROOT", tmp_project)
