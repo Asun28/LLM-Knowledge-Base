@@ -27,7 +27,6 @@ _LIST_SOURCES_PER_SUBDIR_CAP = 500
 _LIST_SOURCES_TOTAL_CAP_BYTES = 64 * 1024
 
 
-@mcp.tool()
 def _format_search_results(results: list[dict]) -> str:
     """Format `search_pages` output for human-readable CLI / MCP consumption.
 
@@ -36,6 +35,9 @@ def _format_search_results(results: list[dict]) -> str:
     the snippet-truncation + `[STALE]` marker logic. Callers that need a
     different format (e.g. JSON) should not use this helper; build a
     dedicated formatter instead.
+
+    NOTE: This helper is NOT an MCP tool — do NOT decorate with
+    ``@mcp.tool()``. The decorator belongs to ``kb_search`` below.
     """
     if not results:
         return "No matching pages found."
@@ -53,6 +55,7 @@ def _format_search_results(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
 def kb_search(query: str, max_results: int = 10) -> str:
     """Search wiki pages by keyword. Returns matching pages ranked by relevance.
 

@@ -22,6 +22,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-24 — cycle 27
+
+- Items: 7 AC / 2 src + 1 new test file / 2 commits
+- Tests: 2790 → 2797 (+7)
+- Scope:
+  CLI ↔ MCP parity — 4 new read-only CLI subcommands (`kb search`,
+  `kb stats`, `kb list-pages`, `kb list-sources`) wrapping existing MCP
+  browse tools with function-local imports (AC1/AC2/AC3/AC4 — preserves
+  cycle-23 AC4 boot-lean contract). AC1b extracts `_format_search_results`
+  helper from `kb_search` body so CLI reuses identical formatter without
+  duplication. AC5: 7 regression tests (4 `--help` smoke + empty-query
+  non-zero-exit + 2 helper semantics). AC6 narrows BACKLOG CLI↔MCP parity
+  entry (18 → 14 remaining tools). AC7 skip-on-no-diff CVE re-verify
+  (pip-audit matches cycle-26 baseline, same-day noise avoidance).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-27-2026-04-24)
+
 #### 2026-04-24 — cycle 26
 
 - Items: 8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 7 commits

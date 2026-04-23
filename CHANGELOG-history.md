@@ -9,6 +9,20 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### Phase 4.5 — cycle 27 (2026-04-24)
+
+7 AC / 2 src + 1 new test file / 2 commits. Tests: 2790 → 2797 (+7).
+
+**CLI ↔ MCP parity for 4 read-only browse tools.** Narrow-scope cycle closing part of the Phase 4.5 HIGH "CLI ↔ MCP parity" BACKLOG item (BACKLOG.md:151) — operators working from scripts / cron / CI can now use `kb search`, `kb stats`, `kb list-pages`, `kb list-sources` instead of spawning an MCP client or calling `python -c "from kb.mcp.browse import ..."`. Pure internal refactor: no new trust boundaries, no filesystem writes, no new security enforcement points. Step 2 threat model skipped per skill clause; inline mini-threat-model captured 3 residual threats (T1-T3), all covered by existing MCP-tool validators.
+
+**Cluster A — CLI subcommands (AC1-AC5).** `src/kb/cli.py` gains four Click subcommands: (1) `kb search <query> [--limit N] [--wiki-dir PATH]` calls `kb.query.engine.search_pages(wiki_dir=...)` directly + reuses the extracted `_format_search_results` helper; enforces `MAX_QUESTION_LEN` + `MAX_SEARCH_RESULTS` identically to the MCP `kb_search` tool. (2) `kb stats [--wiki-dir PATH]` forwards to `kb.mcp.browse.kb_stats` (which already accepts `wiki_dir`). (3) `kb list-pages [--type T] [--limit N] [--offset N]` and (4) `kb list-sources [--limit N] [--offset N]` forward to their MCP counterparts — `--wiki-dir` override is intentionally omitted this cycle because the MCP tool signatures would need to change (Q4 deferred to a future parity cycle). All subcommands use function-local imports (CONDITION 1 per cycle-23 AC4 boot-lean contract: bare `import kb` / `kb --version` must not pull `kb.mcp.browse`). Error-string returns (`"Error: ..."`) map to non-zero exit via `click.echo(..., err=True) + sys.exit(1)` (CONDITION 2 per Q3 Unix convention).
+
+**AC1b formatter extraction.** `kb_search`'s inline result-formatting loop (snippet truncation + `[STALE]` markers + bold page IDs) extracted to `_format_search_results(results: list[dict]) -> str` in `kb.mcp.browse`. `kb_search` body reduced from ~17 LOC to 3 LOC (empty-check + length-gate + helper call). CLI `search` subcommand calls the same helper, guaranteeing parity with future MCP output tweaks. Two targeted regression tests pin the helper: empty-list behaviour (`"No matching pages found."`) and `[STALE]` marker preservation.
+
+**Cluster B — BACKLOG + CVE hygiene (AC6-AC7).** AC6 narrows BACKLOG.md:151 `CLI ↔ MCP parity` entry to reflect the shipped commands (CLI count 10 → 14; remaining MCP-only tool count 18 → 14). Enumerates remaining quick-ship candidates for future cycles: write-path tools (8) + deeper browse/health tools (8). AC7 re-verifies `diskcache` (CVE-2025-69872) + `ragas` (CVE-2026-6587) — both still empty `fix_versions`, pip-audit output unchanged from cycle-26 baseline. NO BACKLOG edit per CONDITION 6 (same-day no-op noise avoidance).
+
+**Step-2 CVE baseline:** 2 open advisories (diskcache + ragas, both `fix_versions: []`, unchanged from cycles 25-26). **Step-11 PR-introduced diff:** empty — zero new CVEs.
+
 ### Phase 4.5 — cycle 26 (2026-04-24)
 
 8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 7 commits. Tests: 2782 → 2790 (+8).
