@@ -14,6 +14,7 @@ from kb.config import (
     TEMPLATES_DIR,
     WIKI_DIR,
 )
+from kb.errors import ValidationError
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
@@ -384,6 +385,20 @@ def compile_wiki(
 
     Returns:
         dict with keys: mode, sources_processed, pages_created, pages_updated, errors.
+
+    Note (cycle 23 AC1) — ``incremental=False`` does NOT invalidate these derived stores:
+
+    - the hash manifest deletion-prune — runs only via ``detect_source_drift``;
+      ``--full`` does not remove hashes for raw sources that were deleted since
+      the last compile.
+    - the vector index — embeddings are rebuilt incrementally inside
+      ``ingest_source``; ``--full`` does not wipe and rebuild the whole index.
+    - in-process LRU caches (template schemas, page frontmatter,
+      ``wiki/purpose.md``) — they are not cleared by ``--full`` either.
+
+    To wipe those derived stores, call ``rebuild_indexes(wiki_dir=...)``
+    below, or invoke ``kb rebuild-indexes`` from the CLI before a clean
+    full recompile.
     """
     raw_dir = raw_dir or RAW_DIR
     manifest_path = manifest_path or HASH_MANIFEST
@@ -508,3 +523,146 @@ def compile_wiki(
     )
 
     return results
+
+
+def rebuild_indexes(
+    wiki_dir: Path | None = None,
+    *,
+    hash_manifest: Path | None = None,
+    vector_db: Path | None = None,
+) -> dict:
+    """Wipe derived indices so the next compile/query regenerates from source.
+
+    Clears, in order:
+
+    1. the **hash manifest** (``HASH_MANIFEST`` by default) — taken under
+       ``file_lock`` with a 1s wait, so a concurrent ``compile_wiki`` save
+       cannot racing-rewrite stale state after we unlink. On
+       ``TimeoutError`` the manifest is left in place and ``error='lock busy'``
+       is returned; rerun the operation once the in-flight compile finishes.
+    2. the **vector index DB** (``<wiki_dir>.parent/.data/vector_index.db``
+       by default, derived via ``kb.query.embeddings._vec_db_path``).
+       Embeddings rebuild on the next query/compile.
+    3. in-process **LRU caches** — ``kb.ingest.extractors.clear_template_cache``
+       (covering ``_load_template_cached`` + ``_build_schema_cached``), plus
+       ``kb.utils.pages._load_page_frontmatter_cached`` and
+       ``kb.utils.pages.load_purpose``. Each cleared helper is named in
+       the returned ``caches_cleared`` list.
+
+    Appends one ``rebuild-indexes`` line to ``<wiki_dir>/log.md`` after the
+    file operations so a failed audit cannot silently obscure the fact
+    that destructive work ran (audit-write failures log a warning and
+    surface via ``audit_written=False`` — they never swallow the whole
+    rebuild).
+
+    Args:
+        wiki_dir: Target wiki directory. Defaults to ``WIKI_DIR``. Must
+                  resolve under ``PROJECT_ROOT`` (cycle 23 threat I1).
+        hash_manifest: Override manifest path. Defaults to
+                       ``HASH_MANIFEST``.
+        vector_db: Override vector DB path. Defaults to
+                   ``_vec_db_path(wiki_dir)``.
+
+    Returns:
+        ``{"manifest": {"cleared": bool, "error": str | None},
+           "vector": {"cleared": bool, "error": str | None},
+           "caches_cleared": list[str],
+           "audit_written": bool}``
+
+    Raises:
+        ``ValidationError`` — ``wiki_dir`` does not resolve under ``PROJECT_ROOT``.
+    """
+    effective_wiki = Path(wiki_dir).expanduser() if wiki_dir else WIKI_DIR
+    root_resolved = PROJECT_ROOT.resolve()
+    # Cycle 23 Q5 / threat I1 — DUAL-anchor containment. Check the caller-
+    # supplied absolute path AND the resolved path both land under
+    # PROJECT_ROOT. This closes the symlink escape where
+    # ``/outside/link -> /proj/wiki`` would slip through a resolve()-only
+    # check (post-resolve looks clean even though the CALLER aimed at
+    # `/outside`). Relative inputs skip the pre-check because ``resolve()``
+    # absolutifies against CWD, which may legitimately differ from project
+    # root in dev workflows.
+    if effective_wiki.is_absolute() and not (
+        effective_wiki == root_resolved or effective_wiki.is_relative_to(root_resolved)
+    ):
+        raise ValidationError("wiki_dir must be inside project root")
+    try:
+        wiki_resolved = effective_wiki.resolve()
+    except OSError as e:
+        raise ValidationError(f"wiki_dir cannot be resolved: {e}") from e
+    if not (wiki_resolved == root_resolved or wiki_resolved.is_relative_to(root_resolved)):
+        raise ValidationError("wiki_dir must be inside project root")
+
+    manifest_path = hash_manifest or HASH_MANIFEST
+    from kb.query.embeddings import _vec_db_path
+
+    vector_path = vector_db or _vec_db_path(effective_wiki)
+
+    result: dict = {
+        "manifest": {"cleared": False, "error": None},
+        "vector": {"cleared": False, "error": None},
+        "caches_cleared": [],
+        "audit_written": False,
+    }
+
+    # (1) Manifest — unlink under file_lock so a concurrent compile_wiki
+    # save cannot race us.
+    try:
+        with file_lock(manifest_path, timeout=1.0):
+            if manifest_path.exists():
+                manifest_path.unlink()
+            result["manifest"]["cleared"] = True
+    except TimeoutError:
+        result["manifest"]["error"] = "lock busy"
+    except OSError as e:
+        result["manifest"]["error"] = str(e)
+
+    # (2) Vector DB — single-writer contract inside embeddings.py, unlocked
+    # unlink is sufficient.  Symlinks are not followed: Path.unlink removes
+    # the symlink itself, the target survives by design.
+    try:
+        if vector_path.exists():
+            vector_path.unlink()
+        result["vector"]["cleared"] = True
+    except OSError as e:
+        result["vector"]["error"] = str(e)
+
+    # (3) LRU caches — clear every mtime- or path-keyed cache that could
+    # otherwise serve pre-rebuild metadata after a subsequent ingest.
+    try:
+        from kb.ingest.extractors import clear_template_cache
+
+        clear_template_cache()
+        result["caches_cleared"].append("kb.ingest.extractors.clear_template_cache")
+    except Exception as e:  # pragma: no cover — defensive against future refactors
+        logger.warning("rebuild_indexes: clear_template_cache failed: %s", e)
+    try:
+        from kb.utils.pages import _load_page_frontmatter_cached
+
+        _load_page_frontmatter_cached.cache_clear()
+        result["caches_cleared"].append("kb.utils.pages._load_page_frontmatter_cached")
+    except (AttributeError, ImportError) as e:
+        logger.warning("rebuild_indexes: _load_page_frontmatter_cached clear failed: %s", e)
+    try:
+        from kb.utils.pages import load_purpose
+
+        load_purpose.cache_clear()
+        result["caches_cleared"].append("kb.utils.pages.load_purpose")
+    except (AttributeError, ImportError) as e:
+        logger.warning("rebuild_indexes: load_purpose clear failed: %s", e)
+
+    # (4) Audit — append one line to wiki/log.md. Best-effort; failure does
+    # not abort the helper because the unlinks already happened.
+    log_path = effective_wiki / "log.md"
+    msg = (
+        f"manifest={'cleared' if result['manifest']['cleared'] else result['manifest']['error']} "
+        f"vector={'cleared' if result['vector']['cleared'] else result['vector']['error']} "
+        f"caches_cleared={len(result['caches_cleared'])}"
+    )
+    try:
+        append_wiki_log("rebuild-indexes", msg, log_path)
+        result["audit_written"] = True
+    except OSError as e:
+        logger.warning("rebuild_indexes: audit write to %s failed: %s", log_path, e)
+
+    return result

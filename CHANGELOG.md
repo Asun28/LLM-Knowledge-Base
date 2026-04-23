@@ -22,6 +22,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-23 — cycle 23
+
+- Items: 8 AC / 6 src + 4 new tests / 6 commits
+- Tests: 2725 → 2743 (+18)
+- Scope:
+  MCP boot-leanness via PEP-562 lazy shim (cycle-19 AC15 contract preserved),
+  `rebuild_indexes` helper + `kb rebuild-indexes` CLI for clean-slate recompiles,
+  hermetic ingest→query→lint E2E coverage, and cross-process `file_lock`
+  regression (Phase 4.5 HIGH-Deferred).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-23-2026-04-23)
+
 #### 2026-04-22 — cycle 22
 
 - Items: 14 AC / 3 src + 2 new tests / 11 commits

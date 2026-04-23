@@ -63,12 +63,6 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
 )
-from kb.feedback import reliability
-from kb.ingest import pipeline as ingest_pipeline
-
-# `_TEXT_EXTENSIONS` is a constant, not a callable — keep the direct import
-# (no monkeypatch sites; snapshot binding is fine).
-from kb.ingest.pipeline import _TEXT_EXTENSIONS
 from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
@@ -78,7 +72,6 @@ from kb.mcp.app import (
     error_tag,
     mcp,
 )
-from kb.query import engine as query_engine
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
@@ -87,6 +80,52 @@ from kb.utils.text import slugify, yaml_escape, yaml_sanitize
 # bodies even though they leak transitively — the direct deferral removes them
 # from kb.mcp.core's self-reported import surface. `kb.utils.pages.save_page_frontmatter`
 # and `kb.utils.llm.LLMError` also stay inside tool bodies (no test monkeypatch).
+
+# Cycle 23 AC4 — PEP 562 module-level lazy-shim for heavy owner modules.
+# Keeps ``kb.mcp.core.<name>`` reachable as an attribute (preserves the
+# cycle-19 AC15 monkeypatch contract: ``monkeypatch.setattr(mcp_core.ingest_pipeline, ...)``)
+# while deferring ``anthropic``/``networkx``/``sentence-transformers`` loads
+# until the first MCP tool that actually needs them runs. Boot-time probes
+# assert absence via ``tests/test_cycle23_mcp_boot_lean.py``.
+#
+# Closed allowlist — names NOT in this dict raise AttributeError through
+# ``__getattr__`` rather than falling through to arbitrary ``importlib``
+# lookups (threat I3 — closed allowlist for attacker-controlled names).
+_LAZY_MODULES: dict[str, str] = {
+    "ingest_pipeline": "kb.ingest.pipeline",
+    "query_engine": "kb.query.engine",
+    "reliability": "kb.feedback.reliability",
+}
+
+# MCP-only whitelist — previously in ``kb.ingest.pipeline`` but importing
+# even a single constant from there forced the whole pipeline module (and
+# anthropic transitively) to load. Relocated cycle-23 AC4 to a local
+# ``frozenset`` so bare ``import kb.mcp`` stays lean.
+_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
+
+
+def __getattr__(name: str):
+    """PEP 562 lazy loader for the heavy owner modules.
+
+    The cached ``globals()[name] = module`` write is idempotent — Python's
+    import system returns the same module object across concurrent calls, so
+    even if two threads race through this function they write the same value.
+    No explicit lock required (cycle-6 L2 converse: locks prevent duplicate
+    construction; here construction is already idempotent).
+    """
+    module_path = _LAZY_MODULES.get(name)
+    if module_path is None:
+        raise AttributeError(f"module 'kb.mcp.core' has no attribute {name!r}")
+    import importlib
+
+    module = importlib.import_module(module_path)
+    globals()[name] = module
+    return module
+
+
+def __dir__():
+    return sorted(set(list(globals())) | set(_LAZY_MODULES))
+
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +362,14 @@ def kb_query(
             return error
         save_slug = slug
 
+    # Cycle 23 AC4 — function-local bindings to PEP-562 lazy-shim targets so
+    # bare ``query_engine.X`` / ``reliability.X`` resolve under function scope.
+    # The cycle-19 AC15 contract is preserved: test patches on
+    # ``kb.query.engine.*`` / ``kb.feedback.reliability.*`` intercept these
+    # call sites because the local binding resolves to the same cached module.
+    from kb.feedback import reliability
+    from kb.query import engine as query_engine
+
     if use_api:
         # Cycle 17 AC4 — lazy import keeps cold-boot out of anthropic.
         import anthropic
@@ -510,6 +557,13 @@ def kb_ingest(
             )
         valid = ", ".join(sorted(SOURCE_TYPE_DIRS))
         return f"Error: Unknown source_type '{source_type}'. Valid: {valid}"
+
+    # Cycle 23 AC4 — function-local binding to PEP-562 lazy-shim target.
+    # Cycle 19 AC15 monkeypatch contract preserved — test patches on
+    # `kb.ingest.pipeline.ingest_source` intercept every call site below
+    # because the local `ingest_pipeline` binding resolves to the same
+    # cached module object the tests patched.
+    from kb.ingest import pipeline as ingest_pipeline
 
     # ── API mode ──
     if use_api:
@@ -708,6 +762,9 @@ def kb_ingest_content(
             f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
             "retry with kb_save_source(..., overwrite=true) then kb_ingest."
         )
+
+    # Cycle 23 AC4 — function-local binding to PEP-562 lazy-shim target.
+    from kb.ingest import pipeline as ingest_pipeline
 
     try:
         # Cycle 6 AC1 — when use_api=True, ``extraction`` is None so

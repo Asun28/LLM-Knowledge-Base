@@ -152,6 +152,7 @@ For Office documents such as `.docx`, `.pptx`, or `.xlsx`, convert them to Markd
 | **Query** | `kb query "..."` | BM25 + PageRank search → synthesize answer with inline citations |
 | **Lint** | `kb lint` | Dead links, orphan pages, staleness, stubs, frontmatter, source coverage, wikilink cycles, low-trust pages |
 | **Evolve** | `kb evolve` | Coverage gaps, connection opportunities, missing page types, disconnected components |
+| **Rebuild indexes** | `kb rebuild-indexes [--yes]` | Clean-slate wipe — deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
 
 ## Key Features
 
