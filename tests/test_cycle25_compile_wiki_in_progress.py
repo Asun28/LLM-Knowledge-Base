@@ -88,6 +88,13 @@ def test_no_warning_when_no_stale_markers(tmp_path, monkeypatch, caplog):
 def test_exception_during_ingest_overwrites_marker_with_failed(tmp_path, monkeypatch):
     """AC8 — normal Python exception in `ingest_source` overwrites the
     in_progress marker with `failed:{pre_hash}`; the marker MUST NOT persist.
+
+    PR #39 R1 Sonnet MAJOR fix: capture the manifest state AT THE MOMENT
+    `ingest_source` is called so we can assert the AC6 pre-marker was written
+    BEFORE the exception fired. Pre-fix, this test was revert-tolerant: if
+    AC6 was removed entirely, the `except` handler still wrote `failed:` and
+    the final-state assertion passed. The snapshot-inside-stub assertion
+    flips to failure under AC6 revert (manifest empty at call time).
     """
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
@@ -95,21 +102,38 @@ def test_exception_during_ingest_overwrites_marker_with_failed(tmp_path, monkeyp
     manifest_path = tmp_path / "hashes.json"
     _write_manifest(manifest_path, {})
 
-    # Stub scan to return our seeded source; stub ingest_source to raise.
+    # Stub scan to return our seeded source.
     monkeypatch.setattr(compiler_mod, "scan_raw_sources", lambda _rd: [src])
 
-    def _raise(*args, **kwargs):
+    # Stub ingest_source that SNAPSHOTS the manifest at call time and then
+    # raises. Under AC6, the manifest should already contain
+    # `in_progress:{pre_hash}` when `ingest_source` is invoked.
+    snapshot: dict = {}
+
+    def _raise_and_snapshot(*args, **kwargs):
+        snapshot.update(load_manifest(manifest_path))
         raise RuntimeError("simulated ingest failure")
 
-    monkeypatch.setattr(compiler_mod, "ingest_source", _raise)
+    monkeypatch.setattr(compiler_mod, "ingest_source", _raise_and_snapshot)
 
     compile_wiki(incremental=False, raw_dir=raw_dir, manifest_path=manifest_path)
 
-    # After compile_wiki, load the FINAL manifest and inspect the entry.
+    # Pre-exception snapshot: AC6 pre-marker must be in place.
+    source_key = next((k for k in snapshot if "articles/example.md" in k), None)
+    assert source_key is not None, (
+        f"AC6 revert detection: pre-marker manifest entry MISSING at "
+        f"ingest_source call time. Snapshot: {snapshot}"
+    )
+    pre_value = str(snapshot[source_key])
+    assert pre_value.startswith("in_progress:"), (
+        f"AC6 revert detection: expected in_progress:{{pre_hash}} snapshot at "
+        f"ingest_source call time; got {pre_value!r}. Revert of AC6 pre-marker "
+        f"write would leave the manifest empty at call time."
+    )
+
+    # Final manifest: exception handler (existing cycle-17 code) must
+    # overwrite the marker with `failed:{pre_hash}`.
     final_manifest = load_manifest(manifest_path)
-    # Source key format: _canonical_rel_path (e.g., "raw/articles/example.md")
-    source_key = next((k for k in final_manifest if "articles/example.md" in k), None)
-    assert source_key is not None, f"Source key not found in manifest: {final_manifest}"
     final_value = str(final_manifest[source_key])
     assert final_value.startswith("failed:"), (
         f"AC8: exception must overwrite in_progress with failed:{{hash}}; got {final_value!r}"
@@ -117,6 +141,44 @@ def test_exception_during_ingest_overwrites_marker_with_failed(tmp_path, monkeyp
     assert not final_value.startswith("in_progress:"), (
         "AC8: in_progress marker MUST NOT persist after a normal exception"
     )
+    # Both hashes should be equal (same pre_hash used by both marker and failure).
+    assert pre_value.split(":", 1)[1] == final_value.split(":", 1)[1], (
+        "Pre-marker and failure marker must reference the same pre_hash"
+    )
+
+
+def test_incremental_prune_exempts_in_progress_markers(tmp_path):
+    """CONDITION 13 (incremental path) — PR #39 R1 Codex BLOCKER: the full-mode
+    prune exemption alone is insufficient because the default incremental
+    `kb compile` path runs `find_changed_sources` which also prunes
+    deleted-source entries. The exemption MUST apply there too or incremental
+    compile silently deletes the markers AC7 says operators should see.
+    """
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "articles").mkdir()
+    manifest_path = tmp_path / "hashes.json"
+    # Seed manifest with an in_progress marker whose raw file is MISSING.
+    _write_manifest(
+        manifest_path,
+        {
+            "articles/missing_src.md": "in_progress:xyz789",
+            "articles/normal_missing.md": "hash_abc",  # should be pruned
+        },
+    )
+
+    # No raw sources on disk → find_changed_sources will prune both unless
+    # exempted. Run in incremental mode (default).
+    compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+
+    final = load_manifest(manifest_path)
+    assert "articles/missing_src.md" in final, (
+        "PR #39 R1 Codex BLOCKER: in_progress marker must NOT be pruned by "
+        "find_changed_sources. Pre-fix would delete it silently on incremental compile."
+    )
+    assert str(final["articles/missing_src.md"]).startswith("in_progress:")
+    # Sanity: normal missing-file entry IS pruned (existing behaviour unchanged).
+    assert "articles/normal_missing.md" not in final
 
 
 def test_full_mode_prune_exempts_in_progress_markers(tmp_path, monkeypatch, caplog):

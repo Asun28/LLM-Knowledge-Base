@@ -179,11 +179,18 @@ def find_changed_sources(
         elif stored.startswith("failed:") or stored != current_hash:
             changed_sources.append(source)
 
-    # Prune manifest entries for files that no longer exist on disk
+    # Prune manifest entries for files that no longer exist on disk.
+    # Cycle 25 CONDITION 13 — exempt `in_progress:`-valued entries so they
+    # survive incremental compiles and AC7's startup scan can surface them.
+    # Otherwise the default `kb compile` path silently deletes the markers
+    # that the design contract says operators should see. (This mirrors the
+    # exemption in compile_wiki's full-mode tail prune at line ~494.)
     deleted_keys = [
         k
-        for k in list(manifest.keys())
-        if not k.startswith("_template/") and k not in existing_rel_paths
+        for k, v in manifest.items()
+        if not k.startswith("_template/")
+        and not str(v).startswith("in_progress:")
+        and k not in existing_rel_paths
     ]
     for k in deleted_keys:
         del manifest[k]
