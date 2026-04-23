@@ -30,7 +30,7 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 ## Implementation Status
 
-Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (brief compact index, newest first; full per-cycle detail in `CHANGELOG-history.md`). Latest full-suite count: 2781 tests across 242 test files; last full run was 2772 passed + 9 skipped (cycle 25 — adds rebuild_indexes `.tmp` unlink + vector-index dim-mismatch operator guidance + `compile_wiki` in_progress marker + BACKLOG/CVE maintenance). Open work and deferred-feature roadmap live in `BACKLOG.md`.
+Current shipped phases and per-cycle tallies live in `CHANGELOG.md` (brief compact index, newest first; full per-cycle detail in `CHANGELOG-history.md`). Latest full-suite count: 2782 tests across 242 test files; last full run was 2773 passed + 9 skipped (cycle 25 — adds rebuild_indexes `.tmp` unlink + vector-index dim-mismatch operator guidance + `compile_wiki` in_progress marker + BACKLOG/CVE maintenance). Open work and deferred-feature roadmap live in `BACKLOG.md`.
 
 ### Module Map (`src/kb/`)
 

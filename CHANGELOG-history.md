@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 25 (2026-04-24)
 
-10 AC / 2 src + 3 new test files / 4 commits. Tests: 2768 → 2781 (+13).
+10 AC / 2 src + 3 new test files / 6 commits. Tests: 2768 → 2782 (+14).
 
 **Observability-layer follow-ups + operator-facing hardening.** Narrowly scoped cycle completing three Phase 4.5 follow-ups that surfaced during cycle 24 (rebuild_indexes .tmp awareness) or that had observability-only variants of larger deferred work (dim-mismatch auto-rebuild, compile_wiki per-source rollback). No new security surface; no new filesystem-write contract.
 

@@ -24,8 +24,8 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-24 — cycle 25
 
-- Items: 10 AC / 2 src + 3 new test files / 4 commits
-- Tests: 2768 → 2781 (+13)
+- Items: 10 AC / 2 src + 3 new test files / 6 commits
+- Tests: 2768 → 2782 (+14)
 - Scope:
   `rebuild_indexes` also unlinks `<vec_db>.tmp` sibling (AC1/AC2 —
   cycle-24 R2 Codex follow-up); vector-index dim-mismatch warning now
