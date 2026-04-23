@@ -22,6 +22,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-24 — cycle 26
+
+- Items: 8 AC (+AC2b) / 2 src + 1 new test file + 1 extended cycle-23 test / 4 commits
+- Tests: 2782 → 2789 (+7)
+- Scope:
+  Vector-model cold-load observability — new `maybe_warm_load_vector_model(wiki_dir)`
+  daemon-thread warm-load hook wired into `kb.mcp.__init__.main()` after tool
+  registration, before stdio loop (AC1/AC2); boot-lean allowlist extension pins
+  function-local import contract (AC2b); `_get_model()` instrumented with
+  `time.perf_counter` — INFO log always on cold-load + WARNING above
+  `VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS=0.3s` (AC3); module-level
+  `_vector_model_cold_loads_seen` counter + `get_vector_model_cold_load_count()`
+  getter, exact counts inside `_model_lock` (AC4 — intentional asymmetry
+  vs cycle-25 lock-free `_dim_mismatches_seen`, documented in getter docstring);
+  seven regression tests including subprocess sys.modules probe + exception-
+  swallow pin (AC5); BACKLOG hygiene — delete stale multiprocessing file_lock
+  entry (AC6 — resolved by cycle-23 AC7), skip no-op CVE re-stamp (AC7 —
+  pip-audit matches cycle-25 baseline), narrow HIGH-Deferred vector-index
+  lifecycle entry + add Q16 follow-up (AC8).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-26-2026-04-24)
+
 #### 2026-04-24 — cycle 25
 
 - Items: 10 AC / 2 src + 3 new test files / 6 commits
