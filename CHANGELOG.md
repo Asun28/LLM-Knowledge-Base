@@ -22,6 +22,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-23 — cycle 24
+
+- Items: 15 AC / 4 src + 4 new tests / 6 commits
+- Tests: 2743 → 2766 (+23)
+- Scope:
+  Evidence-trail inline render at first write + StorageError on update-path
+  evidence failure (AC1/AC2); `append_evidence_trail` sentinel search
+  section-span-limited against attacker-planted body sentinels (AC14/AC15);
+  vector-index atomic rebuild via `<vec_db>.tmp` + `os.replace` with
+  cache-pop+close before replace and crash-cleanup (AC5/AC6/AC7/AC8);
+  `file_lock` exponential backoff across all 3 polling sites with
+  `LOCK_POLL_INTERVAL` as CAP (AC9/AC10); BACKLOG cleanup +
+  diskcache/ragas CVE re-verification (AC11/AC12/AC13).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-24-2026-04-23)
+
 #### 2026-04-23 — cycle 23
 
 - Items: 8 AC / 6 src + 4 new tests / 6 commits
