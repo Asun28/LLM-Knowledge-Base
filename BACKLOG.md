@@ -353,6 +353,9 @@ _All items resolved — see CHANGELOG cycle 13._
 - `mcp/core.py` `kb_delete_source` MCP tool — remove raw source file and cascade: delete source summary wiki page, strip source from `source:` field on shared entity/concept pages without deleting them, clean dead wikilinks from remaining wiki pages, update `index.md` and `_sources.md`. Fills the only major operational workflow gap not addressed by existing tooling.
   (effort: Medium — cascade deletion logic + backlink cleanup + atomic index/sources update)
 
+- `mcp/health.py` `kb_rebuild_indexes` MCP tool — wrap `kb.compile.compiler.rebuild_indexes` so MCP clients can trigger the clean-slate rebuild without shelling out to the CLI. Scope-out from cycle 23 (threat T7): cycle 23 shipped the library helper + CLI subcommand only; MCP surface deferred so same-class peer review (cycle-16 L1) can confirm the I1 dual-anchor check also protects the MCP entry point. Prerequisite: reuse `_validate_wiki_dir` from `kb.mcp.app` for the `wiki_dir` argument; surface the return dict verbatim (already JSON-serialisable). Audit entry should tag the invoker (CLI vs MCP) per cycle-20 L3 MCP-projection peer scan.
+  (effort: Low — thin wrapper + regression test + same-class peer scan)
+
 <!-- `kb_query save_as` parameter remains deferred — see Phase 4.5 MEDIUM. -->
 
 - `evolve/analyzer.py` `kb_evolve mode=research` — for each identified coverage gap, decompose into 2–3 web search queries, fetch top results via fetch MCP, save to `raw/articles/` via `kb_save_source`, return file paths for subsequent `kb_ingest`; capped at 5 sources per gap, max 3 rounds (broad → sub-gaps → contradictions). Turns evolve from advisory gap report into actionable source acquisition pipeline. Source: claude-obsidian autoresearch skill.

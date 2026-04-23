@@ -55,7 +55,11 @@ def test_compile_wiki_docstring_documents_full_scope():
     assert "rebuild_indexes" in doc, (
         "compile_wiki docstring must reference the rebuild_indexes helper (cycle 23 AC1)"
     )
-    for category in ["manifest", "vector", "LRU"]:
+    # Use the stricter "vector index" phrase rather than bare "vector" so a
+    # docstring rewrite like "embeddings are rebuilt incrementally" (which
+    # still contains "not" in "not wipe") cannot pass in the wrong direction
+    # (R1 Sonnet MAJOR — cycle-16 L2 vacuity class).
+    for category in ["manifest", "vector index", "LRU"]:
         assert _word_negation_window(doc, category), (
             f"compile_wiki docstring must negate '{category}' within 200 chars "
             "of the keyword (direction-of-claim assertion, cycle 23 Q1)"
@@ -188,9 +192,18 @@ def test_rebuild_indexes_clears_lru_caches(tmp_project, monkeypatch):
     info_before = pages_mod._load_page_frontmatter_cached.cache_info()
     assert info_before.currsize >= 1
 
-    compiler.rebuild_indexes(wiki_dir=tmp_project / "wiki")
+    result = compiler.rebuild_indexes(wiki_dir=tmp_project / "wiki")
     info_after = pages_mod._load_page_frontmatter_cached.cache_info()
     assert info_after.currsize == 0
+    # R1 Sonnet MAJOR — pin ALL three cache helpers actually ran, not just
+    # the one whose cache_info we inspect. Defeats the vacuity class where
+    # silent ImportError on one helper would otherwise pass the test.
+    cleared = set(result["caches_cleared"])
+    assert {
+        "kb.ingest.extractors.clear_template_cache",
+        "kb.utils.pages._load_page_frontmatter_cached",
+        "kb.utils.pages.load_purpose",
+    } <= cleared, f"rebuild_indexes did not clear all three cache sites: {cleared}"
 
 
 def test_rebuild_indexes_manifest_lock_busy_returns_error(tmp_project, monkeypatch):

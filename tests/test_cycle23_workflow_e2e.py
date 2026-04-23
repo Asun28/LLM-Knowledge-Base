@@ -95,8 +95,22 @@ def test_ingest_query_lint_end_to_end(tmp_project: Path, monkeypatch):
     # At least a Beta summary or entity page should materialise
     assert r2["pages_created"] or r2["pages_updated"], f"second ingest produced nothing: {r2}"
 
-    # ── Step 3: query with stubbed synthesis ──────────────────────────────
+    # Verify the two source-summary pages are on disk after ingest — confirms
+    # the ingest -> _write_wiki_page path reached the filesystem, not just the
+    # return dict (defeats R1 MAJOR 2 — "false hermeticity" when the test
+    # accepts an empty result because no actual files were written).
+    entity_pages = list((wiki / "entities").glob("*.md"))
+    summary_pages = list((wiki / "summaries").glob("*.md"))
+    assert summary_pages, f"no summary pages in {wiki}/summaries after two ingests"
+    assert any("alpha" in p.name.lower() or "beta" in p.name.lower() for p in entity_pages), (
+        f"neither Alpha nor Beta entity page materialised: {[p.name for p in entity_pages]}"
+    )
+
+    # ── Step 3: query with spied synthesis — assert invocation + non-empty ──
+    captured_prompts: list[str] = []
+
     def _fake_call_llm(prompt, tier="write", **_kw):
+        captured_prompts.append(prompt)
         return (
             "Alpha and Beta are related concepts discussed across two "
             "articles. [source: raw/articles/alpha.md]"
@@ -104,17 +118,34 @@ def test_ingest_query_lint_end_to_end(tmp_project: Path, monkeypatch):
 
     monkeypatch.setattr("kb.query.engine.call_llm", _fake_call_llm)
 
-    # Prevent search_pages from trying to load the real vector index
-    monkeypatch.setattr("kb.query.engine._flag_stale_results", lambda results, *a, **kw: None)
+    # Stub stale-results flagging so the test isn't sensitive to clock skew.
+    # Must return the ``results`` list unchanged (not None) — ``search_pages``
+    # uses the return value.
+    monkeypatch.setattr(
+        "kb.query.engine._flag_stale_results",
+        lambda results, *a, **kw: results,
+    )
 
     from kb.query.engine import query_wiki
 
     result = query_wiki("What is Alpha?", wiki_dir=wiki)
     assert "answer" in result
-    # citations may be empty in the stub, but the key must exist
-    assert "citations" in result
-    assert isinstance(result["citations"], list)
+    assert isinstance(result.get("citations"), list)
     assert "source_pages" in result
+    # R1 MAJOR 2 — pin non-emptiness so a regressed search returning [] doesn't
+    # silently pass through the refusal short-circuit.
+    assert result["source_pages"], (
+        f"query returned no source_pages — ingest/search integration broken: {result}"
+    )
+    # Synthesis stub MUST have been called (integration: search -> context ->
+    # LLM synthesis). A refusal short-circuit that never calls the synthesiser
+    # would leave captured_prompts empty.
+    assert captured_prompts, (
+        "kb.query.engine.call_llm stub was never invoked — query short-circuited "
+        "before reaching synthesis"
+    )
+    # Synthesis output must be surfaced in the returned answer (not dropped).
+    assert "Alpha and Beta are related" in result["answer"]
 
     # ── Step 4: lint the wiki just written ────────────────────────────────
     from kb.lint.runner import run_all_checks

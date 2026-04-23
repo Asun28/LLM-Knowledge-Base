@@ -388,12 +388,12 @@ def compile_wiki(
 
     Note (cycle 23 AC1) — ``incremental=False`` does NOT invalidate these derived stores:
 
-    - the hash **manifest** deletion-prune — runs only via ``detect_source_drift``;
+    - the hash manifest deletion-prune — runs only via ``detect_source_drift``;
       ``--full`` does not remove hashes for raw sources that were deleted since
       the last compile.
-    - the **vector** index — embeddings are rebuilt incrementally inside
+    - the vector index — embeddings are rebuilt incrementally inside
       ``ingest_source``; ``--full`` does not wipe and rebuild the whole index.
-    - in-process **LRU** caches (template schemas, page frontmatter,
+    - in-process LRU caches (template schemas, page frontmatter,
       ``wiki/purpose.md``) — they are not cleared by ``--full`` either.
 
     To wipe those derived stores, call ``rebuild_indexes(wiki_dir=...)``
