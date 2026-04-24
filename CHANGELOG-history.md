@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 28 (2026-04-24)
 
-9 AC / 2 src + 1 new test file / 2 commits. Tests: 2801 → 2809 (+8).
+9 AC / 2 src + 1 new test file / 4 commits. Tests: 2801 → 2809 (+8).
 
 **First-query observability completion.** Closes HIGH-Deferred sub-item (b) in `query/embeddings.py` — cycle-26 Q16 follow-up. Cycle 26 shipped `_get_model()` cold-load observability; cycle 28 extends the same pattern to the two remaining first-query latency sources: `VectorIndex._ensure_conn` (sqlite-vec extension load) and `BM25Index.__init__` (corpus indexing). No new trust boundary; no filesystem-write contract; no MCP/CLI surface (counters stay diagnostic-only per cycle-26 Q14). After cycle 28, only sub-item (a) dim-mismatch AUTO-rebuild remains deferred under the HIGH-Deferred lifecycle entry.
 
