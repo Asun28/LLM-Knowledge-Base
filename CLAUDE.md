@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.10.0 · 2882 tests / 250 files (2872 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.10.0 · 2900 tests / 251 files (2890 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — use `tmp_wiki` / `tmp_project` / `tmp_kb_env`; never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Patch the owner module** for the four MCP-migrated callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) — not `kb.mcp.core.*`.
@@ -42,13 +42,13 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 Shipped phases and per-cycle tallies → `CHANGELOG.md` (compact index, newest first) + `CHANGELOG-history.md` (per-cycle bullet archive). Open work + deferred roadmap → `BACKLOG.md`.
 
-- **Latest full-suite:** 2882 tests / 250 files · 2872 passed + 10 skipped.
-- **Latest cycle (31):** CLI ↔ MCP parity page_id-input cluster — 3 new CLI subcommands (`read-page`, `affected-pages`, `lint-deep`) + shared `_is_mcp_error_response` discriminator handling the three heterogeneous error-prefix shapes these tools emit (`Error:`, `Error <verb>`, `Page not found:`); AC8 retrofit of `stats` / `reliability-map` / `lint-consistency` closes a latent silent-exit-0 bug where their wrapped MCP tools emit non-colon runtime-error forms.
+- **Latest full-suite:** 2900 tests / 251 files · 2890 passed + 10 skipped.
+- **Latest cycle (32):** CLI ↔ MCP parity category (b) closure + `_is_mcp_error_response` widening + `file_lock` fair-queue stagger mitigation — 2 new CLI subcommands (`compile-scan`, `ingest-content`), `_is_mcp_error_response` tuple widened with `"Error["` prefix (closes silent-exit-0 bug on `kb_ingest_content` `Error[partial]:` post-create-OSError emitter at `mcp/core.py:762`), and `file_lock` gained a `_LOCK_WAITERS` counter + first-sleep position-based stagger (intra-process mitigation only, not cross-process guarantee; `_FAIR_QUEUE_STAGGER_MS=2.0` clamped to `LOCK_POLL_INTERVAL=50ms`).
 - **Per-AC rationale, question logs, R1/R2 fix trails** → `CHANGELOG-history.md` + `docs/superpowers/decisions/<date>-cycle<N>-*.md`.
 
 ### Module Map (`src/kb/`)
 
-- **Core (Phase 1):** `config`, `models`, `utils`, `ingest`, `compile`, `query`, `lint`, `evolve`, `graph`, `mcp` (split package: `app`, `core`, `browse`, `health`, `quality`), `mcp_server` (entry shim), CLI (22 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `publish`, `mcp`, `refine-sweep`, `refine-list-stale`, `rebuild-indexes`, plus the MCP-parity wrappers `search`, `stats`, `list-pages`, `list-sources` (cycle 27), `graph-viz`, `verdict-trends`, `detect-drift`, `reliability-map`, `lint-consistency` (cycle 30), `read-page`, `affected-pages`, `lint-deep` (cycle 31)).
+- **Core (Phase 1):** `config`, `models`, `utils`, `ingest`, `compile`, `query`, `lint`, `evolve`, `graph`, `mcp` (split package: `app`, `core`, `browse`, `health`, `quality`), `mcp_server` (entry shim), CLI (24 commands: `ingest`, `compile`, `query`, `lint`, `evolve`, `publish`, `mcp`, `refine-sweep`, `refine-list-stale`, `rebuild-indexes`, plus the MCP-parity wrappers `search`, `stats`, `list-pages`, `list-sources` (cycle 27), `graph-viz`, `verdict-trends`, `detect-drift`, `reliability-map`, `lint-consistency` (cycle 30), `read-page`, `affected-pages`, `lint-deep` (cycle 31), `compile-scan`, `ingest-content` (cycle 32)).
 - **Publish (Phase 5, cycles 14-16):** `compile.publish` — five builders for Karpathy Tier-1 machine-consumable outputs: `build_llms_txt`, `build_llms_full_txt`, `build_graph_jsonld` (cycle 14), plus `build_per_page_siblings` (cycle 16 — emits `{out_dir}/pages/{page_id}.{txt,json}` with deterministic `sort_keys=True` JSON and unconditional stale-sibling cleanup before incremental skip), and `build_sitemap_xml` (cycle 16 — `sitemap.org/0.9` schema via `xml.etree.ElementTree`, relative POSIX `<loc>`). JSON-LD uses schema.org `@context`; every builder filters pages with `belief_state in {retracted, contradicted}` OR `confidence == speculative`. Builders write via `atomic_text_write` and accept `incremental: bool = False`; `kb publish --format={llms|llms-full|graph|siblings|sitemap|all}` defaults to `--incremental` and also exposes `--no-incremental`. First post-upgrade publish should use `--no-incremental` so pre-cycle-14 outputs are regenerated under the current epistemic filter. Signature convention: single-file builders take a full `out_path`; multi-file `build_per_page_siblings` takes a base `out_dir` and derives child paths internally.
 - **Quality (Phase 2):** `feedback` (weighted Bayesian trust — "wrong" penalized 2× vs "incomplete"), `review` (pairing, refiner with audit trail), `lint.semantic` (fidelity / consistency / completeness builders), `lint.verdicts` (persistent verdict store), `.claude/agents/wiki-reviewer.md` (Actor-Critic agent).
 - **Capture (Phase 5):** `capture` — conversation/notes atomization for `raw/captures/`.
@@ -185,7 +185,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Full suite: 2882 tests / 250 files (2872 passed + 10 skipped). New tests per cycle go in versioned files (e.g. `test_cycle20_errors_taxonomy.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
+Full suite: 2900 tests / 251 files (2890 passed + 10 skipped). New tests per cycle go in versioned files (e.g. `test_cycle20_errors_taxonomy.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
 
 **Fixture rules** (enforced by `test_cycle19_lint_redundant_patches.py` AST scan):
 - Writing tests: use `tmp_wiki` / `tmp_project` / `tmp_kb_env` only — never touch the real `wiki/` or `raw/`.
