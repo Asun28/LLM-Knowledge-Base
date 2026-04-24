@@ -15,8 +15,9 @@ Key test patterns (per Step-5 design `2026-04-25-cycle31-design.md`):
 - **Non-colon boundary** tests per subcommand force the runtime-error
   path of the wrapped MCP tool to verify the discriminator actually
   routes to exit 1 (Q7, cycle-24 L4 revert-tolerance).
-- **Parity tests** use `CliRunner(mix_stderr=False)` and assert strict
-  stream semantics: `stdout == mcp_output + "\\n"` on success,
+- **Parity tests** use `CliRunner()` (Click 8.3+ splits stdout/stderr by
+  default; the `mix_stderr` kwarg was removed in Click 8.2) and assert
+  strict stream semantics: `stdout == mcp_output + "\\n"` on success,
   `stderr == mcp_output + "\\n"` + `exit_code == 1` on error (Q3).
 - **AC8 retrofit** tests force the non-colon runtime-error paths in
   existing cycle 27/30 wrappers (`stats`, `reliability-map`,
@@ -174,9 +175,7 @@ class TestReadPageCli:
         runner = CliRunner()
         # Use a syntactically-valid page_id that passes the validator
         # with `check_exists=False` but resolves to no file on disk.
-        result = runner.invoke(
-            cli, ["read-page", "concepts/does-not-exist-cycle31-probe"]
-        )
+        result = runner.invoke(cli, ["read-page", "concepts/does-not-exist-cycle31-probe"])
         assert result.exit_code != 0
         assert "Page not found:" in result.output
 
@@ -353,9 +352,7 @@ class TestLintDeepCli:
             "lint-deep must strip (not reject) control chars per MCP contract"
         )
 
-    def test_lint_deep_file_not_found_exits_non_zero_non_colon_form(
-        self, monkeypatch, tmp_path
-    ):
+    def test_lint_deep_file_not_found_exits_non_zero_non_colon_form(self, monkeypatch, tmp_path):
         """AC6b — force `build_fidelity_context` to raise `FileNotFoundError`
         so `kb_lint_deep` emits the non-colon
         ``"Error checking fidelity for <id>: ..."`` at
@@ -415,9 +412,7 @@ class TestParityCliMcp:
         wiki_dir = tmp_path / "wiki"
         (wiki_dir / "concepts").mkdir(parents=True)
         page = wiki_dir / "concepts" / "parity-probe.md"
-        page.write_text(
-            "---\ntitle: Parity Probe\n---\n\nBody content.\n", encoding="utf-8"
-        )
+        page.write_text("---\ntitle: Parity Probe\n---\n\nBody content.\n", encoding="utf-8")
         monkeypatch.setattr("kb.mcp.browse.WIKI_DIR", wiki_dir)
         monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
 
