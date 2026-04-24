@@ -230,8 +230,11 @@ class TestCompileScanCli:
         assert result.exit_code == 0, f"output: {result.output!r}"
         assert "--incremental" in result.output
         assert "--wiki-dir" in result.output
-        # C9 — help text includes "default: incremental".
-        assert "default: incremental" in result.output
+        # C9 — help text includes "default: incremental". Click wraps
+        # the help string across lines (see Click --help rendering), so
+        # normalise whitespace before asserting.
+        normalised = " ".join(result.output.split())
+        assert "default: incremental" in normalised
 
     def test_compile_scan_body_forwards_default_kwargs(self, monkeypatch):
         """Body-spy — default invocation forwards ``incremental=True, wiki_dir=None``."""

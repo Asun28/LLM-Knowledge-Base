@@ -969,5 +969,37 @@ def lint_deep(page_id: str):
         _error_exit(exc)
 
 
+@cli.command("compile-scan")
+@click.option(
+    "--incremental/--no-incremental",
+    default=True,
+    help="Only new/changed sources (default: incremental).",
+)
+@click.option(
+    "--wiki-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=None,
+    help="Optional wiki directory override.",
+)
+def compile_scan(incremental: bool, wiki_dir: str | None) -> None:
+    """Scan for new/changed raw sources that need ingestion.
+
+    Cycle 32 AC1 — CLI parity for MCP ``kb_compile_scan``. Forwards
+    ``incremental`` and ``wiki_dir`` verbatim; MCP tool is authoritative.
+    Error routing uses the cycle-31 shared ``_is_mcp_error_response``
+    discriminator (widened in cycle 32 AC3 to include ``"Error["``).
+    """
+    from kb.mcp.core import kb_compile_scan  # noqa: PLC0415
+
+    try:
+        output = kb_compile_scan(incremental=incremental, wiki_dir=wiki_dir)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()
