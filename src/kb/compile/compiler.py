@@ -595,12 +595,22 @@ def _audit_token(block: dict) -> str:
     or '{error}' otherwise. The error string is passed through
     verbatim — callers must pre-format compound tokens like
     'tmp: <msg>'.
+
+    Cycle 30 AC1 — the error string is capped at 500 chars via
+    ``kb.utils.text.truncate`` before rendering so an ``OSError.__str__()``
+    on Windows (which can emit ~1KB for path-not-found) does not
+    bloat ``wiki/log.md`` or ``kb rebuild-indexes`` CLI stdout. The
+    cap is inside each truthiness-guarded branch, so a falsy error
+    (``None`` / empty string) still returns the bare ``"cleared"`` /
+    ``"unknown"`` token without invoking ``truncate(str(None))``.
     """
+    from kb.utils.text import truncate  # noqa: PLC0415
+
     if block["cleared"]:
         if block["error"]:
-            return f"cleared (warn: {block['error']})"
+            return f"cleared (warn: {truncate(str(block['error']), limit=500)})"
         return "cleared"
-    return str(block["error"]) if block["error"] else "unknown"
+    return truncate(str(block["error"]), limit=500) if block["error"] else "unknown"
 
 
 def _validate_path_under_project_root(path: Path, field_name: str) -> None:
