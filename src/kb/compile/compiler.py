@@ -587,6 +587,49 @@ def compile_wiki(
     return results
 
 
+def _audit_token(block: dict) -> str:
+    """Render the audit token for a rebuild_indexes result block.
+
+    Returns 'cleared' when cleared=True AND error is None,
+    'cleared (warn: {error})' when cleared=True AND error truthy,
+    or '{error}' otherwise. The error string is passed through
+    verbatim — callers must pre-format compound tokens like
+    'tmp: <msg>'.
+    """
+    if block["cleared"]:
+        if block["error"]:
+            return f"cleared (warn: {block['error']})"
+        return "cleared"
+    return str(block["error"]) if block["error"] else "unknown"
+
+
+def _validate_path_under_project_root(path: Path, field_name: str) -> None:
+    """Dual-anchor PROJECT_ROOT containment check.
+
+    Raises ValidationError if path fails containment. Void return
+    (raises-only) to avoid stub-return-type ambiguity (cycle-23 L2):
+    callers MUST NOT assume the path is resolved by this helper —
+    use the literal caller-supplied path for downstream unlink.
+    """
+    # Cycle 29 R1 Sonnet S1 — the Q7-A "empty reject" check was removed at
+    # R1-fix time because `Path("") == Path(".")` on BOTH POSIX and Windows
+    # (both stringify to "." and .resolve() to CWD). A `Path("")` coming from
+    # a caller is semantically equivalent to `Path(".")` — both mean CWD —
+    # and the dual-anchor resolve check below correctly accepts them IFF CWD
+    # is under PROJECT_ROOT. An outer `if hash_manifest is not None` / `if
+    # vector_db is not None` guard in `rebuild_indexes` already skips the
+    # helper for `None` defaults, so the helper never sees `None` here.
+    root_resolved = PROJECT_ROOT.resolve()
+    if path.is_absolute() and not (path == root_resolved or path.is_relative_to(root_resolved)):
+        raise ValidationError(f"{field_name} must be inside project root")
+    try:
+        resolved = path.resolve()
+    except OSError as e:
+        raise ValidationError(f"{field_name} cannot be resolved: {e}") from e
+    if not (resolved == root_resolved or resolved.is_relative_to(root_resolved)):
+        raise ValidationError(f"{field_name} must be inside project root")
+
+
 def rebuild_indexes(
     wiki_dir: Path | None = None,
     *,
@@ -635,30 +678,24 @@ def rebuild_indexes(
         ``ValidationError`` — ``wiki_dir`` does not resolve under ``PROJECT_ROOT``.
     """
     effective_wiki = Path(wiki_dir).expanduser() if wiki_dir else WIKI_DIR
-    root_resolved = PROJECT_ROOT.resolve()
-    # Cycle 23 Q5 / threat I1 — DUAL-anchor containment. Check the caller-
-    # supplied absolute path AND the resolved path both land under
-    # PROJECT_ROOT. This closes the symlink escape where
-    # ``/outside/link -> /proj/wiki`` would slip through a resolve()-only
-    # check (post-resolve looks clean even though the CALLER aimed at
-    # `/outside`). Relative inputs skip the pre-check because ``resolve()``
-    # absolutifies against CWD, which may legitimately differ from project
-    # root in dev workflows.
-    if effective_wiki.is_absolute() and not (
-        effective_wiki == root_resolved or effective_wiki.is_relative_to(root_resolved)
-    ):
-        raise ValidationError("wiki_dir must be inside project root")
-    try:
-        wiki_resolved = effective_wiki.resolve()
-    except OSError as e:
-        raise ValidationError(f"wiki_dir cannot be resolved: {e}") from e
-    if not (wiki_resolved == root_resolved or wiki_resolved.is_relative_to(root_resolved)):
-        raise ValidationError("wiki_dir must be inside project root")
+    # Cycle 23 Q5 / threat I1 — dual-anchor containment on wiki_dir.
+    # Cycle 29 AC2 — same helper also validates the two keyword-only
+    # overrides below when caller-supplied, closing the prior asymmetry
+    # where `hash_manifest` / `vector_db` were unlinked without the check.
+    _validate_path_under_project_root(effective_wiki, "wiki_dir")
 
     manifest_path = hash_manifest or HASH_MANIFEST
+    if hash_manifest is not None:
+        # Pass the caller's original Path (or subclass) so any custom
+        # resolve() override is honored — do NOT wrap in Path() here, or
+        # subclass dispatch is stripped and dual-anchor divergence tests
+        # silently pass.
+        _validate_path_under_project_root(hash_manifest, "hash_manifest")
     from kb.query.embeddings import _vec_db_path
 
     vector_path = vector_db or _vec_db_path(effective_wiki)
+    if vector_db is not None:
+        _validate_path_under_project_root(vector_db, "vector_db")
 
     result: dict = {
         "manifest": {"cleared": False, "error": None},
@@ -749,9 +786,14 @@ def rebuild_indexes(
     # (4) Audit — append one line to wiki/log.md. Best-effort; failure does
     # not abort the helper because the unlinks already happened.
     log_path = effective_wiki / "log.md"
+    # Cycle 29 AC1 — compound tokens via shared `_audit_token` helper so that
+    # a partial clear (main unlink succeeded, `.tmp` unlink failed) surfaces
+    # `cleared (warn: tmp: <msg>)` rather than swallowing the error tail.
+    # Mirrored to `kb.cli.rebuild_indexes_cmd` (same helper) so interactive
+    # output matches the persisted audit line.
     msg = (
-        f"manifest={'cleared' if result['manifest']['cleared'] else result['manifest']['error']} "
-        f"vector={'cleared' if result['vector']['cleared'] else result['vector']['error']} "
+        f"manifest={_audit_token(result['manifest'])} "
+        f"vector={_audit_token(result['vector'])} "
         f"caches_cleared={len(result['caches_cleared'])}"
     )
     try:

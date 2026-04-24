@@ -92,9 +92,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `tests/conftest.py` `project_root` / `raw_dir` / `wiki_dir` leak surface — fixtures point at REAL `PROJECT_ROOT` and are documented as "read-only use" but nothing enforces it. `test_cli.py:61-63` proves the global-escape paths exist (multi-global monkeypatch). Phase 4.5 already flagged `WIKI_CONTRADICTIONS` leaking, `load_purpose()` reading the real file, `append_wiki_log` defaulting to production. Phase 5 will add `wiki/hot.md`, `wiki/overview.md`, `wiki/_schema.md`, `raw/captures/` — one more leak surface each. (R3; cycle 7 only added autouse embeddings reset)
   (fix: make read-only fixtures fail loudly — return paths under a sandbox by default; provide explicit `real_project_root` fixture requiring `pytest --use-real-paths`; autouse monkeypatch of all `WIKI_*` constants to `tmp_path` for tests that don't explicitly opt out)
 
-- `query/embeddings.py` `_get_model` (~32-41) cold load — measured 0.81s + 67 MB RSS delta for `potion-base-8M` on first `kb_query` that touches vector search. `engine.py:87` gates on `vec_path.exists()` — per R2, vector index is almost always stale/absent so the model load is skipped AND hybrid silently degrades to BM25. Either outcome hurts: if the index exists we pay 0.8s on first user query; if it doesn't, "hybrid" is a lie. (R3)
-  (fix: warm-load on MCP startup ONLY IF `vec_path.exists()`, and in a background thread so the user's first query isn't charged; or emit a "first query warm-up: embedding model loading…" progress line if user-facing latency crosses 300ms)
-
 - `mcp/core.py` + `browse.py` + `health.py` + `quality.py` — all 25 MCP tools are sync `def`. FastMCP runs them via `anyio.to_thread.run_sync` on a default 40-thread pool. A `kb_query(use_api=True)` (30s+), `kb_lint()` (multi-second disk walk), `kb_compile()` (minutes), or `kb_ingest_content(use_api=True)` (10+s) each hold a thread; under concurrent tool calls the pool saturates and subsequent calls queue. Claude Code often fires multiple tool calls in parallel; this turns invisible latency spikes into observed user-facing stalls. (R3; cycle 7 did not address)
   (fix: make long-I/O tools `async def` and `await anyio.to_thread.run_sync(...)` around the SDK call; or document / tune `FastMCP(num_threads=N)`; at minimum surface the concurrency model in the `app.py` instructions block)
 
@@ -122,11 +119,8 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `compile/compiler.py` `compile_wiki` per-source rollback — Cycle-25 AC6/AC7/AC8 shipped the narrow observability variant: `in_progress:{pre_hash}` marker written before each `ingest_source`, overwritten on success (by ingest_source's own manifest write) or replaced with `failed:{pre_hash}` by the existing exception handler. AC7's entry-scan logs a warning for any stale `in_progress:` markers from prior hard-kills/power-loss. CONDITION 13 exempts `in_progress:` values from full-mode prune. Remaining deferred: (a) rollback of wiki writes on manifest-save failure (harder — requires receipt-file design or transaction-like helper), (b) escalating manifest-write failure to CRITICAL (cycle-25 keeps the `logger.warning` best-effort stance). (R1)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests.)
 
-- `compile/compiler.py` `rebuild_indexes` audit status — cycle-25 `.tmp` cleanup records `result["vector"]["error"]` when the sibling tmp unlink fails, but the persisted audit line and CLI status still render `vector=cleared` whenever the main DB unlink succeeded. Operators lose the only durable signal that the reset was partial and a stale `<vec_db>.tmp` still exists. (R2 Codex 2026-04-24)
-  (fix: derive vector status from both `cleared` and `error`, e.g. `cleared_with_error: tmp: ...`, and mirror the rule in `kb rebuild-indexes` CLI output)
-
-- `compile/compiler.py` `rebuild_indexes` `hash_manifest` / `vector_db` overrides — the destructive helper validates `wiki_dir` under `PROJECT_ROOT`, then accepts override paths for the manifest and vector DB without the same containment check before calling `unlink()`. The CLI does not expose those overrides today, but the Python API's safety boundary is inconsistent with the documented project-root guard. (R3 Codex 2026-04-24)
-  (fix: validate caller-supplied `hash_manifest` and `vector_db` literal + resolved paths under `PROJECT_ROOT` before locking or unlinking, matching the dual-anchor `wiki_dir` policy)
+- `compile/compiler.py` `rebuild_indexes` audit `error`-string length cap — cycle-29 AC1 Step-11 T1 PARTIAL: `_audit_token(block)` echoes `result[X]["error"]` verbatim into `wiki/log.md` (via `append_wiki_log`) and CLI stdout with no upper bound. `OSError.__str__()` on Windows can be ~1KB (e.g. `[WinError 3] The system cannot find the path specified: '<long path>'`); an adversarial or pathological error chain could bloat the audit log. `append_wiki_log` sanitizes `| \n \r \t` but does not truncate. (Codex Step-11 verify 2026-04-24)
+  (fix: cap `result[X]["error"]` via `kb.utils.text.truncate(s, limit=500)` before rendering in `_audit_token` — or add a length-cap guard in `append_wiki_log`'s `_escape_markdown_prefix` for long-field safety.)
 
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). Cycle-24 AC9 added exponential backoff to `file_lock` (floor 10ms, cap 50ms), eliminating the fixed 50ms polling floor. The JSONL-migration part remains open. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
@@ -189,12 +183,6 @@ _All items resolved — see CHANGELOG cycle 28._
   (fix: implement two-pass `_write_item_files`; OR keep TODO(v2) marker and document explicitly in `CaptureResult` docstring)
 
 ### MEDIUM
-
-- `capture.py:209-238` `_PROMPT_TEMPLATE` inline string vs templates/ convention — all other LLM prompts live as YAML files in `templates/` loaded via `load_template()`. R2 NIT refined: existing `templates/*.yaml` define JSON-Schema `extract:` fields for `build_extraction_schema()` — a structurally different purpose, so a plain format-string prompt does not fit there. (R1 + R2 NIT)
-  (fix: `templates/capture_prompt.txt` in a new `prompts/` subdirectory; OR keep inline but extract to named module-level constant with comment)
-
-- `config.py:40-53` + `CLAUDE.md` architectural contradiction — `CAPTURES_DIR = RAW_DIR / "captures"` places the capture write target inside `raw/`, which CLAUDE.md defines as "Immutable source documents. The LLM reads but **never modifies** files here." `raw/captures/` is the only LLM-written output directory inside `raw/`. (R1)
-  (fix: either (a) move `CAPTURES_DIR` to `captures/` at project root, or (b) carve out an explicit exception in CLAUDE.md and the config comment)
 
 ---
 

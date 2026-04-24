@@ -29,6 +29,38 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-24 — cycle 29
+
+- Items: 5 AC / 3 src + 2 new test files / 6 commits
+- Tests: 2809 → 2826 (+17)
+- Scope:
+  Backlog-by-file hygiene cycle. AC1 `_audit_token(block)` helper in
+  `compile/compiler.py` replaces the inline audit ternary so a partial
+  vector clear (main `unlink()` succeeded + sibling `.tmp` unlink failed)
+  renders `vector=cleared (warn: tmp: <msg>)` instead of swallowing the
+  error tail; mirrored to `kb rebuild-indexes` CLI stdout via function-
+  local import in `cli.py` (cycle-23 AC4 boot-lean preserved); Q3
+  embedded-newline regression pins the `append_wiki_log` sanitizer
+  contract. AC2 `_validate_path_under_project_root(path, field_name)`
+  helper applies the dual-anchor `PROJECT_ROOT` containment (literal-abs
+  + `.resolve()` target both under root) to `hash_manifest` + `vector_db`
+  overrides of `rebuild_indexes`; void-return helper (cycle-23 L2) with
+  explicit empty-path reject (cycle-19 L3); wiki_dir block refactored to
+  use the same helper so all 3 sites share one contract. AC3 architectural
+  carve-out comment above `CAPTURES_DIR = RAW_DIR / "captures"` (5 lines,
+  mirrors CLAUDE.md §raw/ language) + deletes stale `config.py:40-53`
+  BACKLOG bullet (Q13 expansion — BACKLOG lifecycle). AC4 deletes stale
+  `_PROMPT_TEMPLATE inline string` BACKLOG bullet (shipped cycle-19 AC15
+  via lazy `_get_prompt_template()`). AC5 deletes stale Phase 4.5 HIGH #6
+  cold-load bullet ("0.81s + 67 MB RSS delta") — shipped cycle-26 AC1-AC5
+  warm-load + cycle-26/28 observability; HIGH-Deferred summary with the
+  true residual (dim-mismatch AUTO-rebuild) survives. Step-11 T1 PARTIAL
+  (unbounded `OSError.__str__()` → `wiki/log.md` + CLI stdout) filed as
+  new MEDIUM BACKLOG entry per cycle-12 L3. Dep-CVE baseline 2026-04-24:
+  diskcache + ragas both `fix_versions: []`, unchanged; PR-introduced
+  diff empty.
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-29-2026-04-24)
+
 #### 2026-04-24 — cycle 28
 
 - Items: 9 AC / 2 src + 1 new test file / 7 commits
