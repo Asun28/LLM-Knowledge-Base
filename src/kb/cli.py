@@ -84,7 +84,7 @@ def _is_mcp_error_response(output: str) -> bool:
     (e.g. ``kb_read_page`` for a zero-length page body at
     ``src/kb/mcp/browse.py:161``).
 
-    Three shapes currently emitted by cycle-31 target tools:
+    Four shapes matched as of cycle 32:
 
     - ``"Error:"`` — validator-class (e.g. ``_validate_page_id`` at
       ``src/kb/mcp/app.py:250``; emitters at ``browse.py:94,139``;
@@ -97,17 +97,23 @@ def _is_mcp_error_response(output: str) -> bool:
       * ``quality.py:245`` — ``Error computing reliability map: ...``
       * ``quality.py:290`` — ``Error computing affected pages: ...``
 
+    - ``"Error["`` — tagged-error form per ``ERROR_TAG_FORMAT`` at
+      ``src/kb/mcp/app.py:17`` (``"Error[{category}]: {message}"``).
+      Current emitters:
+
+      * ``core.py:762`` — ``Error[partial]: write to ... failed ...``
+        (``kb_ingest_content`` post-create OSError path)
+      * ``core.py:881`` — same shape in ``kb_save_source``
+
+      Cycle 32 AC3 added this prefix to close the silent-exit-0 bug for
+      ``kb_ingest_content`` partial-write path (now exposed via the
+      cycle-32 ``kb ingest-content`` CLI wrapper).
+
     - ``"Page not found:"`` — logical-miss shape unique to ``kb_read_page``
       at ``src/kb/mcp/browse.py:125``.
-
-    Tagged-error form ``Error[<category>]: ...`` from ``src/kb/mcp/app.py:17``
-    is NOT matched — none of the target tools emit it today (not emitted by
-    cycle-31 tools). T9 future-proofing: if a later refactor adopts
-    ``error_tag()`` in these tools, widen the prefix set and re-run the
-    Step-11 verification grep.
     """
     first_line = output.split("\n", 1)[0]
-    return first_line.startswith(("Error:", "Error ", "Page not found:"))
+    return first_line.startswith(("Error:", "Error ", "Error[", "Page not found:"))
 
 
 def _setup_logging() -> None:
