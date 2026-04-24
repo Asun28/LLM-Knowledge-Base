@@ -14,6 +14,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 - Scope:
   <one-sentence scope only>
 - Detail: [history archive](CHANGELOG-history.md#<anchor>)
+
+Commit-count convention (codified cycle 28 AC8 per cycle-26 L1 skill patch):
+on the feature-branch squash-merge flow, the reported <K> equals pre-doc-update
+branch commits + 1 for the landing doc-update that contains this changelog
+line (self-referential). If R1/R2 PR review triggers fix commits, increment
+<K> atomically with each fix commit and re-check `git log --oneline main..HEAD`
+before push.
 -->
 
 ## [Unreleased]
@@ -21,6 +28,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 ### Quick Reference
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
+
+#### 2026-04-24 — cycle 28
+
+- Items: 9 AC / 2 src + 1 new test file / 2 commits
+- Tests: 2801 → 2809 (+8)
+- Scope:
+  First-query observability completion — `VectorIndex._ensure_conn`
+  sqlite-vec extension load and `BM25Index.__init__` corpus indexing
+  (closes HIGH-Deferred sub-item (b), cycle-26 Q16 follow-up). AC1/AC2/AC3:
+  `SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS=0.3` module constant +
+  `_sqlite_vec_loads_seen` counter (exact, inside `_conn_lock`) +
+  `get_sqlite_vec_load_count()` getter; INFO log always on successful
+  extension load + WARNING above 0.3s; post-success ordering (NO
+  `finally:` wraps the log/counter — defended by
+  `test_sqlite_vec_load_no_info_on_failure_path`). AC4/AC5: lock-free
+  `_bm25_builds_seen` counter (aggregates `engine.py:110` wiki +
+  `engine.py:794` raw call sites — "constructor executions, NOT distinct
+  cache insertions" per Q11) + `get_bm25_build_count()` getter; INFO
+  log on every `BM25Index.__init__` including empty-corpus (no WARN
+  threshold — corpus-size variance defeats a fixed threshold). AC6:
+  8 regression tests. AC7: BACKLOG hygiene — narrow HIGH-Deferred entry
+  (sub-item b landed), delete MEDIUM AC17-drop rationale line (duplicate
+  of CHANGELOG-history cycle-13 AC2), delete resolved LOW cycle-27
+  commit-tally entry. AC8: CHANGELOG format-guide commit-count rule
+  codified (self-referential +1 per cycle-26 L1 skill patch). AC9:
+  no-op CVE re-verify, matches cycle-26 baseline (diskcache + ragas
+  still no upstream fix).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-28-2026-04-24)
 
 #### 2026-04-24 — cycle 27
 
