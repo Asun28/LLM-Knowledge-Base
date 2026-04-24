@@ -138,8 +138,11 @@ class TestAuditTokenCap:
         assert "chars elided" in result
         # Budget: 500 char cap + marker + prefix/suffix; ~560 char ceiling.
         assert len(result) <= 560, f"CJK warn-branch cap overshot: len={len(result)}"
-        # Re-encode round-trip must succeed — no corrupted surrogates.
-        result.encode("utf-8").decode("utf-8")
+        # Re-encode round-trip must be LOSSLESS — equality asserts no corrupted
+        # surrogates and no silent byte-boundary split (R2 Codex M1 strengthen).
+        assert result == result.encode("utf-8").decode("utf-8"), (
+            "CJK truncate must produce a lossless UTF-8 round-trip"
+        )
         # Raw 2000-char CJK must NOT appear verbatim (the cap fired).
         assert long_cjk not in result
 
