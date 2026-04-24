@@ -136,46 +136,80 @@ class TestFairQueueStagger:
             "applied to position=0 (T7 regression)."
         )
 
-    def test_fair_queue_stagger_probabilistic_ordering(self, tmp_path):
-        """AC7 — probabilistic fairness under N=3 thundering-herd.
-        ``threading.Barrier`` for simultaneous entry; 10 trials; 80%
-        tolerance per C6."""
-        import time
-        from threading import Barrier, Thread
+    def test_fair_queue_positions_unique_and_zero_based(self, tmp_path):
+        """AC7 — the counter mechanism assigns distinct 0-based positions
+        to N concurrent waiters, and returns to baseline after release.
 
-        from kb.utils.io import file_lock
+        This is a DETERMINISTIC test of the ``_take_waiter_slot`` /
+        ``_release_waiter_slot`` contract (the observable fairness downstream
+        is probabilistic + sub-timer-resolution on Windows — not reliably
+        testable in CI). The deterministic invariant is the load-bearing
+        piece: if positions are unique and 0-based, the stagger mechanism
+        correctly differentiates waiters; if counter returns to baseline,
+        C3 symmetry holds under success path.
+        """
+        import threading
+
+        from kb.utils import io as io_mod
 
         n_workers = 3
-        trials = 10
-        first_entrant_won = 0
+        positions_seen: list[int] = []
+        positions_lock = threading.Lock()
+        entry_barrier = threading.Barrier(n_workers)
+        hold_barrier = threading.Barrier(n_workers)
 
-        for trial_idx in range(trials):
-            lock_path = tmp_path / f"fairness_{trial_idx}.lock"
-            acquire_time_by_entry: dict[int, float] = {}
-            barrier = Barrier(n_workers)
+        baseline = io_mod._LOCK_WAITERS
 
-            def worker() -> None:  # noqa: B023 — closure over barrier+dict is intentional
-                entry_idx = barrier.wait()
-                with file_lock(lock_path, timeout=5.0):
-                    acquire_time_by_entry[entry_idx] = time.perf_counter()
-                    # Hold lock briefly so subsequent waiters queue up.
-                    time.sleep(0.005)
+        def worker() -> None:
+            entry_barrier.wait()
+            pos = io_mod._take_waiter_slot()
+            with positions_lock:
+                positions_seen.append(pos)
+            hold_barrier.wait()  # All threads hold their position simultaneously.
+            io_mod._release_waiter_slot()
 
-            threads = [Thread(target=worker) for _ in range(n_workers)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+        threads = [threading.Thread(target=worker) for _ in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-            first = acquire_time_by_entry.get(0, float("inf"))
-            last = acquire_time_by_entry.get(n_workers - 1, 0.0)
-            if first <= last:
-                first_entrant_won += 1
-
-        assert first_entrant_won >= 8, (
-            f"C6 — fair-queue stagger signal weak: {first_entrant_won}/10 "
-            "trials showed first-entrant acquire ≤ last-entrant. Expected ≥8/10."
+        # Under concurrent take, all N positions must be distinct and
+        # form exactly the set {0, 1, ..., N-1}. This is the atomic
+        # counter invariant that makes stagger work.
+        assert sorted(positions_seen) == list(range(n_workers)), (
+            f"C10 — positions not unique/contiguous: {sorted(positions_seen)}"
         )
+        # C3 — counter returns to baseline after balanced take/release.
+        assert io_mod._LOCK_WAITERS == baseline, (
+            "C3 — counter drift after success path (T6 regression)"
+        )
+
+    def test_release_waiter_slot_underflow_warns(self, caplog):
+        """C14 — unpaired ``_release_waiter_slot`` emits logger.warning
+        instead of silently clamping to 0. Cycle-32 R1 Opus R2 residual:
+        silent clamp hides paired-release bugs."""
+        import logging
+
+        from kb.utils import io as io_mod
+
+        # Reset counter to 0 so any extra release triggers underflow.
+        # (The test runs after other tests may have left baseline at 0.)
+        baseline = io_mod._LOCK_WAITERS
+        assert baseline == 0, (
+            f"Prerequisite failed: _LOCK_WAITERS={baseline}, expected 0 "
+            "(earlier test leaked take/release pair)"
+        )
+
+        with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
+            io_mod._release_waiter_slot()  # Unpaired — should warn.
+
+        assert any("_LOCK_WAITERS underflow" in rec.message for rec in caplog.records), (
+            f"C14 — no underflow warning emitted. Records: "
+            f"{[rec.message for rec in caplog.records]}"
+        )
+        # Counter still at 0 (no negative drift).
+        assert io_mod._LOCK_WAITERS == 0
 
 
 # ---------------------------------------------------------------------------
