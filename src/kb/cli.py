@@ -804,5 +804,33 @@ def reliability_map():
         _error_exit(exc)
 
 
+@cli.command("lint-consistency")
+@click.option(
+    "--page-ids",
+    "page_ids",
+    type=str,
+    default="",
+    help="Comma-separated page IDs (empty = auto-select likely-conflicting groups).",
+)
+def lint_consistency(page_ids: str):
+    """Cross-page consistency check — groups related pages for contradiction review.
+
+    Cycle 30 AC6 — CLI parity for MCP `kb_lint_consistency`. Passes
+    ``--page-ids`` through raw; the MCP tool is the single source of
+    truth for splitting on ``,``, trimming whitespace, and enforcing the
+    50-ID cap + per-ID `_validate_page_id` check.
+    """
+    from kb.mcp.quality import kb_lint_consistency  # noqa: PLC0415
+
+    try:
+        output = kb_lint_consistency(page_ids=page_ids)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()

@@ -197,3 +197,69 @@ class TestReliabilityMapCli:
         assert result.exit_code == 0, f"output: {result.output!r}"
         assert called["value"] is True
         assert "Page Reliability Map" in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC6 — `kb lint-consistency`
+# ---------------------------------------------------------------------------
+
+
+class TestLintConsistencyCli:
+    """AC6 — CLI parity for MCP `kb_lint_consistency`."""
+
+    def test_lint_consistency_help_exits_zero(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-consistency", "--help"])
+        assert result.exit_code == 0, f"stderr: {result.output!r}"
+        assert "--page-ids" in result.output
+        # Cycle-30 C7 — lint-consistency MCP tool has no wiki_dir param;
+        # CLI must NOT expose --wiki-dir to avoid a silent-drop surface.
+        assert "--wiki-dir" not in result.output
+
+    def test_lint_consistency_body_executes_with_ids_raw(self, monkeypatch):
+        """`--page-ids` forwarded RAW (not split) to the MCP tool.
+
+        Cycle-30 C6 — MCP tool is the single source of truth for comma
+        splitting. Divergent-fail: if CLI were to call `.split(",")` and
+        pass a list, this assertion (comparing to the exact raw string)
+        would flip.
+        """
+        from kb.mcp import quality as quality_mod
+
+        called = {"value": False, "page_ids": None}
+
+        def _spy(page_ids=""):
+            called["value"] = True
+            called["page_ids"] = page_ids
+            return "# Consistency Report\nNo contradictions found."
+
+        monkeypatch.setattr(quality_mod, "kb_lint_consistency", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-consistency", "--page-ids", "concepts/rag,concepts/llm"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        # Raw-string passthrough — NOT split into a list.
+        assert called["page_ids"] == "concepts/rag,concepts/llm"
+        assert "Consistency Report" in result.output
+
+    def test_lint_consistency_body_empty_defaults_to_empty_string(self, monkeypatch):
+        """No `--page-ids` → MCP tool receives `""` (empty string), not None.
+
+        MCP tool maps empty string to its "auto-select" mode at
+        `kb.mcp.quality.kb_lint_consistency` line 173.
+        """
+        from kb.mcp import quality as quality_mod
+
+        called = {"page_ids": "__sentinel__"}
+
+        def _spy(page_ids=""):
+            called["page_ids"] = page_ids
+            return "# Auto Consistency\nno groups"
+
+        monkeypatch.setattr(quality_mod, "kb_lint_consistency", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-consistency"])
+        assert result.exit_code == 0
+        assert called["page_ids"] == ""
