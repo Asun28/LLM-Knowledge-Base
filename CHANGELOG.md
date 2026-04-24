@@ -29,6 +29,55 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-25 — cycle 31
+
+- Items: 8 AC / 1 src (`cli.py`) + 1 new test file / +TBD commits
+- Tests: 2850 → 2882 (+32)
+- Scope:
+  Continues cycle-27/30 CLI ↔ MCP parity — AC1-AC3 add
+  `read-page` / `affected-pages` / `lint-deep` thin-wrappers
+  over the three page_id-input MCP tools (`kb_read_page`,
+  `kb_affected_pages`, `kb_lint_deep`). These tools emit
+  heterogeneous error-prefix shapes (`"Error:"` colon-form,
+  `"Error <verb>..."` space-form runtime-exception shapes, and
+  the unique `"Page not found:"` logical-miss from `kb_read_page`),
+  so AC4 introduces a shared `_is_mcp_error_response(output)`
+  discriminator near `_error_exit` that classifies by first-line
+  prefix only against the three shapes (Q1; first-line split
+  prevents misfire on page bodies containing `Error:` on line 2;
+  empty / blank-first-line outputs stay exit-0 to preserve MCP
+  parity for zero-length page bodies). AC5 pins body-spy tests
+  per subcommand (patching the OWNER module `kb.mcp.browse` /
+  `kb.mcp.quality` — NOT `kb.cli` — because function-local
+  imports resolve at call time per cycle-30 L2). AC6 adds
+  traversal-boundary tests (`".."` → validator colon-form error)
+  PLUS non-colon boundary tests per subcommand (`Page not found:`
+  for read-page; forced `build_backlinks` / `build_fidelity_context`
+  exceptions for affected-pages / lint-deep) — revert-divergent
+  by construction: the tests flip `exit_code` from 1 to 0 if the
+  discriminator reverts to `startswith("Error:")`. Q3 parity
+  tests exercise both channels (direct MCP call + CLI invocation)
+  with strict stream semantics (`stdout == mcp_output + "\n"` on
+  success, `stderr == mcp_output + "\n"` + exit 1 on error;
+  `CliRunner()` alone suffices on Click 8.3+ since `mix_stderr`
+  was removed in 8.2). AC8 closes a pre-existing silent-failure
+  bug latent since cycles 27 (`stats`) and 30 (`reliability-map`,
+  `lint-consistency`): all three legacy wrappers wrap MCP tools
+  that also emit non-colon runtime-error shapes, so AC8
+  retrofits them to `_is_mcp_error_response` (one-line swap each
+  plus 3 regression tests). T6 boot-lean pinned by subprocess
+  probe asserting `import kb.cli` doesn't transitively pull
+  `kb.mcp.browse` / `kb.mcp.quality`. AC7 BACKLOG hygiene —
+  remove cluster (b) from the CLI↔MCP parity bullet; narrow
+  "~12 remaining" to "~9 remaining" (7 write-path + 2 ingest/
+  compile variants). Step-2 CVE baseline + Step-11 branch diff
+  show identical 2 open no-upstream-fix CVEs (diskcache + ragas)
+  — Step 11.5 no-op. R1 Opus APPROVE-WITH-AMENDS; R2 Codex AMEND
+  (discovered the pre-existing silent-failure bug — scope
+  expanded to AC8 via Step-5 Q4 Option A); Step 5 APPROVE; Step 8
+  plan-gate REJECT resolved inline per cycle-21 L1.
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-31-2026-04-25)
+
 #### 2026-04-25 — cycle 30
 
 - Items: 7 AC / 2 src + 2 new test files / 12 commits

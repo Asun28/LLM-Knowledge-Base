@@ -70,6 +70,46 @@ def _error_exit(exc: BaseException, *, code: int = 1) -> None:
     sys.exit(code)
 
 
+def _is_mcp_error_response(output: str) -> bool:
+    """Return True if an MCP tool string response represents an error.
+
+    Cycle 31 AC4 — shared discriminator for the three new page_id-input CLI
+    wrappers (read-page / affected-pages / lint-deep) AND three cycle 27/30
+    wrappers retrofitted in AC8 (stats / reliability-map / lint-consistency)
+    whose wrapped MCP tools emit heterogeneous error-prefix shapes.
+
+    Classifies by the FIRST line only (``output.split("\\n", 1)[0]``) to avoid
+    misfiring on page bodies whose later lines happen to contain ``Error:``.
+    Empty / blank-first-line outputs are NOT errors by design — they exit 0
+    (e.g. ``kb_read_page`` for a zero-length page body at
+    ``src/kb/mcp/browse.py:161``).
+
+    Three shapes currently emitted by cycle-31 target tools:
+
+    - ``"Error:"`` — validator-class (e.g. ``_validate_page_id`` at
+      ``src/kb/mcp/app.py:250``; emitters at ``browse.py:94,139``;
+      ``quality.py:142,281``).
+    - ``"Error "`` — runtime-exception shapes:
+
+      * ``browse.py:348`` — ``Error computing wiki stats: ...``
+      * ``quality.py:149,152`` — ``Error checking fidelity for ...``
+      * ``quality.py:184`` — ``Error running consistency check: ...``
+      * ``quality.py:245`` — ``Error computing reliability map: ...``
+      * ``quality.py:290`` — ``Error computing affected pages: ...``
+
+    - ``"Page not found:"`` — logical-miss shape unique to ``kb_read_page``
+      at ``src/kb/mcp/browse.py:125``.
+
+    Tagged-error form ``Error[<category>]: ...`` from ``src/kb/mcp/app.py:17``
+    is NOT matched — none of the target tools emit it today (not emitted by
+    cycle-31 tools). T9 future-proofing: if a later refactor adopts
+    ``error_tag()`` in these tools, widen the prefix set and re-run the
+    Step-11 verification grep.
+    """
+    first_line = output.split("\n", 1)[0]
+    return first_line.startswith(("Error:", "Error ", "Page not found:"))
+
+
 def _setup_logging() -> None:
     """Idempotent logging setup. Exposed so direct callers (tests, alt entry
     points) can configure logging without going through Click's context
@@ -637,7 +677,11 @@ def stats(wiki_dir: str | None):
 
     try:
         output = kb_stats(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_stats emits the non-colon runtime-error shape
+        # "Error computing wiki stats: ..." at src/kb/mcp/browse.py:348 which
+        # the legacy startswith("Error:") check missed (silent exit 0).
+        # Retrofit to the shared _is_mcp_error_response discriminator.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -666,7 +710,12 @@ def list_pages(page_type: str, limit: int, offset: int):
 
     try:
         output = kb_list_pages(page_type=page_type, limit=limit, offset=offset)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — all cycle-27/30 wrappers share
+        # the _is_mcp_error_response discriminator. kb_list_pages emits
+        # only colon-form today (browse.py:187,194,220), so behaviour is
+        # unchanged; the swap defends against a future emitter change that
+        # adds a non-colon runtime-error shape (cycle-11 L3 / cycle-20 L3).
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -687,7 +736,8 @@ def list_sources(limit: int, offset: int):
 
     try:
         output = kb_list_sources(limit=limit, offset=offset)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -721,7 +771,8 @@ def graph_viz(max_nodes: int, wiki_dir: str | None):
 
     try:
         output = kb_graph_viz(max_nodes=max_nodes, wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -748,7 +799,8 @@ def verdict_trends(wiki_dir: str | None):
 
     try:
         output = kb_verdict_trends(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -776,7 +828,8 @@ def detect_drift(wiki_dir: str | None):
 
     try:
         output = kb_detect_drift(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -796,7 +849,11 @@ def reliability_map():
 
     try:
         output = kb_reliability_map()
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_reliability_map emits the non-colon runtime-error
+        # shape "Error computing reliability map: ..." at
+        # src/kb/mcp/quality.py:245 which the legacy startswith("Error:")
+        # check missed. Retrofit to the shared discriminator.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -824,7 +881,81 @@ def lint_consistency(page_ids: str):
 
     try:
         output = kb_lint_consistency(page_ids=page_ids)
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_lint_consistency emits the non-colon runtime-
+        # error shape "Error running consistency check: ..." at
+        # src/kb/mcp/quality.py:184 which the legacy startswith("Error:")
+        # check missed. Retrofit to the shared discriminator.
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("read-page")
+@click.argument("page_id")
+def read_page(page_id: str):
+    """Read a wiki page by ID.
+
+    Cycle 31 AC1 — CLI parity for MCP `kb_read_page`. Forwards ``page_id``
+    verbatim; the MCP tool performs ``_validate_page_id(check_exists=False)``
+    + case-insensitive fallback + byte-level output cap. Error classification
+    uses the cycle-31 shared ``_is_mcp_error_response`` helper so
+    ``"Page not found:"`` (non-``Error`` prefix) and runtime-error shapes
+    route to stderr + exit 1 correctly.
+    """
+    from kb.mcp.browse import kb_read_page  # noqa: PLC0415
+
+    try:
+        output = kb_read_page(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("affected-pages")
+@click.argument("page_id")
+def affected_pages(page_id: str):
+    """Find pages affected when the given page changes.
+
+    Cycle 31 AC2 — CLI parity for MCP `kb_affected_pages`. The empty-state
+    message ``"No pages are affected by changes to X."`` exits 0 (not an
+    error — matches cycle-30 ``reliability-map`` precedent). Runtime
+    exception surfaces as ``"Error computing affected pages: ..."`` (non-
+    colon form) which ``_is_mcp_error_response`` routes to stderr + exit 1.
+    """
+    from kb.mcp.quality import kb_affected_pages  # noqa: PLC0415
+
+    try:
+        output = kb_affected_pages(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("lint-deep")
+@click.argument("page_id")
+def lint_deep(page_id: str):
+    """Deep lint a single page against its raw sources.
+
+    Cycle 31 AC3 — CLI parity for MCP `kb_lint_deep`. Returns page body +
+    raw-source text side-by-side for source-fidelity review. A
+    ``FileNotFoundError`` or other runtime exception surfaces as
+    ``"Error checking fidelity for <id>: ..."`` (non-colon form) which
+    ``_is_mcp_error_response`` routes to stderr + exit 1.
+    """
+    from kb.mcp.quality import kb_lint_deep  # noqa: PLC0415
+
+    try:
+        output = kb_lint_deep(page_id)
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
