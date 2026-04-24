@@ -31,7 +31,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-25 — cycle 31
 
-- Items: 8 AC / 1 src (`cli.py`) + 1 new test file / +TBD commits
+- Items: 8 AC / 1 src (`cli.py`) + 1 new test file / 9 commits (post-merge backfill per cycle-30 L1)
 - Tests: 2850 → 2882 (+32)
 - Scope:
   Continues cycle-27/30 CLI ↔ MCP parity — AC1-AC3 add

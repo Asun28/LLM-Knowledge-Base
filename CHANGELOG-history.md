@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 31 (2026-04-25)
 
-8 AC / 1 src (`cli.py`) + 1 new test file / +TBD commits (cycle-30 L1 placeholder — backfill post-merge). Tests: 2850 → 2882 (+32).
+8 AC / 1 src (`cli.py`) + 1 new test file / 9 commits. Tests: 2850 → 2882 (+32).
 
 **CLI ↔ MCP parity — page_id-input cluster (AC1-AC3) + shared error discriminator (AC4) + legacy-wrapper retrofit (AC8).** Continues cycle-27 (4 read-only wrappers) + cycle-30 (5 more). Closes the read-bearing / page_id-input cluster (3 of the 12 remaining MCP-tool gaps) and opportunistically fixes a pre-existing silent-failure bug in three legacy wrappers discovered by R2 Codex design eval.
 
