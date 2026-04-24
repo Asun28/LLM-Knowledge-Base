@@ -677,7 +677,11 @@ def stats(wiki_dir: str | None):
 
     try:
         output = kb_stats(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_stats emits the non-colon runtime-error shape
+        # "Error computing wiki stats: ..." at src/kb/mcp/browse.py:348 which
+        # the legacy startswith("Error:") check missed (silent exit 0).
+        # Retrofit to the shared _is_mcp_error_response discriminator.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -836,7 +840,11 @@ def reliability_map():
 
     try:
         output = kb_reliability_map()
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_reliability_map emits the non-colon runtime-error
+        # shape "Error computing reliability map: ..." at
+        # src/kb/mcp/quality.py:245 which the legacy startswith("Error:")
+        # check missed. Retrofit to the shared discriminator.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -864,7 +872,11 @@ def lint_consistency(page_ids: str):
 
     try:
         output = kb_lint_consistency(page_ids=page_ids)
-        if output.startswith("Error:"):
+        # Cycle 31 AC8 — kb_lint_consistency emits the non-colon runtime-
+        # error shape "Error running consistency check: ..." at
+        # src/kb/mcp/quality.py:184 which the legacy startswith("Error:")
+        # check missed. Retrofit to the shared discriminator.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)

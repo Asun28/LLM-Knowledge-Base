@@ -608,6 +608,76 @@ class TestParityCliMcp:
 
 
 # ---------------------------------------------------------------------------
+# AC8 — legacy cycle 27/30 wrapper retrofits (TASK 5)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyWrapperRetrofit:
+    """AC8 — three cycle 27/30 wrappers wrap MCP tools that ALSO emit
+    non-colon runtime-error shapes. The legacy ``startswith("Error:")``
+    discriminator let those errors exit 0 silently. Retrofit swaps each
+    to ``_is_mcp_error_response`` and pins the non-colon error path with
+    a revert-divergent regression test (cycle-24 L4 / cycle-16 L2)."""
+
+    def test_stats_non_colon_error_exits_non_zero(self, monkeypatch):
+        """`kb_stats` emits ``"Error computing wiki stats: ..."`` at
+        `src/kb/mcp/browse.py:348`. Legacy discriminator missed it."""
+        from click.testing import CliRunner
+
+        from kb.mcp import browse as browse_mod
+
+        def _spy(wiki_dir=None):
+            return "Error computing wiki stats: forced"
+
+        monkeypatch.setattr(browse_mod, "kb_stats", _spy)
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["stats"])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert "Error computing wiki stats" in result.output
+
+    def test_reliability_map_non_colon_error_exits_non_zero(self, monkeypatch):
+        """`kb_reliability_map` emits ``"Error computing reliability map: ..."``
+        at `src/kb/mcp/quality.py:245`. Legacy discriminator missed it."""
+        from click.testing import CliRunner
+
+        from kb.mcp import quality as quality_mod
+
+        def _spy():
+            return "Error computing reliability map: forced"
+
+        monkeypatch.setattr(quality_mod, "kb_reliability_map", _spy)
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["reliability-map"])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert "Error computing reliability map" in result.output
+
+    def test_lint_consistency_non_colon_error_exits_non_zero(self, monkeypatch):
+        """`kb_lint_consistency` emits ``"Error running consistency check: ..."``
+        at `src/kb/mcp/quality.py:184`. Legacy discriminator missed it."""
+        from click.testing import CliRunner
+
+        from kb.mcp import quality as quality_mod
+
+        def _spy(page_ids=""):
+            return "Error running consistency check: forced"
+
+        monkeypatch.setattr(quality_mod, "kb_lint_consistency", _spy)
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-consistency"])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert "Error running consistency check" in result.output
+
+
+# ---------------------------------------------------------------------------
 # T6 — boot-lean contract (TASK 2)
 # ---------------------------------------------------------------------------
 
