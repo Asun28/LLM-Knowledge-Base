@@ -83,3 +83,256 @@ class TestIsMcpErrorResponse:
         from kb.cli import _is_mcp_error_response
 
         assert _is_mcp_error_response("Error:\r\ndetails") is True
+
+
+# ---------------------------------------------------------------------------
+# AC1 — `kb read-page` (TASK 2)
+# ---------------------------------------------------------------------------
+
+
+class TestReadPageCli:
+    """AC1 — CLI parity for MCP `kb_read_page`."""
+
+    def test_read_page_help_exits_zero(self):
+        """`kb read-page --help` exits 0 and shows the positional arg."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["read-page", "--help"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert "PAGE_ID" in result.output
+        assert "Read a wiki page" in result.output
+
+    def test_read_page_body_executes_forwards_page_id(self, monkeypatch):
+        """Body spy — CLI forwards `page_id` kwarg RAW to `kb_read_page`.
+
+        Patch the OWNER module (`kb.mcp.browse`) per cycle-30 L2: the
+        function-local import in `read_page` resolves against that module
+        at call time; patching `kb.cli` would re-bind an attribute that
+        is never read.
+        """
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+        from kb.mcp import browse as browse_mod
+
+        called = {"value": False, "page_id": None}
+
+        def _spy(page_id):
+            called["value"] = True
+            called["page_id"] = page_id
+            return "# Fake Page\nBody."
+
+        monkeypatch.setattr(browse_mod, "kb_read_page", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["read-page", "concepts/rag"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        assert called["page_id"] == "concepts/rag"
+        assert "# Fake Page" in result.output
+
+    def test_read_page_traversal_exits_non_zero(self):
+        """AC6a — ``..`` path-traversal hits `_validate_page_id`'s colon-form
+        rejection at `src/kb/mcp/app.py`. No monkeypatch — pins the real
+        validator contract end-to-end."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["read-page", "../etc/passwd"])
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "Invalid page_id" in result.output
+
+    def test_read_page_trailing_newline_rejected(self):
+        """T4/Q6 — `kb_read_page` calls `_validate_page_id` DIRECTLY (no
+        `_strip_control_chars` pre-pass); `_CTRL_CHARS_RE` at
+        `src/kb/mcp/app.py:188` rejects `\\n`. CLI forwards verbatim."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["read-page", "concepts/rag\n"])
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "control characters" in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC2 — `kb affected-pages` (TASK 2)
+# ---------------------------------------------------------------------------
+
+
+class TestAffectedPagesCli:
+    """AC2 — CLI parity for MCP `kb_affected_pages`."""
+
+    def test_affected_pages_help_exits_zero(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["affected-pages", "--help"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert "PAGE_ID" in result.output
+
+    def test_affected_pages_body_executes_forwards_page_id(self, monkeypatch):
+        """Body spy — patch `kb.mcp.quality` owner module."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+        from kb.mcp import quality as quality_mod
+
+        called = {"value": False, "page_id": None}
+
+        def _spy(page_id):
+            called["value"] = True
+            called["page_id"] = page_id
+            return "# Pages Affected by Changes to concepts/rag\n- concepts/llm"
+
+        monkeypatch.setattr(quality_mod, "kb_affected_pages", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["affected-pages", "concepts/rag"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        assert called["page_id"] == "concepts/rag"
+        assert "Pages Affected" in result.output
+
+    def test_affected_pages_traversal_exits_non_zero(self):
+        """AC6a — ``..`` traversal hits validator at MCP boundary."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["affected-pages", "../etc/passwd"])
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "Invalid page_id" in result.output
+
+    def test_affected_pages_trailing_newline_stripped_then_validated(self):
+        """T4/Q6 — `kb_affected_pages` calls `_strip_control_chars` BEFORE
+        validation (quality.py:275); trailing `\\n` is stripped, not
+        rejected. Result depends on post-strip page existence."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["affected-pages", "concepts/nonexistent-cycle31\n"])
+        # Stripped → `concepts/nonexistent-cycle31` → validator rejects on
+        # non-existence (check_exists=True). NOT a control-chars error.
+        assert "control characters" not in result.output, (
+            "affected-pages must strip (not reject) control chars per MCP contract"
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC3 — `kb lint-deep` (TASK 2)
+# ---------------------------------------------------------------------------
+
+
+class TestLintDeepCli:
+    """AC3 — CLI parity for MCP `kb_lint_deep`."""
+
+    def test_lint_deep_help_exits_zero(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-deep", "--help"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert "PAGE_ID" in result.output
+
+    def test_lint_deep_body_executes_forwards_page_id(self, monkeypatch):
+        """Body spy — patch `kb.mcp.quality` owner module."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+        from kb.mcp import quality as quality_mod
+
+        called = {"value": False, "page_id": None}
+
+        def _spy(page_id):
+            called["value"] = True
+            called["page_id"] = page_id
+            return "## Page: concepts/rag\n## Sources\n..."
+
+        monkeypatch.setattr(quality_mod, "kb_lint_deep", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-deep", "concepts/rag"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        assert called["page_id"] == "concepts/rag"
+        assert "Page: concepts/rag" in result.output
+
+    def test_lint_deep_traversal_exits_non_zero(self):
+        """AC6a — ``..`` traversal hits validator at MCP boundary."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-deep", "../etc/passwd"])
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "Invalid page_id" in result.output
+
+    def test_lint_deep_trailing_newline_stripped_then_validated(self):
+        """T4/Q6 — `kb_lint_deep` calls `_strip_control_chars` BEFORE
+        validation (quality.py:139); trailing `\\n` stripped, not rejected."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-deep", "concepts/nonexistent-cycle31\n"])
+        assert "control characters" not in result.output, (
+            "lint-deep must strip (not reject) control chars per MCP contract"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T6 — boot-lean contract (TASK 2)
+# ---------------------------------------------------------------------------
+
+
+class TestBootLean:
+    """T6 — `import kb.cli` must not eagerly pull `kb.mcp.browse` /
+    `kb.mcp.quality`. Function-local imports with `# noqa: PLC0415`
+    defer transitive weight until a subcommand body actually fires.
+    """
+
+    def test_cli_import_does_not_eagerly_import_mcp_modules(self):
+        import os
+        import subprocess
+        import sys
+
+        probe = (
+            "import sys; "
+            "import kb.cli; "
+            "bad = [m for m in sys.modules "
+            "       if m in ('kb.mcp.browse', 'kb.mcp.quality')]; "
+            "assert not bad, f'Eager kb.mcp imports detected: {bad}'; "
+            "print('OK')"
+        )
+        env = {**os.environ, "PYTHONPATH": "src" + os.pathsep + os.environ.get("PYTHONPATH", "")}
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert result.returncode == 0, (
+            f"subprocess stderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+        assert "OK" in result.stdout

@@ -872,5 +872,75 @@ def lint_consistency(page_ids: str):
         _error_exit(exc)
 
 
+@cli.command("read-page")
+@click.argument("page_id")
+def read_page(page_id: str):
+    """Read a wiki page by ID.
+
+    Cycle 31 AC1 — CLI parity for MCP `kb_read_page`. Forwards ``page_id``
+    verbatim; the MCP tool performs ``_validate_page_id(check_exists=False)``
+    + case-insensitive fallback + byte-level output cap. Error classification
+    uses the cycle-31 shared ``_is_mcp_error_response`` helper so
+    ``"Page not found:"`` (non-``Error`` prefix) and runtime-error shapes
+    route to stderr + exit 1 correctly.
+    """
+    from kb.mcp.browse import kb_read_page  # noqa: PLC0415
+
+    try:
+        output = kb_read_page(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("affected-pages")
+@click.argument("page_id")
+def affected_pages(page_id: str):
+    """Find pages affected when the given page changes.
+
+    Cycle 31 AC2 — CLI parity for MCP `kb_affected_pages`. The empty-state
+    message ``"No pages are affected by changes to X."`` exits 0 (not an
+    error — matches cycle-30 ``reliability-map`` precedent). Runtime
+    exception surfaces as ``"Error computing affected pages: ..."`` (non-
+    colon form) which ``_is_mcp_error_response`` routes to stderr + exit 1.
+    """
+    from kb.mcp.quality import kb_affected_pages  # noqa: PLC0415
+
+    try:
+        output = kb_affected_pages(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("lint-deep")
+@click.argument("page_id")
+def lint_deep(page_id: str):
+    """Deep lint a single page against its raw sources.
+
+    Cycle 31 AC3 — CLI parity for MCP `kb_lint_deep`. Returns page body +
+    raw-source text side-by-side for source-fidelity review. A
+    ``FileNotFoundError`` or other runtime exception surfaces as
+    ``"Error checking fidelity for <id>: ..."`` (non-colon form) which
+    ``_is_mcp_error_response`` routes to stderr + exit 1.
+    """
+    from kb.mcp.quality import kb_lint_deep  # noqa: PLC0415
+
+    try:
+        output = kb_lint_deep(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()
