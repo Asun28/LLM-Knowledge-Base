@@ -540,19 +540,23 @@ def rebuild_indexes_cmd(wiki_dir: str | None, assume_yes: bool):
             abort=True,
         )
 
-    from kb.compile.compiler import rebuild_indexes as _rebuild  # noqa: PLC0415
+    from kb.compile.compiler import (  # noqa: PLC0415 — function-local per cycle-23 AC4 boot-lean
+        _audit_token,
+    )
+    from kb.compile.compiler import (
+        rebuild_indexes as _rebuild,
+    )
 
     try:
         result = _rebuild(wiki_dir=Path(wiki_dir) if wiki_dir else None)
     except Exception as exc:
         _error_exit(exc)
 
-    manifest_status = (
-        "cleared" if result["manifest"]["cleared"] else (result["manifest"]["error"] or "unknown")
-    )
-    vector_status = (
-        "cleared" if result["vector"]["cleared"] else (result["vector"]["error"] or "unknown")
-    )
+    # Cycle 29 Q4 — CLI mirrors the compound audit token used by wiki/log.md so
+    # the interactive operator sees the same `cleared (warn: tmp: <msg>)` form
+    # (Q4 same-class-peer rule — both surfaces render from the same result dict).
+    manifest_status = _audit_token(result["manifest"])
+    vector_status = _audit_token(result["vector"])
     click.echo(
         f"manifest={manifest_status} "
         f"vector={vector_status} "
