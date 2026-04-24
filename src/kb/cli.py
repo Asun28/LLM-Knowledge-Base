@@ -756,5 +756,53 @@ def verdict_trends(wiki_dir: str | None):
         _error_exit(exc)
 
 
+@cli.command("detect-drift")
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Wiki directory override (defaults to config WIKI_DIR).",
+)
+def detect_drift(wiki_dir: str | None):
+    """Detect wiki pages stale due to raw source changes.
+
+    Cycle 30 AC4 — CLI parity for MCP `kb_detect_drift`. Compares raw
+    source content hashes against the compile manifest and reports
+    changed, deleted, and new sources along with the wiki pages that
+    reference them.
+    """
+    from kb.mcp.health import kb_detect_drift  # noqa: PLC0415
+
+    try:
+        output = kb_detect_drift(wiki_dir=wiki_dir)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("reliability-map")
+def reliability_map():
+    """Show page trust scores based on query feedback history.
+
+    Cycle 30 AC5 — CLI parity for MCP `kb_reliability_map`. Zero args.
+    "No feedback recorded yet" is a normal empty-state message and does
+    not prefix ``Error:`` — the command exits 0 in that case.
+    """
+    from kb.mcp.quality import kb_reliability_map  # noqa: PLC0415
+
+    try:
+        output = kb_reliability_map()
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()

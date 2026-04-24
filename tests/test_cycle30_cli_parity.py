@@ -110,3 +110,90 @@ class TestVerdictTrendsCli:
         assert called["value"] is True
         assert called["wiki_dir"] is None
         assert "Verdict Trends" in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC4 — `kb detect-drift`
+# ---------------------------------------------------------------------------
+
+
+class TestDetectDriftCli:
+    """AC4 — CLI parity for MCP `kb_detect_drift`."""
+
+    def test_detect_drift_help_exits_zero(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["detect-drift", "--help"])
+        assert result.exit_code == 0, f"stderr: {result.output!r}"
+        assert "--wiki-dir" in result.output
+
+    def test_detect_drift_body_executes(self, monkeypatch):
+        from kb.mcp import health as health_mod
+
+        called = {"value": False, "wiki_dir": None}
+
+        def _spy(wiki_dir=None):
+            called["value"] = True
+            called["wiki_dir"] = wiki_dir
+            return "# Source Drift Detection\nNo drift detected."
+
+        monkeypatch.setattr(health_mod, "kb_detect_drift", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["detect-drift"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        assert "Source Drift Detection" in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC5 — `kb reliability-map`
+# ---------------------------------------------------------------------------
+
+
+class TestReliabilityMapCli:
+    """AC5 — CLI parity for MCP `kb_reliability_map` (zero args)."""
+
+    def test_reliability_map_help_exits_zero(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["reliability-map", "--help"])
+        assert result.exit_code == 0, f"stderr: {result.output!r}"
+        # No options — but help text should mention trust scores.
+        assert "trust" in result.output.lower()
+        # Cycle-30 C7/C12 — reliability-map takes no args, no --wiki-dir.
+        assert "--wiki-dir" not in result.output
+
+    def test_reliability_map_no_feedback_exits_zero(self, monkeypatch):
+        """Empty-state message is NOT an Error: prefix → exit 0.
+
+        Cycle 30 AC5 specifically calls out this edge — do not conflate
+        "No feedback recorded yet" with an error.
+        """
+        from kb.mcp import quality as quality_mod
+
+        monkeypatch.setattr(
+            quality_mod,
+            "kb_reliability_map",
+            lambda: "No feedback recorded yet. Use kb_query_feedback after queries.",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["reliability-map"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert "No feedback recorded yet" in result.output
+
+    def test_reliability_map_body_executes(self, monkeypatch):
+        from kb.mcp import quality as quality_mod
+
+        called = {"value": False}
+
+        def _spy():
+            called["value"] = True
+            return "# Page Reliability Map\n- concepts/rag: trust=0.80"
+
+        monkeypatch.setattr(quality_mod, "kb_reliability_map", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["reliability-map"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert called["value"] is True
+        assert "Page Reliability Map" in result.output
