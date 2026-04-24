@@ -387,6 +387,227 @@ class TestLintDeepCli:
 
 
 # ---------------------------------------------------------------------------
+# Q3 parity — direct MCP call vs CLI invocation (TASK 4)
+# ---------------------------------------------------------------------------
+
+
+class TestParityCliMcp:
+    """Q3 — CLI is a pure projection of MCP.
+
+    Each test (a) calls the real MCP tool directly to capture
+    ``mcp_output``, (b) invokes the CLI with the same input, (c) asserts
+    strict stream semantics:
+      success → ``stdout == mcp_output + "\\n"``; ``stderr == ""``; exit 0.
+      error   → ``stderr == mcp_output + "\\n"``; ``stdout == ""``; exit 1.
+    Uses ``CliRunner(mix_stderr=False)`` (Click 8.x) so stdout and stderr
+    are separately inspectable.
+
+    Parallel-assertion shape across all 6 tests per cycle-30 L3.
+    """
+
+    # ----- read-page -----
+
+    def test_read_page_parity_success(self, tmp_path, monkeypatch):
+        """Seed a known page in tmp wiki; direct MCP call + CLI return the
+        same string. CLI adds a trailing ``\\n`` via ``click.echo``."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "parity-probe.md"
+        page.write_text(
+            "---\ntitle: Parity Probe\n---\n\nBody content.\n", encoding="utf-8"
+        )
+        monkeypatch.setattr("kb.mcp.browse.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.browse import kb_read_page
+
+        mcp_output = kb_read_page("concepts/parity-probe")
+        assert not _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["read-page", "concepts/parity-probe"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert result.stdout == mcp_output + "\n"
+        assert result.stderr == ""
+
+    def test_read_page_parity_error(self, tmp_path, monkeypatch):
+        """Nonexistent page_id → both channels return identical
+        ``"Page not found: <id>"``. CLI routes to stderr + exit 1."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        monkeypatch.setattr("kb.mcp.browse.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.browse import kb_read_page
+
+        page_id = "concepts/does-not-exist-parity-probe"
+        mcp_output = kb_read_page(page_id)
+        assert _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+        assert "Page not found:" in mcp_output
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["read-page", page_id])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert result.stderr == mcp_output + "\n"
+        assert result.stdout == ""
+
+    # ----- affected-pages -----
+
+    def test_affected_pages_parity_success(self, tmp_path, monkeypatch):
+        """Sparse wiki with one page → empty-state message on both channels."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "parity-probe.md"
+        page.write_text(
+            "---\ntitle: Parity Probe\nsource:\n  - raw/x.md\n---\n\nBody.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.quality import kb_affected_pages
+
+        mcp_output = kb_affected_pages("concepts/parity-probe")
+        assert not _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["affected-pages", "concepts/parity-probe"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert result.stdout == mcp_output + "\n"
+        assert result.stderr == ""
+
+    def test_affected_pages_parity_error(self, tmp_path, monkeypatch):
+        """Forced exception in ``build_backlinks`` → both channels emit
+        identical non-colon ``"Error computing affected pages: ..."``."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "parity-probe.md"
+        page.write_text(
+            "---\ntitle: Parity Probe\nsource:\n  - raw/x.md\n---\n\nBody.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        def _boom():
+            raise RuntimeError("forced")
+
+        monkeypatch.setattr("kb.compile.linker.build_backlinks", _boom)
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.quality import kb_affected_pages
+
+        mcp_output = kb_affected_pages("concepts/parity-probe")
+        assert _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+        assert "Error computing affected pages" in mcp_output
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["affected-pages", "concepts/parity-probe"])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert result.stderr == mcp_output + "\n"
+        assert result.stdout == ""
+
+    # ----- lint-deep -----
+
+    def test_lint_deep_parity_success(self, tmp_path, monkeypatch):
+        """Spy the direct-below helper ``build_fidelity_context`` to return
+        a deterministic string; BOTH channels hit the same spy (owner of
+        the output string is the helper, not the MCP tool)."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "parity-probe.md"
+        page.write_text("---\ntitle: Parity Probe\n---\nBody.\n", encoding="utf-8")
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        # Helper below MCP returns a deterministic string; both CLI and
+        # direct MCP call hit the SAME production code path in the tool.
+        monkeypatch.setattr(
+            "kb.lint.semantic.build_fidelity_context",
+            lambda pid: f"## Page: {pid}\n\n## Sources\n(stub)\n",
+        )
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.quality import kb_lint_deep
+
+        mcp_output = kb_lint_deep("concepts/parity-probe")
+        assert not _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["lint-deep", "concepts/parity-probe"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        assert result.stdout == mcp_output + "\n"
+        assert result.stderr == ""
+
+    def test_lint_deep_parity_error(self, tmp_path, monkeypatch):
+        """Forced ``FileNotFoundError`` in ``build_fidelity_context`` → both
+        channels emit identical non-colon ``"Error checking fidelity for"``."""
+        from click.testing import CliRunner
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "parity-probe.md"
+        page.write_text("---\ntitle: Parity Probe\n---\nBody.\n", encoding="utf-8")
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        def _boom(pid):
+            raise FileNotFoundError("/raw/missing-source.md")
+
+        monkeypatch.setattr("kb.lint.semantic.build_fidelity_context", _boom)
+
+        from kb.cli import _is_mcp_error_response
+        from kb.mcp.quality import kb_lint_deep
+
+        mcp_output = kb_lint_deep("concepts/parity-probe")
+        assert _is_mcp_error_response(mcp_output), (
+            f"precondition failed — mcp_output: {mcp_output!r}"
+        )
+        assert "Error checking fidelity for" in mcp_output
+
+        from kb.cli import cli
+
+        runner = CliRunner()  # Click 8.3+ splits stdout/stderr by default
+        result = runner.invoke(cli, ["lint-deep", "concepts/parity-probe"])
+        assert result.exit_code == 1, f"output: {result.output!r}"
+        assert result.stderr == mcp_output + "\n"
+        assert result.stdout == ""
+
+
+# ---------------------------------------------------------------------------
 # T6 — boot-lean contract (TASK 2)
 # ---------------------------------------------------------------------------
 
