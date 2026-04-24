@@ -29,6 +29,61 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-25 — cycle 32
+
+- Items: 8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / +TBD commits (post-merge backfill per cycle-30 L1)
+- Tests: 2882 → 2901 (+19; Step 14 R1 Codex MAJOR 2 added stagger-integration pin)
+- Scope:
+  Closes CLI ↔ MCP parity category (b) — AC1/AC2 add `compile-scan`
+  thin-wrapper over `kb_compile_scan` and AC4/AC5 add
+  `ingest-content` over `kb_ingest_content` (both via the cycle
+  27+ function-local-import pattern; `--incremental/--no-incremental`
+  boolean flag pair matches cycle 15 `kb publish` precedent; Click
+  `click.Path(exists=True, file_okay=False)` for `--wiki-dir`;
+  Click `click.File("r", lazy=False, encoding="utf-8")` for
+  `--content-file` + `--extraction-json-file` with native `-` stdin
+  support per Context7-verified Click 8.3 semantics). AC3 widens
+  `_is_mcp_error_response` tuple to include `"Error["` prefix,
+  closing a silent-exit-0 bug where `kb_ingest_content`'s
+  post-create OSError path (`Error[partial]: write to ... failed`
+  at `mcp/core.py:762`) would have routed to stdout + exit 0 under
+  the cycle-31 three-tuple; docstring updated with the full
+  emitter map. AC6/AC7 add `utils/io.py` fair-queue stagger
+  mitigation — module-level `_LOCK_WAITERS` counter guarded by
+  `threading.Lock`, incremented via `_take_waiter_slot()` (0-based
+  position snapshot) on entry to `file_lock` retry loop and
+  decremented via `_release_waiter_slot()` in the outermost
+  `finally` (C3 symmetry across success / TimeoutError /
+  KeyboardInterrupt); first-sleep stagger is
+  `position * _FAIR_QUEUE_STAGGER_MS / 1000` clamped to
+  `LOCK_POLL_INTERVAL=50ms` (C11 prevents double-compounding with
+  exponential backoff); position=0 → zero stagger so uncontended
+  N=1 acquire sees no latency change; `_release_waiter_slot`
+  emits `logger.warning` on underflow (C14, post-R1 Opus AMEND)
+  instead of silently clamping to zero so counter drift surfaces
+  to operators. AC8 doc sync updates CLI count 22 → 24 and
+  deletes the BACKLOG fair-queue entry (lines 125-126) since AC6
+  resolves it as a mitigation. Step-2 CVE baseline showed 2 open
+  no-upstream-fix advisories (diskcache, ragas); Step-11 PR-CVE
+  diff surfaced 3 mid-cycle arrivals per cycle-22 L4: litellm
+  GHSA-xqmj-j6mv-4862 + GHSA-r75f-5x8p-qvmc (patched at 1.83.7
+  but blocked by click<8.2 transitive — narrow-role exception
+  documented in BACKLOG since zero runtime imports in `src/kb/`),
+  python-dotenv CVE-2026-28684 (fixed via 1.1.1 → 1.2.2 already
+  pinned in requirements.txt), pip CVE-2026-3219 (no upstream fix
+  yet — tooling-only narrow-role). R1 Opus AMEND verdict (AC5
+  add --use-api test, AC6 observable-warning on underflow, AC8
+  explicit T11 BACKLOG filing); R2 Codex design-eval stopped
+  past 12 min hang (cycle-20 L4) — primary-session manual
+  verify caught `core.py:535` misread of `MAX_INGEST_CONTENT_CHARS*4`
+  as a JSON-overhead ratio (actually UTF-8 bytes-per-char
+  upper bound). Step 5 Opus decision gate hung past 10 min;
+  primary-session synthesis per cycle-20 L4 fallback. Step 8
+  Codex plan-gate hung past 8 min; primary-session self-review
+  per cycle-21 L1 inline-resolve (all conditions grep-verifiable,
+  no code-exploration gaps).
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-32-2026-04-25)
+
 #### 2026-04-25 — cycle 31
 
 - Items: 8 AC / 1 src (`cli.py`) + 1 new test file / 9 commits (post-merge backfill per cycle-30 L1)

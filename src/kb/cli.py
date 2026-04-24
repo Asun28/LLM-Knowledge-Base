@@ -84,7 +84,7 @@ def _is_mcp_error_response(output: str) -> bool:
     (e.g. ``kb_read_page`` for a zero-length page body at
     ``src/kb/mcp/browse.py:161``).
 
-    Three shapes currently emitted by cycle-31 target tools:
+    Four shapes matched as of cycle 32:
 
     - ``"Error:"`` — validator-class (e.g. ``_validate_page_id`` at
       ``src/kb/mcp/app.py:250``; emitters at ``browse.py:94,139``;
@@ -97,17 +97,23 @@ def _is_mcp_error_response(output: str) -> bool:
       * ``quality.py:245`` — ``Error computing reliability map: ...``
       * ``quality.py:290`` — ``Error computing affected pages: ...``
 
+    - ``"Error["`` — tagged-error form per ``ERROR_TAG_FORMAT`` at
+      ``src/kb/mcp/app.py:17`` (``"Error[{category}]: {message}"``).
+      Current emitters:
+
+      * ``core.py:762`` — ``Error[partial]: write to ... failed ...``
+        (``kb_ingest_content`` post-create OSError path)
+      * ``core.py:881`` — same shape in ``kb_save_source``
+
+      Cycle 32 AC3 added this prefix to close the silent-exit-0 bug for
+      ``kb_ingest_content`` partial-write path (now exposed via the
+      cycle-32 ``kb ingest-content`` CLI wrapper).
+
     - ``"Page not found:"`` — logical-miss shape unique to ``kb_read_page``
       at ``src/kb/mcp/browse.py:125``.
-
-    Tagged-error form ``Error[<category>]: ...`` from ``src/kb/mcp/app.py:17``
-    is NOT matched — none of the target tools emit it today (not emitted by
-    cycle-31 tools). T9 future-proofing: if a later refactor adopts
-    ``error_tag()`` in these tools, widen the prefix set and re-run the
-    Step-11 verification grep.
     """
     first_line = output.split("\n", 1)[0]
-    return first_line.startswith(("Error:", "Error ", "Page not found:"))
+    return first_line.startswith(("Error:", "Error ", "Error[", "Page not found:"))
 
 
 def _setup_logging() -> None:
@@ -955,6 +961,146 @@ def lint_deep(page_id: str):
 
     try:
         output = kb_lint_deep(page_id)
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("ingest-content")
+@click.option(
+    "--filename",
+    required=True,
+    help="Slug for raw/<type>/<slug>.md.",
+)
+@click.option(
+    "--type",
+    "source_type",
+    required=True,
+    # Cycle 32 R1 Codex NIT 1 — source-of-truth is ``SOURCE_TYPE_DIRS`` in
+    # ``kb.config``; MCP ``_validate_file_inputs`` already validates against
+    # this set at ``core.py:686``. Using the imported dict keeps the CLI
+    # surface aligned automatically as new source types are added.
+    type=click.Choice(sorted(SOURCE_TYPE_DIRS.keys())),
+    help="Source type subdirectory under raw/.",
+)
+@click.option(
+    "--content-file",
+    type=click.File("r", lazy=False, encoding="utf-8"),
+    required=True,
+    help="Path to content file. Use '-' for stdin.",
+)
+@click.option(
+    "--extraction-json-file",
+    type=click.File("r", lazy=False, encoding="utf-8"),
+    default=None,
+    help=("Optional; required when --use-api is not set. Ignored with --use-api."),
+)
+@click.option(
+    "--url",
+    default="",
+    help="Optional source URL for metadata.",
+)
+@click.option(
+    "--use-api",
+    is_flag=True,
+    default=False,
+    help=("Use Anthropic API for extraction. --extraction-json-file ignored if set."),
+)
+def ingest_content(
+    filename: str,
+    source_type: str,
+    content_file,
+    extraction_json_file,
+    url: str,
+    use_api: bool,
+) -> None:
+    """One-shot ingest: save content to raw/ and create wiki pages.
+
+    Cycle 32 AC4 — CLI parity for MCP ``kb_ingest_content``. Content + extraction
+    JSON forwarded verbatim; MCP tool is authoritative for validation.
+
+    ``--content-file`` accepts ``-`` for stdin (Click native). Stat guard
+    rejects oversized files BEFORE calling MCP (C13). Errors route via
+    the shared ``_is_mcp_error_response`` discriminator which recognises
+    the ``Error[partial]:`` post-create-OSError shape added in cycle 32 AC3.
+    """
+    from kb.config import MAX_INGEST_CONTENT_CHARS  # noqa: PLC0415
+    from kb.mcp.core import kb_ingest_content  # noqa: PLC0415
+
+    # Cycle 32 C13 — stat guard for --content-file BEFORE read. Skips
+    # on stdin / non-seekable streams; MCP cap catches those paths.
+    try:
+        st_size = os.fstat(content_file.fileno()).st_size
+        if st_size > MAX_INGEST_CONTENT_CHARS:
+            click.echo(
+                f"Error: --content-file size {st_size} exceeds {MAX_INGEST_CONTENT_CHARS}.",
+                err=True,
+            )
+            sys.exit(1)
+    except (OSError, AttributeError):
+        pass  # stdin / non-seekable — defer to MCP cap
+
+    # C13 — stat guard for --extraction-json-file (same cap per Q9).
+    if extraction_json_file is not None:
+        try:
+            ej_size = os.fstat(extraction_json_file.fileno()).st_size
+            if ej_size > MAX_INGEST_CONTENT_CHARS:
+                click.echo(
+                    f"Error: --extraction-json-file size {ej_size} exceeds "
+                    f"{MAX_INGEST_CONTENT_CHARS}.",
+                    err=True,
+                )
+                sys.exit(1)
+        except (OSError, AttributeError):
+            pass
+
+    content = content_file.read()
+    extraction_json = extraction_json_file.read() if extraction_json_file else ""
+
+    try:
+        output = kb_ingest_content(
+            content=content,
+            filename=filename,
+            source_type=source_type,
+            extraction_json=extraction_json,
+            url=url,
+            use_api=use_api,
+        )
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("compile-scan")
+@click.option(
+    "--incremental/--no-incremental",
+    default=True,
+    help="Only new/changed sources (default: incremental).",
+)
+@click.option(
+    "--wiki-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=None,
+    help="Optional wiki directory override.",
+)
+def compile_scan(incremental: bool, wiki_dir: str | None) -> None:
+    """Scan for new/changed raw sources that need ingestion.
+
+    Cycle 32 AC1 — CLI parity for MCP ``kb_compile_scan``. Forwards
+    ``incremental`` and ``wiki_dir`` verbatim; MCP tool is authoritative.
+    Error routing uses the cycle-31 shared ``_is_mcp_error_response``
+    discriminator (widened in cycle 32 AC3 to include ``"Error["``).
+    """
+    from kb.mcp.core import kb_compile_scan  # noqa: PLC0415
+
+    try:
+        output = kb_compile_scan(incremental=incremental, wiki_dir=wiki_dir)
         if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)

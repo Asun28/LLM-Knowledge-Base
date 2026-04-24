@@ -40,6 +40,47 @@ _IS_WINDOWS = sys.platform == "win32"
 _legacy_locks_purged = False
 _legacy_locks_purge_lock = threading.Lock()
 
+# Cycle 32 AC6 — fair-queue stagger mitigation (intra-process only,
+# probabilistic). Module-level counter tracks how many threads are
+# currently inside the ``file_lock`` retry loop so each entrant can
+# stagger its first sleep by ``position * _FAIR_QUEUE_STAGGER_MS / 1000``
+# (clamped to ``LOCK_POLL_INTERVAL``). Does NOT guarantee fair-queue
+# acquisition across processes; only improves the intra-process
+# thundering-herd case.
+_LOCK_WAITERS: int = 0
+_LOCK_WAITERS_LOCK: threading.Lock = threading.Lock()
+_FAIR_QUEUE_STAGGER_MS: float = 2.0
+
+
+def _take_waiter_slot() -> int:
+    """Increment ``_LOCK_WAITERS`` and return 0-based position BEFORE increment.
+
+    Caller MUST pair with ``_release_waiter_slot`` in a ``finally`` clause
+    (cycle-32 C3 counter-symmetry contract). Position snapshot BEFORE the
+    increment means first waiter sees 0 (zero stagger), second sees 1, etc.
+    """
+    global _LOCK_WAITERS
+    with _LOCK_WAITERS_LOCK:
+        position = _LOCK_WAITERS
+        _LOCK_WAITERS += 1
+        return position
+
+
+def _release_waiter_slot() -> None:
+    """Decrement ``_LOCK_WAITERS``; warn on underflow.
+
+    Cycle-32 C14 (R1 Opus R2 residual): silent clamp-to-zero hides
+    paired-release bugs. On underflow, emit ``logger.warning`` so counter
+    drift surfaces to operators instead of silently inflating stagger for
+    all subsequent waiters.
+    """
+    global _LOCK_WAITERS
+    with _LOCK_WAITERS_LOCK:
+        if _LOCK_WAITERS > 0:
+            _LOCK_WAITERS -= 1
+        else:
+            logger.warning("_LOCK_WAITERS underflow — paired _take_waiter_slot release missing")
+
 
 def _cleanup_tmp(tmp_path: str) -> None:
     """Best-effort cleanup of an atomic-write temp file.
@@ -289,7 +330,26 @@ def file_lock(path: Path, timeout: float | None = None):
     # both constants read at CALL TIME (module attribute lookup) so
     # monkeypatching either one in tests takes effect immediately.
     attempt_count = 0
+    # Cycle 32 AC6 — fair-queue position snapshot (intra-process only mitigation).
+    # Pair with ``_release_waiter_slot()`` in the finally clause (C3 symmetry).
+    # Cycle 32 PR review R1 Codex MAJOR 1 — take the slot INSIDE the outer try
+    # and guard release with ``slot_taken`` to close a narrow window where a
+    # KeyboardInterrupt landing between ``_take_waiter_slot()`` returning and
+    # the try-statement being entered would leak the counter increment.
+    slot_taken = False
     try:
+        position = _take_waiter_slot()
+        slot_taken = True
+        # Cycle 32 C11 — one-shot initial stagger BEFORE retry loop, clamped
+        # to ``LOCK_POLL_INTERVAL`` to prevent double-compounding with
+        # exponential backoff (T7). Position=0 → zero stagger → no latency
+        # change for uncontended acquires.
+        if position > 0:
+            stagger_s = min(
+                position * _FAIR_QUEUE_STAGGER_MS / 1000.0,
+                LOCK_POLL_INTERVAL,
+            )
+            time.sleep(stagger_s)
         while not acquired:
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -384,5 +444,11 @@ def file_lock(path: Path, timeout: float | None = None):
                 attempt_count += 1
         yield
     finally:
+        # Cycle 32 C3 — release waiter slot on every exit path (success,
+        # TimeoutError, PermissionError, KeyboardInterrupt). Guarded by
+        # ``slot_taken`` so an exception BEFORE the slot was taken does not
+        # decrement a counter that was never incremented (R1 Codex MAJOR 1).
+        if slot_taken:
+            _release_waiter_slot()
         if acquired:
             lock_path.unlink(missing_ok=True)
