@@ -31,7 +31,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-24 — cycle 28
 
-- Items: 9 AC / 2 src + 1 new test file / 4 commits
+- Items: 9 AC / 2 src + 1 new test file / 6 commits
 - Tests: 2801 → 2809 (+8)
 - Scope:
   First-query observability completion — `VectorIndex._ensure_conn`

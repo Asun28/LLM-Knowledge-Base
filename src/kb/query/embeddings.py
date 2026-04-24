@@ -535,12 +535,16 @@ class VectorIndex:
                 except Exception:
                     pass
                 return None
-            # Cycle 28 AC1/AC2/AC3 — post-success ordering (CONDITION 4 / C9):
-            # log + counter fire ONLY after `self._conn = conn`. NO `finally:`
-            # wraps this block — a revert to `finally:` would emit INFO on the
-            # exception path, caught by `test_sqlite_vec_load_no_info_on_failure_path`.
-            self._conn = conn
+            # Cycle 28 AC1/AC2/AC3 — ordering per design CONDITIONs 1, 4, 9:
+            #   C1 — `elapsed = time.perf_counter() - start` BEFORE `self._conn = conn`.
+            #   C4 — log + counter AFTER `self._conn = conn`.
+            #   C9 — NO `finally:` wraps the perf/log/counter triple. A revert to
+            #        `finally:` would emit INFO on the exception path, caught by
+            #        `test_sqlite_vec_load_no_info_on_failure_path`.
+            # PR #42 R1 Sonnet M1 fix (2026-04-24): elapsed captured before the
+            # assignment so the latency measurement matches C1's literal text.
             elapsed = time.perf_counter() - start
+            self._conn = conn
             global _sqlite_vec_loads_seen
             _sqlite_vec_loads_seen += 1
             logger.info("sqlite-vec extension loaded in %.3fs (db=%s)", elapsed, self.db_path)

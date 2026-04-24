@@ -171,19 +171,34 @@ def test_sqlite_vec_load_count_increments_exactly_once(tmp_path):
 
 
 def test_sqlite_vec_load_count_stable_on_fast_path(tmp_path):
-    """AC3 — second `_ensure_conn` on the same instance hits `self._conn` cache; counter stable."""
+    """AC3 — second `_ensure_conn` on the same instance hits `self._conn` cache; counter stable.
+
+    PR #42 R1 Sonnet M2 fix (2026-04-24): capture baseline BEFORE the first call
+    and assert +1 after first, then +1 (unchanged) after second. Under a revert
+    of the `_sqlite_vec_loads_seen += 1` line entirely, the after-first assertion
+    flips to fail — the test is no longer vacuous. The prior version only
+    sampled the counter between the two calls, so a full revert still produced
+    delta == 0 and the test passed under both correct and reverted code.
+    """
     _skip_if_no_hybrid()
     db_path = _build_minimal_vec_db(tmp_path)
     fresh_idx = VectorIndex(db_path)
 
+    baseline = embeddings_mod.get_sqlite_vec_load_count()
+
     conn_a = fresh_idx._ensure_conn()
     assert conn_a is not None
+    after_first = embeddings_mod.get_sqlite_vec_load_count() - baseline
+    assert after_first == 1, (
+        f"First call must increment counter by 1 (revert-divergence pin); got {after_first}"
+    )
 
-    baseline_after_first = embeddings_mod.get_sqlite_vec_load_count()
     conn_b = fresh_idx._ensure_conn()
     assert conn_b is conn_a, "Cached conn must be returned on second call"
-    delta = embeddings_mod.get_sqlite_vec_load_count() - baseline_after_first
-    assert delta == 0, f"Expected counter stable on fast-path; got delta={delta}"
+    after_second = embeddings_mod.get_sqlite_vec_load_count() - baseline
+    assert after_second == 1, (
+        f"Second call (fast-path) must NOT increment counter; got total delta {after_second}"
+    )
 
 
 def test_sqlite_vec_load_no_info_on_failure_path(tmp_path, caplog, monkeypatch):
