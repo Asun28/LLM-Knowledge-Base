@@ -695,5 +695,66 @@ def list_sources(limit: int, offset: int):
         _error_exit(exc)
 
 
+@cli.command("graph-viz")
+@click.option(
+    "--max-nodes",
+    "max_nodes",
+    type=int,
+    default=30,
+    help="Max nodes in graph (default 30; 1-500; 0 rejected).",
+)
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Wiki directory override (defaults to config WIKI_DIR).",
+)
+def graph_viz(max_nodes: int, wiki_dir: str | None):
+    """Export the wiki knowledge graph as a Mermaid diagram.
+
+    Cycle 30 AC2 — CLI parity for MCP `kb_graph_viz`. Forwards to the
+    same underlying library helper; auto-prunes to the most-connected
+    nodes when the graph exceeds ``max_nodes``.
+    """
+    from kb.mcp.health import kb_graph_viz  # noqa: PLC0415
+
+    try:
+        output = kb_graph_viz(max_nodes=max_nodes, wiki_dir=wiki_dir)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
+@cli.command("verdict-trends")
+@click.option(
+    "--wiki-dir",
+    "wiki_dir",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Wiki directory override (defaults to config WIKI_DIR).",
+)
+def verdict_trends(wiki_dir: str | None):
+    """Show verdict quality trends over time.
+
+    Cycle 30 AC3 — CLI parity for MCP `kb_verdict_trends`. Forwards to
+    the same underlying library helper; reports weekly pass/fail/warning
+    rates and whether quality is improving, stable, or declining.
+    """
+    from kb.mcp.health import kb_verdict_trends  # noqa: PLC0415
+
+    try:
+        output = kb_verdict_trends(wiki_dir=wiki_dir)
+        if output.startswith("Error:"):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 if __name__ == "__main__":
     cli()
