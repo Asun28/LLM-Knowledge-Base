@@ -162,6 +162,24 @@ class TestReadPageCli:
         assert "Error:" in result.output
         assert "control characters" in result.output
 
+    def test_read_page_missing_exits_non_zero_with_page_not_found(self):
+        """AC6b — nonexistent page hits `"Page not found:"` at
+        `src/kb/mcp/browse.py:125` (no ``"Error"`` prefix at all).
+        Revert-divergent: under legacy `startswith("Error:")` discriminator
+        this test FAILS with exit 0 + the text on stdout."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        # Use a syntactically-valid page_id that passes the validator
+        # with `check_exists=False` but resolves to no file on disk.
+        result = runner.invoke(
+            cli, ["read-page", "concepts/does-not-exist-cycle31-probe"]
+        )
+        assert result.exit_code != 0
+        assert "Page not found:" in result.output
+
 
 # ---------------------------------------------------------------------------
 # AC2 — `kb affected-pages` (TASK 2)
@@ -232,6 +250,42 @@ class TestAffectedPagesCli:
             "affected-pages must strip (not reject) control chars per MCP contract"
         )
 
+    def test_affected_pages_runtime_exception_exits_non_zero_non_colon_form(
+        self, monkeypatch, tmp_path
+    ):
+        """AC6b — force a runtime exception inside `kb_affected_pages` so
+        the MCP tool's except clause emits the non-colon
+        ``"Error computing affected pages: ..."`` form at
+        `src/kb/mcp/quality.py:290`. Revert-divergent: under legacy
+        `startswith("Error:")` discriminator this test FAILS with exit 0."""
+        from click.testing import CliRunner
+
+        # Seed a minimal wiki containing the probe page so validator's
+        # check_exists=True passes, reaching the build_backlinks call.
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "probe-cycle31.md"
+        page.write_text(
+            "---\ntitle: Probe\nsource:\n  - raw/x.md\n---\n\nBody.",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        # Force the helper BELOW the MCP tool to raise → MCP's except clause
+        # emits the non-colon error shape.
+        def _boom():
+            raise RuntimeError("forced")
+
+        monkeypatch.setattr("kb.compile.linker.build_backlinks", _boom)
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["affected-pages", "concepts/probe-cycle31"])
+        assert result.exit_code != 0, f"output: {result.output!r}"
+        assert "Error computing affected pages" in result.output
+
 
 # ---------------------------------------------------------------------------
 # AC3 — `kb lint-deep` (TASK 2)
@@ -298,6 +352,38 @@ class TestLintDeepCli:
         assert "control characters" not in result.output, (
             "lint-deep must strip (not reject) control chars per MCP contract"
         )
+
+    def test_lint_deep_file_not_found_exits_non_zero_non_colon_form(
+        self, monkeypatch, tmp_path
+    ):
+        """AC6b — force `build_fidelity_context` to raise `FileNotFoundError`
+        so `kb_lint_deep` emits the non-colon
+        ``"Error checking fidelity for <id>: ..."`` at
+        `src/kb/mcp/quality.py:149,152`. Revert-divergent."""
+        from click.testing import CliRunner
+
+        # Seed a minimal wiki with the probe page so the validator passes.
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "probe-cycle31.md"
+        page.write_text(
+            "---\ntitle: Probe\nsource:\n  - raw/x.md\n---\n\nBody.",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.mcp.app.WIKI_DIR", wiki_dir)
+
+        def _boom(page_id):
+            raise FileNotFoundError("/raw/missing-source.md")
+
+        monkeypatch.setattr("kb.lint.semantic.build_fidelity_context", _boom)
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["lint-deep", "concepts/probe-cycle31"])
+        assert result.exit_code != 0, f"output: {result.output!r}"
+        assert "Error checking fidelity for" in result.output
 
 
 # ---------------------------------------------------------------------------
