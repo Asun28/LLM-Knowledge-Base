@@ -77,6 +77,11 @@ RAW_CONVERSATIONS = RAW_DIR / "conversations"
 RAW_ASSETS = RAW_DIR / "assets"
 
 # ── Raw subdirectories (contd.) ──────────────────────────────
+# Carve-out from the "LLM never modifies raw/" invariant: raw/captures/
+# is the SOLE LLM-written output directory inside raw/. Items are atomised
+# via kb_capture (scan-tier LLM extraction) from unstructured text, then
+# treated as raw input for subsequent ingest. See CLAUDE.md §raw/ bullet
+# for the architectural contract and the Phase 5 pre-merge resolution.
 CAPTURES_DIR = RAW_DIR / "captures"
 
 # ── Query output adapters (Phase 4.11) ───────────────────────
