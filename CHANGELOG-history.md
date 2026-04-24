@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 32 (2026-04-25)
 
-8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / +TBD commits (post-merge backfill per cycle-30 L1). Tests: 2882 → 2900 (+18).
+8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / +TBD commits (post-merge backfill per cycle-30 L1). Tests: 2882 → 2901 (+19) — final count after Step 14 R1 Codex MAJOR 2 added `test_fair_queue_stagger_integrates_with_file_lock`.
 
 **Closes CLI ↔ MCP parity category (b) + widens error discriminator + adds intra-process fair-queue stagger.** Three conceptually separate changes land in one cycle per the batch-by-file convention: the two new CLI wrappers (AC1/AC4) share the `cli.py` surface with the `_is_mcp_error_response` widening (AC3), and `utils/io.py` gets the fair-queue mitigation (AC6) that the Phase 4.5 MEDIUM BACKLOG entry has been tracking since cycle 24 AC9.
 
@@ -35,6 +35,9 @@
 - Step 10 CI: 2890 passed + 10 skipped, ruff clean. 138-145s runtime. One transient flake on `test_persist_contradictions_concurrent` resolved on re-run (not a cycle 32 regression).
 - Step 11 PR-CVE diff: 2 new advisories per cycle-22 L4 (litellm GHSA-xqmj-j6mv-4862, pip CVE-2026-3219). Bump attempt litellm 1.83.0→1.83.7 failed ResolutionImpossible (click<8.2 transitive conflict with our click==8.3.2). Venv restored to requirements.txt-compliant state. Narrow-role exception documented.
 - Step 11.5 Dependabot: 3 open alerts (both litellm GHSAs at 1.83.7 blocked; ragas no upstream).
+- Step 14 PR review R1 Codex (REQUEST-CHANGES): (MAJOR 1) `_take_waiter_slot()` was called before the outer `try:` — a `KeyboardInterrupt` between the helper's increment and the try-entry would leak the counter. Refactored to take the slot as the FIRST statement INSIDE the outer try, guarded by a `slot_taken = False` flag so the `finally:` only releases when the slot was actually taken. (MAJOR 2) deterministic counter test passed even if the `if position > 0: time.sleep(stagger_s)` call in `file_lock` were removed — added `test_fair_queue_stagger_integrates_with_file_lock` that seeds `_LOCK_WAITERS=2`, monkeypatches `time.sleep` to record durations, enters an uncontended `file_lock`, and asserts the first recorded sleep equals `min(position * _FAIR_QUEUE_STAGGER_MS / 1000.0, LOCK_POLL_INTERVAL)`; fully deterministic, pins the C11 integration. (NIT 1) `--type` choices refactored from hardcoded list to `sorted(SOURCE_TYPE_DIRS.keys())` — aligns CLI automatically with `_validate_file_inputs` at `core.py:686`. (NIT 3) CLAUDE.md §File locking paragraph extended with cycle-32 mitigation language per C8.
+- Step 14 PR review R1 Sonnet (APPROVE w/ MAJORs): (MAJOR 1) design doc C6 had no waiver note despite the probabilistic 10-trial test being replaced with a deterministic invariant — added a waiver block under C6 in `2026-04-25-cycle32-design.md` cross-referencing the CHANGELOG-history rationale. (MAJOR 2) `test_release_waiter_slot_underflow_warns` used a hard `assert baseline == 0` precondition that would mis-fail under pytest-xdist / any prior test leaving non-zero residual counter state — rewrote to save the prior value, zero the counter under `_LOCK_WAITERS_LOCK`, exercise the underflow path, then restore the prior value in `finally`. (NIT 3) 200ms vs "20ms" comment mismatch in `test_fair_queue_stagger_single_waiter_zero_stagger` — comment updated to describe the actual 200ms budget and its rationale (AV/OneDrive headroom on Windows).
+- Step 14 final CI: 2891 passed + 10 skipped, ruff clean.
 
 ### Phase 4.5 — cycle 31 (2026-04-25)
 

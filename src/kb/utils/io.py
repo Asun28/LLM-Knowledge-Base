@@ -332,8 +332,14 @@ def file_lock(path: Path, timeout: float | None = None):
     attempt_count = 0
     # Cycle 32 AC6 — fair-queue position snapshot (intra-process only mitigation).
     # Pair with ``_release_waiter_slot()`` in the finally clause (C3 symmetry).
-    position = _take_waiter_slot()
+    # Cycle 32 PR review R1 Codex MAJOR 1 — take the slot INSIDE the outer try
+    # and guard release with ``slot_taken`` to close a narrow window where a
+    # KeyboardInterrupt landing between ``_take_waiter_slot()`` returning and
+    # the try-statement being entered would leak the counter increment.
+    slot_taken = False
     try:
+        position = _take_waiter_slot()
+        slot_taken = True
         # Cycle 32 C11 — one-shot initial stagger BEFORE retry loop, clamped
         # to ``LOCK_POLL_INTERVAL`` to prevent double-compounding with
         # exponential backoff (T7). Position=0 → zero stagger → no latency
@@ -439,8 +445,10 @@ def file_lock(path: Path, timeout: float | None = None):
         yield
     finally:
         # Cycle 32 C3 — release waiter slot on every exit path (success,
-        # TimeoutError, PermissionError, KeyboardInterrupt). Paired with
-        # the ``_take_waiter_slot()`` call immediately before the try.
-        _release_waiter_slot()
+        # TimeoutError, PermissionError, KeyboardInterrupt). Guarded by
+        # ``slot_taken`` so an exception BEFORE the slot was taken does not
+        # decrement a counter that was never incremented (R1 Codex MAJOR 1).
+        if slot_taken:
+            _release_waiter_slot()
         if acquired:
             lock_path.unlink(missing_ok=True)

@@ -128,9 +128,10 @@ class TestFairQueueStagger:
         with file_lock(lock_path, timeout=5.0):
             pass
         elapsed = time.perf_counter() - start
-        # Uncontended acquire should be well under the initial 10ms poll
-        # (C11 cap is 50ms). Stagger at position=0 is zero, so total
-        # elapsed < 20ms is a reasonable sanity check for "no new delay."
+        # Uncontended acquire should complete well under 200ms on any CI
+        # host. Stagger at position=0 is zero, so the wall-clock budget is
+        # "no new delay beyond pre-cycle-32 lock-creation overhead"; 200ms
+        # is generous headroom against AV / OneDrive stall on Windows.
         assert elapsed < 0.2, (
             f"Uncontended file_lock took {elapsed:.3f}s; stagger may be "
             "applied to position=0 (T7 regression)."
@@ -188,28 +189,99 @@ class TestFairQueueStagger:
     def test_release_waiter_slot_underflow_warns(self, caplog):
         """C14 — unpaired ``_release_waiter_slot`` emits logger.warning
         instead of silently clamping to 0. Cycle-32 R1 Opus R2 residual:
-        silent clamp hides paired-release bugs."""
+        silent clamp hides paired-release bugs.
+
+        R1 Sonnet MAJOR 2 (cycle 32 PR review): robustness under parallel
+        test pollution — explicitly zero the counter under its own lock
+        instead of asserting a global precondition. This makes the test
+        safe against ``pytest-xdist`` / any prior test leaving a non-zero
+        residual, and restores the counter afterward so we never leave
+        negative drift for the next test.
+        """
         import logging
 
         from kb.utils import io as io_mod
 
-        # Reset counter to 0 so any extra release triggers underflow.
-        # (The test runs after other tests may have left baseline at 0.)
-        baseline = io_mod._LOCK_WAITERS
-        assert baseline == 0, (
-            f"Prerequisite failed: _LOCK_WAITERS={baseline}, expected 0 "
-            "(earlier test leaked take/release pair)"
-        )
+        with io_mod._LOCK_WAITERS_LOCK:
+            prior = io_mod._LOCK_WAITERS
+            io_mod._LOCK_WAITERS = 0  # guarantee underflow is reachable
 
-        with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
-            io_mod._release_waiter_slot()  # Unpaired — should warn.
+        try:
+            with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
+                io_mod._release_waiter_slot()  # Unpaired — should warn.
 
-        assert any("_LOCK_WAITERS underflow" in rec.message for rec in caplog.records), (
-            f"C14 — no underflow warning emitted. Records: "
-            f"{[rec.message for rec in caplog.records]}"
+            assert any("_LOCK_WAITERS underflow" in rec.message for rec in caplog.records), (
+                f"C14 — no underflow warning emitted. Records: "
+                f"{[rec.message for rec in caplog.records]}"
+            )
+            # Counter still at 0 (no negative drift).
+            assert io_mod._LOCK_WAITERS == 0
+        finally:
+            # Restore whatever prior value was in place so we never leave
+            # the module counter polluted for subsequent tests.
+            with io_mod._LOCK_WAITERS_LOCK:
+                io_mod._LOCK_WAITERS = prior
+
+    def test_fair_queue_stagger_integrates_with_file_lock(self, tmp_path, monkeypatch):
+        """R1 Codex MAJOR 2 (cycle 32 PR review) — pin the C11 stagger
+        INTEGRATION inside ``file_lock``, not just the counter contract.
+
+        A regression that left ``_take_waiter_slot`` / ``_release_waiter_slot``
+        intact but removed the ``if position > 0: time.sleep(stagger_s)`` call
+        at ``utils/io.py`` would still pass the deterministic counter test.
+        This test seeds ``_LOCK_WAITERS`` so the next entrant observes
+        ``position > 0``, monkeypatches ``time.sleep`` to record the first
+        sleep duration, enters an uncontended ``file_lock``, and asserts the
+        first recorded sleep matches ``min(position * _FAIR_QUEUE_STAGGER_MS
+        / 1000.0, LOCK_POLL_INTERVAL)``. Fully deterministic — no wall-clock.
+        """
+        from kb.utils import io as io_mod
+        from kb.utils.io import file_lock
+
+        # Seed position = 2 so the stagger branch fires AND the clamp is
+        # exercised in the same assertion (2 * 2.0ms = 4.0ms; well below
+        # the 50ms LOCK_POLL_INTERVAL cap, so we verify the pre-cap form).
+        with io_mod._LOCK_WAITERS_LOCK:
+            prior = io_mod._LOCK_WAITERS
+            io_mod._LOCK_WAITERS = 2
+
+        recorded: list[float] = []
+        real_sleep = io_mod.time.sleep
+
+        def fake_sleep(duration: float) -> None:
+            recorded.append(duration)
+            # Don't actually sleep — we're not measuring wall-clock.
+            real_sleep(0)
+
+        monkeypatch.setattr(io_mod.time, "sleep", fake_sleep)
+
+        try:
+            lock_path = tmp_path / "stagger-integration"
+            with file_lock(lock_path, timeout=5.0):
+                pass
+        finally:
+            # Restore the counter (we bumped it manually; helper would
+            # normally decrement by 1 when file_lock exits, so manually
+            # reconcile so later tests see baseline).
+            with io_mod._LOCK_WAITERS_LOCK:
+                io_mod._LOCK_WAITERS = prior
+
+        # The FIRST sleep call must be the stagger sleep (C11): one-shot,
+        # computed from position and clamped. We expect position==2 here,
+        # so the value is 2 * 2.0 / 1000 = 0.004s (not clamped).
+        assert recorded, (
+            "R1 Codex MAJOR 2 — no sleep recorded; stagger branch did not fire. "
+            "Regression: `if position > 0: time.sleep(stagger_s)` removed."
         )
-        # Counter still at 0 (no negative drift).
-        assert io_mod._LOCK_WAITERS == 0
+        expected = min(
+            2 * io_mod._FAIR_QUEUE_STAGGER_MS / 1000.0,
+            io_mod.LOCK_POLL_INTERVAL,
+        )
+        assert recorded[0] == expected, (
+            f"R1 Codex MAJOR 2 — first sleep was {recorded[0]!r}, "
+            f"expected stagger {expected!r} (pos=2, stagger_ms="
+            f"{io_mod._FAIR_QUEUE_STAGGER_MS}). C11 integration broken."
+        )
 
 
 # ---------------------------------------------------------------------------

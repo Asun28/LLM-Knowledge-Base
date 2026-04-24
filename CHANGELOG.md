@@ -32,7 +32,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 #### 2026-04-25 — cycle 32
 
 - Items: 8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / +TBD commits (post-merge backfill per cycle-30 L1)
-- Tests: 2882 → 2900 (+18)
+- Tests: 2882 → 2901 (+19; Step 14 R1 Codex MAJOR 2 added stagger-integration pin)
 - Scope:
   Closes CLI ↔ MCP parity category (b) — AC1/AC2 add `compile-scan`
   thin-wrapper over `kb_compile_scan` and AC4/AC5 add

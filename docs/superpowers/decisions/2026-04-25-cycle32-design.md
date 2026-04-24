@@ -151,6 +151,8 @@ Consolidated from threat-model C1-C13 + R1 Opus residuals + Q9 + cycle-22 L5 (ea
 
 **C6.** AC7 probabilistic test: `max_workers=3`, 10 trials, 80% tolerance, `threading.Barrier(3)` for simultaneous entry. Grep-verifiable: `rg 'threading\.Barrier' tests/test_cycle32_*.py` shows fixture.
 
+> **C6 waiver (Step 9, 2026-04-25):** The probabilistic 10-trial ordering test was observationally unreliable on the Windows CI host because the ~15.6ms coarse-scheduler tick is larger than the intended 2ms position stagger (Q5), so the fairness signal sits below timer resolution. Replaced by `test_fair_queue_positions_unique_and_zero_based` (deterministic counter-invariant) plus — after R1 Codex PR review MAJOR 2 — `test_fair_queue_stagger_integrates_with_file_lock` (deterministic `time.sleep` monkeypatch that pins the C11 integration inside `file_lock`, not just the counter contract). Full rationale: `CHANGELOG-history.md` cycle-32 entry under "TestFairQueueStagger".
+
 **C7.** AC4 CLI reads file contents WITHOUT client-side `json.loads` on extraction-json or `str.strip()` on url. Grep-verifiable: `rg -n 'json\.loads|url\.strip' src/kb/cli.py` returns no new matches in `ingest_content` body.
 
 **C8.** AC8 CLAUDE.md §"File locking" paragraph contains literals `mitigation` AND `intra-process only`; contains ZERO occurrences of `fair-queue` as unqualified noun (may use "fair-queue stagger" as a compound adjective for the feature name). Grep-verifiable: `rg -n 'mitigation' CLAUDE.md` shows the cycle-32 line; `rg -n '\bfair-queue\b[^ ]*\s' CLAUDE.md` returns 0 unqualified usages outside compound "fair-queue stagger mitigation" phrase.

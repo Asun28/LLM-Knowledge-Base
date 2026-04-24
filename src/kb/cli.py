@@ -979,19 +979,11 @@ def lint_deep(page_id: str):
     "--type",
     "source_type",
     required=True,
-    type=click.Choice(
-        [
-            "article",
-            "paper",
-            "repo",
-            "video",
-            "podcast",
-            "book",
-            "dataset",
-            "conversation",
-            "capture",
-        ]
-    ),
+    # Cycle 32 R1 Codex NIT 1 — source-of-truth is ``SOURCE_TYPE_DIRS`` in
+    # ``kb.config``; MCP ``_validate_file_inputs`` already validates against
+    # this set at ``core.py:686``. Using the imported dict keeps the CLI
+    # surface aligned automatically as new source types are added.
+    type=click.Choice(sorted(SOURCE_TYPE_DIRS.keys())),
     help="Source type subdirectory under raw/.",
 )
 @click.option(
