@@ -12,11 +12,45 @@ relevant compiled pages for a given question.
 import logging
 import math
 import re
+import time
 from collections import Counter
 
 from kb.utils.text import STOPWORDS as STOP_WORDS
 
 logger = logging.getLogger(__name__)
+
+# Cycle 28 AC5 — process-level observability counter for BM25 index builds.
+# Lock-free per design Q2 (matches cycle-25 `_dim_mismatches_seen` pattern):
+# `BM25Index.__init__` is called from outside any cache lock (`engine.py:110`
+# wiki-side + `engine.py:794` raw-side both release the cache lock before
+# constructing), and the counter is intended as operator diagnostic telemetry,
+# NOT billing-grade. Approximate counts are adequate; a concurrent pair of
+# cache-miss rebuilds may under-count by 1 under the non-atomic `+= 1` race.
+# Python `int` has no overflow (threat-model T7). Contrast cycle-26 AC4
+# `_vector_model_cold_loads_seen` which IS locked — different rate profile.
+_bm25_builds_seen: int = 0
+
+
+def get_bm25_build_count() -> int:
+    """Return the process-level count of `BM25Index.__init__` executions.
+
+    Cycle 28 AC5 — module-level observability counter. Semantics pinned
+    by Q11: "constructor executions, NOT distinct cache insertions".
+    Aggregates both call sites: `engine.py:110` (wiki-page BM25 cache
+    rebuilds) and `engine.py:794` (raw-source BM25 cache rebuilds). Under
+    concurrent cache-misses two threads may both build and both increment,
+    so the counter is approximate.
+
+    Lock-free per cycle-25 Q8 design precedent: operator-diagnostic use
+    tolerates undercount by ≤N under N concurrent rebuilds. Contrast
+    cycle-26 `get_vector_model_cold_load_count()` which IS locked via
+    `_model_lock` because cold-loads happen at most once per process.
+
+    The counter is READ-only: no reset helper. Tests observe monotonic
+    deltas via baseline-snapshot pattern (reload-safe per cycle-20 L1 /
+    threat-model T8). Python `int` is arbitrary-precision — no overflow risk.
+    """
+    return _bm25_builds_seen
 
 
 def tokenize(text: str) -> list[str]:
@@ -65,10 +99,19 @@ class BM25Index:
         At ~5K pages with hundreds of unique terms the memory cost is ~150 MB;
         the scoring speedup for sparse queries outweighs the cost.
 
+        Cycle 28 AC4 — instrumented with ``time.perf_counter`` around the FULL
+        constructor body (corpus loop + avgdl + IDF pre-computation per
+        design CONDITION 2). Emits one INFO log per call. Counter increments
+        and log emission sit at the end of the method body (post-success
+        ordering — no `finally:` wraps them).
+
         Args:
             documents: List of token lists (one per document).
         """
         self.n_docs = len(documents)
+        # Cycle 28 AC4 — bracket starts AFTER `self.n_docs` assignment so the
+        # log can reference `n_docs` even for the empty-corpus edge case.
+        start = time.perf_counter()
         self.doc_freqs: list[Counter[str]] = []
         self.doc_lengths: list[int] = []
         self.df: Counter[str] = Counter()
@@ -92,6 +135,15 @@ class BM25Index:
         self.idf: dict[str, float] = {}
         for term, df in self.df.items():
             self.idf[term] = math.log((self.n_docs - df + 0.5) / (df + 0.5) + 1.0)
+
+        # Cycle 28 AC4/AC5 — post-success instrumentation (design CONDITION 2 + C9).
+        # Log + counter fire AT THE END of the method body, NOT in a `finally:`.
+        # Even empty-corpus case (`n_docs=0`) emits the INFO line (Q10 empty-
+        # corpus coverage + R2 finding 6).
+        elapsed = time.perf_counter() - start
+        global _bm25_builds_seen
+        _bm25_builds_seen += 1
+        logger.info("BM25 index built in %.3fs (n_docs=%d)", elapsed, self.n_docs)
 
     def score(self, query_tokens: list[str], k1: float = 1.5, b: float = 0.75) -> list[float]:
         """Score all documents against query tokens.

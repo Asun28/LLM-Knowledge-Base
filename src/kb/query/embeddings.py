@@ -63,6 +63,22 @@ VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS: float = 0.3
 # to cycle-25's query-hot-path counter.
 _vector_model_cold_loads_seen: int = 0
 
+# Cycle 28 AC2 — WARN threshold (seconds) for `_ensure_conn` sqlite-vec extension-
+# load latency. Module-level constant per cycle-28 Q4 (no env override, matches
+# cycle-26 Q4 design decision). 0.3s mirrors cold-load threshold: typical warm
+# sqlite_vec DLL load is 50-200ms on Windows NTFS, so 0.3s flags pathological
+# cold-cache / antivirus-interference scenarios without spamming on normal boot.
+SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS: float = 0.3
+
+# Cycle 28 AC3 — process-level observability counter for sqlite-vec extension
+# loads. Exact-per-instance because the increment sits inside the existing
+# `_conn_lock` span (already held across the extension-load path); approximate
+# across concurrent `VectorIndex` instances because each instance owns its own
+# `_conn_lock`. Same locking posture as cycle-26 `_vector_model_cold_loads_seen`;
+# contrast with cycle-25 lock-free `_dim_mismatches_seen` (query hot path).
+# Python `int` is arbitrary-precision — no overflow risk per threat-model T7.
+_sqlite_vec_loads_seen: int = 0
+
 
 def get_dim_mismatch_count() -> int:
     """Return the process-level count of vector-index dim-mismatch events.
@@ -92,6 +108,31 @@ def get_vector_model_cold_load_count() -> int:
     "normalise" one to match the other — the rate characteristics differ.
     """
     return _vector_model_cold_loads_seen
+
+
+def get_sqlite_vec_load_count() -> int:
+    """Return the process-level count of successful sqlite-vec extension loads.
+
+    Cycle 28 AC3 — module-level observability counter, incremented inside
+    :meth:`VectorIndex._ensure_conn` AFTER ``self._conn = conn`` assignment
+    (post-success ordering per design CONDITION 4). Counter is process-local
+    (resets on interpreter restart) and exact-per-instance because the
+    increment sits inside the existing ``_conn_lock`` span. Approximate
+    across concurrent ``VectorIndex`` instances (each owns its own
+    ``_conn_lock``) — matches cycle-26 ``_vector_model_cold_loads_seen``
+    posture.
+
+    Contrast cycle-25 ``get_dim_mismatch_count()`` which is lock-free
+    (query hot path, approximate counts adequate per Q8). Cycle-28 Q2
+    design decision keeps the locked-but-low-rate precedent: sqlite-vec
+    loads happen at most once per ``VectorIndex`` instance per process,
+    so the lock cost is zero and exact counts are free.
+
+    The counter is READ-only: no reset helper is exposed. Tests observe
+    monotonic deltas by snapshotting before/after the action under test
+    (reload-safe per cycle-20 L1 / threat-model T8).
+    """
+    return _sqlite_vec_loads_seen
 
 
 def _warm_load_target(vec_path: Path) -> None:
@@ -458,6 +499,12 @@ class VectorIndex:
                 return self._conn
             if not self.db_path.exists():
                 return None
+            # Cycle 28 AC1 — bracket the FULL extension-load block with
+            # `time.perf_counter` per design CONDITION 1. `import time` is
+            # function-local matching the cycle-26 `_get_model` style.
+            import time
+
+            start = time.perf_counter()
             try:
                 # PR #20 R2 Codex NEW-ISSUE fix: sqlite3 connections are
                 # thread-affine by default. Since this connection is shared
@@ -488,7 +535,25 @@ class VectorIndex:
                 except Exception:
                     pass
                 return None
+            # Cycle 28 AC1/AC2/AC3 — ordering per design CONDITIONs 1, 4, 9:
+            #   C1 — `elapsed = time.perf_counter() - start` BEFORE `self._conn = conn`.
+            #   C4 — log + counter AFTER `self._conn = conn`.
+            #   C9 — NO `finally:` wraps the perf/log/counter triple. A revert to
+            #        `finally:` would emit INFO on the exception path, caught by
+            #        `test_sqlite_vec_load_no_info_on_failure_path`.
+            # PR #42 R1 Sonnet M1 fix (2026-04-24): elapsed captured before the
+            # assignment so the latency measurement matches C1's literal text.
+            elapsed = time.perf_counter() - start
             self._conn = conn
+            global _sqlite_vec_loads_seen
+            _sqlite_vec_loads_seen += 1
+            logger.info("sqlite-vec extension loaded in %.3fs (db=%s)", elapsed, self.db_path)
+            if elapsed >= SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS:
+                logger.warning(
+                    "sqlite-vec extension load took %.3fs (threshold=%.2fs); consider warm-loading",
+                    elapsed,
+                    SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS,
+                )
             return conn
 
     def build(

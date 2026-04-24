@@ -106,7 +106,7 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 
 > HIGH-severity items either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
 
-- `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip). Cycle-25 AC3/AC4/AC5 shipped the *observability* variant of sub-item (3 — dim-mismatch): `VectorIndex.query` logs operator-actionable remediation (`kb rebuild-indexes --wiki-dir <path>`) on mismatch + module-level `_dim_mismatches_seen` counter + `get_dim_mismatch_count()` getter. Cycle-26 AC1-AC5 shipped the *observability* variant of sub-item (2 — cold-load latency): `maybe_warm_load_vector_model(wiki_dir)` daemon-thread warm-load hook wired into `kb.mcp.__init__.main()`, `_get_model()` instrumented with `time.perf_counter` + INFO log on every load + WARNING above 0.3s threshold, and `get_vector_model_cold_load_count()` process-level counter. Sub-item (1) atomic temp-DB-then-replace rebuild SHIPPED cycle 24 (AC5/AC6/AC8 — `os.replace` on `<vec_db>.tmp` with cache-pop+close before replace + crash-cleanup). Sub-item (4) `_index_cache` cross-thread lock symmetry shipped incrementally across cycles 3/6/24. Remaining true-deferred: (a) dim-mismatch AUTO-rebuild (needs `VectorIndex` to hold `wiki_dir` or callback + concurrent-rebuild idempotency design), (b) first-query observability — `VectorIndex._ensure_conn` sqlite-vec extension load + BM25 build latency instrumentation (cycle-26 Q16 follow-up — cycle-26 covers only `_get_model` cold-load; other cold-load sources on first query remain uninstrumented).
+- `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip). Cycle-25 AC3/AC4/AC5 shipped the *observability* variant of sub-item (3 — dim-mismatch): `VectorIndex.query` logs operator-actionable remediation (`kb rebuild-indexes --wiki-dir <path>`) on mismatch + module-level `_dim_mismatches_seen` counter + `get_dim_mismatch_count()` getter. Cycle-26 AC1-AC5 shipped the *observability* variant of sub-item (2 — cold-load latency): `maybe_warm_load_vector_model(wiki_dir)` daemon-thread warm-load hook wired into `kb.mcp.__init__.main()`, `_get_model()` instrumented with `time.perf_counter` + INFO log on every load + WARNING above 0.3s threshold, and `get_vector_model_cold_load_count()` process-level counter. Cycle-28 AC1-AC5 shipped the *observability* variant of the remaining first-query latency sources: `VectorIndex._ensure_conn` sqlite-vec extension load instrumented with `time.perf_counter` + INFO + WARNING above `SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS=0.3` + `_sqlite_vec_loads_seen` counter + `get_sqlite_vec_load_count()` getter (locked via `_conn_lock` for exact counts), AND `BM25Index.__init__` corpus-indexing instrumented with INFO log (no WARN threshold per Q1 — corpus-size variance defeats fixed threshold) + lock-free `_bm25_builds_seen` counter (approximate, cycle-25 Q8 precedent) + `get_bm25_build_count()` getter. Sub-item (1) atomic temp-DB-then-replace rebuild SHIPPED cycle 24 (AC5/AC6/AC8 — `os.replace` on `<vec_db>.tmp` with cache-pop+close before replace + crash-cleanup). Sub-item (4) `_index_cache` cross-thread lock symmetry shipped incrementally across cycles 3/6/24. Remaining true-deferred: (a) dim-mismatch AUTO-rebuild (needs `VectorIndex` to hold `wiki_dir` or callback + concurrent-rebuild idempotency design).
 
 ### MEDIUM
 
@@ -122,6 +122,12 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 - `compile/compiler.py` `compile_wiki` per-source rollback — Cycle-25 AC6/AC7/AC8 shipped the narrow observability variant: `in_progress:{pre_hash}` marker written before each `ingest_source`, overwritten on success (by ingest_source's own manifest write) or replaced with `failed:{pre_hash}` by the existing exception handler. AC7's entry-scan logs a warning for any stale `in_progress:` markers from prior hard-kills/power-loss. CONDITION 13 exempts `in_progress:` values from full-mode prune. Remaining deferred: (a) rollback of wiki writes on manifest-save failure (harder — requires receipt-file design or transaction-like helper), (b) escalating manifest-write failure to CRITICAL (cycle-25 keeps the `logger.warning` best-effort stance). (R1)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests.)
 
+- `compile/compiler.py` `rebuild_indexes` audit status — cycle-25 `.tmp` cleanup records `result["vector"]["error"]` when the sibling tmp unlink fails, but the persisted audit line and CLI status still render `vector=cleared` whenever the main DB unlink succeeded. Operators lose the only durable signal that the reset was partial and a stale `<vec_db>.tmp` still exists. (R2 Codex 2026-04-24)
+  (fix: derive vector status from both `cleared` and `error`, e.g. `cleared_with_error: tmp: ...`, and mirror the rule in `kb rebuild-indexes` CLI output)
+
+- `compile/compiler.py` `rebuild_indexes` `hash_manifest` / `vector_db` overrides — the destructive helper validates `wiki_dir` under `PROJECT_ROOT`, then accepts override paths for the manifest and vector DB without the same containment check before calling `unlink()`. The CLI does not expose those overrides today, but the Python API's safety boundary is inconsistent with the documented project-root guard. (R3 Codex 2026-04-24)
+  (fix: validate caller-supplied `hash_manifest` and `vector_db` literal + resolved paths under `PROJECT_ROOT` before locking or unlinking, matching the dual-anchor `wiki_dir` policy)
+
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). Cycle-24 AC9 added exponential backoff to `file_lock` (floor 10ms, cap 50ms), eliminating the fixed 50ms polling floor. The JSONL-migration part remains open. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
@@ -133,8 +139,6 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 
 - `requirements.txt` `ragas==0.4.3` — CVE-2026-6587 (GHSA-95ww-475f-pr4f): server-side request forgery in `_try_process_local_file` / `_try_process_url` of `ragas.metrics.collections.multi_modal_faithfulness.util`. No patched upstream release as of 2026-04-24 (Re-confirmed 2026-04-24 per cycle-25 AC9: `pip-audit` reports empty `fix_versions`; `pip index versions ragas` shows 0.4.3 = LATEST INSTALLED; vendor did not respond to disclosure — identical no-upstream-fix profile to diskcache). ragas is a dev-eval-only dep (used manually for evaluation harness work); `grep -rnE "ragas|Ragas" src/kb` confirms zero runtime imports. Re-check on the next cycle's Step-2 baseline.
   (mitigation: confirmed zero `src/kb/` imports; dev-eval-only usage means an attacker would need local Python access to run `python -c "from ragas..."` themselves — no remote reach. Track for patched release.)
-
-- `src/kb/lint/augment.py::_post_ingest_quality` — AC17-drop rationale for future reference: cache-invalidation work was reconsidered and DROPPED. Cycle-13 AC2 intentionally uses uncached `frontmatter.load` to avoid FAT32/OneDrive/SMB coarse-mtime holes. Do not re-open without a concrete failure case.
 
 - `compile/linker.py` cross-reference auto-linking — deferred: when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` added to A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
 
@@ -159,11 +163,14 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 
 ### LOW
 
-_All items resolved — see CHANGELOG cycle 13._
+_All items resolved — see CHANGELOG cycle 28._
 
 <!-- Cycle 13 closed: AC7 sweep_orphan_tmp on kb.cli:cli boot ({.data, WIKI_DIR}); AC8 +
      _resolve_raw_dir helper derives run_augment raw_dir from wiki_dir.parent / "raw" when
-     wiki_dir is overridden and raw_dir omitted. -->
+     wiki_dir is overridden and raw_dir omitted.
+     Cycle 28 closed (2026-04-24): CHANGELOG cycle-27 commit-tally rule documented
+     in CHANGELOG.md format-guide (self-referential +1 per cycle-26 L1); entry
+     deleted as resolved. -->
 
 ---
 
