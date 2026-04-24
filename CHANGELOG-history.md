@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 30 (2026-04-25)
 
-7 AC / 2 src + 2 new test files / 6 commits. Tests: 2826 → 2846 (+20).
+7 AC / 2 src + 2 new test files / 7 commits. Tests: 2826 → 2846 (+20).
 
 **Backlog-by-file hygiene cycle.** Three tractable MEDIUM items grouped across two files: (a) `src/kb/compile/compiler.py::_audit_token` error-string length cap — cycle-29 Step-11 T1 PARTIAL follow-up; (b) CLI ↔ MCP parity continuation of cycle-27 AC1-AC5 — 5 new read-only subcommands shipping 5 of the 14 MCP tools without CLI surface; (c) BACKLOG narrow of the CLI-MCP parity entry + delete of the cycle-29 audit-cap entry. No new trust boundaries, no new filesystem-write surfaces. Step-2 baseline CVE unchanged (diskcache CVE-2025-69872 + ragas CVE-2026-6587, both `fix_versions: []`). Step-11 PR-introduced CVE diff empty.
 
@@ -29,7 +29,7 @@
 
 **Step-2 CVE baseline:** 2 open advisories (diskcache CVE-2025-69872 + ragas CVE-2026-6587, both `fix_versions: []`, unchanged). 1 open Dependabot alert (GHSA-95ww-475f-pr4f ragas, sev=low, `first_patched=null`). **Step-11 PR-introduced diff:** empty — zero new CVEs. Step 11.5 skipped (no patchable advisories). Scope-out confirmed via cycle-20 L3 same-class MCP peer scan — all 12 remaining CLI-less MCP tools enumerated in BACKLOG with deferred-cycle targets.
 
-**Commit count (cycle-26 L1 self-referential):** 6 total — (1) `5fbf107 docs(cycle 30): requirements + threat-model + brainstorm + R1/R2 evals + design gate + plan`, (2) `4cdcb5e feat(cycle 30): AC1 _audit_token error-string 500-char cap`, (3) `78af9a3 feat(cycle 30): AC2+AC3 kb graph-viz + verdict-trends CLI parity`, (4) `eaf2bb3 feat(cycle 30): AC4+AC5 kb detect-drift + reliability-map CLI parity`, (5) `2b7b748 feat(cycle 30): AC6 kb lint-consistency CLI parity`, (6) `824f78f docs(cycle 30): AC7 BACKLOG hygiene` + pending Step-12 doc commit = total 7 at push time per cycle-26 L1 self-referential rule.
+**Commit count (cycle-26 L1 self-referential):** 7 total — (1) `5fbf107 docs(cycle 30): requirements + threat-model + brainstorm + R1/R2 evals + design gate + plan`, (2) `4cdcb5e feat(cycle 30): AC1 _audit_token error-string 500-char cap`, (3) `78af9a3 feat(cycle 30): AC2+AC3 kb graph-viz + verdict-trends CLI parity`, (4) `eaf2bb3 feat(cycle 30): AC4+AC5 kb detect-drift + reliability-map CLI parity`, (5) `2b7b748 feat(cycle 30): AC6 kb lint-consistency CLI parity`, (6) `824f78f docs(cycle 30): AC7 BACKLOG hygiene`, (7) `3cadb02 docs(cycle 30): CHANGELOG + CLAUDE.md + BACKLOG + README sync` (the doc commit itself counted per cycle-26 L1 self-referential rule — post-merge total = 7).
 
 ### Phase 4.5 — cycle 29 (2026-04-24)
 
