@@ -969,6 +969,122 @@ def lint_deep(page_id: str):
         _error_exit(exc)
 
 
+@cli.command("ingest-content")
+@click.option(
+    "--filename",
+    required=True,
+    help="Slug for raw/<type>/<slug>.md.",
+)
+@click.option(
+    "--type",
+    "source_type",
+    required=True,
+    type=click.Choice(
+        [
+            "article",
+            "paper",
+            "repo",
+            "video",
+            "podcast",
+            "book",
+            "dataset",
+            "conversation",
+            "capture",
+        ]
+    ),
+    help="Source type subdirectory under raw/.",
+)
+@click.option(
+    "--content-file",
+    type=click.File("r", lazy=False, encoding="utf-8"),
+    required=True,
+    help="Path to content file. Use '-' for stdin.",
+)
+@click.option(
+    "--extraction-json-file",
+    type=click.File("r", lazy=False, encoding="utf-8"),
+    default=None,
+    help=("Optional; required when --use-api is not set. Ignored with --use-api."),
+)
+@click.option(
+    "--url",
+    default="",
+    help="Optional source URL for metadata.",
+)
+@click.option(
+    "--use-api",
+    is_flag=True,
+    default=False,
+    help=("Use Anthropic API for extraction. --extraction-json-file ignored if set."),
+)
+def ingest_content(
+    filename: str,
+    source_type: str,
+    content_file,
+    extraction_json_file,
+    url: str,
+    use_api: bool,
+) -> None:
+    """One-shot ingest: save content to raw/ and create wiki pages.
+
+    Cycle 32 AC4 — CLI parity for MCP ``kb_ingest_content``. Content + extraction
+    JSON forwarded verbatim; MCP tool is authoritative for validation.
+
+    ``--content-file`` accepts ``-`` for stdin (Click native). Stat guard
+    rejects oversized files BEFORE calling MCP (C13). Errors route via
+    the shared ``_is_mcp_error_response`` discriminator which recognises
+    the ``Error[partial]:`` post-create-OSError shape added in cycle 32 AC3.
+    """
+    from kb.config import MAX_INGEST_CONTENT_CHARS  # noqa: PLC0415
+    from kb.mcp.core import kb_ingest_content  # noqa: PLC0415
+
+    # Cycle 32 C13 — stat guard for --content-file BEFORE read. Skips
+    # on stdin / non-seekable streams; MCP cap catches those paths.
+    try:
+        st_size = os.fstat(content_file.fileno()).st_size
+        if st_size > MAX_INGEST_CONTENT_CHARS:
+            click.echo(
+                f"Error: --content-file size {st_size} exceeds {MAX_INGEST_CONTENT_CHARS}.",
+                err=True,
+            )
+            sys.exit(1)
+    except (OSError, AttributeError):
+        pass  # stdin / non-seekable — defer to MCP cap
+
+    # C13 — stat guard for --extraction-json-file (same cap per Q9).
+    if extraction_json_file is not None:
+        try:
+            ej_size = os.fstat(extraction_json_file.fileno()).st_size
+            if ej_size > MAX_INGEST_CONTENT_CHARS:
+                click.echo(
+                    f"Error: --extraction-json-file size {ej_size} exceeds "
+                    f"{MAX_INGEST_CONTENT_CHARS}.",
+                    err=True,
+                )
+                sys.exit(1)
+        except (OSError, AttributeError):
+            pass
+
+    content = content_file.read()
+    extraction_json = extraction_json_file.read() if extraction_json_file else ""
+
+    try:
+        output = kb_ingest_content(
+            content=content,
+            filename=filename,
+            source_type=source_type,
+            extraction_json=extraction_json,
+            url=url,
+            use_api=use_api,
+        )
+        if _is_mcp_error_response(output):
+            click.echo(output, err=True)
+            sys.exit(1)
+        click.echo(output)
+    except Exception as exc:
+        _error_exit(exc)
+
+
 @cli.command("compile-scan")
 @click.option(
     "--incremental/--no-incremental",
