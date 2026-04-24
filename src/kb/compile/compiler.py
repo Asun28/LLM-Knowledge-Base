@@ -611,8 +611,14 @@ def _validate_path_under_project_root(path: Path, field_name: str) -> None:
     callers MUST NOT assume the path is resolved by this helper —
     use the literal caller-supplied path for downstream unlink.
     """
-    if path == Path(""):
-        raise ValidationError(f"{field_name} must be non-empty")
+    # Cycle 29 R1 Sonnet S1 — the Q7-A "empty reject" check was removed at
+    # R1-fix time because `Path("") == Path(".")` on BOTH POSIX and Windows
+    # (both stringify to "." and .resolve() to CWD). A `Path("")` coming from
+    # a caller is semantically equivalent to `Path(".")` — both mean CWD —
+    # and the dual-anchor resolve check below correctly accepts them IFF CWD
+    # is under PROJECT_ROOT. An outer `if hash_manifest is not None` / `if
+    # vector_db is not None` guard in `rebuild_indexes` already skips the
+    # helper for `None` defaults, so the helper never sees `None` here.
     root_resolved = PROJECT_ROOT.resolve()
     if path.is_absolute() and not (path == root_resolved or path.is_relative_to(root_resolved)):
         raise ValidationError(f"{field_name} must be inside project root")

@@ -68,24 +68,6 @@ def _last_log_entry(log_path: Path) -> str:
     return log_path.read_text(encoding="utf-8").strip().splitlines()[-1]
 
 
-def _has_symlink_priv(tmp_path: Path) -> bool:
-    """Best-effort Windows symlink-creation privilege probe (test-scoped, not Path.home())."""
-    if os.name != "nt":
-        return True
-    probe = tmp_path / f"_kb_c29_symlink_probe_{os.getpid()}"
-    target = tmp_path / f"_kb_c29_symlink_target_{os.getpid()}"
-    target.write_text("x")
-    try:
-        probe.symlink_to(target)
-        probe.unlink()
-        return True
-    except (OSError, NotImplementedError):
-        return False
-    finally:
-        if target.exists():
-            target.unlink()
-
-
 # ---------------------------------------------------------------------------
 # AC1 — compound audit token
 # ---------------------------------------------------------------------------
@@ -328,15 +310,19 @@ class TestOverrideValidation:
         with pytest.raises(ValidationError, match="hash_manifest must be inside project root"):
             compiler.rebuild_indexes(wiki_dir=wiki_dir, hash_manifest=resolving)
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="Windows symlinks require admin/developer mode; decorator-skip per C6 "
+        "grep-invariant (cycle-29 R1 Codex M2 — runtime pytest.skip is not grep-verifiable).",
+    )
     def test_hash_manifest_override_symlink_to_outside_raises(self, tmp_path, monkeypatch):
         """Q8 sub-test (b) — real `os.symlink` to out-of-root target → ValidationError.
 
-        Skipped on Windows without symlink privilege. On platforms where symlinks
-        work, creates an in-root `.lnk` pointing to an out-of-root target; the
-        dual-anchor resolve() check catches the escape.
+        On POSIX, creates an in-root `.lnk` pointing to an out-of-root target;
+        the dual-anchor resolve() check catches the escape. Skipped on Windows
+        via decorator so C6's grep-invariant (``rg '@pytest.mark.skipif'``)
+        passes without a runtime-inspection walk through test bodies.
         """
-        if not _has_symlink_priv(tmp_path):
-            pytest.skip("symlink privilege unavailable (Windows non-admin)")
         _patch_project_root(monkeypatch, tmp_path)
         from kb.compile import compiler
 
@@ -375,38 +361,93 @@ class TestOverrideValidation:
     def test_none_override_uses_default_without_validation_drift(self, tmp_path, monkeypatch):
         """None overrides skip extra validation — defaults are derived from PROJECT_ROOT.
 
-        Pins the backward-compat contract: calling `rebuild_indexes(wiki_dir=W)` with
-        no overrides MUST NOT newly reject the defaults (HASH_MANIFEST /
-        _vec_db_path(wiki_dir)). Exercises the `hash_manifest is not None` and
-        `vector_db is not None` guards in the AC2 implementation — without those
-        guards, the helper would be called with `Path("")` or similar on None
-        and produce a false-positive ValidationError.
+        Pins the backward-compat contract AND divergent-fails on removal of the
+        `hash_manifest is not None` / `vector_db is not None` guards in
+        `rebuild_indexes` (R1 Codex M1): spy the helper and assert it is called
+        exactly ONCE (for `wiki_dir` — not for the None overrides). Under guard
+        removal, `_validate_path_under_project_root(None, ...)` would either fire
+        a 3rd call (AttributeError inside) or add 2 extra calls, flipping the
+        assertion.
         """
         _patch_project_root(monkeypatch, tmp_path)
-        from kb.compile.compiler import rebuild_indexes
+        from kb.compile import compiler
 
         wiki_dir, _, _ = _seed_wiki_and_data(tmp_path)
-        # No seeds — defaults point nowhere on disk; unlink(missing_ok=True) is fine.
 
-        result = rebuild_indexes(wiki_dir=wiki_dir)
+        # Spy on the validator — wrap the real helper, count calls.
+        real_validator = compiler._validate_path_under_project_root
+        call_log: list[tuple] = []
+
+        def _spy(path, field_name):
+            call_log.append((path, field_name))
+            return real_validator(path, field_name)
+
+        monkeypatch.setattr(compiler, "_validate_path_under_project_root", _spy)
+
+        result = compiler.rebuild_indexes(wiki_dir=wiki_dir)
 
         assert result["manifest"]["cleared"] is True
         assert result["vector"]["cleared"] is True
         assert result["manifest"]["error"] is None
         assert result["vector"]["error"] is None
 
+        # Exactly ONE validator call — for wiki_dir. None overrides must skip.
+        # A revert removing the `is not None` guards would make this 3.
+        fields_validated = [field for _, field in call_log]
+        assert fields_validated == ["wiki_dir"], (
+            f"Expected exactly one validator call (wiki_dir); got {fields_validated}. "
+            "None overrides for hash_manifest/vector_db must NOT enter validation."
+        )
 
-class TestOverrideEmptyInput:
-    """Q7 — explicit empty-Path reject (cycle-19 L3)."""
 
-    def test_hash_manifest_empty_path_raises(self, tmp_path, monkeypatch):
-        """`hash_manifest=Path("")` fails fast with crisp ValidationError."""
+class TestOverrideCwdSemantics:
+    """Cycle 29 R1 S1 — `Path("")` / `Path(".")` cross-platform equivalence.
+
+    Python pathlib treats `Path("")` and `Path(".")` as the same path on both
+    POSIX and Windows — both stringify to `"."` and `.resolve()` to CWD. The
+    Q7-A "empty reject" check was removed at R1-fix time because it could not
+    discriminate between a caller who meant CWD and one who passed empty
+    string (they're indistinguishable in pathlib). Instead the dual-anchor
+    resolve check handles both: `Path("")` / `Path(".")` resolves to CWD and
+    is ACCEPTED iff CWD is under `PROJECT_ROOT`, rejected otherwise.
+    """
+
+    def test_empty_path_as_hash_manifest_rejected_when_cwd_outside_project(
+        self, tmp_path, monkeypatch
+    ):
+        """`hash_manifest=Path("")` with CWD outside PROJECT_ROOT → reject by dual-anchor.
+
+        Uses `monkeypatch.chdir(tmp_path.parent)` to force CWD outside the
+        patched PROJECT_ROOT (which equals tmp_path). `Path("")` resolves to
+        that CWD, the dual-anchor finds it out-of-root, raises
+        ValidationError with the "inside project root" message.
+        """
         _patch_project_root(monkeypatch, tmp_path)
+        monkeypatch.chdir(tmp_path.parent)  # CWD := tmp_path.parent, OUTSIDE PROJECT_ROOT
         from kb.compile import compiler
 
         ValidationError = compiler.ValidationError
 
         wiki_dir, _, _ = _seed_wiki_and_data(tmp_path)
 
-        with pytest.raises(ValidationError, match="hash_manifest must be non-empty"):
+        with pytest.raises(ValidationError, match="hash_manifest must be inside project root"):
             compiler.rebuild_indexes(wiki_dir=wiki_dir, hash_manifest=Path(""))
+
+    def test_dot_path_as_wiki_dir_accepted_when_cwd_inside_project(self, tmp_path, monkeypatch):
+        """`wiki_dir=Path(".")` with CWD == tmp_wiki → accepted (S1 regression pin).
+
+        Divergent-fail anchor for the R1 Sonnet S1 regression: under any guard
+        that blanket-rejects `Path("")` / `Path(".")` (including `path ==
+        Path("")` which returns True for both), this test would fail with
+        "wiki_dir must be non-empty". With the resolve-anchor approach, CWD
+        resolves inside PROJECT_ROOT and the call succeeds.
+        """
+        _patch_project_root(monkeypatch, tmp_path)
+        wiki_dir, _, _ = _seed_wiki_and_data(tmp_path)
+        monkeypatch.chdir(wiki_dir)  # CWD := tmp_path/wiki, inside PROJECT_ROOT=tmp_path
+
+        from kb.compile.compiler import rebuild_indexes
+
+        # Does NOT raise — Path(".") resolves to wiki_dir which is under tmp_path.
+        result = rebuild_indexes(wiki_dir=Path("."))
+        assert result["manifest"]["cleared"] is True

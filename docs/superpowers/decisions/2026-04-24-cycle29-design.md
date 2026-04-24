@@ -320,9 +320,11 @@ Correction: the question statement listed 11 new tests + Q3 (+1 = 12) + Q4 (+1 =
 
 Projected full-suite count: 2823 (2809 + 14 new tests). Locked as Step-11 verification target via `pytest --collect-only -q | tail -1`.
 
+**Cycle 29 R1 Sonnet S2 correction (2026-04-24 post-merge):** actual full-suite count after Step-9 implementation is **2825** (2809 + 16 new tests), not 2823. The +2 drift comes from (a) `TestOverrideEmptyInput` split into its own class with 1 test (now superseded by `TestOverrideCwdSemantics` with 2 tests post-R1 S1 fix), and (b) Q8's hybrid symlink strategy implemented as two distinct tests (`test_hash_manifest_override_resolve_escape_raises` via `_ResolvingPath` subclass + `test_hash_manifest_override_symlink_to_outside_raises` via `os.symlink` with decorator skip on Windows), not one. Plan arithmetic pinned 5 AC2 tests; implementation shipped 6. CHANGELOG/CHANGELOG-history/CLAUDE.md carry the authoritative 2825 number.
+
 #### RATIONALE
 
-Mechanical addition. The +1 from Q13 expansion brings the total from the question's 2822 to 2823.
+Mechanical addition. The Q15 arithmetic collapsed the Q8 hybrid into one test instead of two.
 
 #### CONFIDENCE
 
