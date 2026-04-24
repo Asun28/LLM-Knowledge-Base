@@ -119,6 +119,48 @@ class TestAuditTokenCap:
         # On the non-cleared path, falsy error returns "unknown".
         assert _audit_token({"cleared": False, "error": ""}) == "unknown"
 
+    def test_audit_token_caps_unicode_cjk_error(self):
+        """R1 Sonnet MAJOR 1 — non-ASCII (CJK) 2000-char error truncates cleanly.
+
+        Python `str` is codepoint-indexed, so `truncate`'s slice operates on
+        chars not bytes. The output must remain a valid Python str (no
+        surrogate corruption) AND remain bounded by the char-budget.
+        Divergent-fail: if `truncate` were byte-sliced, a mid-CJK split
+        would raise `UnicodeDecodeError` on UTF-8 encode.
+        """
+        from kb.compile.compiler import _audit_token
+
+        # 2000 CJK codepoints — each 3 bytes UTF-8, so 6000 bytes total.
+        long_cjk = "测" * 2000
+        result = _audit_token({"cleared": True, "error": long_cjk})
+
+        assert result.startswith("cleared (warn: 测")
+        assert "chars elided" in result
+        # Budget: 500 char cap + marker + prefix/suffix; ~560 char ceiling.
+        assert len(result) <= 560, f"CJK warn-branch cap overshot: len={len(result)}"
+        # Re-encode round-trip must succeed — no corrupted surrogates.
+        result.encode("utf-8").decode("utf-8")
+        # Raw 2000-char CJK must NOT appear verbatim (the cap fired).
+        assert long_cjk not in result
+
+    def test_audit_token_caps_mixed_emoji_error(self):
+        """R1 Sonnet MAJOR 1 follow-up — non-BMP (emoji, surrogate-pair on
+        UTF-16 platforms) error truncates cleanly on the fallback branch.
+        """
+        from kb.compile.compiler import _audit_token
+
+        # 1200 emoji codepoints (each 4 bytes UTF-8).
+        long_emoji = "🔥" * 1200
+        result = _audit_token({"cleared": False, "error": long_emoji})
+
+        assert "chars elided" in result
+        assert len(result) <= 540, f"emoji fallback-branch cap overshot: len={len(result)}"
+        # UTF-8 encode must succeed — no unpaired surrogates / mid-codepoint split.
+        encoded = result.encode("utf-8")
+        assert len(encoded) < 5000, "capped emoji output size bounded"
+        # Round-trip must be lossless for the surviving head+tail.
+        assert result == encoded.decode("utf-8")
+
 
 # ---------------------------------------------------------------------------
 # E2E tests — `rebuild_indexes` → wiki/log.md audit line bounded

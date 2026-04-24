@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 30 (2026-04-25)
 
-7 AC / 2 src + 2 new test files / 9 commits. Tests: 2826 → 2846 (+20).
+7 AC / 2 src + 2 new test files / 10 commits. Tests: 2826 → 2850 (+24). R1 Sonnet MAJOR fixes: 4 new tests (Unicode CJK + emoji cap coverage AC1; `--max-nodes 0` exit-non-zero + `-1` clamp pin AC2).
 
 **Backlog-by-file hygiene cycle.** Three tractable MEDIUM items grouped across two files: (a) `src/kb/compile/compiler.py::_audit_token` error-string length cap — cycle-29 Step-11 T1 PARTIAL follow-up; (b) CLI ↔ MCP parity continuation of cycle-27 AC1-AC5 — 5 new read-only subcommands shipping 5 of the 14 MCP tools without CLI surface; (c) BACKLOG narrow of the CLI-MCP parity entry + delete of the cycle-29 audit-cap entry. No new trust boundaries, no new filesystem-write surfaces. Step-2 baseline CVE unchanged (diskcache CVE-2025-69872 + ragas CVE-2026-6587, both `fix_versions: []`). Step-11 PR-introduced CVE diff empty.
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.10.0 · 2846 tests / 249 files (2836 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.10.0 · 2850 tests / 249 files (2840 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — use `tmp_wiki` / `tmp_project` / `tmp_kb_env`; never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Patch the owner module** for the four MCP-migrated callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) — not `kb.mcp.core.*`.
@@ -185,7 +185,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Full suite: 2846 tests / 249 files (2836 passed + 10 skipped). New tests per cycle go in versioned files (e.g. `test_cycle20_errors_taxonomy.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
+Full suite: 2850 tests / 249 files (2840 passed + 10 skipped). New tests per cycle go in versioned files (e.g. `test_cycle20_errors_taxonomy.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
 
 **Fixture rules** (enforced by `test_cycle19_lint_redundant_patches.py` AST scan):
 - Writing tests: use `tmp_wiki` / `tmp_project` / `tmp_kb_env` only — never touch the real `wiki/` or `raw/`.

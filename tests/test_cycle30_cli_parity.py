@@ -77,6 +77,56 @@ class TestGraphVizCli:
         assert result.exit_code != 0
         assert "Error: bad thing" in result.output
 
+    def test_graph_viz_max_nodes_zero_exits_non_zero(self, monkeypatch):
+        """R1 Sonnet MAJOR 2 — `--max-nodes 0` hits MCP tool's `"Error:"`-prefix
+        rejection path and surfaces via non-zero exit.
+
+        The MCP tool `kb_graph_viz` at `src/kb/mcp/health.py:191-197` rejects
+        `max_nodes=0` with an explicit `"Error: max_nodes=0 is not allowed..."`
+        string. This test pins the CLI → MCP zero-rejection contract so a
+        future MCP refactor that drops the `"Error:"` prefix on the 0-path
+        would surface as a test failure instead of silent exit-0 drift
+        (cycle-16 L2 class).
+        """
+        # NO monkeypatch — exercise the real MCP tool's 0-rejection path.
+        runner = CliRunner()
+        result = runner.invoke(cli, ["graph-viz", "--max-nodes", "0"])
+        assert result.exit_code != 0, (
+            f"--max-nodes 0 must exit non-zero; got exit={result.exit_code}, "
+            f"output={result.output!r}"
+        )
+        assert "max_nodes=0" in result.output or "Error:" in result.output
+
+    def test_graph_viz_max_nodes_negative_clamps_at_mcp(self, monkeypatch):
+        """R1 Sonnet MAJOR 2 follow-up — `--max-nodes -1` reaches MCP layer
+        which clamps negatives via `max(1, min(n, 500))`.
+
+        Divergent-fail: if CLI added its own rejection for negatives
+        (diverging from the MCP tool's clamp semantics), this test would
+        flip because `called["max_nodes"]` would not be -1. The CLI
+        passthrough contract is that negatives reach the MCP layer
+        un-modified.
+        """
+        from kb.mcp import health as health_mod
+
+        called = {"max_nodes": None}
+
+        def _spy(max_nodes=30, wiki_dir=None):
+            called["max_nodes"] = max_nodes
+            # Echo the MCP clamp behavior (not under test — we just
+            # assert the CLI forwarded -1 un-modified).
+            return "graph TD\nA-->B"
+
+        monkeypatch.setattr(health_mod, "kb_graph_viz", _spy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["graph-viz", "--max-nodes", "-1"])
+        assert result.exit_code == 0, f"output: {result.output!r}"
+        # CLI forwarded -1 raw — MCP is responsible for clamping.
+        assert called["max_nodes"] == -1, (
+            f"CLI must forward --max-nodes raw to MCP; got {called['max_nodes']}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC3 — `kb verdict-trends`
