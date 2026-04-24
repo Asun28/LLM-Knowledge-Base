@@ -710,7 +710,12 @@ def list_pages(page_type: str, limit: int, offset: int):
 
     try:
         output = kb_list_pages(page_type=page_type, limit=limit, offset=offset)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — all cycle-27/30 wrappers share
+        # the _is_mcp_error_response discriminator. kb_list_pages emits
+        # only colon-form today (browse.py:187,194,220), so behaviour is
+        # unchanged; the swap defends against a future emitter change that
+        # adds a non-colon runtime-error shape (cycle-11 L3 / cycle-20 L3).
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -731,7 +736,8 @@ def list_sources(limit: int, offset: int):
 
     try:
         output = kb_list_sources(limit=limit, offset=offset)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -765,7 +771,8 @@ def graph_viz(max_nodes: int, wiki_dir: str | None):
 
     try:
         output = kb_graph_viz(max_nodes=max_nodes, wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -792,7 +799,8 @@ def verdict_trends(wiki_dir: str | None):
 
     try:
         output = kb_verdict_trends(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)
@@ -820,7 +828,8 @@ def detect_drift(wiki_dir: str | None):
 
     try:
         output = kb_detect_drift(wiki_dir=wiki_dir)
-        if output.startswith("Error:"):
+        # Cycle 31 R1 Sonnet homogenization — see list-pages above for rationale.
+        if _is_mcp_error_response(output):
             click.echo(output, err=True)
             sys.exit(1)
         click.echo(output)

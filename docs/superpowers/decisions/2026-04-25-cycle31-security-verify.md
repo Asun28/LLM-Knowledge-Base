@@ -18,8 +18,8 @@
 | T5 — output-size DoS | AST scan `read_page` body for `Path(`, `read_text`, `open(`, `.stat(` | 0 | 0 | IMPLEMENTED (pure MCP delegation; cap inherited from `kb_read_page`) |
 | T6 — boot-lean | AST scan module-scope for `kb.mcp.*` imports | 0 | 0 | IMPLEMENTED (also pinned by `TestBootLean.test_cli_import_does_not_eagerly_import_mcp_modules` subprocess probe) |
 | T7 — verbatim forwarding | `grep -cE 'page_id\.(strip\|lower\|upper\|encode\|replace)' src/kb/cli.py` | 0 | 0 | IMPLEMENTED; parity tests (`TestParityCliMcp`) pin stream-semantic contract per subcommand |
-| T8 — peer-drift | Legacy `startswith("Error:")` count in cli.py | exactly 5 | 5 | IMPLEMENTED (3 wrappers retrofitted per AC8 — Option A; Step-5 Q4) |
-| T8 — peer-drift | `_is_mcp_error_response(` count in cli.py | exactly 7 (1 def + 6 calls) | 7 | IMPLEMENTED |
+| T8 — peer-drift | Legacy `startswith("Error:")` count in cli.py | 0 (post R1 Sonnet homogenization) | 0 | IMPLEMENTED (3 wrappers retrofitted per AC8 — Option A; Step-5 Q4; remaining 5 homogenized per R1 Sonnet MAJOR 2) |
+| T8 — peer-drift | `_is_mcp_error_response(` count in cli.py | exactly 12 (1 def + 11 calls) | 12 | IMPLEMENTED |
 | T9 — tagged form annotation | `"cycle-31 tools"` or `"not emitted"` in helper docstring | ≥1 | `cli.py:105` | DOCUMENTED |
 | T10 — Click arg coercion | informational (no code change) | — | — | N/A |
 
@@ -27,7 +27,7 @@
 
 - `_format_search_results` caller: confirmed still bound to `search` only (`cli.py:634`).
 - `_audit_token` caller: confirmed still bound to `rebuild-indexes` (`cli.py:604,618-619`).
-- `_is_mcp_error_response` call sites: exactly 6, in the 3 new wrappers + 3 retrofitted wrappers. No same-class helper retrofit drift.
+- `_is_mcp_error_response` call sites: exactly 11 post R1 Sonnet homogenization (3 AC1-AC3 new + 3 AC8 retrofit + 5 cycle-27/30 homogenization). The helper is now the universal CLI discriminator; legacy `startswith("Error:")` count = 0. No same-class helper retrofit drift risk for future cycles — the helper is the single source of truth.
 
 All 10 threats addressed. No PARTIAL / MISSING.
 

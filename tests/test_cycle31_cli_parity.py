@@ -167,7 +167,11 @@ class TestReadPageCli:
         """AC6b — nonexistent page hits `"Page not found:"` at
         `src/kb/mcp/browse.py:125` (no ``"Error"`` prefix at all).
         Revert-divergent: under legacy `startswith("Error:")` discriminator
-        this test FAILS with exit 0 + the text on stdout."""
+        this test FAILS with exit 0 + the text on stdout.
+
+        R1 Sonnet MAJOR — assert on `result.stderr` explicitly so the test
+        flips not just on exit-code regression but also on a hypothetical
+        future bug that routes the error to stdout with exit 1."""
         from click.testing import CliRunner
 
         from kb.cli import cli
@@ -177,7 +181,8 @@ class TestReadPageCli:
         # with `check_exists=False` but resolves to no file on disk.
         result = runner.invoke(cli, ["read-page", "concepts/does-not-exist-cycle31-probe"])
         assert result.exit_code != 0
-        assert "Page not found:" in result.output
+        assert "Page not found:" in result.stderr
+        assert result.stdout == ""
 
 
 # ---------------------------------------------------------------------------
