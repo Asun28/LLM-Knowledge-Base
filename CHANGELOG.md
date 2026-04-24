@@ -31,7 +31,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-25 — cycle 30
 
-- Items: 7 AC / 2 src + 2 new test files / 8 commits
+- Items: 7 AC / 2 src + 2 new test files / 9 commits
 - Tests: 2826 → 2846 (+20)
 - Scope:
   Pre-Phase-5 backlog hygiene — AC1 `_audit_token` caps
