@@ -29,6 +29,35 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-25 — cycle 30
+
+- Items: 7 AC / 2 src + 2 new test files / 6 commits
+- Tests: 2826 → 2846 (+20)
+- Scope:
+  Pre-Phase-5 backlog hygiene — AC1 `_audit_token` caps
+  `block["error"]` at 500 chars via `kb.utils.text.truncate`
+  (truthiness-guarded: `None`/empty skips the cap and keeps the
+  bare `"cleared"`/`"unknown"` token; R2-A2 amendment) so a
+  pathological `OSError.__str__()` on Windows can't bloat
+  `wiki/log.md` or `kb rebuild-indexes` CLI stdout. AC2-AC6
+  extend cycle-27's CLI ↔ MCP parity with 5 read-only
+  subcommands — `graph-viz` (`--max-nodes` help text documents
+  "1-500; 0 rejected" per R1 Opus amendment), `verdict-trends`,
+  `detect-drift`, `reliability-map` (zero args; "No feedback
+  recorded yet" exits 0), `lint-consistency` (`--page-ids`
+  forwarded raw; no `--wiki-dir` since the MCP tool signature
+  omits it). All 5 wrappers use the cycle-27 thin-wrapper
+  pattern (function-local import + forward args raw +
+  `"Error:"`-prefix contract + `_error_exit(exc)` wrap). AC7
+  BACKLOG hygiene — delete cycle-29 audit-cap MEDIUM entry +
+  narrow CLI↔MCP parity from "~14 remaining" to "~12 remaining"
+  (R2-A3 arithmetic correction + `kb_save_synthesis` non-tool
+  call-out); skip no-op CVE re-verify (diskcache + ragas
+  identical cycle-29 baseline, same-day). R2 Codex stalled
+  ~14min; primary-session R2 fallback per cycle-20 L4 then
+  R2 findings folded in via DESIGN-AMEND.
+- Detail: [history archive](CHANGELOG-history.md#phase-45--cycle-30-2026-04-25)
+
 #### 2026-04-24 — cycle 29
 
 - Items: 5 AC / 3 src + 2 new test files / 6 commits
