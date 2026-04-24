@@ -70,6 +70,46 @@ def _error_exit(exc: BaseException, *, code: int = 1) -> None:
     sys.exit(code)
 
 
+def _is_mcp_error_response(output: str) -> bool:
+    """Return True if an MCP tool string response represents an error.
+
+    Cycle 31 AC4 — shared discriminator for the three new page_id-input CLI
+    wrappers (read-page / affected-pages / lint-deep) AND three cycle 27/30
+    wrappers retrofitted in AC8 (stats / reliability-map / lint-consistency)
+    whose wrapped MCP tools emit heterogeneous error-prefix shapes.
+
+    Classifies by the FIRST line only (``output.split("\\n", 1)[0]``) to avoid
+    misfiring on page bodies whose later lines happen to contain ``Error:``.
+    Empty / blank-first-line outputs are NOT errors by design — they exit 0
+    (e.g. ``kb_read_page`` for a zero-length page body at
+    ``src/kb/mcp/browse.py:161``).
+
+    Three shapes currently emitted by cycle-31 target tools:
+
+    - ``"Error:"`` — validator-class (e.g. ``_validate_page_id`` at
+      ``src/kb/mcp/app.py:250``; emitters at ``browse.py:94,139``;
+      ``quality.py:142,281``).
+    - ``"Error "`` — runtime-exception shapes:
+
+      * ``browse.py:348`` — ``Error computing wiki stats: ...``
+      * ``quality.py:149,152`` — ``Error checking fidelity for ...``
+      * ``quality.py:184`` — ``Error running consistency check: ...``
+      * ``quality.py:245`` — ``Error computing reliability map: ...``
+      * ``quality.py:290`` — ``Error computing affected pages: ...``
+
+    - ``"Page not found:"`` — logical-miss shape unique to ``kb_read_page``
+      at ``src/kb/mcp/browse.py:125``.
+
+    Tagged-error form ``Error[<category>]: ...`` from ``src/kb/mcp/app.py:17``
+    is NOT matched — none of the target tools emit it today (not emitted by
+    cycle-31 tools). T9 future-proofing: if a later refactor adopts
+    ``error_tag()`` in these tools, widen the prefix set and re-run the
+    Step-11 verification grep.
+    """
+    first_line = output.split("\n", 1)[0]
+    return first_line.startswith(("Error:", "Error ", "Page not found:"))
+
+
 def _setup_logging() -> None:
     """Idempotent logging setup. Exposed so direct callers (tests, alt entry
     points) can configure logging without going through Click's context
