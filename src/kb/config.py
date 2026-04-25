@@ -114,9 +114,7 @@ RAW_SOURCE_MAX_BYTES = 2_097_152  # 2 MiB
 
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
-SUPPORTED_SOURCE_EXTENSIONS = frozenset(
-    {".md", ".txt", ".pdf", ".json", ".yaml", ".yml", ".rst", ".csv"}
-)
+SUPPORTED_SOURCE_EXTENSIONS = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".rst", ".csv"})
 
 # J1 (Phase 4.5 MEDIUM): hard ceiling on rewriter output. Floor is
 # max(3 * len(question), 120) — these two together accept legitimate
