@@ -31,7 +31,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 
 #### 2026-04-25 — cycle 33
 
-- Items: 11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files / +TBD commits (post-merge backfill per cycle-30 L1)
+- Items: 11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files / 8 commits (6 feat+docs+fix on branch + 1 merge + 1 self-review)
 - Tests: 2901 → 2923 (+21 passed including R1 mkdir-failure + R2 lazy-import-failure regressions; +1 xfailed for the Q8 ordinary-UNC residual)
 - Scope:
   Closes BACKLOG `mcp/core.py:762,881` MEDIUM (cycle-32 threat T11) —

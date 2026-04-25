@@ -11,7 +11,7 @@
 
 ### Phase 4.5 — cycle 33 (2026-04-25)
 
-11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files (`tests/test_cycle33_mcp_core_path_leak.py`, `tests/test_cycle33_ingest_index_idempotency.py`) / +TBD commits (post-merge backfill per cycle-30 L1). Tests: 2901 → 2912 passed (+21 — final count after R1 mkdir-failure regression + R2 lazy-import-failure regression added 2 more passing tests), plus 1 xfailed for the Q8 ordinary-UNC residual. Total collected: 2923.
+11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files (`tests/test_cycle33_mcp_core_path_leak.py`, `tests/test_cycle33_ingest_index_idempotency.py`) / 8 commits (6 feat+docs+fix + 1 merge + 1 self-review). Tests: 2901 → 2912 passed (+21 — final count after R1 mkdir-failure regression + R2 lazy-import-failure regression added 2 more passing tests), plus 1 xfailed for the Q8 ordinary-UNC residual. Total collected: 2923.
 
 **Closes BACKLOG `mcp/core.py:762,881` MEDIUM (cycle-32 threat T11) + pins ingest index-file dedup contract via spy regression.** Two conceptually separate scope items land in one cycle per the batch-by-file convention: `mcp/core.py` redaction at three sites (kb_ingest_content, kb_save_source, kb_query.save_as) plus their paired `logger.warning` calls; `ingest/pipeline.py` adds `## Idempotency` docstring blocks documenting an existing dedup contract that was never explicitly pinned by tests.
 
