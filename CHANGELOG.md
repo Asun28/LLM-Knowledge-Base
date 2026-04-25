@@ -29,6 +29,55 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-25 — cycle 33
+
+- Items: 11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files / +TBD commits (post-merge backfill per cycle-30 L1)
+- Tests: 2901 → 2920 (+19 passed; +1 xfailed for the Q8 ordinary-UNC residual)
+- Scope:
+  Closes BACKLOG `mcp/core.py:762,881` MEDIUM (cycle-32 threat T11) —
+  AC1/AC2/AC3 wrap raw `OSError write_err` interpolation in pre-computed
+  `sanitized_err = _sanitize_error_str(write_err, file_path)` at the
+  paired `logger.warning` + `Error[partial]:` return for both
+  `kb_ingest_content` (`core.py:748-768`) and `kb_save_source`
+  (`core.py:868-893`); single binding ensures log + return cannot drift
+  apart. AC4 same-class peer at `kb_query.save_as` (`core.py:279-285`)
+  upgrades BOTH the previously-asymmetric `logger.warning(... %s, exc)`
+  AND the return string to use `_sanitize_error_str(exc, target)` for
+  symmetric path-attribute redaction depth (matches AC1/AC2). AC5
+  regression suite at `tests/test_cycle33_mcp_core_path_leak.py` —
+  15 tests covering Windows-drive-letter + POSIX shapes for all 3 sites,
+  5-case parametrised `sanitize_error_text` OSError-shape unit suite
+  (3-arg / no-filename / filename=None / filename2 / args[1] path),
+  plus 3 UNC/long-path tests. AC6 adds "## Idempotency" docstring
+  paragraphs to `_update_sources_mapping` + `_update_index_batch`
+  documenting (a) safe-on-crash-then-reingest contract, (b) merge-on-
+  new-pages contract, (c) explicit "Concurrent calls may race"
+  serial-only disclaimer. AC7+AC8 pin both contracts behaviorally via
+  `tests/test_cycle33_ingest_index_idempotency.py` — 5 tests with
+  `MagicMock(wraps=atomic_text_write)` spy + call_count assertions
+  (1 for dedup branches, 2 for merge branch, 0 for missing-file
+  early-out at `pipeline.py:773-775`). AC9 deletes the closed
+  `mcp/core.py:762,881` BACKLOG entry. AC10 narrows the
+  `ingest/pipeline.py` BACKLOG entry from "duplicate-on-reingest"
+  (closed) to "RMW-concurrency residual" (still open — the serial
+  dedup is now contract+test pinned but concurrent-ingest race remains
+  unfixed). AC11 files three new MINOR BACKLOG entries (R1-08 empty
+  wiki_pages, R1-10 backtick source_ref, R1-11 weaker filename
+  validation) and one new MEDIUM (Q8 — `sanitize.py` UNC slash-
+  normalize gap, the spawn cost of closing AC1+AC2). One Q8 test marked
+  `pytest.mark.xfail(strict=True)` per cycle-16 L3 REPL probe — when
+  the helper is fixed, removing the marker forces the strict-pass flip.
+  Step-2 CVE baseline showed 4 existing advisories (diskcache, ragas,
+  pip, litellm) all deferred per existing BACKLOG mitigation; Step-11
+  PR-CVE diff returns empty (zero new dependencies introduced — no
+  imports added beyond the already-imported `_sanitize_error_str`
+  helper). R1 Opus design-eval (4.9/5 avg, PROCEED) + R1 Codex (5
+  MAJOR + 6 MINOR, APPROVE-WITH-FIXES) → Step 5 decision gate folded
+  in 12 question outcomes via 7 AC amendments before Step 9.
+  Revert-fail discipline (cycle-24 L4) verified — `git stash` on
+  `src/kb/mcp/core.py` produces 6 of 7 integration-test failures.
+- Detail: [history archive](CHANGELOG-history.md#2026-04-25-cycle-33)
+
 #### 2026-04-25 — cycle 32
 
 - Items: 8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / 10 commits (9 feat+docs+fix + 1 self-review)
