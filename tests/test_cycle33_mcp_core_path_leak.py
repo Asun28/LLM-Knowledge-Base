@@ -1,0 +1,361 @@
+"""Cycle 33 AC1-AC5 — path-leak redaction at MCP `Error[partial]:` emitters
++ paired `logger.warning` records + `kb_query.save_as` peer + sanitize-helper
+OSError-shape unit suite + Q8 UNC/long-path xfail-strict markers.
+
+Threats covered: T1, T2, T3, T4, T5, T10. Revert-fail discipline per cycle-24
+L4 — production-fix revert MUST flip ≥4 of these tests to red.
+"""
+
+from __future__ import annotations
+
+import errno
+import logging
+import os
+
+import pytest
+
+# Distinct slug-bearing fixture filenames so caplog assertions can disambiguate
+# across concurrent / interleaved tests (T10 / R1-05 mitigation).
+#
+# Important: ``OSError.__str__`` formats the ``filename`` attribute using
+# Python's repr-style escaping, so a single-backslash Windows path
+# ``D:\Projects\test\fake.md`` (24 chars) emerges as the doubled-backslash
+# form ``D:\\Projects\\test\\fake.md`` (32 chars) in the rendered OSError
+# string. The two assertion forms below cover both the input shape AND the
+# rendered shape so a revert test cannot pass vacuously (cycle-24 L4 — Windows
+# assertion that uses the single-backslash literal would never appear in the
+# rendered OSError string regardless of whether redaction ran).
+_LEAKY_WIN_INPUT = r"D:\Projects\test\fake.md"  # what we PUT in OSError filename
+_LEAKY_WIN_EMITTED = r"D:\\Projects\\test\\fake.md"  # what OSError str EMITS
+_LEAKY_WIN_FWD = "D:/Projects/test/fake.md"  # slash-normalized variant
+_LEAKY_WIN_BASENAME_DIR = "Projects"  # any leak form will contain this
+_LEAKY_POSIX = "/tmp/test/fake.md"
+_FIXTURE_TAG = "cycle33-redact-fixture-A1B2"
+
+
+class _RaisingFile:
+    """Context-manager stub whose `.write()` raises a crafted OSError.
+
+    Used by the kb_ingest_content / kb_save_source path-leak fixtures: the
+    production code does ``with os.fdopen(fd, "w", ...) as f: f.write(...)``,
+    so we need an object that supports the ``__enter__``/``__exit__`` protocol
+    AND has a ``.write`` method that raises with the desired path embedded.
+    """
+
+    def __init__(self, exc: OSError) -> None:
+        self._exc = exc
+
+    def __enter__(self):  # noqa: ANN204
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:  # noqa: ANN001
+        return False
+
+    def write(self, *_a, **_kw) -> int:  # noqa: ANN201
+        raise self._exc
+
+
+def _force_oserror_on_fdopen(monkeypatch, exc: OSError, *, fd_to_close: list[int]) -> None:
+    """Patch `kb.mcp.core.os.fdopen` so the next call raises `exc` from `.write`.
+
+    The production path opens a real fd via ``os.open`` first; we must close
+    that fd ourselves to avoid resource warnings. Pass `fd_to_close` so the
+    test owner can sweep on teardown.
+    """
+    real_fdopen = os.fdopen
+
+    def _stub(fd, *args, **kwargs):
+        # Close the real fd that ``os.open`` returned — production code expects
+        # ``fd_transferred = True`` to be set inside the with-block; we still
+        # want to release the OS handle to keep the fixture clean.
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        return _RaisingFile(exc)
+
+    monkeypatch.setattr("kb.mcp.core.os.fdopen", _stub)
+    # Keep real_fdopen referenced so it is not garbage-collected (paranoia).
+    fd_to_close.append(0)
+    _ = real_fdopen
+
+
+# ---------------------------------------------------------------------------
+# AC1 / AC2 / AC3 — kb_ingest_content + kb_save_source `Error[partial]:` redact
+# ---------------------------------------------------------------------------
+
+
+class TestKbIngestContentPathRedacted:
+    """AC1 + AC3 — kb_ingest_content `Error[partial]:` + paired logger.warning."""
+
+    def _invoke(self, monkeypatch, caplog, leaky_path: str) -> tuple[str, str]:
+        from kb.mcp import core as mcp_core
+
+        caplog.set_level(logging.WARNING, logger="kb.mcp.core")
+        exc = OSError(errno.EACCES, "Access is denied", leaky_path)
+        _force_oserror_on_fdopen(monkeypatch, exc, fd_to_close=[])
+
+        result = mcp_core.kb_ingest_content(
+            content=f"hello world {_FIXTURE_TAG}",
+            filename=f"{_FIXTURE_TAG}-ingest",
+            source_type="article",
+            extraction_json='{"title": "T", "entities_mentioned": [], "concepts_mentioned": []}',
+        )
+        # caplog.text is the formatted text including args interpolation.
+        return result, caplog.text
+
+    def test_windows_drive_letter_path_redacted_in_return_and_log(
+        self, monkeypatch, caplog, tmp_kb_env
+    ):
+        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        # MCP return string contract — must NOT contain any of the three
+        # leak forms (input single-backslash, OSError emitted double-backslash,
+        # slash-normalized forward variant) and must NOT contain the
+        # distinguishing directory token "Projects".
+        assert "Error[partial]:" in result
+        assert _LEAKY_WIN_INPUT not in result
+        assert _LEAKY_WIN_EMITTED not in result
+        assert _LEAKY_WIN_FWD not in result
+        assert _LEAKY_WIN_BASENAME_DIR not in result
+        # caplog contract — paired logger.warning at core.py:756-760.
+        assert _LEAKY_WIN_INPUT not in log_text
+        assert _LEAKY_WIN_EMITTED not in log_text
+        assert _LEAKY_WIN_FWD not in log_text
+        assert _LEAKY_WIN_BASENAME_DIR not in log_text
+        # Positive: errno + strerror should still surface (operator diagnostic).
+        assert "Access is denied" in result
+        assert "Access is denied" in log_text
+
+    def test_posix_path_redacted_in_return_and_log(self, monkeypatch, caplog, tmp_kb_env):
+        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_POSIX)
+        assert "Error[partial]:" in result
+        assert _LEAKY_POSIX not in result
+        assert _LEAKY_POSIX not in log_text
+        assert "Permission denied" in result or "Access is denied" in result
+
+
+class TestKbSaveSourcePathRedacted:
+    """AC2 + AC3 — kb_save_source `Error[partial]:` + paired logger.warning."""
+
+    def _invoke(self, monkeypatch, caplog, leaky_path: str) -> tuple[str, str]:
+        from kb.mcp import core as mcp_core
+
+        caplog.set_level(logging.WARNING, logger="kb.mcp.core")
+        exc = OSError(errno.EACCES, "Access is denied", leaky_path)
+        _force_oserror_on_fdopen(monkeypatch, exc, fd_to_close=[])
+
+        result = mcp_core.kb_save_source(
+            content=f"raw content {_FIXTURE_TAG}",
+            filename=f"{_FIXTURE_TAG}-save",
+            source_type="article",
+        )
+        return result, caplog.text
+
+    def test_windows_drive_letter_path_redacted_in_return_and_log(
+        self, monkeypatch, caplog, tmp_kb_env
+    ):
+        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        assert "Error[partial]:" in result
+        assert _LEAKY_WIN_INPUT not in result
+        assert _LEAKY_WIN_EMITTED not in result
+        assert _LEAKY_WIN_FWD not in result
+        assert _LEAKY_WIN_BASENAME_DIR not in result
+        assert _LEAKY_WIN_INPUT not in log_text
+        assert _LEAKY_WIN_EMITTED not in log_text
+        assert _LEAKY_WIN_FWD not in log_text
+        assert _LEAKY_WIN_BASENAME_DIR not in log_text
+
+    def test_posix_path_redacted_in_return_and_log(self, monkeypatch, caplog, tmp_kb_env):
+        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_POSIX)
+        assert "Error[partial]:" in result
+        assert _LEAKY_POSIX not in result
+        assert _LEAKY_POSIX not in log_text
+
+
+# ---------------------------------------------------------------------------
+# AC4 — kb_query.save_as same-class peer (logger + return symmetry)
+# ---------------------------------------------------------------------------
+
+
+class TestKbQuerySaveAsPathRedacted:
+    """AC4 — `_save_synthesis` OSError path; both log AND return get sanitized.
+
+    `_save_synthesis` is the helper kb_query calls when `save_as=...` is set.
+    We invoke it directly with a stub `result` dict to avoid the full kb_query
+    pipeline (LLM call, BM25 search, etc.) — the leak surface is the OSError
+    handler at `core.py:279-285`, not the upstream synthesis logic.
+    """
+
+    def _invoke_with_oserror(
+        self, monkeypatch, caplog, leaky_path: str
+    ) -> tuple[str, str]:
+        from kb.mcp import core as mcp_core
+
+        caplog.set_level(logging.WARNING, logger="kb.mcp.core")
+
+        # Patch save_page_frontmatter (the only OSError-raising call inside
+        # _save_synthesis's try block) to raise the crafted error.
+        exc = OSError(errno.EACCES, "Access is denied", leaky_path)
+
+        def _raising_save(*_a, **_kw):
+            raise exc
+
+        monkeypatch.setattr("kb.utils.pages.save_page_frontmatter", _raising_save)
+
+        result_dict = {
+            "answer": "synthetic answer body",
+            "source_pages": ["entities/foo"],
+            "low_confidence": False,
+        }
+        msg = mcp_core._save_synthesis(f"{_FIXTURE_TAG}-synth", result_dict)
+        return msg, caplog.text
+
+    def test_windows_path_redacted_in_return(self, monkeypatch, caplog, tmp_kb_env):
+        msg, _log_text = self._invoke_with_oserror(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        assert "[warn] save_as failed:" in msg
+        assert _LEAKY_WIN_INPUT not in msg
+        assert _LEAKY_WIN_EMITTED not in msg
+        assert _LEAKY_WIN_FWD not in msg
+        assert _LEAKY_WIN_BASENAME_DIR not in msg
+
+    def test_windows_path_redacted_in_log(self, monkeypatch, caplog, tmp_kb_env):
+        _msg, log_text = self._invoke_with_oserror(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        # AC4 fix at core.py:280 — logger.warning must NOT leak path either.
+        assert "save_as write failed" in log_text
+        assert _LEAKY_WIN_INPUT not in log_text
+        assert _LEAKY_WIN_EMITTED not in log_text
+        assert _LEAKY_WIN_FWD not in log_text
+        assert _LEAKY_WIN_BASENAME_DIR not in log_text
+
+    def test_posix_path_redacted_in_return_and_log(self, monkeypatch, caplog, tmp_kb_env):
+        msg, log_text = self._invoke_with_oserror(monkeypatch, caplog, _LEAKY_POSIX)
+        assert _LEAKY_POSIX not in msg
+        assert _LEAKY_POSIX not in log_text
+
+
+# ---------------------------------------------------------------------------
+# R1-03 IN-CYCLE — sanitize_error_text OSError-shape parametrised unit suite
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeErrorTextOSErrorShapes:
+    """R1-03 IN-CYCLE — pin redaction across the OSError constructor space.
+
+    AC5 covers one shape (3-arg with filename); this suite extends to the
+    five most common variants the helper might see in production. Each case
+    asserts ABSENCE of the leaky path literal, NOT a specific output form,
+    so internal helper output changes are tolerated.
+    """
+
+    def test_3arg_form_with_posix_filename(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        out = sanitize_error_text(OSError(errno.EACCES, "Access is denied", "/home/user/secret.md"))
+        assert "/home/user/secret.md" not in out
+        assert "Access is denied" in out
+
+    def test_no_filename_arg_returns_clean_string(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        # 1-arg form has no filename attribute — nothing to leak; helper must
+        # not crash and must preserve the strerror prefix.
+        out = sanitize_error_text(OSError("Access is denied"))
+        assert "Access is denied" in out
+
+    def test_filename_is_none_no_spurious_path_token(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        # Some libraries pass filename=None explicitly; helper must not insert
+        # a spurious `<path>` token where no path was present.
+        exc = OSError(errno.EACCES, "Access is denied", None)
+        out = sanitize_error_text(exc)
+        assert "Access is denied" in out
+        # filename=None means OSError.__str__ omits the trailing `: '<path>'`.
+        assert "/home" not in out
+        assert "D:\\" not in out
+
+    def test_filename2_attr_5arg_form_redacts_both(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        # 5-arg form populates both filename + filename2 (e.g., MoveFile).
+        # Helper iterates ("filename", "filename2") at sanitize.py:68-76 so
+        # both should be redacted.
+        exc = OSError(
+            errno.EACCES,
+            "MoveFile failed",
+            "/home/user/src.md",
+            None,
+            "/home/user/dst.md",
+        )
+        out = sanitize_error_text(exc)
+        assert "/home/user/src.md" not in out
+        assert "/home/user/dst.md" not in out
+        assert "MoveFile failed" in out
+
+    def test_path_in_args1_text_only(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        # Path appears inside the strerror text (args[1]) without a filename
+        # attr. Regex sweep must catch it via _ABS_PATH_PATTERNS.
+        exc = OSError(errno.EACCES, "/home/user/leaked-via-msg.md")
+        out = sanitize_error_text(exc)
+        assert "/home/user/leaked-via-msg.md" not in out
+
+
+# ---------------------------------------------------------------------------
+# Q8 — UNC / long-path filename xfail-strict (only ordinary-UNC currently leaks)
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeErrorTextUNCAndLongPath:
+    r"""Q8 — Three Windows path shapes that flow through ``_rel(Path(fn_str))``.
+
+    Per Step-9 REPL probe (cycle-16 L3 — reproduce the failure mode first):
+      - long_path ``\\?\C:\...``: REDACTS via final regex sweep (drive-letter
+        match after slash-normalize).
+      - ordinary_unc ``\\server\share\...``: LEAKS — see BACKLOG cycle-34
+        candidate ``sanitize.py UNC slash-normalize bug``. Marked xfail-strict
+        so a future helper fix flips the marker and forces removal.
+      - unc_long_path ``\\?\UNC\server\share\...``: REDACTS via long-path regex.
+    """
+
+    def test_windows_long_path_filename_redacts(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        out = sanitize_error_text(
+            OSError(errno.EACCES, "Access is denied", r"\\?\C:\Projects\foo.md")
+        )
+        assert "C:\\Projects" not in out
+        assert "C:/Projects" not in out
+        assert "foo.md" not in out
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "sanitize.py UNC slash-normalize bug — see BACKLOG cycle-34 candidate. "
+            "OSError.__str__ doubles backslashes; _ABS_PATH_PATTERNS UNC alternative "
+            "matches single backslashes only, so doubled-backslash UNC slips through. "
+            "Removing this xfail when the helper is fixed will force the marker "
+            "removal (strict=True semantic)."
+        ),
+    )
+    def test_windows_ordinary_unc_filename_redacts(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        out = sanitize_error_text(
+            OSError(errno.EACCES, "Access is denied", r"\\server\share\secret.md")
+        )
+        # Both backslash and slash-normalized forms must be absent.
+        assert "server" not in out
+        assert "share" not in out
+        assert "secret.md" not in out
+
+    def test_windows_unc_long_path_filename_redacts(self):
+        from kb.utils.sanitize import sanitize_error_text
+
+        out = sanitize_error_text(
+            OSError(errno.EACCES, "Access is denied", r"\\?\UNC\server\share\foo.md")
+        )
+        assert "server" not in out
+        assert "share" not in out
+        assert "foo.md" not in out
