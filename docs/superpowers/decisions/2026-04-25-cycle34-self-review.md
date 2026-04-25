@@ -3,7 +3,7 @@
 **Date:** 2026-04-25
 **Branch:** `feat/backlog-by-file-cycle34` → PR #48
 **Scope:** 2026-04-25 comprehensive review P0/P1 ship-blockers (Findings 1, 2, 3, 5, 6, 7, 9, 20)
-**ACs designed:** 57 · **delivered:** 53 · **deferred:** AC4e (NEW-Q15 b) · **dropped:** AC49 (R2 NT1 stale) · **dropped:** AC55 (per-design final) · **net new tests:** 18 · **skill patches:** 6 (C34-L1..L6)
+**ACs designed:** 57 · **delivered:** 53 · **deferred:** AC4e (NEW-Q15 b) · **dropped:** AC49 (R2 NT1 stale) · **dropped:** AC55 (per-design final) · **net new tests:** 18 · **skill patches:** 7 (C34-L1..L7)
 
 ---
 
@@ -135,6 +135,23 @@
 **Fix going forward.** Step-10 local gate is NOT `pytest` + `ruff` alone — it's the union of every `run:` step in the touched workflow file. Test updates from Step-9 production changes (e.g., version bump `0.10.0` → `0.11.0` breaks `test_cli.py::test_cli_version`; pip-audit refactor breaks `test_pip_audit_invocation_uses_dash_r`) must (a) be in the SAME commit as the production change, (b) pass `pytest <test_file>` locally, (c) be included in the full Step-10 sweep before PR open.
 
 → **C34-L6**: Step-10 local gate MUST mirror EVERY `run:` step in `.github/workflows/*.yml` (extras install, pip-audit, build, twine), not just `pytest` + `ruff`. Test updates from Step-9 production changes go in the SAME commit and pass locally before push. Refines the feature-dev Step-10 contract.
+
+---
+
+### S7 — Step-15 merge gate verified workflow `conclusion: success` but did NOT verify EVERY step-level conclusion (added per user pre-merge feedback)
+
+**What happened.** Step-15 pre-merge check confirmed `gh pr view 48 --json mergeStateStatus` returned `CLEAN` and `gh run view <run-id> --json conclusion` returned `success`. PR #48 merged. The cycle-34 workflow includes `continue-on-error: true` on the pytest step (per C34-L3 soft-fail bridge for pre-existing fragility). On run #24926336567 the pytest step happened to also conclude `success` at the step level — no test failures slipped through, no regression hidden under the soft-fail.
+
+**The risk this exposes.** Future cycles where a regression is introduced AND happens to fall into one of the documented soft-fail classes would ship to main with the regression invisible: the workflow `conclusion: success` because non-pytest gate steps pass; the step-level pytest `conclusion: failure`; but no one would check the latter because the green checkmark looks final.
+
+**Fix going forward.** Step-15 must run TWO checks before `gh pr merge`:
+
+1. **Workflow-level success** (already canonical): `gh run view <run-id> --json conclusion --jq '.conclusion'` must be `success`.
+2. **Step-level success** (NEW per C34-L7): `gh run view <run-id> --json jobs --jq '[.jobs[].steps[] | select(.conclusion == "failure" or .conclusion == "cancelled")]'` must be empty, OR every step-level failure must map 1:1 to a `continue-on-error: true` step whose failure pattern matches the documented soft-fail classes in the workflow comment AND the cycle-N+1 BACKLOG entry.
+
+For cycle 34 this would have surfaced any regression in the pytest soft-fail content. The BACKLOG entry tracking cycle-36 portability would have to remain explicitly open as the "permitted" failure surface.
+
+→ **C34-L7**: Step-15 merge gate MUST verify EVERY step-level CI conclusion, not just overall workflow `conclusion: success`. Soft-fail (`continue-on-error: true`) steps can mask regressions under the green checkmark — operator must explicitly diff step-level failures against documented soft-fail classes before merge. Refines the feature-dev Step-15 contract.
 
 ---
 
