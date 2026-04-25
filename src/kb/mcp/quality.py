@@ -44,7 +44,7 @@ def kb_review_page(page_id: str) -> str:
         page_id: Page to review (e.g., 'concepts/rag').
     """
     page_id = _strip_control_chars(page_id)
-    err = _validate_page_id(page_id)
+    err = _validate_page_id(page_id, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
 
@@ -80,7 +80,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
     notes_err = _validate_notes(revision_notes, "revision_notes")
     if notes_err:
         return notes_err
-    err = _validate_page_id(page_id)
+    err = _validate_page_id(page_id, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
     if len(updated_content) > MAX_INGEST_CONTENT_CHARS:
@@ -137,7 +137,7 @@ def kb_lint_deep(page_id: str) -> str:
         page_id: Page to check (e.g., 'concepts/rag').
     """
     page_id = _strip_control_chars(page_id)
-    err = _validate_page_id(page_id)
+    err = _validate_page_id(page_id, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
 
@@ -175,7 +175,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
             return "Error: Too many page IDs — max 50."
         if ids:
             for pid in ids:
-                err = _validate_page_id(pid, check_exists=True)
+                err = _validate_page_id(pid, check_exists=True, wiki_dir=WIKI_DIR)
                 if err:
                     return f"Error: {err}"
         return build_consistency_context(ids)
@@ -204,7 +204,7 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
 
     pages = [p.strip() for p in cited_pages.split(",") if p.strip()]
     for pid in pages:
-        err = _validate_page_id(pid, check_exists=False)
+        err = _validate_page_id(pid, check_exists=False, wiki_dir=WIKI_DIR)
         if err:
             return f"Error: Invalid cited page '{pid}': {err}"
 
@@ -276,7 +276,7 @@ def kb_affected_pages(page_id: str) -> str:
     # Cycle 4 item #11 — validate existence so a typo surfaces as a clear
     # "Page not found: ..." instead of silently returning "No pages are
     # affected by changes to {page_id}." (false-negative).
-    err = _validate_page_id(page_id, check_exists=True)
+    err = _validate_page_id(page_id, check_exists=True, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
 
@@ -363,7 +363,7 @@ def kb_save_lint_verdict(
         notes: Free-text notes about the evaluation.
     """
     page_id = _strip_control_chars(page_id)
-    err = _validate_page_id(page_id, check_exists=False)
+    err = _validate_page_id(page_id, check_exists=False, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
 
@@ -435,7 +435,7 @@ def kb_create_page(
     if len(title) > 500:
         return f"Error: title too long ({len(title)} chars; max 500)."
     # Validate page_id — reuse shared validator first (handles traversal + resolve check)
-    err = _validate_page_id(page_id, check_exists=False)
+    err = _validate_page_id(page_id, check_exists=False, wiki_dir=WIKI_DIR)
     if err:
         return f"Error: {err}"
     if len(content) > MAX_INGEST_CONTENT_CHARS:

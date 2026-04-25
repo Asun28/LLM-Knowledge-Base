@@ -247,13 +247,17 @@ def _is_windows_reserved(page_id: str) -> bool:
     return False
 
 
-def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
+def _validate_page_id(
+    page_id: str, *, check_exists: bool = True, wiki_dir: Path | None = None
+) -> str | None:
     """Validate a page ID for security and optionally existence.
 
     Args:
         page_id: Page identifier (e.g., 'concepts/rag').
         check_exists: If True (default), also verify the page file exists.
             Set False when the caller handles existence separately.
+        wiki_dir: Optional wiki directory to validate against. Defaults to the
+            module-level WIKI_DIR.
 
     Returns:
         Error message string (caller prepends "Error:" before surfacing to MCP
@@ -280,9 +284,10 @@ def _validate_page_id(page_id: str, *, check_exists: bool = True) -> str | None:
             f"(CON, PRN, AUX, NUL, COM1-9, LPT1-9): {page_id}. "
             "Rename to avoid cross-platform filesystem failures."
         )
-    page_path = WIKI_DIR / f"{page_id}.md"
+    effective_wiki_dir = wiki_dir or WIKI_DIR
+    page_path = effective_wiki_dir / f"{page_id}.md"
     try:
-        page_path.resolve().relative_to(WIKI_DIR.resolve())
+        page_path.resolve().relative_to(effective_wiki_dir.resolve())
     except ValueError:
         return f"Invalid page_id: {page_id}. Path escapes wiki directory."
     if check_exists and not page_path.exists():

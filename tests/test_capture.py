@@ -164,6 +164,18 @@ class TestCheckRateLimit:
         # Retry should be within an hour
         assert retry_after <= 3600
 
+    def test_over_cap_retry_after_static_clock_is_one_hour(
+        self, reset_rate_limit, monkeypatch
+    ):
+        monkeypatch.setattr("kb.capture.time.time", lambda: 1000.0)
+
+        for _ in range(CAPTURE_MAX_CALLS_PER_HOUR):
+            _check_rate_limit()
+        allowed, retry_after = _check_rate_limit()
+
+        assert allowed is False
+        assert retry_after == 3600
+
     def test_window_slides_old_entries_purged(self, reset_rate_limit, monkeypatch):
         # Fake the clock — populate window with stale timestamps then advance time
         fake_now = [1000.0]

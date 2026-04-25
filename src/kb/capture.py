@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-04-13-kb-capture-design.md
 
 import base64
 import logging
+import math
 import os
 import re
 import secrets as _secrets
@@ -73,7 +74,7 @@ def _check_rate_limit() -> tuple[bool, int]:
         if len(_rate_limit_window) >= CAPTURE_MAX_CALLS_PER_HOUR:
             oldest = _rate_limit_window[0]
             # max(1, ...) avoids ≤0 retry_after under frozen-clock test fixtures
-            retry_after = max(1, int(oldest + 3600 - now) + 1)
+            retry_after = max(1, math.ceil(oldest + 3600 - now))
             return False, retry_after
         _rate_limit_window.append(now)
         return True, 0
