@@ -238,15 +238,25 @@ def _save_synthesis(slug: str, result: dict) -> str:
     if not source_list:
         return "\n[warn] save_as skipped: query returned no source_pages"
 
+    # Cycle 33 R1 Codex MAJOR A1 + R2 Codex C33-R2-01 — assign `target` BEFORE
+    # the try block (NOT just before mkdir). The `except OSError as exc:`
+    # handler references `target` for path-redaction; if any operation INSIDE
+    # the try raises OSError before `target` is bound — including the lazy
+    # imports of `frontmatter` / `save_page_frontmatter` (R2 reproduced via
+    # forced OSError on import) OR the mkdir call (R1 original finding) — the
+    # handler would raise UnboundLocalError and bypass the AC4 contract.
+    # `Path / str` arithmetic is pure object construction and cannot fail, so
+    # both bindings are safe to live above the try.
+    synthesis_dir = WIKI_DIR / "synthesis"
+    target = synthesis_dir / f"{slug}.md"
+
     try:
         # Cycle 17 AC4 — lazy imports keep cold-boot out of frontmatter.
         import frontmatter
 
         from kb.utils.pages import save_page_frontmatter
 
-        synthesis_dir = WIKI_DIR / "synthesis"
         synthesis_dir.mkdir(parents=True, exist_ok=True)
-        target = synthesis_dir / f"{slug}.md"
         # Belt-and-suspenders containment check (T1) — uses path-component
         # comparison, NOT string prefix. A sibling directory named
         # `synthesis_evil` would falsely pass `.startswith(str(synthesis_dir))`
@@ -277,8 +287,12 @@ def _save_synthesis(slug: str, result: dict) -> str:
         save_page_frontmatter(target, post)
         return f"\nSaved synthesis to: {_rel(target)}"
     except OSError as exc:
-        logger.warning("save_as write failed for slug=%r: %s", slug, exc)
-        return f"\n[warn] save_as failed: {_sanitize_error_str(exc)}"
+        # Cycle 33 AC4 — pass `target` to both log AND return so the exception's
+        # filename attribute is path-redacted (not just regex-swept). Symmetric
+        # depth match for kb_ingest_content / kb_save_source AC1+AC2 fixes.
+        sanitized_err = _sanitize_error_str(exc, target)
+        logger.warning("save_as write failed for slug=%r: %s", slug, sanitized_err)
+        return f"\n[warn] save_as failed: {sanitized_err}"
 
 
 @mcp.tool()
@@ -753,13 +767,19 @@ def kb_ingest_content(
             except OSError:
                 pass
         file_path.unlink(missing_ok=True)
+        # Cycle 33 AC1 + AC3 — pre-compute redacted error string ONCE so the
+        # paired logger.warning + Error[partial]: return cannot drift apart.
+        # Raw OSError.__str__ on Windows includes the absolute filename
+        # (`[WinError 5] Access is denied: 'D:\\...'`); cycle-32 AC3 widening
+        # routes Error[partial]: to CLI stderr where this would surface.
+        sanitized_err = _sanitize_error_str(write_err, file_path)
         logger.warning(
             "kb_ingest_content partial write to %s: %s; client must retry",
             _rel(file_path),
-            write_err,
+            sanitized_err,
         )
         return (
-            f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+            f"Error[partial]: write to {_rel(file_path)} failed ({sanitized_err}); "
             "retry with kb_save_source(..., overwrite=true) then kb_ingest."
         )
 
@@ -872,13 +892,15 @@ def kb_save_source(
                 except OSError:
                     pass
             file_path.unlink(missing_ok=True)
+            # Cycle 33 AC2 + AC3 — same pattern as kb_ingest_content above.
+            sanitized_err = _sanitize_error_str(write_err, file_path)
             logger.warning(
                 "kb_save_source partial write to %s: %s; client must retry",
                 _rel(file_path),
-                write_err,
+                sanitized_err,
             )
             return (
-                f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+                f"Error[partial]: write to {_rel(file_path)} failed ({sanitized_err}); "
                 "retry with overwrite=true."
             )
     return (
