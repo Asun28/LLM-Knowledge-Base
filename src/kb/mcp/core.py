@@ -245,8 +245,14 @@ def _save_synthesis(slug: str, result: dict) -> str:
         from kb.utils.pages import save_page_frontmatter
 
         synthesis_dir = WIKI_DIR / "synthesis"
-        synthesis_dir.mkdir(parents=True, exist_ok=True)
+        # Cycle 33 R1 Codex MAJOR A1 — assign `target` BEFORE mkdir so the
+        # `except OSError as exc:` handler at the bottom can always reference
+        # `target` for path-redaction. If mkdir raises (PermissionError, disk
+        # full, etc.) and `target` were assigned AFTER, the handler's
+        # `_sanitize_error_str(exc, target)` call would raise UnboundLocalError
+        # and bypass the AC4 error-string contract entirely.
         target = synthesis_dir / f"{slug}.md"
+        synthesis_dir.mkdir(parents=True, exist_ok=True)
         # Belt-and-suspenders containment check (T1) — uses path-component
         # comparison, NOT string prefix. A sibling directory named
         # `synthesis_evil` would falsely pass `.startswith(str(synthesis_dir))`

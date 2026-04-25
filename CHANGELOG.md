@@ -32,7 +32,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 #### 2026-04-25 — cycle 33
 
 - Items: 11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files / +TBD commits (post-merge backfill per cycle-30 L1)
-- Tests: 2901 → 2920 (+19 passed; +1 xfailed for the Q8 ordinary-UNC residual)
+- Tests: 2901 → 2922 (+20 passed including R1 mkdir-failure regression; +1 xfailed for the Q8 ordinary-UNC residual)
 - Scope:
   Closes BACKLOG `mcp/core.py:762,881` MEDIUM (cycle-32 threat T11) —
   AC1/AC2/AC3 wrap raw `OSError write_err` interpolation in pre-computed
@@ -54,7 +54,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
   new-pages contract, (c) explicit "Concurrent calls may race"
   serial-only disclaimer. AC7+AC8 pin both contracts behaviorally via
   `tests/test_cycle33_ingest_index_idempotency.py` — 5 tests with
-  `MagicMock(wraps=atomic_text_write)` spy + call_count assertions
+  `MagicMock(side_effect=atomic_text_write)` spy + call_count assertions
   (1 for dedup branches, 2 for merge branch, 0 for missing-file
   early-out at `pipeline.py:773-775`). AC9 deletes the closed
   `mcp/core.py:762,881` BACKLOG entry. AC10 narrows the

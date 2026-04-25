@@ -11,6 +11,7 @@ from __future__ import annotations
 import errno
 import logging
 import os
+from pathlib import Path
 
 import pytest
 
@@ -88,8 +89,30 @@ def _force_oserror_on_fdopen(monkeypatch, exc: OSError, *, fd_to_close: list[int
 class TestKbIngestContentPathRedacted:
     """AC1 + AC3 — kb_ingest_content `Error[partial]:` + paired logger.warning."""
 
-    def _invoke(self, monkeypatch, caplog, leaky_path: str) -> tuple[str, str]:
+    def _invoke(
+        self, monkeypatch, caplog, tmp_kb_env, leaky_path: str
+    ) -> tuple[str, str]:
         from kb.mcp import core as mcp_core
+
+        # R1 Sonnet MINOR — defense-in-depth + Step-5 Q9 explicit monkeypatch.
+        # Under full-suite ordering, `tmp_kb_env`'s mirror-rebind loop
+        # (conftest:248-255) can MISS `kb.mcp.core.SOURCE_TYPE_DIRS` because the
+        # comparison `kb.mcp.core.SOURCE_TYPE_DIRS == mirror_original` returns
+        # False when an earlier test reloaded kb.config (snapshot drift; see
+        # cycle-19 L2 reload-leak class). Defensive monkeypatch ensures
+        # production code lands under tmp regardless of mirror-rebind state.
+        article_dir = tmp_kb_env / "raw" / "articles"
+        article_dir.mkdir(parents=True, exist_ok=True)
+        patched_dirs = {
+            **mcp_core.SOURCE_TYPE_DIRS,
+            "article": article_dir,
+        }
+        monkeypatch.setattr("kb.mcp.core.SOURCE_TYPE_DIRS", patched_dirs)
+        # Now confirm the production-computed file_path WILL resolve under tmp.
+        article_dir_used = mcp_core.SOURCE_TYPE_DIRS["article"]
+        assert str(article_dir_used).startswith(str(tmp_kb_env)), (
+            f"defensive monkeypatch failed — article_dir={article_dir_used!r}"
+        )
 
         caplog.set_level(logging.WARNING, logger="kb.mcp.core")
         exc = OSError(errno.EACCES, "Access is denied", leaky_path)
@@ -107,7 +130,7 @@ class TestKbIngestContentPathRedacted:
     def test_windows_drive_letter_path_redacted_in_return_and_log(
         self, monkeypatch, caplog, tmp_kb_env
     ):
-        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        result, log_text = self._invoke(monkeypatch, caplog, tmp_kb_env, _LEAKY_WIN_INPUT)
         # MCP return string contract — must NOT contain any of the three
         # leak forms (input single-backslash, OSError emitted double-backslash,
         # slash-normalized forward variant) and must NOT contain the
@@ -127,7 +150,7 @@ class TestKbIngestContentPathRedacted:
         assert "Access is denied" in log_text
 
     def test_posix_path_redacted_in_return_and_log(self, monkeypatch, caplog, tmp_kb_env):
-        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_POSIX)
+        result, log_text = self._invoke(monkeypatch, caplog, tmp_kb_env, _LEAKY_POSIX)
         assert "Error[partial]:" in result
         assert _LEAKY_POSIX not in result
         assert _LEAKY_POSIX not in log_text
@@ -137,8 +160,24 @@ class TestKbIngestContentPathRedacted:
 class TestKbSaveSourcePathRedacted:
     """AC2 + AC3 — kb_save_source `Error[partial]:` + paired logger.warning."""
 
-    def _invoke(self, monkeypatch, caplog, leaky_path: str) -> tuple[str, str]:
+    def _invoke(
+        self, monkeypatch, caplog, tmp_kb_env, leaky_path: str
+    ) -> tuple[str, str]:
         from kb.mcp import core as mcp_core
+
+        # R1 Sonnet MINOR defense-in-depth + Step-5 Q9 explicit monkeypatch
+        # (mirrors kb_ingest_content tests; see comment block there).
+        article_dir = tmp_kb_env / "raw" / "articles"
+        article_dir.mkdir(parents=True, exist_ok=True)
+        patched_dirs = {
+            **mcp_core.SOURCE_TYPE_DIRS,
+            "article": article_dir,
+        }
+        monkeypatch.setattr("kb.mcp.core.SOURCE_TYPE_DIRS", patched_dirs)
+        article_dir_used = mcp_core.SOURCE_TYPE_DIRS["article"]
+        assert str(article_dir_used).startswith(str(tmp_kb_env)), (
+            f"defensive monkeypatch failed — article_dir={article_dir_used!r}"
+        )
 
         caplog.set_level(logging.WARNING, logger="kb.mcp.core")
         exc = OSError(errno.EACCES, "Access is denied", leaky_path)
@@ -154,7 +193,7 @@ class TestKbSaveSourcePathRedacted:
     def test_windows_drive_letter_path_redacted_in_return_and_log(
         self, monkeypatch, caplog, tmp_kb_env
     ):
-        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_WIN_INPUT)
+        result, log_text = self._invoke(monkeypatch, caplog, tmp_kb_env, _LEAKY_WIN_INPUT)
         assert "Error[partial]:" in result
         assert _LEAKY_WIN_INPUT not in result
         assert _LEAKY_WIN_EMITTED not in result
@@ -166,7 +205,7 @@ class TestKbSaveSourcePathRedacted:
         assert _LEAKY_WIN_BASENAME_DIR not in log_text
 
     def test_posix_path_redacted_in_return_and_log(self, monkeypatch, caplog, tmp_kb_env):
-        result, log_text = self._invoke(monkeypatch, caplog, _LEAKY_POSIX)
+        result, log_text = self._invoke(monkeypatch, caplog, tmp_kb_env, _LEAKY_POSIX)
         assert "Error[partial]:" in result
         assert _LEAKY_POSIX not in result
         assert _LEAKY_POSIX not in log_text
@@ -231,6 +270,52 @@ class TestKbQuerySaveAsPathRedacted:
         msg, log_text = self._invoke_with_oserror(monkeypatch, caplog, _LEAKY_POSIX)
         assert _LEAKY_POSIX not in msg
         assert _LEAKY_POSIX not in log_text
+
+    def test_mkdir_oserror_does_not_raise_unboundlocalerror(
+        self, monkeypatch, caplog, tmp_kb_env
+    ):
+        """Cycle 33 R1 Codex MAJOR A1 regression — `synthesis_dir.mkdir` failing
+        BEFORE `target` is assigned must NOT raise UnboundLocalError.
+
+        Pre-fix code at `core.py:247-249` had ``mkdir`` then ``target = ...`` so
+        an OSError from ``mkdir`` would jump to the except handler with `target`
+        unbound. The except references `target` for path-redaction, producing
+        UnboundLocalError that crashes through MCP's "never raises" contract.
+        Fix moves `target` assignment BEFORE ``mkdir``.
+        """
+        from kb.mcp import core as mcp_core
+
+        caplog.set_level(logging.WARNING, logger="kb.mcp.core")
+
+        # Patch mkdir on the Path class to raise — affects the synthesis_dir
+        # mkdir at the start of the try block, BEFORE any other code can run.
+        leaky_path = _LEAKY_WIN_INPUT
+        exc = OSError(errno.EACCES, "Access is denied", leaky_path)
+
+        original_mkdir = Path.mkdir
+
+        def _raising_mkdir(self, *args, **kwargs):
+            # Only raise for the synthesis_dir; let other mkdir calls work.
+            if self.name == "synthesis":
+                raise exc
+            return original_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", _raising_mkdir)
+
+        result_dict = {
+            "answer": "synthetic answer body",
+            "source_pages": ["entities/foo"],
+            "low_confidence": False,
+        }
+        # MUST NOT raise UnboundLocalError — the post-fix code assigns
+        # `target` before `mkdir` so the except handler can use it.
+        msg = mcp_core._save_synthesis(f"{_FIXTURE_TAG}-mkdir-fail", result_dict)
+
+        # And the leak must still be redacted (AC4 contract preserved).
+        assert "[warn] save_as failed:" in msg
+        assert leaky_path not in msg
+        assert _LEAKY_WIN_EMITTED not in msg
+        assert _LEAKY_WIN_BASENAME_DIR not in msg
 
 
 # ---------------------------------------------------------------------------
