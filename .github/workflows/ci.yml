@@ -80,15 +80,22 @@ jobs:
         continue-on-error: true
 
       - name: Pip-audit (full pin set with documented narrow-role exceptions)
-        # NEW-Q17: audit `requirements.txt` (full pin set users actually face),
-        # not just installed `[dev]` env. The four --ignore-vuln IDs match
+        # NEW-Q17 + cycle-22 L1 hybrid: audit `requirements.txt` for the
+        # full user-facing pin set BUT add `--no-deps` so pip-audit does
+        # NOT do its own dependency-resolution dry-run (which would trip
+        # ResolutionImpossible on the three known conflicts that cycle 34
+        # accepts via continue-on-error on `pip check`).  requirements.txt
+        # is fully pinned so --no-deps is correct: every transitive is
+        # already listed explicitly.  The four --ignore-vuln IDs match
         # SECURITY.md's "Known Advisories" table 1:1 (cycle 34 T4 mitigation).
         # ANY new CVE on these or other packages will fail this step.
+        # Step-9-fix DESIGN-AMEND: R1 PR review (edge-cases) B1 caught the
+        # cycle-22 L1 trap; --no-deps closes it without dropping -r.
         run: |
-          pip-audit -r requirements.txt \
-            --ignore-vuln=CVE-2025-69872 \
-            --ignore-vuln=GHSA-xqmj-j6mv-4862 \
-            --ignore-vuln=CVE-2026-3219 \
+          pip-audit -r requirements.txt --no-deps `
+            --ignore-vuln=CVE-2025-69872 `
+            --ignore-vuln=GHSA-xqmj-j6mv-4862 `
+            --ignore-vuln=CVE-2026-3219 `
             --ignore-vuln=CVE-2026-6587
 
       - name: Build distribution + twine check
