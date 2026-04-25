@@ -89,9 +89,7 @@ def _force_oserror_on_fdopen(monkeypatch, exc: OSError, *, fd_to_close: list[int
 class TestKbIngestContentPathRedacted:
     """AC1 + AC3 — kb_ingest_content `Error[partial]:` + paired logger.warning."""
 
-    def _invoke(
-        self, monkeypatch, caplog, tmp_kb_env, leaky_path: str
-    ) -> tuple[str, str]:
+    def _invoke(self, monkeypatch, caplog, tmp_kb_env, leaky_path: str) -> tuple[str, str]:
         from kb.mcp import core as mcp_core
 
         # R1 Sonnet MINOR — defense-in-depth + Step-5 Q9 explicit monkeypatch.
@@ -160,9 +158,7 @@ class TestKbIngestContentPathRedacted:
 class TestKbSaveSourcePathRedacted:
     """AC2 + AC3 — kb_save_source `Error[partial]:` + paired logger.warning."""
 
-    def _invoke(
-        self, monkeypatch, caplog, tmp_kb_env, leaky_path: str
-    ) -> tuple[str, str]:
+    def _invoke(self, monkeypatch, caplog, tmp_kb_env, leaky_path: str) -> tuple[str, str]:
         from kb.mcp import core as mcp_core
 
         # R1 Sonnet MINOR defense-in-depth + Step-5 Q9 explicit monkeypatch
@@ -225,9 +221,7 @@ class TestKbQuerySaveAsPathRedacted:
     handler at `core.py:279-285`, not the upstream synthesis logic.
     """
 
-    def _invoke_with_oserror(
-        self, monkeypatch, caplog, leaky_path: str
-    ) -> tuple[str, str]:
+    def _invoke_with_oserror(self, monkeypatch, caplog, leaky_path: str) -> tuple[str, str]:
         from kb.mcp import core as mcp_core
 
         caplog.set_level(logging.WARNING, logger="kb.mcp.core")
@@ -339,9 +333,7 @@ class TestKbQuerySaveAsPathRedacted:
         assert _LEAKY_WIN_EMITTED not in msg
         assert _LEAKY_WIN_BASENAME_DIR not in msg
 
-    def test_mkdir_oserror_does_not_raise_unboundlocalerror(
-        self, monkeypatch, caplog, tmp_kb_env
-    ):
+    def test_mkdir_oserror_does_not_raise_unboundlocalerror(self, monkeypatch, caplog, tmp_kb_env):
         """Cycle 33 R1 Codex MAJOR A1 regression — `synthesis_dir.mkdir` failing
         BEFORE `target` is assigned must NOT raise UnboundLocalError.
 
