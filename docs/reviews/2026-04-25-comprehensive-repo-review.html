@@ -1,0 +1,994 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Wiki Flywheel — Comprehensive Repository Review</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --ink: #202124;
+      --muted: #5f6368;
+      --line: #d8d9d4;
+      --accent: #0f766e;
+      --accent-dark: #173b3a;
+      --critical: #b42318;
+      --high: #b45309;
+      --medium: #5b5f00;
+      --low: #4b5563;
+      --good: #15803d;
+      --code: #f1f3f2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+    header {
+      background: var(--accent-dark);
+      color: #fff;
+      padding: 42px 24px 34px;
+      border-bottom: 5px solid var(--accent);
+    }
+    header .wrap, main {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(1.9rem, 3.6vw, 2.9rem);
+      line-height: 1.1;
+    }
+    header p {
+      max-width: 900px;
+      margin: 8px 0 0;
+      color: #d7eeee;
+      font-size: 1rem;
+    }
+    main { padding: 28px 24px 64px; }
+    section {
+      margin: 0 0 22px;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      color: var(--accent-dark);
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 6px;
+    }
+    h3 { margin: 22px 0 8px; font-size: 1.12rem; color: #184847; }
+    h4 { margin: 16px 0 6px; font-size: 1rem; color: #1c5654; }
+    p { margin: 10px 0; }
+    ul, ol { margin: 10px 0 10px 22px; padding: 0; }
+    li { margin: 5px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 0.93rem;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 11px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #eef5f4;
+      color: #113a38;
+      font-weight: 600;
+    }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    td.c, th.c { text-align: center; }
+    code {
+      background: var(--code);
+      border: 1px solid #e1e4e2;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #0f1a1a;
+      color: #e5efef;
+      border-radius: 6px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .meta div {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.22);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #fff;
+      margin-right: 6px;
+      letter-spacing: 0.3px;
+    }
+    .critical { background: var(--critical); }
+    .high { background: var(--high); }
+    .medium { background: var(--medium); }
+    .low { background: var(--low); }
+    .good { background: var(--good); }
+    .p0 { background: #7c2d12; }
+    .p1 { background: #92400e; }
+    .p2 { background: #3f3f46; }
+    .finding {
+      border-left: 4px solid var(--accent);
+      padding: 2px 14px 2px;
+      margin-top: 16px;
+      background: #fafcfb;
+      border-radius: 0 6px 6px 0;
+    }
+    .finding.critical-border { border-left-color: var(--critical); }
+    .finding.high-border { border-left-color: var(--high); }
+    .finding.medium-border { border-left-color: var(--medium); }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #eef8f7;
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 14px 0;
+    }
+    .callout.warn { border-left-color: var(--high); background: #fef3e5; }
+    .callout.crit { border-left-color: var(--critical); background: #fde9e7; }
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+    nav.toc {
+      background: #eef8f7;
+      border: 1px solid #cde2e0;
+      border-radius: 6px;
+      padding: 14px 18px;
+    }
+    nav.toc ol { columns: 2; margin: 0 0 0 18px; }
+    nav.toc li { margin: 3px 0; break-inside: avoid; }
+    nav.toc a { color: var(--accent-dark); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    .compact li { margin: 3px 0; }
+    .supersedes {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    @media (max-width: 720px) {
+      header { padding: 30px 18px 26px; }
+      main { padding: 20px 14px 48px; }
+      section { padding: 18px; }
+      table { font-size: 0.85rem; }
+      th, td { padding: 7px 8px; }
+      nav.toc ol { columns: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>LLM Wiki Flywheel — Comprehensive Repository Review</h1>
+      <p>Actionable findings, then PRD, architecture, implementation, tests, CI/CD, security, differentiation, innovation, advantages, disadvantages, risks, ways of working, and a fix plan.</p>
+      <div class="meta">
+        <div><strong>Date</strong><br>2026-04-25</div>
+        <div><strong>Branch</strong><br><code>main</code></div>
+        <div><strong>Version</strong><br>v0.10.0</div>
+        <div><strong>Cycle</strong><br>32 complete</div>
+        <div><strong>Scope</strong><br>Full repository audit with live verification</div>
+        <div><strong>Source markdown</strong><br><code>2026-04-25-comprehensive-repo-review.md</code></div>
+      </div>
+      <p class="supersedes">Supersedes <code>docs/repo_review.md</code> / <code>docs/repo_review.html</code>.</p>
+    </div>
+  </header>
+
+  <main>
+    <!-- TOC -->
+    <section>
+      <h2>Contents</h2>
+      <nav class="toc">
+        <ol>
+          <li><a href="#tldr">TL;DR &amp; maturity scorecard</a></li>
+          <li><a href="#findings">Actionable findings (top 10 + full table)</a></li>
+          <li><a href="#prd">PRD / product contract</a></li>
+          <li><a href="#arch">Architecture</a></li>
+          <li><a href="#impl">Implementation</a></li>
+          <li><a href="#tests">Tests</a></li>
+          <li><a href="#cicd">CI/CD</a></li>
+          <li><a href="#security">Security</a></li>
+          <li><a href="#differentiation">Differentiation</a></li>
+          <li><a href="#innovation">Innovation</a></li>
+          <li><a href="#advantages">Advantages</a></li>
+          <li><a href="#disadvantages">Disadvantages</a></li>
+          <li><a href="#risks">Risks</a></li>
+          <li><a href="#ways">Ways of working</a></li>
+          <li><a href="#fixplan">Fix plan</a></li>
+          <li><a href="#appendix">Appendix — live verification log</a></li>
+        </ol>
+      </nav>
+    </section>
+
+    <!-- TL;DR -->
+    <section id="tldr">
+      <h2>0. TL;DR</h2>
+      <p>Serious, differentiated local-first knowledge-base system with deep implementation and a large test suite. The product idea is genuinely novel (compile-not-retrieve, MCP-native, Obsidian-native, trust-aware). The blocker is not capability — it is <strong>product contract, dependency health, CI/CD, and doc hygiene</strong>. The repo cannot be called release-ready today, but six focused fixes (≈2-3 cycles) would close that gap.</p>
+      <h3>Maturity scorecard</h3>
+      <table>
+        <thead><tr><th>Area</th><th class="c">Rating</th><th>One-line verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Product vision</td><td class="c">8/10</td><td>Compile-not-retrieve + Karpathy-style structured wiki is a real thesis, not marketing.</td></tr>
+          <tr><td>PRD / product contract</td><td class="c">6/10</td><td>Vision is strong; the public contract drifts across README, code, and backlog.</td></tr>
+          <tr><td>Architecture</td><td class="c">7.5/10</td><td>Coherent three-layer model; ingest state fan-out and module size raise ownership risk.</td></tr>
+          <tr><td>Implementation</td><td class="c">7/10</td><td>Many hardened primitives (SSRF, atomic writes, locks, redaction); narrow leaks remain.</td></tr>
+          <tr><td>Code quality</td><td class="c">6.5/10</td><td>Ruff-clean and disciplined, but 10 modules are 24-80&nbsp;KB; <code>config.py</code> is a god-module.</td></tr>
+          <tr><td>Tests</td><td class="c">7/10</td><td>2901 collected (verified); volume is real, but no golden/snapshot tests for rendered output.</td></tr>
+          <tr><td>CI/CD</td><td class="c">2/10</td><td>No root <code>.github/workflows</code> — all gates are local, enforced by developer discipline only.</td></tr>
+          <tr><td>Security</td><td class="c">6.5/10</td><td>Strong SSRF / capture / subprocess controls; pre-ingest secret gate missing on main path; 4 unfixed CVEs.</td></tr>
+          <tr><td>Differentiation</td><td class="c">8.5/10</td><td>Real and defensible vs RAG, Obsidian vanilla, and the Karpathy gist.</td></tr>
+          <tr><td>Innovation</td><td class="c">8/10</td><td>Trust+contradictions+evolve+publish stack + MCP-first is genuinely novel.</td></tr>
+          <tr><td>Release readiness</td><td class="c">4/10</td><td>Dependency conflicts, drifting docs, no CI, and scratch files in root block a confident ship.</td></tr>
+          <tr><td>Ways of working</td><td class="c">7/10</td><td>17-step cycle workflow is disciplined; velocity is high (373 commits / 7 days) — verging on cycle overload.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Findings -->
+    <section id="findings">
+      <h2>1. Actionable Findings (Leading)</h2>
+      <p>Every finding is backed by a grep- or command-verifiable citation. <span class="badge p0">P0</span> ship blocker, <span class="badge p1">P1</span> maintainability, <span class="badge p2">P2</span> positioning.</p>
+
+      <table>
+        <thead><tr><th class="c">#</th><th class="c">Prio</th><th class="c">Severity</th><th>Finding</th><th>Evidence</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge critical">Crit</span></td><td>Dependency environment is broken: 3 pip conflicts, 4 unfixed CVEs</td><td><code>pip check</code> + <code>pip-audit</code> runs</td></tr>
+          <tr><td class="num">2</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>No CI/CD — no <code>.github/workflows</code>, no enforced gate</td><td><code>ls .github</code> → does not exist</td></tr>
+          <tr><td class="num">3</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Package <code>readme = "CLAUDE.md"</code> points at agent instructions</td><td><code>pyproject.toml:6</code></td></tr>
+          <tr><td class="num">4</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Partial-write MCP paths interpolate raw <code>OSError</code> — leak absolute Windows paths</td><td><code>mcp/core.py:762</code>, <code>:881</code> vs sanitized siblings</td></tr>
+          <tr><td class="num">5</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Contract drift: README says "No vectors" but v0.10 ships hybrid BM25+vector</td><td><code>README.md:5</code> vs <code>:384</code>, <code>query/hybrid.py</code></td></tr>
+          <tr><td class="num">6</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Test-count drift: badge 2850; CLAUDE.md/actual = 2901</td><td><code>README.md:9</code> vs live <code>pytest --collect-only</code></td></tr>
+          <tr><td class="num">7</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>PDF "support" is actually binary rejection — misleads users</td><td><code>README.md:142</code>, <code>pipeline.py:1230,1233</code></td></tr>
+          <tr><td class="num">8</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Main ingest path has no shared pre-LLM secret/PII filter</td><td><code>capture.py:249-264</code> vs <code>extractors.py:336-368</code></td></tr>
+          <tr><td class="num">9</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>Scratch files in repo root: <code>findings.md</code>, <code>progress.md</code>, <code>task_plan.md</code>, <code>claude4.6.md</code></td><td>Root <code>ls</code>; all dated cycle-29 or earlier</td></tr>
+          <tr><td class="num">10</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>Ingest has 11-stage side-effect fan-out with no whole-op recovery</td><td><code>BACKLOG.md:83-84, 99-100</code> self-identified</td></tr>
+          <tr><td class="num">11</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>MCP tools all sync; FastMCP runs them on 40-thread pool</td><td><code>BACKLOG.md:95-96</code></td></tr>
+          <tr><td class="num">12</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>10 modules exceed 24&nbsp;KB; <code>pipeline.py</code> 80&nbsp;KB, <code>engine.py</code> 54&nbsp;KB, <code>augment.py</code> 49&nbsp;KB</td><td><code>du -b src/kb/**/*.py</code></td></tr>
+          <tr><td class="num">13</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td><code>config.py</code> is a 30&nbsp;KB god-module with 35+ unrelated constants</td><td>Phase 4.5 MEDIUM</td></tr>
+          <tr><td class="num">14</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>Zero golden/snapshot tests for structured output</td><td><code>grep "snapshot\|golden\|syrupy"</code> → 0</td></tr>
+          <tr><td class="num">15</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge medium">Med</span></td><td>CLAUDE.md is 38&nbsp;KB and doubles as PRD, onboarding, and runtime policy</td><td>343 lines</td></tr>
+          <tr><td class="num">16</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge medium">Med</span></td><td>251 decision docs dominate <code>docs/</code></td><td><code>ls docs/superpowers/decisions/</code></td></tr>
+          <tr><td class="num">17</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge low">Low-M</span></td><td><code>kb_save_synthesis</code> conflated with <code>kb_query(save_as=...)</code> — a query call is also a write</td><td><code>CLAUDE.md</code> ~L250</td></tr>
+          <tr><td class="num">18</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge low">Low</span></td><td>Optional features not declared in <code>pyproject.toml</code>; all pulled via <code>requirements.txt</code></td><td><code>pyproject.toml:7-13</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>Top 10 detail</h3>
+
+      <div class="finding critical-border">
+        <h4><span class="badge critical">P0 / Critical</span>1. Dependency environment is broken</h4>
+        <p><strong>Evidence.</strong> <code>pip check</code>: <code>arxiv 2.4.1</code> needs <code>requests~=2.32.0</code> but has <code>2.33.0</code>; <code>crawl4ai 0.8.6</code> needs <code>lxml~=5.3</code> but has <code>6.1.0</code>; <code>instructor 1.15.1</code> needs <code>rich&lt;15.0.0</code> but has <code>15.0.0</code>. <code>pip-audit</code>: <code>diskcache 5.6.3</code> (CVE-2025-69872, no fix), <code>litellm 1.83.0</code> (GHSA-xqmj-j6mv-4862, fix <code>1.83.7</code> blocked by transitive <code>click&lt;8.2</code>), <code>pip 26.0.1</code> (CVE-2026-3219, no fix), <code>ragas 0.4.3</code> (CVE-2026-6587, no fix).</p>
+        <p><strong>Fix.</strong> Split deps into extras: <code>hybrid</code>, <code>augment</code>, <code>formats</code>, <code>cli-backends</code>, <code>eval</code>, <code>dev</code>. Remove <code>litellm</code> from default path or wait for its <code>click</code> pin to relax. Accept the other three as documented narrow-role risks in a <code>SECURITY.md</code>.</p>
+        <p><strong>Effort.</strong> 0.5 cycle.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>2. No CI/CD</h4>
+        <p><strong>Evidence.</strong> <code>ls .github</code> fails; the only <code>.github</code> directories live inside vendored skills (<code>.claude/skills/gstack/.github</code>, <code>.tools/ralph-claude-code/.github</code>).</p>
+        <p><strong>Impact.</strong> The 17-step cycle's R1/R2 review gates are all model-driven and local; nothing stops a regression from landing on <code>main</code>.</p>
+        <p><strong>Fix.</strong> <code>.github/workflows/ci.yml</code> with Python 3.12, steps: <code>ruff check</code>, <code>pytest --collect-only</code>, full <code>pytest</code>, <code>pip check</code>, <code>pip-audit</code>, <code>python -m build</code>.</p>
+        <p><strong>Effort.</strong> 0.25 cycle.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>3. Package <code>readme</code> points at agent instructions</h4>
+        <p><strong>Evidence.</strong> <code>pyproject.toml:6</code> → <code>readme = "CLAUDE.md"</code>. CLAUDE.md is 343 lines of internal runtime policy, not user onboarding.</p>
+        <p><strong>Fix.</strong> One-line change to <code>readme = "README.md"</code>. Add test via <code>python -m build &amp;&amp; twine check dist/*</code>.</p>
+        <p><strong>Effort.</strong> 5 minutes + CI hook.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>4. Partial-write paths leak absolute paths</h4>
+        <p><strong>Evidence.</strong> <code>src/kb/mcp/core.py:762</code>:</p>
+<pre><code>f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "</code></pre>
+        <p>The log-side (line 759) passes <code>write_err</code> to <code>_sanitize_error_str</code>, but the return string interpolates it raw. Same pattern at <code>core.py:881</code> for <code>kb_save_source</code>. On Windows, <code>OSError.__str__()</code> typically reads <code>"[WinError 5] Access is denied: 'D:\\Projects\\...\\raw\\articles\\foo.md'"</code>. Cycle-32 AC3 widened <code>_is_mcp_error_response</code> to include <code>"Error["</code>, so this string is now routed to operator stderr under write-failure conditions. Cycle 32 Threat Model T11 and <code>BACKLOG.md:146</code> already track it.</p>
+        <p><strong>Fix.</strong> Wrap <code>write_err</code> in <code>_sanitize_error_str(write_err, file_path)</code> at both sites + regression tests that assert no substring matches <code>str(Path.cwd().resolve())</code> under a simulated <code>PermissionError</code>.</p>
+        <p><strong>Effort.</strong> 30 minutes.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>5. "No vectors" conflicts with hybrid search</h4>
+        <p><strong>Evidence.</strong> <code>README.md:5</code> "No vectors. No chunking." · <code>README.md:155</code> "deletes the vector DB" · <code>README.md:384</code> v0.10 ships "hybrid search with RRF fusion (BM25 + vector via <code>model2vec</code> + <code>sqlite-vec</code>)" · <code>src/kb/query/engine.py:1</code> docstring: "BM25 + vector hybrid search + LLM synthesis" · <code>src/kb/query/hybrid.py:1</code>.</p>
+        <p><strong>Fix.</strong> Replace the tagline with <em>"Markdown-first wiki with optional hybrid retrieval"</em>. Add an opt-out guide documenting how to disable vector search.</p>
+        <p><strong>Effort.</strong> 2 hours.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>6. Test-count drift</h4>
+        <p><strong>Evidence.</strong> Live <code>pytest --collect-only -q</code>: <strong>2901</strong>. <code>CLAUDE.md</code> + <code>CHANGELOG.md</code>: 2901 (consistent). <code>README.md:9</code> badge: <strong>tests-2850</strong>. README narrative cites historical counts 1033, 1177, 2850.</p>
+        <p><strong>Fix.</strong> Generate the badge in CI from <code>pytest --collect-only -q | tail -1</code>; stop citing exact counts in prose.</p>
+        <p><strong>Effort.</strong> 15 minutes + CI hook.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>7. PDF support is advertised but absent</h4>
+        <p><strong>Evidence.</strong> <code>README.md:142</code> claims PDF support; <code>config.py:117</code> includes <code>.pdf</code>; <code>ingest/pipeline.py:1230</code> reads as UTF-8; <code>pipeline.py:1233</code> returns <code>"Binary file cannot be ingested"</code> on failed decode. Net behavior: drag a real PDF in → error.</p>
+        <p><strong>Fix.</strong> Remove <code>.pdf</code> from <code>SUPPORTED_SOURCE_EXTENSIONS</code> and update README (20 min), or implement a real PDF extractor with size/page caps (1 cycle).</p>
+        <p><strong>Effort.</strong> 20 minutes (remove) — recommended.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p0">P0</span><span class="badge high">High</span>8. Main ingest path has no shared pre-LLM secret/PII filter</h4>
+        <p><strong>Evidence.</strong> <code>capture.py:249-264</code> defines <code>_SECRET_PATTERNS</code> + decoded-base64 candidates; <code>capture.py:771-779</code> aborts with <code>CaptureError</code>. <code>ingest/extractors.py:336-368</code> builds the prompt from raw content with no secret scan before <code>call_llm_json(...)</code>. <code>BACKLOG.md:219</code> lists <code>.llmwikiignore</code> + pre-ingest scanner as missing; <code>BACKLOG.md:293-294</code> notes every ingest sends full content to the API.</p>
+        <p><strong>Fix.</strong> Extract <code>_scan_for_secrets</code> from <code>capture.py</code> into <code>kb/utils/secrets.py</code>. Call at the top of <code>ingest_source</code> and <code>compile_wiki</code>. Add <code>.llmwikiignore</code>. Default deny with override.</p>
+        <p><strong>Effort.</strong> 1 cycle.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p1">P1</span><span class="badge high">High</span>9. Scratch planning files in repo root</h4>
+        <p><strong>Evidence.</strong> <code>findings.md</code> (cycle-29 scratch), <code>progress.md</code>, <code>task_plan.md</code> (still says <code>[in_progress] Synthesize T1-T3 verdicts</code>), <code>claude4.6.md</code> (40&nbsp;KB pre-Opus-4.7 copy of CLAUDE.md). None listed in <code>.gitignore</code>; all persist across merges.</p>
+        <p><strong>Fix.</strong> Move to <code>.data/</code> or delete. Add names to <code>.gitignore</code>. Delete <code>claude4.6.md</code> or move to <code>docs/archive/</code>.</p>
+        <p><strong>Effort.</strong> 10 minutes.</p>
+      </div>
+
+      <div class="finding high-border">
+        <h4><span class="badge p1">P1</span><span class="badge high">High</span>10. Ingest state fan-out is unrecoverable</h4>
+        <p><strong>Evidence.</strong> <code>BACKLOG.md:83-84</code> describes the 11-stage fan-out (summary → N entities → N concepts → <code>index.md</code> → <code>_sources.md</code> → <code>hashes.json</code> → <code>log.md</code> → <code>contradictions.md</code> → N retroactive wikilinks). <code>BACKLOG.md:99-100</code> R5 notes systemic absence of locking discipline. A crash between manifest-write and log-append leaves manifest saying "ingested" while log shows nothing.</p>
+        <p><strong>Fix.</strong> Backlog's receipt-file recipe (<code>.data/ingest_locks/&lt;hash&gt;.json</code> written first, deleted last; recovery pass replays partials). Introduce <code>with page_lock(page_path):</code> used consistently across <code>_write_wiki_page</code>, <code>_update_existing_page</code>, <code>append_evidence_trail</code>, <code>inject_wikilinks</code>.</p>
+        <p><strong>Effort.</strong> 1-2 cycles.</p>
+      </div>
+    </section>
+
+    <!-- PRD -->
+    <section id="prd">
+      <h2>2. PRD / Product Contract Review</h2>
+
+      <h3>2.1 What the repo claims</h3>
+      <ul>
+        <li><strong>Promise:</strong> drop a source in; Claude extracts entities/concepts/claims, writes wiki pages, injects wikilinks retroactively, tracks trust, flags contradictions.</li>
+        <li><strong>Non-RAG identity:</strong> "No vectors. No chunking." (<code>README.md:5</code>).</li>
+        <li><strong>Obsidian-native</strong> — open <code>wiki/</code> as a vault.</li>
+        <li><strong>MCP-first</strong> — 28 tools; "no API key needed" in Claude Code mode.</li>
+        <li><strong>Publishable</strong> — Karpathy Tier-1 <code>/llms.txt</code>, <code>/llms-full.txt</code>, <code>/graph.jsonld</code>, sitemap, siblings.</li>
+        <li><strong>Self-healing</strong> — Bayesian trust, contradictions, staleness, dead-link lint.</li>
+      </ul>
+
+      <h3>2.2 Contract drift</h3>
+      <table>
+        <thead><tr><th>Claim</th><th>Code reality</th></tr></thead>
+        <tbody>
+          <tr><td>"No vectors" (<code>README.md:5</code>)</td><td><code>query/hybrid.py</code>, <code>query/embeddings.py</code>, <code>model2vec</code> + <code>sqlite-vec</code> runtime deps</td></tr>
+          <tr><td>"PDF supported" (<code>README.md:142</code>)</td><td><code>ingest/pipeline.py:1233</code> rejects binary PDFs</td></tr>
+          <tr><td>"Tests: 2850" badge</td><td>Actual 2901</td></tr>
+          <tr><td>"No API key needed"</td><td>True for MCP / Claude Code; false for CLI without <code>use_api=False</code>; false for <code>output_format=...</code></td></tr>
+          <tr><td>Package <code>readme = "CLAUDE.md"</code></td><td>CLAUDE.md is agent instructions</td></tr>
+          <tr><td>"28 MCP tools"</td><td>Accurate, but <code>kb_save_synthesis</code> is <code>kb_query(save_as=...)</code> — read+write conflation</td></tr>
+          <tr><td>"Optional ANTHROPIC_API_KEY"</td><td><code>pyproject.toml:7-13</code> declares <code>anthropic&gt;=0.7</code> <strong>required</strong></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.3 Missing PRD artifacts</h3>
+      <ul>
+        <li><strong>Stable PRD</strong> — a ≤500-line spec separate from cycle history.</li>
+        <li><strong>Contract tests</strong> — pytest files that assert the promises.</li>
+        <li><strong>User personas</strong> — today's README implicitly targets only Claude-Code power users.</li>
+        <li><strong>Non-goals list</strong> — one page of what this is NOT (Notion AI, generic RAG, DMS).</li>
+        <li><strong>Release checklist</strong> — gates at a PRD level (docs, tests, CI, deps, migrations).</li>
+      </ul>
+      <div class="callout"><strong>Recommendation.</strong> Create <code>docs/prd/v0.10.md</code> (≤300 lines) as the single source of truth. <code>README.md</code> derives from it. Test counts, cycle history, and roadmap move out of the PRD.</div>
+    </section>
+
+    <!-- Architecture -->
+    <section id="arch">
+      <h2>3. Architecture Review</h2>
+
+      <h3>3.1 Three-layer content model</h3>
+<pre><code>raw/           (human-owned, immutable)
+  ├── articles, papers, videos, repos, podcasts, books, datasets, conversations, assets
+  └── captures/   (sole LLM write into raw/; atomised by kb_capture)
+wiki/          (LLM-owned, editable by user)
+  ├── entities/, concepts/, comparisons/, summaries/, synthesis/
+  ├── index.md, _sources.md, _categories.md, log.md, contradictions.md
+research/      (human-owned analysis + meta-research)</code></pre>
+      <p>Durable artifact is <strong>Markdown</strong> — not an embedding, not a proprietary DB. The user can always read, version, and fork.</p>
+
+      <h3>3.2 Five-operations cycle</h3>
+<pre><code>Ingest ──→ Compile ──→ Query
+  │                      │
+  └── Evolve ←── Lint ←──┘</code></pre>
+      <p>Compile is thinner than advertised — <code>compile/compiler.py:compile_wiki</code> is a ~50-line loop over <code>ingest_source</code>. No cross-source reconciliation.</p>
+
+      <h3>3.3 Module layout (<code>src/kb/</code>, 72 files, 21,593 LOC)</h3>
+      <table>
+        <thead><tr><th>Module</th><th class="num">KB</th><th>Role</th><th>Concern</th></tr></thead>
+        <tbody>
+          <tr><td><code>ingest/pipeline.py</code></td><td class="num">80</td><td>11-stage ingest orchestration</td><td>Too much in one file; stateful</td></tr>
+          <tr><td><code>query/engine.py</code></td><td class="num">54</td><td>BM25 + hybrid + synthesis + output</td><td>Mixes retrieval + rendering</td></tr>
+          <tr><td><code>lint/augment.py</code></td><td class="num">49</td><td>Three-gate augment + rate limit</td><td>OK but dense</td></tr>
+          <tr><td><code>mcp/core.py</code></td><td class="num">47</td><td>Ingest/query/capture MCP tools</td><td>28 tools in 4 files; largest MCP module</td></tr>
+          <tr><td><code>cli.py</code></td><td class="num">42</td><td>24 CLI commands</td><td>Grows linearly per cycle</td></tr>
+          <tr><td><code>lint/checks.py</code></td><td class="num">41</td><td>Dead links, orphans, staleness</td><td>OK</td></tr>
+          <tr><td><code>compile/compiler.py</code></td><td class="num">37</td><td>Batch ingest + rebuild-indexes</td><td>Misleadingly named</td></tr>
+          <tr><td><code>capture.py</code></td><td class="num">36</td><td>Conversation atomization</td><td>Has the secret scan others need</td></tr>
+          <tr><td><code>query/embeddings.py</code></td><td class="num">33</td><td><code>model2vec</code> + <code>sqlite-vec</code> warmup</td><td>Hybrid optionality not enforced</td></tr>
+          <tr><td><code>config.py</code></td><td class="num">30</td><td>35+ unrelated constants</td><td>God-module</td></tr>
+          <tr><td><code>compile/linker.py</code></td><td class="num">25</td><td>Wikilink injection</td><td>OK</td></tr>
+          <tr><td><code>mcp/quality.py</code></td><td class="num">25</td><td>Refine/review/verdicts</td><td>OK</td></tr>
+          <tr><td><code>lint/fetcher.py</code></td><td class="num">24</td><td>SSRF-hardened HTTP</td><td><strong>Exemplar</strong></td></tr>
+          <tr><td><code>compile/publish.py</code></td><td class="num">24</td><td>Karpathy Tier-1 builders</td><td>OK</td></tr>
+          <tr><td><code>review/refiner.py</code></td><td class="num">22</td><td>Two-phase pending→applied</td><td>Good discipline</td></tr>
+        </tbody>
+      </table>
+
+      <div class="two-col">
+        <div>
+          <h3>3.4 Strengths</h3>
+          <ul class="compact">
+            <li>Raw→wiki→publish explainable in 90 seconds.</li>
+            <li>Markdown-as-artifact is a strong anchor.</li>
+            <li>CLI + MCP split avoids agent-shell lock-in.</li>
+            <li>Reliability primitives: <code>file_lock</code>, <code>atomic_json_write</code>, <code>_validate_path_under_project_root</code>, <code>StorageError</code> redaction.</li>
+            <li>Observability counters + structured logs at cold-load sites.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>3.5 Concerns</h3>
+          <ul class="compact">
+            <li>Directory naming inversion: <code>compile/</code> depends on <code>ingest/</code> (<code>BACKLOG.md:80-82</code>).</li>
+            <li>11-stage ingest has no whole-op recovery.</li>
+            <li>No shared graph-cache policy — lint and query rebuild PageRank independently.</li>
+            <li>MCP tools all sync; FastMCP thread pool pressure.</li>
+            <li>Optional features not package-isolated.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>Recommendation.</strong> Freeze six contracts and gate them with pytest: source ingestion, wiki page schema, query result, publish artifact, error response, dependency extras. Refactor modules <em>behind</em> the contracts, not before.
+      </div>
+    </section>
+
+    <!-- Implementation -->
+    <section id="impl">
+      <h2>4. Implementation Review</h2>
+
+      <h3>4.1 Exemplary patterns to preserve</h3>
+      <ul class="compact">
+        <li><strong>SSRF hardening.</strong> <code>lint/fetcher.py</code> — <code>SafeTransport</code>, allowlists, private/reserved IP rejection, redirect revalidation.</li>
+        <li><strong>Subprocess safety.</strong> <code>utils/cli_backend.py</code> — no <code>shell=True</code>, stdin prompt delivery, argv token rejection, output redaction.</li>
+        <li><strong>Pre-LLM secret scan (capture only).</strong> <code>capture.py:249-264, 771-779</code>. Pattern is right; it just isn't shared.</li>
+        <li><strong>Centralised redaction.</strong> <code>utils/sanitize.py</code>; used by <code>mcp/core.py:581, 616, 785, 842</code>.</li>
+        <li><strong>Dual-anchor path validation.</strong> <code>_validate_path_under_project_root(path, field_name)</code>.</li>
+        <li><strong>Atomic writes.</strong> temp-file + <code>os.replace</code>.</li>
+        <li><strong>Fair-queue lock stagger (cycle 32).</strong> <code>_LOCK_WAITERS</code> counter + position-based stagger clamped to <code>LOCK_POLL_INTERVAL</code>; <code>slot_taken</code> guard survives <code>KeyboardInterrupt</code>.</li>
+        <li><strong>Exception taxonomy.</strong> <code>KBError</code> + 5 specialisations; <code>StorageError.__str__</code> redacts paths.</li>
+        <li><strong>Observability counters.</strong> <code>get_dim_mismatch_count</code>, <code>get_bm25_build_count</code>, <code>get_vector_model_cold_load_count</code>, <code>get_sqlite_vec_load_count</code>.</li>
+        <li><strong>Extraction schema cache.</strong> LRU via <code>_build_schema_cached(source_type)</code>.</li>
+      </ul>
+
+      <h3>4.2 Weaknesses</h3>
+      <ul class="compact">
+        <li>Packaging vs runtime — 6 declared deps, 6+ extras imported under <code>src/kb</code>.</li>
+        <li>10 modules &gt; 24&nbsp;KB; <code>config.py</code> god-module.</li>
+        <li>~50 of 253 test files are <code>test_v0NNN_taskNN.py</code>-style — coverage is hard to audit.</li>
+        <li>No golden/snapshot tests (<code>grep "snapshot\|golden\|syrupy"</code> → 0).</li>
+        <li>Doc-code drift (vectors, PDF, test counts, API-key optionality).</li>
+        <li>Scratch files in repo root (Finding 9).</li>
+      </ul>
+
+      <h3>4.3 Function-local import pattern</h3>
+      <p>Cycles 23-32 introduced function-local imports at CLI→MCP boundaries to preserve boot-lean contracts. Subprocess-probe tests in cycle 31 pin the contract. This is disciplined but subtle — <strong>patching must target the owner module</strong> (<code>kb.mcp.browse.kb_search</code>), not <code>kb.cli.kb_search</code>. CLAUDE.md documents this; new contributors will get it wrong on the first try.</p>
+      <div class="callout"><strong>Recommendation.</strong> Promote the cycle-31 subprocess probe into a permanent <code>tests/test_boot_lean.py</code> guard.</div>
+    </section>
+
+    <!-- Tests -->
+    <section id="tests">
+      <h2>5. Tests Review</h2>
+
+      <h3>5.1 Scale</h3>
+      <ul class="compact">
+        <li><strong>Collected:</strong> 2901 tests (verified live 2026-04-25).</li>
+        <li><strong>Files:</strong> 253 in <code>tests/</code>.</li>
+        <li><strong>Source:</strong> 72 <code>.py</code> in <code>src/kb/</code> → test:source ratio ≈ 3.5:1.</li>
+        <li><strong>Runtime:</strong> 144&nbsp;s for full suite (cycle 32 CI gate).</li>
+      </ul>
+
+      <div class="two-col">
+        <div>
+          <h3>5.2 Strengths</h3>
+          <ul class="compact">
+            <li>Security edge cases (traversal, Windows reserved names, 255-char ceiling).</li>
+            <li>Cycle-specific regression files preserve history.</li>
+            <li>AST-scan enforcement (<code>test_cycle19_lint_redundant_patches.py</code>) catches fixture drift.</li>
+            <li>Boot-lean subprocess probe enforces architectural contracts.</li>
+            <li>Fixtures (<code>tmp_wiki</code>, <code>tmp_project</code>, <code>tmp_kb_env</code>) are real sandboxes.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>5.3 Gaps</h3>
+          <ul class="compact">
+            <li><strong>No golden/snapshot tests.</strong> <code>assert "X" in output</code> doesn't catch rendered-Markdown drift.</li>
+            <li><strong>Fixture leak surface.</strong> <code>conftest.py</code> fixtures point at real paths.</li>
+            <li><strong>Versioned test files</strong> make coverage hard to navigate.</li>
+            <li><strong>No coverage gate.</strong></li>
+            <li><strong>No mutation testing.</strong></li>
+            <li><strong>No package-extras contract tests.</strong></li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>5.4 Recommendation order</h3>
+      <ol>
+        <li>Boot-smoke — <code>pip install .</code> in clean venv; <code>kb --version</code>; no ImportError.</li>
+        <li>Golden tests with <code>syrupy</code>: frontmatter render, evidence trail, Mermaid, llms.txt, graph.jsonld, siblings, query formats.</li>
+        <li>Fixture leak guard — autouse monkeypatch of all <code>WIKI_*</code>/<code>RAW_*</code> constants; opt-in <code>--use-real-paths</code>.</li>
+        <li>Coverage gate in CI; per-module % reporting.</li>
+        <li>Freeze-and-fold rule after each shipped version.</li>
+      </ol>
+    </section>
+
+    <!-- CI/CD -->
+    <section id="cicd">
+      <h2>6. CI/CD Review</h2>
+      <p><strong>Current state: none.</strong> Confirmed via <code>ls .github</code> (does not exist). All gates are local + agent-run: R1 Opus / R2 Codex / R3 Sonnet, manual <code>pytest</code> + <code>ruff</code>, manual <code>pip-audit</code> per Step 2 baseline + Step 11 PR-CVE diff + Step 11.5 patch + Step 15 late-arrival warn.</p>
+
+      <h3>Recommended minimum pipeline</h3>
+<pre><code># .github/workflows/ci.yml
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: pytest --collect-only -q
+      - run: pytest -q
+      - run: pip check
+      - run: pip install pip-audit &amp;&amp; pip-audit --strict
+      - run: python -m build &amp;&amp; pip install twine &amp;&amp; twine check dist/*
+  extras-smoke:
+    strategy: { matrix: { extra: [hybrid, augment, formats, cli-backends] } }
+  windows-smoke:
+    runs-on: windows-latest</code></pre>
+      <p>Gate <code>main</code> on <code>test</code>. Run <code>extras-smoke</code> and <code>windows-smoke</code> nightly. <strong>Effort:</strong> 0.5 cycle minimal; 1 cycle full matrix.</p>
+
+      <h3>Release automation</h3>
+      <p>Today <code>CHANGELOG.md</code> is hand-maintained with a commit-count convention. A CI step could verify <code>&lt;K&gt;</code> equals <code>git log --oneline main..HEAD | wc -l + 1</code> before merge. Cycles 30 and 32 both needed commit-count backfills — automating this would prevent recurrence.</p>
+    </section>
+
+    <!-- Security -->
+    <section id="security">
+      <h2>7. Security Review</h2>
+
+      <div class="two-col">
+        <div>
+          <h3>7.1 Strong controls</h3>
+          <ul class="compact">
+            <li>SSRF-aware fetcher with private-IP rejection + redirect revalidation.</li>
+            <li>Subprocess backend without <code>shell=True</code>; stdin prompt delivery; argv token rejection.</li>
+            <li>Capture-path pre-LLM secret scan with decoded-base64 candidates.</li>
+            <li>Path traversal validated at MCP boundary AND library level.</li>
+            <li><code>StorageError.__str__</code> redacts paths when <code>kind</code> + <code>path</code> are set.</li>
+            <li>Atomic writes across all JSON stores.</li>
+            <li>Exception taxonomy prevents info disclosure through uncaught <code>Exception</code>.</li>
+            <li>Cycle-20 slug-collision hardening: <code>O_EXCL|O_NOFOLLOW</code> + poison-unlink.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>7.2 Material gaps</h3>
+          <table>
+            <thead><tr><th>Gap</th><th class="c">Sev</th></tr></thead>
+            <tbody>
+              <tr><td>Main ingest path has no pre-LLM secret/PII filter</td><td class="c"><span class="badge high">High</span></td></tr>
+              <tr><td>Partial-write MCP errors leak absolute paths</td><td class="c"><span class="badge high">High</span></td></tr>
+              <tr><td>4 unfixed CVEs in deps</td><td class="c"><span class="badge high">High</span></td></tr>
+              <tr><td>No CI security gate</td><td class="c"><span class="badge high">High</span></td></tr>
+              <tr><td>No rate limit on MCP <code>kb_ingest_content</code></td><td class="c"><span class="badge medium">Med</span></td></tr>
+              <tr><td>Augment <code>auto_ingest=True</code> writes from external fetch</td><td class="c"><span class="badge medium">Med</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h3>7.3 Dependency CVE table (live 2026-04-25)</h3>
+      <table>
+        <thead><tr><th>Package</th><th>Version</th><th>Advisory</th><th>Fixed in</th><th>Narrow role?</th></tr></thead>
+        <tbody>
+          <tr><td><code>diskcache</code></td><td>5.6.3</td><td>CVE-2025-69872 (pickle RCE)</td><td>none</td><td>Yes — trafilatura robots.txt cache; 0 direct imports in <code>src/kb</code></td></tr>
+          <tr><td><code>litellm</code></td><td>1.83.0</td><td>GHSA-xqmj-j6mv-4862, GHSA-r75f-5x8p-qvmc</td><td>1.83.7</td><td>Yes — dev-eval (ragas harness); 0 runtime imports; proxy never started</td></tr>
+          <tr><td><code>pip</code></td><td>26.0.1</td><td>CVE-2026-3219</td><td>none</td><td>Yes — tooling only; not runtime</td></tr>
+          <tr><td><code>ragas</code></td><td>0.4.3</td><td>CVE-2026-6587 (SSRF)</td><td>none</td><td>Yes — dev-eval only; 0 runtime imports</td></tr>
+        </tbody>
+      </table>
+      <p>Each is defensible as a narrow-role exception; the fix is to split extras so the default install doesn't include them.</p>
+    </section>
+
+    <!-- Differentiation -->
+    <section id="differentiation">
+      <h2>8. Differentiation</h2>
+
+      <h3>8.1 vs generic RAG</h3>
+      <table>
+        <thead><tr><th></th><th>RAG</th><th>This Project</th></tr></thead>
+        <tbody>
+          <tr><td>Durable artifact</td><td>Vector DB</td><td>Markdown pages (user-readable, git-able)</td></tr>
+          <tr><td>Unit of knowledge</td><td>Chunk</td><td>Entity / concept / summary with frontmatter</td></tr>
+          <tr><td>Relationships</td><td>None (latent in embeddings)</td><td><code>[[wikilinks]]</code> + NetworkX + PageRank</td></tr>
+          <tr><td>Contradiction handling</td><td>Returns conflicting chunks silently</td><td><code>contradictions.md</code> + <code>kb_lint_consistency</code></td></tr>
+          <tr><td>Gap awareness</td><td>None</td><td><code>kb_evolve</code> proposes missing pages</td></tr>
+          <tr><td>Updating</td><td>Re-embed</td><td>SHA-256 diff → only changed sources recompiled</td></tr>
+          <tr><td>Output format</td><td>JSON / prose</td><td>Markdown + optional Marp / HTML / chart / Jupyter</td></tr>
+          <tr><td>Agent surface</td><td>API</td><td>28 MCP tools</td></tr>
+          <tr><td>Ownership</td><td>DB file</td><td>Markdown files in git</td></tr>
+        </tbody>
+      </table>
+      <p>Structurally different answer to the same problem. The bet: <em>structure wins long-term over vectors for personal/team knowledge</em>.</p>
+
+      <h3>8.2 vs Karpathy's gist</h3>
+      <p>The gist is a manual pattern ("ask Claude to write pages"). This is a <strong>compiled automation</strong> with retroactive linking, trust scoring, contradictions, evolve loop, and Tier-1 publish outputs. The <code>demo/</code> folder ships a worked example from Karpathy's own X post.</p>
+
+      <h3>8.3 vs vanilla Obsidian vault</h3>
+      <p>Obsidian is a UI over Markdown with a graph view — it does not ingest, compile, or synthesize. This writes to the same vault format, so a user can adopt Obsidian for free after <code>kb compile</code>. "Meet users where they are" is genuinely strong.</p>
+
+      <h3>8.4 vs commercial KB tools (Notion AI, Mem, Reflect, Tana)</h3>
+      <ul class="compact">
+        <li><strong>Local-first</strong> — all data on disk, git-able, offline-capable.</li>
+        <li><strong>User-owned formats</strong> — Markdown + YAML; no lock-in.</li>
+        <li><strong>LLM-agnostic</strong> — Claude, Ollama, Gemini CLI, OpenCode, Codex via <code>KB_LLM_BACKEND</code>.</li>
+        <li><strong>Agent-native</strong> — 28 MCP tools in Claude Code.</li>
+        <li><strong>Lower polish</strong> — no mobile, shared workspace, real-time collab, or SSO. Developer/researcher tool, not enterprise.</li>
+      </ul>
+
+      <h3>8.5 Where differentiation is currently weakened</h3>
+      <ul class="compact">
+        <li>"No vectors" claim (Finding 5) undermines the pitch.</li>
+        <li>PDF support advertised but absent (Finding 7).</li>
+        <li>Heavy install (crawl4ai, playwright, ragas, litellm) belies the "simple Markdown wiki" story.</li>
+        <li>32 cycles + 251 decision docs in 20 days imply high churn.</li>
+      </ul>
+    </section>
+
+    <!-- Innovation -->
+    <section id="innovation">
+      <h2>9. Innovation</h2>
+      <p>Genuinely novel contributions beyond the Karpathy gist:</p>
+      <ol>
+        <li><strong>Retroactive wikilink injection.</strong> New source mentions entity X → existing pages auto-link to X without re-ingest. <code>compile/linker.py:inject_wikilinks_batch</code> — per-page locks, chunked 200-title batches, 500-char cap.</li>
+        <li><strong>Incremental compile with crash safety.</strong> SHA-256 hashes + three-valued manifest (<code>real_hash</code> / <code>failed:{pre_hash}</code> / <code>in_progress:{pre_hash}</code>) + crash-resume audit.</li>
+        <li><strong>Trust = Bayesian + feedback.</strong> "Wrong" penalised 2× vs "incomplete"; per-page posterior updated by <code>kb_query_feedback</code>.</li>
+        <li><strong>Two-phase refine with audit trail.</strong> <code>review/refiner.py</code> — pending row → body mutation → applied/failed flip under <code>file_lock(history_path)</code>; attempt-id + sweep-by-attempt-id hardening.</li>
+        <li><strong>Actor-Critic wiki review.</strong> <code>.claude/agents/wiki-reviewer.md</code> + <code>kb_review_page</code> with structured 6-item checklist.</li>
+        <li><strong>Boot-lean contract.</strong> Function-local imports at CLI→MCP boundaries, enforced by a subprocess probe (cycle 31).</li>
+        <li><strong>Evidence Trail sentinel pattern.</strong> Append-only reverse-chronological section inside each page with a machine-maintained sentinel.</li>
+        <li><strong>Publish-ready outputs.</strong> <code>compile.publish</code> ships <code>llms.txt</code>, <code>llms-full.txt</code>, <code>graph.jsonld</code>, sitemap, and per-page siblings from one command.</li>
+        <li><strong>Output adapters outside <code>wiki/</code>.</strong> <code>PROJECT_ROOT/outputs/</code> is gitignored and separate from the search index — small decision, prevents adapter output from poisoning future queries.</li>
+        <li><strong>Fair-queue lock stagger (cycle 32).</strong> <code>_LOCK_WAITERS</code> + position-based first-sleep stagger clamped to <code>LOCK_POLL_INTERVAL</code>; <code>slot_taken</code> guard is <code>KeyboardInterrupt</code>-safe.</li>
+      </ol>
+    </section>
+
+    <!-- Advantages / Disadvantages / Risks -->
+    <section id="advantages">
+      <h2>10. Advantages</h2>
+      <ul class="compact">
+        <li><strong>Markdown-first.</strong> Durable artifact is human-readable, git-able, forkable.</li>
+        <li><strong>Obsidian-native.</strong> Free graph view, backlinks, hover preview.</li>
+        <li><strong>CLI + MCP parity</strong> — scripting and agent workflows share a core.</li>
+        <li><strong>28 MCP tools</strong> in Claude Code; "no API key needed" for the main flow.</li>
+        <li><strong>Local-first.</strong> Works offline with <code>KB_LLM_BACKEND=ollama</code> / Gemini CLI / OpenCode / Codex.</li>
+        <li><strong>Incremental + crash-safe compile.</strong></li>
+        <li><strong>Trust + contradictions + evolve</strong> is meaningfully more than RAG-as-a-library.</li>
+        <li><strong>Strong security primitives</strong> where they exist.</li>
+        <li><strong>High test volume</strong> — 2901 tests in 144&nbsp;s.</li>
+        <li><strong>Karpathy Tier-1 publish outputs</strong> from one command.</li>
+        <li><strong>Honest cycle history</strong> — every decision is archived.</li>
+      </ul>
+    </section>
+
+    <section id="disadvantages">
+      <h2>11. Disadvantages</h2>
+      <ul class="compact">
+        <li>Install is heavy (crawl4ai, playwright, ragas, litellm).</li>
+        <li>Package metadata wrong (<code>readme = "CLAUDE.md"</code>, underdeclared runtime deps).</li>
+        <li>No CI. Every gate is local and agent-run.</li>
+        <li>Docs disagree with code (vectors, PDF, test count, API-key optionality).</li>
+        <li>Ten modules &gt; 24&nbsp;KB; <code>config.py</code> god-module.</li>
+        <li>Tests are versioned, not folded — canonical coverage hard to find.</li>
+        <li>No golden tests for structured output.</li>
+        <li>High cycle velocity — 373 commits in last 7 days.</li>
+        <li>Onboarding friction: Python + venv + Claude Code + MCP + Obsidian.</li>
+        <li>CLAUDE.md is 38&nbsp;KB and doubles as PRD.</li>
+        <li>Scratch files in repo root signal lax hygiene.</li>
+        <li>Windows-first workflow; Unix edge cases less covered.</li>
+      </ul>
+    </section>
+
+    <section id="risks">
+      <h2>12. Risks</h2>
+      <ul class="compact">
+        <li><strong>Trust risk.</strong> LLM extraction can hallucinate, omit nuance, overstate certainty.</li>
+        <li><strong>Privacy risk.</strong> Main ingest path sends full content to API without pre-ingest secret/PII scan (Finding 8).</li>
+        <li><strong>Dependency risk.</strong> 4 open CVEs; broad optional surface.</li>
+        <li><strong>State-consistency risk.</strong> 11-stage ingest without whole-op recovery (Finding 10).</li>
+        <li><strong>Scaling risk.</strong> Markdown filesystem + graph rebuilds will slow at 10k+ pages. No measured benchmark.</li>
+        <li><strong>Onboarding risk.</strong> Mental-model stack is high.</li>
+        <li><strong>Maintenance risk.</strong> Cycle-driven development has left stale scratch, drifting test counts, README contradictions.</li>
+        <li><strong>Product-claim risk.</strong> "No vectors" and "PDF supported" are load-bearing but unhonored.</li>
+        <li><strong>Supply-chain risk.</strong> <code>crawl4ai</code> + <code>playwright</code> against user-supplied URLs in augment <code>execute=True</code>.</li>
+        <li><strong>Lock-contention risk.</strong> File locks are not re-entrant; documented order (page → history) can be violated by a new contributor.</li>
+        <li><strong>Vendor-lock subtlety.</strong> "No API key needed" is true in Claude Code, false in CLI and output adapters.</li>
+      </ul>
+    </section>
+
+    <!-- Ways of working -->
+    <section id="ways">
+      <h2>13. Ways of Working</h2>
+
+      <h3>13.1 17-step cycle workflow</h3>
+      <ol class="compact">
+        <li>Requirements gathering</li>
+        <li>Threat modeling</li>
+        <li>Brainstorming (optional)</li>
+        <li>Design evaluation (R1 Opus + R2 Codex in parallel)</li>
+        <li>Design decision gate (R1/R2 synthesis)</li>
+        <li>Context7 doc verification (optional)</li>
+        <li>Implementation plan</li>
+        <li>Plan gate (Codex coverage matrices)</li>
+        <li>TDD implementation</li>
+        <li>CI hard gate (full <code>pytest</code>)</li>
+        <li>Security verification (threat-model grep conditions)</li>
+        <li>Existing-CVE patch (optional, Step 11.5)</li>
+        <li>Documentation update</li>
+        <li>PR creation</li>
+        <li>Multi-round PR review (R1 + R2 + R3 if ≥25 items)</li>
+        <li>Merge + cleanup</li>
+        <li>Self-review with mandatory skill patching</li>
+      </ol>
+
+      <h3>13.2 Evidence of discipline</h3>
+      <ul class="compact">
+        <li><code>docs/superpowers/decisions/</code> contains <strong>251 decision docs</strong> across 20 days.</li>
+        <li>788 total commits on <code>main</code>; 373 in last 7 days ≈ 53/day recently.</li>
+        <li>32 cycles shipped since 2026-04-05 → <strong>1.6 cycles/day</strong>.</li>
+        <li>~4 artifacts per cycle: design, plan, PR review, self-review.</li>
+        <li>18 codified feedback rules in <code>memory/feedback_*.md</code>.</li>
+        <li>Mandatory Step 16 skill patches — bugs become process improvements.</li>
+      </ul>
+
+      <div class="two-col">
+        <div>
+          <h3>13.3 Strengths</h3>
+          <ul class="compact">
+            <li>Explicit gates at design + plan + CI + security.</li>
+            <li>Multi-model adversarial review (Opus + Codex + Sonnet).</li>
+            <li>Self-modifying process via skill patches.</li>
+            <li>Audit trail IS the product.</li>
+            <li>Explicit lesson codification (batch by file, test behavior not signature, ruff-format ordering, etc.).</li>
+            <li>Zero human-in-the-loop bottleneck; cycles don't stall.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>13.4 Risks</h3>
+          <ul class="compact">
+            <li><strong>Cycle overload.</strong> 1.6 cycles/day; history files hit 277&nbsp;KB.</li>
+            <li><strong>Decision-doc sprawl.</strong> 251 docs in one folder — lookup is O(n).</li>
+            <li><strong>Process is the product.</strong> CLAUDE.md crowds out the PRD.</li>
+            <li><strong>Agent reviewers hang.</strong> Cycle 32: R2 Codex past 12 min, R1 Opus past 10 min.</li>
+            <li><strong>Scratch leaks.</strong> <code>findings.md</code>/<code>progress.md</code>/<code>task_plan.md</code> never cleaned.</li>
+            <li><strong>No observable SLA</strong> on wall-clock per cycle.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>13.5 Recommendations</h3>
+      <ol>
+        <li>Cap cycle velocity — ≤0.5 cycle/day lets docs, tests, feedback catch up.</li>
+        <li>Promote the retrospective — ≤200-word executive summary at the top of each CHANGELOG entry.</li>
+        <li>Subdivide <code>decisions/</code> by cycle range.</li>
+        <li>Separate PRD from CLAUDE.md.</li>
+        <li>Add <code>scripts/check_stale_scratch.py</code> as a commit hook.</li>
+        <li>Fold versioned tests after each cycle.</li>
+        <li>Track R1/R2 hang rate; switch fallback to deterministic grep harness if &gt;20%.</li>
+      </ol>
+    </section>
+
+    <!-- Fix plan -->
+    <section id="fixplan">
+      <h2>14. Fix Plan</h2>
+      <p>One cycle ≈ 4 hours (per cycle-26 observation).</p>
+      <table>
+        <thead>
+          <tr>
+            <th class="c">#</th><th class="c">Prio</th><th class="c">Sev</th>
+            <th>Fix</th><th>Evidence</th>
+            <th class="num">Effort</th><th class="c">Cycle</th><th>Owner</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge critical">Crit</span></td><td>Split deps into extras; remove <code>litellm</code>/<code>crawl4ai</code>/<code>playwright</code> from default</td><td>Finding 1</td><td class="num">4 h</td><td class="c">N+1</td><td>packaging</td></tr>
+          <tr><td class="num">2</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Add <code>.github/workflows/ci.yml</code></td><td>Finding 2</td><td class="num">2 h</td><td class="c">N+1</td><td>CI</td></tr>
+          <tr><td class="num">3</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td><code>pyproject.toml:6</code> → <code>readme = "README.md"</code> + declare runtime deps</td><td>Finding 3</td><td class="num">0.5 h</td><td class="c">N+1</td><td>packaging</td></tr>
+          <tr><td class="num">4</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Wrap <code>{write_err}</code> in <code>_sanitize_error_str</code> at <code>mcp/core.py:762</code> + <code>:881</code> + regression tests</td><td>Finding 4</td><td class="num">1 h</td><td class="c">N+1</td><td>security</td></tr>
+          <tr><td class="num">5</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Reposition "No vectors" → "Markdown-first, optional hybrid retrieval"; opt-out guide</td><td>Finding 5</td><td class="num">2 h</td><td class="c">N+1</td><td>docs</td></tr>
+          <tr><td class="num">6</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Generate test-count badge in CI; drop exact counts in prose</td><td>Finding 6</td><td class="num">0.5 h</td><td class="c">N+1</td><td>CI</td></tr>
+          <tr><td class="num">7</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Remove <code>.pdf</code> from <code>SUPPORTED_SOURCE_EXTENSIONS</code> + README; or ship real extractor</td><td>Finding 7</td><td class="num">0.5 / 4 h</td><td class="c">N+1</td><td>product</td></tr>
+          <tr><td class="num">8</td><td class="c"><span class="badge p0">P0</span></td><td class="c"><span class="badge high">High</span></td><td>Extract <code>_scan_for_secrets</code> → <code>utils/secrets.py</code>; share across paths; add <code>.llmwikiignore</code></td><td>Finding 8</td><td class="num">4 h</td><td class="c">N+2</td><td>security</td></tr>
+          <tr><td class="num">9</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>Delete/move <code>findings.md</code>, <code>progress.md</code>, <code>task_plan.md</code>, <code>claude4.6.md</code>; add to <code>.gitignore</code>; commit hook</td><td>Finding 9</td><td class="num">0.5 h</td><td class="c">N+1</td><td>hygiene</td></tr>
+          <tr><td class="num">10</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>Ingest receipt/recovery (<code>.data/ingest_locks/&lt;hash&gt;.json</code>); per-page <code>page_lock</code> helper</td><td>Finding 10</td><td class="num">8 h</td><td class="c">N+3</td><td>architecture</td></tr>
+          <tr><td class="num">11</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge high">High</span></td><td>Make long-I/O MCP tools <code>async def</code> OR tune <code>FastMCP(num_threads=N)</code></td><td>Finding 11</td><td class="num">4 h</td><td class="c">N+2</td><td>performance</td></tr>
+          <tr><td class="num">12</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>Split <code>config.py</code> into <code>config/{paths,models,limits,search,lint}.py</code></td><td>Finding 13</td><td class="num">4 h</td><td class="c">N+3</td><td>architecture</td></tr>
+          <tr><td class="num">13</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>Add <code>syrupy</code> golden tests: evidence trail, Mermaid, llms.txt, graph.jsonld, siblings, query formats</td><td>Finding 14</td><td class="num">6 h</td><td class="c">N+2</td><td>tests</td></tr>
+          <tr><td class="num">14</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>Fixture leak guard — autouse monkeypatch of <code>WIKI_*</code>/<code>RAW_*</code>; opt-in <code>--use-real-paths</code></td><td>BACKLOG Phase 4.5</td><td class="num">3 h</td><td class="c">N+2</td><td>tests</td></tr>
+          <tr><td class="num">15</td><td class="c"><span class="badge p1">P1</span></td><td class="c"><span class="badge medium">Med</span></td><td>Coverage gate in CI; per-module % reporting</td><td>§5.4</td><td class="num">2 h</td><td class="c">N+2</td><td>CI</td></tr>
+          <tr><td class="num">16</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge medium">Med</span></td><td>Write <code>docs/prd/v0.10.md</code> (≤300 lines) as stable product contract</td><td>§2.3</td><td class="num">4 h</td><td class="c">N+3</td><td>product</td></tr>
+          <tr><td class="num">17</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge medium">Med</span></td><td>Freeze-and-fold — fold <code>test_v0NNN_*</code> into canonical module files after each version</td><td>BACKLOG HIGH R3</td><td class="num">1 cycle</td><td class="c">N+4</td><td>tests</td></tr>
+          <tr><td class="num">18</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge medium">Med</span></td><td>Subdivide <code>decisions/</code> by cycle range</td><td>§13.5</td><td class="num">1 h</td><td class="c">N+2</td><td>docs</td></tr>
+          <tr><td class="num">19</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge low">Low</span></td><td>Boot-smoke test — <code>pip install .</code> in clean venv; <code>kb --version</code></td><td>§5.4</td><td class="num">1 h</td><td class="c">N+2</td><td>tests</td></tr>
+          <tr><td class="num">20</td><td class="c"><span class="badge p2">P2</span></td><td class="c"><span class="badge low">Low</span></td><td>Document <code>kb_save_synthesis</code> correctly (it's <code>kb_query(save_as=...)</code>)</td><td>Finding 17</td><td class="num">0.25 h</td><td class="c">N+1</td><td>docs</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Suggested cycle plan</h3>
+      <ul class="compact">
+        <li><strong>Cycle 33 ("Release hygiene").</strong> Items 1-7 + 9 + 20. Closes P0 ship-blocker set in ~1 cycle — mostly docs + packaging + a 2-line security fix + CI bootstrap.</li>
+        <li><strong>Cycle 34 ("Tests + security").</strong> Items 8, 11, 13, 14, 15, 18, 19.</li>
+        <li><strong>Cycle 35 ("Architecture").</strong> Items 10 + 12. Harder, more invasive.</li>
+        <li><strong>Cycle 36 ("Consolidation").</strong> Items 16 + 17. Pays down docs debt before Phase 5 features resume.</li>
+      </ul>
+      <div class="callout"><strong>Total ship-blocker fix time:</strong> ≈13 hours (~3 cycles at current velocity).</div>
+    </section>
+
+    <!-- Bottom Line -->
+    <section>
+      <h2>15. Bottom Line</h2>
+      <p>This repo is stronger than it looks from the outside. The product idea is original and defensible, the implementation has serious reliability and security primitives, and the test volume is real. The bottleneck is not capability — it is that the <strong>product contract, dependency story, CI, and doc hygiene have not kept pace with the code</strong>. The velocity that produced 32 cycles in 20 days is the same velocity that left scratch files in the repo root, "No vectors" in the README, and <code>readme = "CLAUDE.md"</code> in <code>pyproject.toml</code>.</p>
+      <p>Three cycles of focused release-hygiene work — most of which is documentation, packaging, CI bootstrap, and a two-line security fix — would produce a repo that <strong>matches its code quality with its product contract</strong>. At that point, "local-first Markdown knowledge compiler with MCP-native maintenance" becomes a credible claim, not an aspirational one.</p>
+      <p>If the author continues to treat process as the product, the compounding quality loop (skill patches, codified feedback, decision archive, multi-model review) will keep paying dividends. The thing to protect against is cycle overload — high-frequency iteration only works if the repo surfaces stay clean enough for the next cycle to start from a known state.</p>
+    </section>
+
+    <!-- Appendix -->
+    <section id="appendix">
+      <h2>Appendix A — Live Verification Log (2026-04-25)</h2>
+      <p>All commands run from project root in the project <code>.venv</code>.</p>
+
+      <h3>A.1 Test collection</h3>
+<pre><code>$ .venv/Scripts/python.exe -m pytest --collect-only -q | tail -5
+tests/test_workflow_e2e.py::test_e2e_ingest_then_query
+tests/test_workflow_e2e.py::test_e2e_ingest_refine_requery
+tests/test_workflow_e2e.py::test_e2e_shared_entity_wikilink_injection
+2901 tests collected in 2.95s</code></pre>
+
+      <h3>A.2 Dependency conflicts</h3>
+<pre><code>$ .venv/Scripts/python.exe -m pip check
+arxiv 2.4.1 has requirement requests~=2.32.0, but you have requests 2.33.0.
+crawl4ai 0.8.6 has requirement lxml~=5.3, but you have lxml 6.1.0.
+instructor 1.15.1 has requirement rich&lt;15.0.0,&gt;=13.7.0, but you have rich 15.0.0.</code></pre>
+
+      <h3>A.3 Vulnerability scan</h3>
+<pre><code>$ .venv/Scripts/python.exe -m pip_audit --format=columns
+Found 4 known vulnerabilities in 4 packages
+Name      Version ID                  Fix Versions
+--------- ------- ------------------- ------------
+diskcache 5.6.3   CVE-2025-69872
+litellm   1.83.0  GHSA-xqmj-j6mv-4862 1.83.7
+pip       26.0.1  CVE-2026-3219
+ragas     0.4.3   CVE-2026-6587</code></pre>
+
+      <h3>A.4 CI presence</h3>
+<pre><code>$ ls .github
+ls: cannot access '.github': No such file or directory
+
+$ find . -maxdepth 4 -type d -name ".github"
+./.claude/skills/gstack/.github       # vendored skill, unrelated
+./.tools/ralph-claude-code/.github    # vendored tool, unrelated</code></pre>
+
+      <h3>A.5 Module sizes</h3>
+<pre><code>$ du -b src/kb/**/*.py src/kb/*.py | sort -rn | head -10
+79682  src/kb/ingest/pipeline.py
+54403  src/kb/query/engine.py
+48835  src/kb/lint/augment.py
+46859  src/kb/mcp/core.py
+41793  src/kb/cli.py
+40966  src/kb/lint/checks.py
+36673  src/kb/compile/compiler.py
+35543  src/kb/capture.py
+33218  src/kb/query/embeddings.py
+30143  src/kb/config.py</code></pre>
+
+      <h3>A.6 Partial-write leak (Finding 4)</h3>
+<pre><code>$ grep -n "_sanitize_error_str\|write_err" src/kb/mcp/core.py | head
+ 70:    _sanitize_error_str,
+581:            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
+616:            return f"Error ingesting source: {_sanitize_error_str(e, path)}"
+748:    except OSError as write_err:
+759:            write_err,                  # &lt;-- log path
+762:    f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+                                                           ^^^^^^^^^^^
+                             raw OSError string -&gt; absolute path leak on Windows
+785:        return f"Error: Ingest failed — {_sanitize_error_str(e, file_path)}"
+868:        except OSError as write_err:
+881:    f"Error[partial]: write to {_rel(file_path)} failed ({write_err}); "
+                                                              same pattern</code></pre>
+
+      <h3>A.7 Product-claim drift</h3>
+<pre><code>$ grep -n "No vectors\|hybrid\|vector" README.md | head
+  5:&gt; No vectors. No chunking.
+ 17:- Structure, not chunks. Entities, concepts, wikilinks — a real graph, not opaque vectors.
+155:| Rebuild indexes | ... deletes the hash manifest + vector DB + in-process LRU caches
+384:- v0.10.0: Phase 4 — hybrid search with RRF fusion (BM25 + vector via model2vec + sqlite-vec)
+
+$ grep -n "tests-[0-9]" README.md
+  9:[![Tests](https://img.shields.io/badge/tests-2850-brightgreen)](#development)</code></pre>
+
+      <h3>A.8 Scratch files in root</h3>
+<pre><code>$ ls -la findings.md progress.md task_plan.md claude4.6.md
+-rw-r--r-- 1 Admin  1082 Apr 25 05:20 findings.md
+-rw-r--r-- 1 Admin   239 Apr 25 05:20 progress.md
+-rw-r--r-- 1 Admin   345 Apr 25 05:20 task_plan.md
+-rw-r--r-- 1 Admin 40452 Apr 17 20:44 claude4.6.md</code></pre>
+
+      <h3>A.9 Decision / velocity metrics</h3>
+<pre><code>$ ls docs/superpowers/decisions/ | wc -l
+251
+
+$ git log --oneline main | wc -l
+788
+
+$ git log --oneline --since="7 days ago" | wc -l
+373</code></pre>
+
+      <h3>A.10 Packaging gap</h3>
+<pre><code>$ head -14 pyproject.toml
+[project]
+name = "llm-wiki-flywheel"
+version = "0.10.0"
+description = "LLM-maintained knowledge wiki — compile raw sources into structured, interlinked markdown."
+requires-python = "&gt;=3.12"
+readme = "CLAUDE.md"         # &lt;-- should be README.md
+dependencies = [
+    "click&gt;=8.0",
+    "python-frontmatter&gt;=1.0",
+    "fastmcp&gt;=2.0",
+    "networkx&gt;=3.0",
+    "anthropic&gt;=0.7",        # &lt;-- declared required; README says optional
+    "PyYAML&gt;=6.0",
+]
+# Missing: jsonschema, httpx, trafilatura, nbformat, model2vec, sqlite_vec (all imported under src/kb)</code></pre>
+    </section>
+
+    <section>
+      <p style="color:var(--muted); font-size: 0.85rem; text-align: center; margin: 0;">End of review · Source: <code>docs/reviews/2026-04-25-comprehensive-repo-review.md</code> · Supersedes <code>docs/repo_review.md</code></p>
+    </section>
+  </main>
+</body>
+</html>
