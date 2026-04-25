@@ -3,7 +3,7 @@
 **Date:** 2026-04-25
 **Branch:** `feat/backlog-by-file-cycle34` → PR #48
 **Scope:** 2026-04-25 comprehensive review P0/P1 ship-blockers (Findings 1, 2, 3, 5, 6, 7, 9, 20)
-**ACs designed:** 57 · **delivered:** 53 · **deferred:** AC4e (NEW-Q15 b) · **dropped:** AC49 (R2 NT1 stale) · **dropped:** AC55 (per-design final) · **net new tests:** 18
+**ACs designed:** 57 · **delivered:** 53 · **deferred:** AC4e (NEW-Q15 b) · **dropped:** AC49 (R2 NT1 stale) · **dropped:** AC55 (per-design final) · **net new tests:** 18 · **skill patches:** 6 (C34-L1..L6)
 
 ---
 
@@ -117,6 +117,24 @@
 **What to add.** Cycle-32 already documented timing budget (cycle-24 L5). Cycle 34 confirms the cycle-20 L4 protocol is the right move for hangs vs aborts.
 
 → **C34-L5**: When Opus subagent hangs past timing budget, primary-session parallel write is the right fallback (per cycle-20 L4); reconcile by accepting whichever output is finer-grained / more complete. Generalises cycle-24 L5 timing-budget rule to recovery protocol for hangs.
+
+---
+
+### S6 — Step-10 local gate didn't mirror the full CI workflow → 5 CI iterations to land green (added per user retrospective feedback)
+
+**What happened.** Step 10 ran the canonical local pair (`python -m pytest -q` + `ruff check`) and went GREEN at 2941/2941 passed. PR opened. CI then failed FIVE consecutive times across 7 commits because the workflow contained five additional steps that the local gate did not exercise:
+
+1. `pip install -e '.[dev,formats,augment,hybrid,eval]'` — caught at run #24925709837 (`da03b99`): `[dev]` alone left `nbformat`/`httpx`/`trafilatura`/`model2vec`/`sqlite_vec`/`ragas` missing → collection errors.
+2. `pytest` on the workflow runner OS — caught at run #24925796919 (`c665c60`): 22 tests assume Windows path semantics; ubuntu-latest fails.
+3. `pip-audit -r requirements.txt --no-deps` — caught at run #24926127251 (`df2b673`): `--no-deps` doesn't bypass underlying `pip install --dry-run` (this is C34-L1).
+4. `python -m build` + `python -m twine check dist/*` — would have caught any pyproject.toml malformation BEFORE PR.
+5. `pip check` (soft-fail) — would have surfaced known transitive conflicts BEFORE PR.
+
+**Cost.** 5 CI iterations × ~3 min wall-clock + reviewer attention overhead. All five failures were locally reproducible.
+
+**Fix going forward.** Step-10 local gate is NOT `pytest` + `ruff` alone — it's the union of every `run:` step in the touched workflow file. Test updates from Step-9 production changes (e.g., version bump `0.10.0` → `0.11.0` breaks `test_cli.py::test_cli_version`; pip-audit refactor breaks `test_pip_audit_invocation_uses_dash_r`) must (a) be in the SAME commit as the production change, (b) pass `pytest <test_file>` locally, (c) be included in the full Step-10 sweep before PR open.
+
+→ **C34-L6**: Step-10 local gate MUST mirror EVERY `run:` step in `.github/workflows/*.yml` (extras install, pip-audit, build, twine), not just `pytest` + `ruff`. Test updates from Step-9 production changes go in the SAME commit and pass locally before push. Refines the feature-dev Step-10 contract.
 
 ---
 
