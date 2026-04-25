@@ -46,9 +46,13 @@ class TestCliSourceTypeList:
 
 
 class TestVersionBump:
-    """Version must be bumped to 0.10.0."""
+    """Version must be bumped to current minor (cycle 34: 0.11.0)."""
 
     def test_version_is_0_9_16(self):
+        # Test name preserves historical context (originally validated 0.9.16);
+        # cycle 34 bumped to 0.11.0 per NEW-Q11. The cycle-34 regression
+        # test_pyproject_version_is_0_11_0 + test_kb_init_version_matches_pyproject
+        # provide the new cross-file lockstep guard.
         from kb import __version__
 
-        assert __version__ == "0.10.0"
+        assert __version__ == "0.11.0"

@@ -98,9 +98,7 @@ class TestSourcesMappingIdempotency:
         spy = mock.MagicMock(side_effect=pipeline.atomic_text_write)
         monkeypatch.setattr("kb.ingest.pipeline.atomic_text_write", spy)
 
-        pipeline._update_sources_mapping(
-            "raw/articles/x.md", ["entities/foo"], wiki_dir=tmp_wiki
-        )
+        pipeline._update_sources_mapping("raw/articles/x.md", ["entities/foo"], wiki_dir=tmp_wiki)
 
         # Contract: file is NOT created and the warning fires.
         assert not (tmp_wiki / "_sources.md").exists()
@@ -179,9 +177,7 @@ class TestSourcesMappingCrashRecovery:
         # Q11 — no second write fired.
         assert spy.call_count == 1
 
-    def test_reingest_with_added_pages_merges_branch_writes_again(
-        self, tmp_wiki, monkeypatch
-    ):
+    def test_reingest_with_added_pages_merges_branch_writes_again(self, tmp_wiki, monkeypatch):
         """AC8 step (e)-(f) — merge-on-new-pages branch DOES write a second time."""
         from kb.ingest import pipeline
 

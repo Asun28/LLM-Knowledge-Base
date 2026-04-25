@@ -2,6 +2,9 @@
 
 **Language / 语言：** [English](README.md) · **简体中文**
 
+> **注意：** 英文版 [README.md](README.md) 是规范版本。中文镜像可能滞后 1-2 个开发周期；请通过 GitHub 查看最新状态。
+> *Note: English [README.md](README.md) is canonical. This Chinese mirror may lag by 1-2 cycles; see GitHub for current state.*
+
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-2725-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet) ![Version](https://img.shields.io/badge/version-v0.10.0-orange)
 
 **编译知识，而非检索碎片。**

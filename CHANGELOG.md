@@ -29,6 +29,50 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-25 — cycle 34 (Release hygiene · v0.10.0 → v0.11.0)
+
+- Items: 54 AC delivered (out of 57 designed; AC4e diagram bump DEFERRED to cycle 35 + AC49 boot-lean fix DROPPED at Step 9 with test-anchor retention + AC55 architecture-diagram-version-test DROPPED with the deferred AC4e) / 4 src (`pyproject.toml`, `src/kb/__init__.py`, `src/kb/config.py`, `src/kb/ingest/pipeline.py`) + 2 NEW user-facing files (`SECURITY.md`, `.github/workflows/ci.yml`) + 1 NEW test file (`tests/test_cycle34_release_hygiene.py`) + 4 doc/config files modified (`README.md`, `README.zh-CN.md`, `requirements.txt`, `.gitignore`) + 6 untracked deletions (`findings.md`, `progress.md`, `task_plan.md`, `claude4.6.md`, `docs/repo_review.md`, `docs/repo_review.html`) + 2 NEW review artifacts committed (`docs/reviews/2026-04-25-comprehensive-repo-review.{md,html}`) / +TBD commits (backfill post-merge per cycle-15 L4 + cycle-30 L1)
+- Tests: 2923 → 2941 (+18 passed: cycle-34 release-hygiene regressions covering pyproject readme, extras structure, jsonschema runtime dep, version lockstep across pyproject + `__init__.py` + README badge, "No vectors" tagline absent regression, `.pdf` extension removal, scratch-file deletion regression, `.gitignore` patterns present, SECURITY.md required sections, CI workflow YAML structure, save_as= clarification in CLAUDE.md, comprehensive-review presence, kb_save_synthesis absent forward regression, README v0.11.0 badge, pip-audit -r flag, and boot-lean subprocess probe)
+- Scope:
+  Closes 8 P0/P1 ship-blocker findings from `docs/reviews/2026-04-25-comprehensive-repo-review.md`
+  (Findings 1, 2, 3, 5, 6, 7, 9, 20). Packaging metadata aligned with code surface
+  (`pyproject.toml.readme = "README.md"`; new `[project.optional-dependencies]` extras
+  `hybrid` / `augment` / `formats` / `eval` / `dev` with concrete pin lower-bounds; `jsonschema`
+  added to runtime dependencies for cycle-21 cli_backend; version 0.10.0 → 0.11.0 across
+  pyproject + `src/kb/__init__.py`). New `SECURITY.md` documents narrow-role acceptance for the
+  four open advisories (`diskcache 5.6.3` CVE-2025-69872, `litellm 1.83.0` GHSA-xqmj-j6mv-4862,
+  `pip 26.0.1` CVE-2026-3219, `ragas 0.4.3` CVE-2026-6587) with verification grep + unblock
+  conditions + per-cycle re-check cadence. New `.github/workflows/ci.yml` provides the first
+  automated CI gate (ruff + pytest --collect-only + full pytest + pip check soft-fail +
+  pip-audit with documented `--ignore-vuln` + `python -m build && twine check`); workflow
+  ships with `permissions: read-all` (T1), `concurrency: cancel-in-progress` (NT5),
+  `on: { push: { branches: [main] }, pull_request: {} }` (NT4 cost containment),
+  `actions/{checkout,setup-python}@v6` (Step-6 Context7 amendment vs original @v4/@v5),
+  and a dedicated `pip install build twine pip-audit` step (NEW-Q13 / AC50). README content
+  drift fixes: `> blockquote` tagline at line 5 replaced from "No vectors. No chunking."
+  to "Markdown-first; optional hybrid retrieval"; matching bullet at line 17 from
+  "Structure, not chunks." to "Structure first, optional vectors."; PDF row removed from
+  Supported File Formats with sentence directing at markitdown/docling; tests-2850 badge
+  → tests-passing-brightgreen (drift surface eliminated per Q6); v0.10.0 → v0.11.0 badge;
+  Quick Start expanded with extras-aware install paths. `src/kb/config.py` removes `.pdf`
+  from `SUPPORTED_SOURCE_EXTENSIONS` (Finding 7); `src/kb/ingest/pipeline.py` updates the
+  binary-rejection message at lines 1261-1265 to enumerate supported extensions for better
+  UX, and the now-stale comment at line 1198. Six untracked scratch/superseded files
+  deleted (filesystem `rm`, not `git rm`, per NEW-Q19); the comprehensive review
+  committed at the new `docs/reviews/` convention. `README.zh-CN.md` gains a 1-line
+  "English canonical, may lag" note (Q8 + R1 AC23.5). CLAUDE.md state-line + test-count
+  + Latest cycle summary updated; new Release-artifacts pointer added. `BACKLOG.md` adds
+  5 cycle-34 follow-up entries (cycle-35 `pip check` resolver-conflict unblock, cycle-35
+  architecture-diagram v0.11.0 + PNG re-render, cycle-N+1 if requested real PDF extraction,
+  cycle-N+1 if requested `KB_DISABLE_VECTORS` runtime flag, cycle-36 `requirements.txt`
+  per-extra split). The 4 narrow-role CVE BACKLOG entries STAY (no upstream patch
+  installable; SECURITY.md documents acceptance). Step-9 DESIGN-AMENDs: AC49 production
+  fix DROPPED after primary-session probe confirmed `kb.cli` already does NOT pull in
+  `kb.lint.fetcher`/`httpx`/`trafilatura` at module-load (R2 NT1 premise was stale);
+  AC56 boot-lean test retained as forward-protection regression per cycle-15 L2.
+  AC4e architecture-diagram bump deferred per design-gate fallback (NEW-Q15 option B).
+- Detail: [history archive](CHANGELOG-history.md#2026-04-25--cycle-34--release-hygiene)
+
 #### 2026-04-25 — cycle 33
 
 - Items: 11 AC / 2 src (`mcp/core.py`, `ingest/pipeline.py`) + 2 new test files / 8 commits (6 feat+docs+fix on branch + 1 merge + 1 self-review)

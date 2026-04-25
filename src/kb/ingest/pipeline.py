@@ -1194,9 +1194,10 @@ def ingest_source(
 
     # C2 (Phase 4.5 MEDIUM): reject extensions not in SUPPORTED_SOURCE_EXTENSIONS
     # at the library boundary, not only at the MCP wrapper, so internal callers
-    # cannot slip suffix-less files (README, LICENSE) through. Uses the broad
-    # allowlist (includes .pdf) so PDFs still hit the UTF-8 decode path where
-    # they fail with the helpful "convert to markdown first" message.
+    # cannot slip suffix-less files (README, LICENSE) through. Cycle 34 AC24:
+    # ``.pdf`` removed from the allowlist so PDFs are rejected at this extension
+    # check (clearer error sooner) rather than failing later with a UTF-8 decode
+    # error. Users should convert with markitdown or docling first.
     if source_path.suffix.lower() not in SUPPORTED_SOURCE_EXTENSIONS:
         raise ValueError(
             f"Unsupported source extension: {source_path.suffix!r}. "
@@ -1257,9 +1258,11 @@ def ingest_source(
     try:
         raw_content = raw_bytes.decode("utf-8")
     except UnicodeDecodeError as e:
+        _supported_list = ", ".join(sorted(SUPPORTED_SOURCE_EXTENSIONS))
         raise ValueError(
             f"Binary file cannot be ingested: {source_path.name}. "
-            "Convert to markdown first (e.g., markitdown or docling)."
+            f"Only text source types ({_supported_list}) are supported. "
+            "Convert with markitdown or docling first."
         ) from e
     source_hash = hash_bytes(raw_bytes)
 

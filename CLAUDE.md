@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.10.0 · 2923 tests / 253 files (2912 passed + 10 skipped + 1 xfailed). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.11.0 · 2941 tests / 254 files (2930 passed + 10 skipped + 1 xfailed). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — use `tmp_wiki` / `tmp_project` / `tmp_kb_env`; never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Patch the owner module** for the four MCP-migrated callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) — not `kb.mcp.core.*`.
 - **Path safety** — `_validate_page_id` at MCP boundary; library calls use `_validate_path_under_project_root(path, field_name)` (dual-anchor: literal + resolved both under `PROJECT_ROOT`).
 - **Evidence Trail** — reverse-chronological, sentinel-guarded; sentinel is machine-maintained.
+- **Release artifacts** — `SECURITY.md` (narrow-role CVE acceptance + disclosure path) + `.github/workflows/ci.yml` (ruff + pytest + pip-audit + build gate; cycle 34).
 - **Doc update checklist** on push — see §Automation at bottom.
 
 ## Working Principles
@@ -42,7 +43,8 @@ LLM Knowledge Base — a personal, LLM-maintained knowledge wiki inspired by [Ka
 
 Shipped phases and per-cycle tallies → `CHANGELOG.md` (compact index, newest first) + `CHANGELOG-history.md` (per-cycle bullet archive). Open work + deferred roadmap → `BACKLOG.md`.
 
-- **Latest full-suite:** 2923 tests / 253 files · 2912 passed + 10 skipped + 1 xfailed (cycle 33 added +21 passing path-leak/idempotency regressions including R1 mkdir-failure regression and R2 lazy-import-failure regression, and +1 xfail-strict marker for the open `sanitize.py` ordinary-UNC residual).
+- **Latest full-suite:** 2941 tests / 254 files · 2930 passed + 10 skipped + 1 xfailed (cycle 34 added +18 passing release-hygiene regressions; net +18 vs cycle 33's 2923).
+- **Latest cycle (34):** Release hygiene — packaging metadata (pyproject `readme = "README.md"` + 5 optional-dependency extras `hybrid`/`augment`/`formats`/`eval`/`dev` + `jsonschema` runtime dep + version 0.10.0 → 0.11.0 across `pyproject.toml` + `src/kb/__init__.py`); new `SECURITY.md` documenting four narrow-role CVE acceptance entries (diskcache CVE-2025-69872, litellm GHSA-xqmj-j6mv-4862, pip CVE-2026-3219, ragas CVE-2026-6587); new `.github/workflows/ci.yml` bootstrap (ruff + pytest + pip check + pip-audit + build/twine; `permissions: read-all`, `concurrency: cancel-in-progress`, narrowed `on:` trigger, `actions/{checkout,setup-python}@v6`); README content drift fixes (replaced "No vectors. No chunking." tagline; PDF row removed from supported formats; tests-2850 badge → tests-passing; v0.10.0 → v0.11.0 badge); `.pdf` removed from `SUPPORTED_SOURCE_EXTENSIONS` with clearer ingest-pipeline rejection message; 6 untracked scratch/superseded files deleted (findings.md / progress.md / task_plan.md / claude4.6.md / docs/repo_review.md / docs/repo_review.html); comprehensive review committed at `docs/reviews/2026-04-25-comprehensive-repo-review.{md,html}`. AC49 (boot-lean fix in `kb.lint.augment`) DROPPED at Step 9 after primary-session probe confirmed `kb.cli` already does NOT pull in `kb.lint.fetcher`/`httpx`/`trafilatura` at module-load time; AC56 boot-lean regression test retained as forward protection (cycle-15 L2 DROP-with-test-anchor pattern). AC4e (architecture-diagram version bump + Playwright PNG re-render) DEFERRED to cycle 35 with BACKLOG entry per design-doc fallback (NEW-Q15 option B; practical scope discipline at 57 ACs).
 - **Latest cycle (33):** MCP `Error[partial]:` path-leak redaction at three sites (`kb_ingest_content` + `kb_save_source` post-create-OSError emitters at `mcp/core.py:762,881`; `kb_query.save_as` peer at `core.py:280-281`) — closes BACKLOG mcp/core.py path-leak MEDIUM (cycle-32 threat T11) by pre-computing `sanitized_err = _sanitize_error_str(write_err, file_path)` ONCE per OSError block and reusing for paired log + return so symmetry cannot drift. AC4 fixes the previously-asymmetric `kb_query.save_as` log/return depth. AC6-AC8 add `## Idempotency` docstrings to `_update_sources_mapping` + `_update_index_batch` and pin the serial dedup-on-recall + merge-on-new-pages contracts via `atomic_text_write` spy + `call_count` regressions; AC10 narrows the `ingest/pipeline.py` BACKLOG entry from "duplicate-on-reingest" (closed) to "RMW-concurrency residual" (still open). Spawn cost: NEW BACKLOG MEDIUM for `sanitize.py` ordinary-UNC slash-normalize gap with `pytest.mark.xfail(strict=True)` test marker (Q8 cycle-16 L3 REPL-probed).
 - **Latest cycle (32):** CLI ↔ MCP parity category (b) closure + `_is_mcp_error_response` widening + `file_lock` fair-queue stagger mitigation — 2 new CLI subcommands (`compile-scan`, `ingest-content`), `_is_mcp_error_response` tuple widened with `"Error["` prefix (closes silent-exit-0 bug on `kb_ingest_content` `Error[partial]:` post-create-OSError emitter at `mcp/core.py:762`), and `file_lock` gained a `_LOCK_WAITERS` counter + first-sleep position-based stagger (intra-process mitigation only, not cross-process guarantee; `_FAIR_QUEUE_STAGGER_MS=2.0` clamped to `LOCK_POLL_INTERVAL=50ms`).
 - **Per-AC rationale, question logs, R1/R2 fix trails** → `CHANGELOG-history.md` + `docs/superpowers/decisions/<date>-cycle<N>-*.md`.
@@ -186,7 +188,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Full suite: 2923 tests / 253 files (2912 passed + 10 skipped + 1 xfailed). New tests per cycle go in versioned files (e.g. `test_cycle20_errors_taxonomy.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
+Full suite: 2941 tests / 254 files (2930 passed + 10 skipped + 1 xfailed). New tests per cycle go in versioned files (e.g. `test_cycle34_release_hygiene.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
 
 **Fixture rules** (enforced by `test_cycle19_lint_redundant_patches.py` AST scan):
 - Writing tests: use `tmp_wiki` / `tmp_project` / `tmp_kb_env` only — never touch the real `wiki/` or `raw/`.
