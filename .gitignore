@@ -61,3 +61,6 @@ feature-dev-Opus4.6.md
 /findings.md
 /progress.md
 /task_plan.md
+
+# Per-cycle scratch directories (forward-looking — added cycle 34 AC17)
+cycle-*-scratch/
