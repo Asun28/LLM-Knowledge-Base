@@ -2,19 +2,19 @@
 
 **Language / 语言：** **English** · [简体中文](README.zh-CN.md)
 
-> **Compile, don't retrieve.** Drop a source in. Claude does the rest — extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. No vectors. No chunking. Pure markdown you own, browsable in Obsidian.
+> **Compile, don't retrieve.** Drop a source in. Claude does the rest — extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. Markdown-first; optional hybrid retrieval. Pure markdown you own, browsable in Obsidian.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-2850-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet)](#claude-code-integration-mcp-server)
-[![Version](https://img.shields.io/badge/version-v0.10.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.11.0-orange)](CHANGELOG.md)
 
 Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 28 MCP tools — **no API key required**. Also runs on any local AI CLI tool (Ollama, Gemini CLI, OpenCode, Codex CLI, and more) via `KB_LLM_BACKEND`.
 
 ### 🎯 Why users pick this over RAG
 
-- 🧠 **Structure, not chunks.** Entities, concepts, wikilinks — a real graph, not opaque vectors.
+- 🧠 **Structure first, optional vectors.** Entities, concepts, wikilinks form a real graph; hybrid BM25 + vector search is opt-in for recall.
 - ⚡ **Incremental by default.** SHA-256 change detection; only new/changed sources reprocessed.
 - 🔗 **Retroactive linking.** Ingest a new topic → existing pages auto-gain `[[wikilinks]]` to it.
 - 🧪 **Self-healing.** Bayesian trust scoring, contradiction detection, staleness flags, dead-link lint.
@@ -119,6 +119,15 @@ source .venv/bin/activate     # Unix
 
 pip install -r requirements.txt && pip install -e .
 kb --version
+
+# OR — minimal install (no hybrid search, no augment fetcher, no eval harness):
+#   pip install -e .
+# Then opt into specific feature groups via extras (added cycle 34):
+#   pip install -e '.[hybrid]'   # vector search via model2vec + sqlite-vec
+#   pip install -e '.[augment]'  # kb_lint --augment fetcher (httpx + trafilatura)
+#   pip install -e '.[formats]'  # kb_query --format=jupyter (nbformat)
+#   pip install -e '.[eval]'     # ragas / litellm evaluation harness
+#   pip install -e '.[dev]'      # pytest + ruff + pytest-httpx + build + twine
 ```
 
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
@@ -139,7 +148,8 @@ Place source files under the matching `raw/` subdirectory, then run `kb ingest <
 | Plain text | `.txt` | Good for transcripts, notes, and simple exports |
 | reStructuredText | `.rst` | Useful for Python/project documentation |
 | Structured data | `.json`, `.yaml`, `.yml`, `.csv` | Useful for datasets, metadata, and exported records |
-| PDF | `.pdf` | Supported by the compile pipeline; for direct MCP ingest, convert to Markdown first |
+
+> **PDF files:** convert with [`markitdown`](https://github.com/microsoft/markitdown) or [`docling`](https://github.com/DS4SD/docling) first, then place the `.md` output in `raw/papers/`. Direct `.pdf` ingest is not supported (the binary content can't be parsed without a real PDF extractor — cycle 34 removed `.pdf` from the supported-extensions list to surface this earlier with a clear error).
 
 For Office documents such as `.docx`, `.pptx`, or `.xlsx`, convert them to Markdown or CSV first, then place the converted file in `raw/`.
 

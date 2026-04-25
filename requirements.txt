@@ -1,3 +1,6 @@
+# requirements.txt — full-dev superset for local development.
+# For runtime-only or per-feature installs, see [project.optional-dependencies]
+# in pyproject.toml: hybrid / augment / formats / eval / dev (added cycle 34 AC2).
 accelerate==1.13.0
 aiofile==3.9.0
 aiofiles==25.1.0
