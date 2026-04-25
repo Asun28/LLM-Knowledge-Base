@@ -32,8 +32,14 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install package + dev extras
-        run: pip install -e '.[dev]'
+      - name: Install package + ALL feature extras + dev tools
+        # cycle 34 fix-after-CI-failure: tests cover ALL feature surfaces
+        # (formats / augment / hybrid / eval) so CI must install every extra.
+        # `[dev]` alone leaves nbformat / httpx / trafilatura / model2vec /
+        # sqlite_vec / ragas missing → collection errors on the test files
+        # that import the corresponding feature modules. Net: CI install =
+        # full test surface.
+        run: pip install -e '.[dev,formats,augment,hybrid,eval]'
 
       - name: Install CI tooling (build, twine, pip-audit)
         # AC50 / NEW-Q13: dedicated step keeps `[dev]` lean for actual developers
