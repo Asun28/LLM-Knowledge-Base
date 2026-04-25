@@ -238,20 +238,24 @@ def _save_synthesis(slug: str, result: dict) -> str:
     if not source_list:
         return "\n[warn] save_as skipped: query returned no source_pages"
 
+    # Cycle 33 R1 Codex MAJOR A1 + R2 Codex C33-R2-01 — assign `target` BEFORE
+    # the try block (NOT just before mkdir). The `except OSError as exc:`
+    # handler references `target` for path-redaction; if any operation INSIDE
+    # the try raises OSError before `target` is bound — including the lazy
+    # imports of `frontmatter` / `save_page_frontmatter` (R2 reproduced via
+    # forced OSError on import) OR the mkdir call (R1 original finding) — the
+    # handler would raise UnboundLocalError and bypass the AC4 contract.
+    # `Path / str` arithmetic is pure object construction and cannot fail, so
+    # both bindings are safe to live above the try.
+    synthesis_dir = WIKI_DIR / "synthesis"
+    target = synthesis_dir / f"{slug}.md"
+
     try:
         # Cycle 17 AC4 — lazy imports keep cold-boot out of frontmatter.
         import frontmatter
 
         from kb.utils.pages import save_page_frontmatter
 
-        synthesis_dir = WIKI_DIR / "synthesis"
-        # Cycle 33 R1 Codex MAJOR A1 — assign `target` BEFORE mkdir so the
-        # `except OSError as exc:` handler at the bottom can always reference
-        # `target` for path-redaction. If mkdir raises (PermissionError, disk
-        # full, etc.) and `target` were assigned AFTER, the handler's
-        # `_sanitize_error_str(exc, target)` call would raise UnboundLocalError
-        # and bypass the AC4 error-string contract entirely.
-        target = synthesis_dir / f"{slug}.md"
         synthesis_dir.mkdir(parents=True, exist_ok=True)
         # Belt-and-suspenders containment check (T1) — uses path-component
         # comparison, NOT string prefix. A sibling directory named

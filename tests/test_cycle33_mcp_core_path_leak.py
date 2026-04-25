@@ -271,6 +271,74 @@ class TestKbQuerySaveAsPathRedacted:
         assert _LEAKY_POSIX not in msg
         assert _LEAKY_POSIX not in log_text
 
+    def test_lazy_import_oserror_does_not_raise_unboundlocalerror(
+        self, monkeypatch, caplog, tmp_kb_env
+    ):
+        """Cycle 33 R2 Codex C33-R2-01 regression — same-class extension of A1.
+
+        The original A1 fix moved `target` assignment BEFORE `mkdir`. R2 caught
+        a remaining gap: the lazy `import frontmatter` (and
+        `from kb.utils.pages import save_page_frontmatter`) inside the try
+        block can ALSO raise OSError on a corrupted .pyc / disk-error
+        condition, leaving `target` unbound at the except handler. Final fix
+        moves `target` (and `synthesis_dir`) OUTSIDE the try block entirely.
+        Path / str is pure construction and cannot fail, so this is safe.
+        """
+        from kb.mcp import core as mcp_core
+
+        caplog.set_level(logging.WARNING, logger="kb.mcp.core")
+
+        # Patch sys.modules to force `import frontmatter` to raise OSError.
+        # The lazy import inside _save_synthesis goes through importlib;
+        # we simulate by removing frontmatter from sys.modules and inserting
+        # a finder that raises.
+        import sys
+
+        leaky_path = _LEAKY_WIN_INPUT
+        exc_to_raise = OSError(errno.EACCES, "Access is denied", leaky_path)
+
+        # Remove the cached frontmatter module if present, then patch builtins
+        # __import__ to raise OSError when 'frontmatter' is requested.
+        # `monkeypatch.delitem` auto-restores the original module on teardown
+        # — using bare `sys.modules.pop` would leave frontmatter unloaded and
+        # break any sibling test that mutates the module object via
+        # `import frontmatter as fm_lib; fm_lib.load = mock` (e.g.
+        # `tests/test_v0915_task06.py::test_does_not_swallow_keyboard_interrupt`
+        # — that test gets a stale handle when frontmatter re-imports fresh).
+        monkeypatch.delitem(sys.modules, "frontmatter", raising=False)
+        # __builtins__ is a dict in non-main modules but a module in __main__;
+        # handle both by sniffing the type before patch.
+        if isinstance(__builtins__, dict):
+            original_import = __builtins__["__import__"]
+        else:
+            original_import = __builtins__.__import__
+
+        def _raising_import(name, *args, **kwargs):
+            if name == "frontmatter":
+                raise exc_to_raise
+            return original_import(name, *args, **kwargs)
+
+        if isinstance(__builtins__, dict):
+            monkeypatch.setitem(__builtins__, "__import__", _raising_import)
+        else:
+            monkeypatch.setattr(__builtins__, "__import__", _raising_import)
+
+        result_dict = {
+            "answer": "synthetic answer body",
+            "source_pages": ["entities/foo"],
+            "low_confidence": False,
+        }
+        # MUST NOT raise UnboundLocalError — `target` is now bound BEFORE the
+        # try block, so the except handler can use it regardless of where
+        # inside the try the OSError fired.
+        msg = mcp_core._save_synthesis(f"{_FIXTURE_TAG}-import-fail", result_dict)
+
+        # AC4 path-redaction contract preserved.
+        assert "[warn] save_as failed:" in msg
+        assert leaky_path not in msg
+        assert _LEAKY_WIN_EMITTED not in msg
+        assert _LEAKY_WIN_BASENAME_DIR not in msg
+
     def test_mkdir_oserror_does_not_raise_unboundlocalerror(
         self, monkeypatch, caplog, tmp_kb_env
     ):
