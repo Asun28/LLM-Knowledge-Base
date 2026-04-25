@@ -278,27 +278,36 @@ def test_ci_workflow_yaml_parses():
     assert "actions/setup-python@v6" in raw, "Step-6 amendment: bump setup-python to @v6"
 
 
-def test_pip_audit_invocation_uses_dash_r():
-    """AC57 (NEW-Q17 regression): pip-audit step audits the FULL pin set, not just installed venv.
+def test_pip_audit_invocation_audits_live_env():
+    """AC57 (cycle-34 fix-after-CI-failure-4 regression): pip-audit audits the LIVE env.
 
-    Cycle-22 L1 documented that pip-audit -r requirements.txt can fail with
-    ResolutionImpossible under pre-existing conflicts — but cycle 34's
-    `requirements.txt` carries explicit version pins for all 4 narrow-role
-    CVEs, so pip-audit -r should resolve cleanly. The --ignore-vuln flags
-    remain identical regardless.
+    Cycle-22 L1 documented that `pip-audit -r requirements.txt` trips
+    ResolutionImpossible on pre-existing conflicts.  Cycle-34's first attempt
+    added `--no-deps` to suppress that — but pip-audit's `--no-deps` flag
+    only suppresses ITS OWN transitive auditing; the underlying
+    `pip install --dry-run` resolution step still runs and still fails.
+
+    Fix: audit the LIVE installed environment (no `-r` flag).  Since the
+    previous CI step installs every extra (`[dev,formats,augment,hybrid,
+    eval]`), the live env IS the audit surface — coverage is equivalent to
+    auditing requirements.txt, but pip-audit walks `pip list` instead of
+    spinning up a fresh venv install that fails resolution.
     """
     raw = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    # AC14 + NEW-Q17: pip-audit MUST audit requirements.txt
-    # Look for the -r flag near pip-audit invocation
-    audit_step_idx = raw.find("pip-audit ")
+    audit_step_idx = raw.find("pip-audit `")
     assert audit_step_idx >= 0, "pip-audit invocation not found"
     audit_step_end = raw.find("\n\n", audit_step_idx)
     audit_step = raw[
         audit_step_idx : audit_step_end if audit_step_end > 0 else audit_step_idx + 500
     ]
-    assert "-r requirements.txt" in audit_step, (
-        f"NEW-Q17 requires pip-audit -r requirements.txt; audit step: {audit_step!r}"
+    # Cycle-34 fix-after-CI-failure-4: must NOT use `-r requirements.txt`
+    assert "-r requirements.txt" not in audit_step, (
+        f"pip-audit must audit live env, not requirements.txt (cycle-22 L1 trap); "
+        f"audit step: {audit_step!r}"
     )
+    # Must still carry all 4 ignore-vuln flags
+    for cve in ("CVE-2025-69872", "GHSA-xqmj-j6mv-4862", "CVE-2026-3219", "CVE-2026-6587"):
+        assert cve in audit_step, f"pip-audit step missing {cve} ignore"
 
 
 # ─────────────────────────────────────────────────────────────────────

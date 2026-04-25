@@ -94,20 +94,20 @@ jobs:
         run: pip check
         continue-on-error: true
 
-      - name: Pip-audit (full pin set with documented narrow-role exceptions)
-        # NEW-Q17 + cycle-22 L1 hybrid: audit `requirements.txt` for the
-        # full user-facing pin set BUT add `--no-deps` so pip-audit does
-        # NOT do its own dependency-resolution dry-run (which would trip
-        # ResolutionImpossible on the three known conflicts that cycle 34
-        # accepts via continue-on-error on `pip check`).  requirements.txt
-        # is fully pinned so --no-deps is correct: every transitive is
-        # already listed explicitly.  The four --ignore-vuln IDs match
-        # SECURITY.md's "Known Advisories" table 1:1 (cycle 34 T4 mitigation).
-        # ANY new CVE on these or other packages will fail this step.
-        # Step-9-fix DESIGN-AMEND: R1 PR review (edge-cases) B1 caught the
-        # cycle-22 L1 trap; --no-deps closes it without dropping -r.
+      - name: Pip-audit (live environment with documented narrow-role exceptions)
+        # cycle 34 fix-after-CI-failure-4: pip-audit's `--no-deps` flag does
+        # NOT prevent its underlying `pip install --dry-run` resolution step
+        # — it only suppresses transitive auditing.  The dry-run still trips
+        # cycle-22 L1's ResolutionImpossible on arxiv 2.4.1 vs requests 2.33.0.
+        # Fix: drop `-r requirements.txt` and audit the LIVE installed env
+        # instead.  Since the previous step installed every extra (`[dev,
+        # formats,augment,hybrid,eval]`), the live env IS the audit surface,
+        # and pip-audit just walks `pip list` without spinning up a fresh
+        # venv install.  Audit coverage equivalent; no resolution conflict.
+        # The four --ignore-vuln IDs match SECURITY.md's "Known Advisories"
+        # table 1:1.  ANY new CVE on these or other packages will fail this step.
         run: |
-          pip-audit -r requirements.txt --no-deps `
+          pip-audit `
             --ignore-vuln=CVE-2025-69872 `
             --ignore-vuln=GHSA-xqmj-j6mv-4862 `
             --ignore-vuln=CVE-2026-3219 `

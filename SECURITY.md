@@ -24,6 +24,8 @@ The four packages below carry open advisories with no installable upstream patch
 
 These four advisory IDs are explicitly listed in `.github/workflows/ci.yml` `pip-audit` step via `--ignore-vuln=` so the CI gate's green-checkmark means "no NEW CVE since cycle 34." Adding any new advisory to the ignore list requires (a) a verification grep, (b) a row in this table, (c) sign-off from the maintainer.
 
+The CI pip-audit step audits the **live installed environment** (no `-r requirements.txt`) — see cycle-34 fix-after-CI-failure-4 in `.github/workflows/ci.yml`. Audit coverage is equivalent because the previous CI step installs every extra (`[dev,formats,augment,hybrid,eval]`), so the live env carries the full pin set. Auditing the live env avoids pip-audit's underlying `pip install --dry-run` step, which trips ResolutionImpossible on `arxiv 2.4.1` ↔ `requests 2.33.0` (cycle-22 L1).
+
 ## Re-check Cadence
 
 The CVE acceptance list is re-evaluated every cycle:
