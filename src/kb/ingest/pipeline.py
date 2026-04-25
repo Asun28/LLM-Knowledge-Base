@@ -765,6 +765,21 @@ def _update_sources_mapping(
 
     First ingest: appends new entry. Re-ingest: merges new page IDs into
     the existing line rather than silently skipping.
+
+    ## Idempotency
+
+    Safe to re-call after a crash that aborted the ingest before manifest-save.
+    The first call's effect is preserved; the second call is a no-op for
+    already-present entries (identical source-ref + identical pages → existing
+    line unchanged, no atomic_text_write fires). Re-call with NEW pages on
+    the same source-ref → existing line is MERGED via the dedup branch
+    (single line carries all old + new page IDs).
+
+    **Idempotency holds for serial re-calls only.** Concurrent calls may race:
+    two parallel ingests writing the same source-ref simultaneously are NOT
+    synchronised — the read-modify-write window is unguarded. See BACKLOG
+    `IndexWriter` abstraction entry for the open concurrency surface.
+    Pinned by ``tests/test_cycle33_ingest_index_idempotency.py``.
     """
     sources_file = (wiki_dir / "_sources.md") if wiki_dir is not None else WIKI_SOURCES
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
@@ -799,7 +814,20 @@ _SECTION_HEADERS: dict[str, str] = {
 
 
 def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | None = None) -> None:
-    """Update wiki/index.md with multiple new page entries in a single read/write."""
+    """Update wiki/index.md with multiple new page entries in a single read/write.
+
+    ## Idempotency
+
+    Safe to re-call after a crash that aborted the ingest before manifest-save.
+    The first call writes new entries; the second call is a no-op for entries
+    whose ``[[subdir/slug]]`` link is already present in the section
+    (atomic_text_write does not fire when ``changed`` stays False).
+
+    **Idempotency holds for serial re-calls only.** Concurrent calls may race
+    on the same RMW window. See BACKLOG `IndexWriter` abstraction entry for
+    the open concurrency surface.
+    Pinned by ``tests/test_cycle33_ingest_index_idempotency.py``.
+    """
     if not entries:
         return
     index_path = (wiki_dir / "index.md") if wiki_dir is not None else WIKI_INDEX
