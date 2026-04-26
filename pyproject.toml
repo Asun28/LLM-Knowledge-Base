@@ -36,6 +36,13 @@ eval = [
     "ragas>=0.4",
     "litellm>=1.83",
     "datasets>=4.0",
+    # Cycle 35 post-merge hotfix — late-arrival LOW-severity GHSA-r7w7-9xr2-qq2r
+    # (DNS-rebinding SSRF in langchain-openai's image-token-counting helper, fix
+    # at 1.1.14). Pulled in transitively by ragas; without the floor pin, the CI
+    # resolver picked 1.1.10 even though `requirements.txt` already pinned 1.1.14
+    # locally. Zero `import langchain_openai` in `src/kb` (transitive eval-only
+    # dep) — fix is mechanical.
+    "langchain-openai>=1.1.14",
 ]
 dev = [
     "pytest>=7.0",
