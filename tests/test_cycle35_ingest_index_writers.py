@@ -149,9 +149,15 @@ class TestUpdateSourcesMappingEmptyList:
 
         # Byte-equal: file content unchanged.
         assert sources.read_bytes() == snap_before
-        # No I/O fired (early-return before file_lock + read_text).
+        # No I/O fired (early-return before file_lock + read_text + write).
+        # Per R1 Codex NIT: explicit `read_text not in names` assertion proves
+        # the early-return short-circuited BEFORE the read; reverting AC6
+        # (placing early-return AFTER sources_file.exists() check) would still
+        # leave the byte-equal snapshot valid (no write), but read_text WOULD
+        # fire and this assertion catches that revert too.
         names = {name for name, _ in log}
         assert "file_lock_enter" not in names
+        assert "read_text" not in names
         assert "atomic_text_write" not in names
 
     def test_silent_on_absent_file(self, monkeypatch, tmp_path, caplog):
