@@ -1,4 +1,7 @@
+import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_import_page_id_and_scan_wiki_pages_succeeds():  # noqa: D103  # placeholder-for-task9
@@ -29,6 +32,13 @@ def test_page_id_lowercases_mixed_case_filename():  # noqa: D103  # placeholder-
     assert page_id(Path("wiki/concepts/FOO.md"), wiki_dir=Path("wiki")) == "concepts/foo"
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=(
+        "Cycle 36 AC11 — Windows-only backslash-to-POSIX normalisation; "
+        "on POSIX, '\\' is a literal filename character."
+    ),
+)
 def test_page_id_normalizes_backslashes_to_posix_id():  # noqa: D103
     from kb.utils.pages import page_id
 

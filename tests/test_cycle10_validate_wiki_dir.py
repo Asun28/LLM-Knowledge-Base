@@ -37,9 +37,15 @@ def test_validate_wiki_dir_accepts_project_wiki_subdir(tmp_project, monkeypatch)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink semantics differ")
-def test_validate_wiki_dir_symlink_to_outside_rejected(tmp_project, tmp_path, monkeypatch):
+def test_validate_wiki_dir_symlink_to_outside_rejected(tmp_project, tmp_path_factory, monkeypatch):
+    # Cycle 36 AC11 fix — pre-cycle-36 used `tmp_path` which is the SAME
+    # pytest dir as `tmp_project` (conftest.py `tmp_project` returns
+    # tmp_path), so `outside = tmp_path / "..."` was actually INSIDE
+    # tmp_project and the is_relative_to check passed. Use tmp_path_factory
+    # to get a sibling tmp dir guaranteed outside tmp_project.
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    outside = tmp_path / "outside_project_root_cycle10"
+    outside_root = tmp_path_factory.mktemp("outside_cycle10")
+    outside = outside_root / "target"
     outside.mkdir()
     link = tmp_project / "wiki_link"
     link.symlink_to(outside, target_is_directory=True)

@@ -20,6 +20,7 @@ cannot deadlock the parent (R1 Sonnet MAJOR — design condition 20).
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import time
 from pathlib import Path
 
@@ -53,6 +54,15 @@ def _child_hold_lock(
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason=(
+        "Cycle 36 AC2 — Windows multiprocessing spawn hangs on GHA runner "
+        "(child blocks at popen_spawn_win32.py:112 reduction.dump). Local "
+        "Windows pass time 1.03s confirms cycle-23 invariant; CI-only skip "
+        "documented in cycle-36 investigation, cycle-37 candidate."
+    ),
+)
 def test_cross_process_file_lock_timeout_then_recovery(tmp_path):
     """AC7 — parent times out while child holds lock; acquires after release."""
     from kb.utils.io import file_lock

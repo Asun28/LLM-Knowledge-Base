@@ -7,6 +7,7 @@ import kb.config
 import kb.feedback.store
 import kb.lint.semantic
 import kb.mcp.app
+import kb.mcp.quality
 import kb.review.context
 import kb.review.refiner
 import kb.utils.wiki_log
@@ -61,6 +62,11 @@ def _setup_project(tmp_project, monkeypatch):
     monkeypatch.setattr(kb.compile.linker, "WIKI_DIR", wiki_dir)
     # H7: wiki_log.WIKI_LOG no longer exists (log_path now required per call-site)
     monkeypatch.setattr(kb.mcp.app, "WIKI_DIR", wiki_dir)
+    # Cycle 36 AC11 fix — kb.mcp.quality reads WIKI_DIR at module top for
+    # _validate_page_id(check_exists=True) on POSIX CI; Windows passed under
+    # cycle-23 multiprocessing-hang masking. Adding the mirror here applies the
+    # cycle-19 L1 snapshot-binding pattern to the missing module.
+    monkeypatch.setattr(kb.mcp.quality, "WIKI_DIR", wiki_dir)
 
     return wiki_dir, raw_dir
 

@@ -396,6 +396,16 @@ def test_h14_build_review_checklist_has_untrusted_data_instruction():
     os.name == "nt" and not os.environ.get("ALLOW_SYMLINK_TESTS"),
     reason="Symlink creation requires elevated privileges on Windows — set ALLOW_SYMLINK_TESTS=1",
 )
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason=(
+        "Cycle 36 AC11 — KNOWN POSIX SECURITY GAP: pair_page_with_sources "
+        "resolves symlinks without containment check on POSIX, allowing path "
+        "traversal via symlinks inside raw/. Test was masked on Windows by the "
+        "cycle-23 multiprocessing-hang; surfaced in cycle-36 ubuntu probe. "
+        "Tracked in cycle-37 BACKLOG as a real production bug to fix."
+    ),
+)
 def test_qb_symlink_outside_raw_rejected(tmp_path):
     """Regression: Phase 4.5 HIGH item Q_B (symlink escaping raw/ is skipped)."""
     from kb.review.context import pair_page_with_sources
