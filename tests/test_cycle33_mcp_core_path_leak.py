@@ -534,3 +534,34 @@ class TestSanitizeErrorTextUNCAndLongPath:
 
         inp = "// comment text\n// more comments"
         assert sanitize_text(inp) == inp
+
+    # Cycle 35 R1 Sonnet PR-49 MAJOR — `//word/word` prose with no whitespace
+    # between `//` and the host token would have over-matched the original
+    # 2-segment pattern. The fix tightens the pattern to require THREE
+    # slash-separated segments (real UNC has host + share + file at minimum).
+    def test_two_segment_double_slash_prose_not_overmatched(self):
+        from kb.utils.sanitize import sanitize_text
+
+        # 2-segment cases: HTML/Markdown comment, mid-prose mirror reference.
+        for inp in (
+            "<!-- //comment/block -->",
+            "see //mirror/copy for the rsync target",
+            "ref //tag/section",
+        ):
+            assert sanitize_text(inp) == inp, f"over-matched: {inp!r}"
+
+    # Cycle 35 R1 Sonnet PR-49 NIT 2 — drive-letter `(?<![A-Za-z])` lookbehind
+    # negative regression. The lookbehind blocks `s://` URI collisions where
+    # the `s` is a letter; it does NOT block all over-matches (e.g. URL-embedded
+    # `/C:/foo` segments are still picked up because `/` is not a letter). The
+    # known acceptable over-match: `https://example.com/C:/foo` redacts the
+    # `C:/foo` segment. Adding `/` to the lookbehind would block legitimate
+    # drive-letter paths preceded by `/` in multi-path messages (rare, but
+    # possible). Documented here as the contract boundary.
+    def test_url_scheme_letter_not_overmatched_via_drive_letter_pattern(self):
+        from kb.utils.sanitize import sanitize_text
+
+        # URI scheme `https://example.com/path` — `s` (letter) precedes `://`,
+        # the lookbehind blocks the drive-letter pattern from matching `s:/`.
+        inp = "see https://example.com/path for details"
+        assert sanitize_text(inp) == inp

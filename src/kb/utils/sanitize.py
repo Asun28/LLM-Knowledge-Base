@@ -25,8 +25,11 @@ _ABS_PATH_PATTERNS = re.compile(
     # Cycle 35 AC1 (T1) — ordinary slash-UNC: //server/share/path. Produced by
     # `_rel(Path(fn_str))` slash-normalising `\\server\share\path`. The `(?<!:)`
     # lookbehind prevents URI overmatch (`https://host/path` would otherwise
-    # collide with `//host/path`).
-    r"|(?<!:)(?://[^\s'\"?/]+/[^\s'\"]+(?:/[^\s'\"]*)?)"
+    # collide with `//host/path`). The pattern requires THREE slash-separated
+    # segments (host + share + path) so `//word/word` prose like a Markdown
+    # `<!-- //tag/section -->` comment is NOT redacted (R1 Sonnet PR-49 MAJOR);
+    # real UNC paths always have a file/path component after the share.
+    r"|(?<!:)(?://[^\s'\"?/]+/[^\s'\"?/]+/[^\s'\"]+)"
     r"|(?:/(?:home|Users|opt|var|srv|tmp|mnt|root)/[^\s'\"]+)"  # POSIX absolute
 )
 
