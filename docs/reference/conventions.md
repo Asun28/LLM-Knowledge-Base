@@ -22,4 +22,27 @@ Every wiki page ingested via `ingest_source` grows an `## Evidence Trail` sectio
 
 ## Architecture Diagram Sync (MANDATORY)
 
-Source `docs/architecture/architecture-diagram.html` → rendered PNG sibling → displayed in `README.md`. **Every HTML edit must re-render the PNG and commit it.** Render via headless Playwright at 1440×900 viewport (auto-expanded to content), `device_scale_factor=3`, `full_page=True`, `--type=png`; see prior commits for the exact invocation.
+Source `docs/architecture/architecture-diagram.html` → rendered PNG sibling → displayed in `README.md`. **Every HTML edit must re-render the PNG and commit it.** Render via headless Playwright at 1440×900 viewport (auto-expanded to content), `device_scale_factor=3`, `full_page=True`, `--type=png`.
+
+Canonical re-render snippet (run from repo root after editing the HTML):
+
+```python
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+root = Path.cwd()
+html = (root / "docs/architecture/architecture-diagram.html").resolve()
+png = root / "docs/architecture/architecture-diagram.png"
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    context = browser.new_context(
+        viewport={"width": 1440, "height": 900},
+        device_scale_factor=3,
+    )
+    page = context.new_page()
+    page.goto(html.as_uri(), wait_until="networkidle")
+    page.screenshot(path=str(png), full_page=True, type="png")
+    browser.close()
+```
+
+Requires `playwright` installed in `.venv` plus `python -m playwright install chromium`. Only the non-`-detailed` HTML has a PNG sibling — the `-detailed` variant is HTML-only.
