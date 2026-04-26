@@ -692,26 +692,71 @@ class TestPathWithinCaptures:
 
 
 class TestSymlinkGuard:
-    """Spec §5, §8 — module refuses to load if CAPTURES_DIR escapes PROJECT_ROOT."""
+    """Spec §5, §8 — module refuses to load if CAPTURES_DIR escapes PROJECT_ROOT.
 
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="symlink creation requires admin on Windows"
-    )
-    def test_symlink_outside_project_root_refuses_import(self, tmp_path, monkeypatch):
-        import importlib
+    Cycle 38 AC0: the security-guard verification runs in a subprocess so it
+    never mutates the test runner's ``sys.modules``. Pre-cycle-38 used
+    ``del sys.modules["kb.capture"]`` + reimport in-process, which left this
+    file's pre-collection bindings (line 20+) holding OLD module function
+    objects whose ``__globals__`` was the OLD module ``__dict__``. Subsequent
+    ``mock_scan_llm`` patches on ``sys.modules["kb.capture"]`` (= NEW module)
+    didn't reach the OLD ``__dict__`` that test functions actually used,
+    causing the cycle-36 ubuntu-probe Category-A failures (10 tests in
+    ``TestCaptureItems`` / ``TestPipelineFrontmatterStrip`` /
+    ``TestRoundTripIntegration`` / ``test_mcp_core::TestKbCaptureWrapper``).
+    Subprocess isolation eliminates this contamination class entirely.
+    """
+
+    def test_symlink_outside_project_root_refuses_import(self, tmp_path):
+        import subprocess
+        import textwrap
 
         external_dir = tmp_path / "external"
         external_dir.mkdir()
         symlink_dir = tmp_path / "captures_symlink"
-        symlink_dir.symlink_to(external_dir, target_is_directory=True)
-        monkeypatch.setattr("kb.config.CAPTURES_DIR", symlink_dir)
-        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path / "project_root")
-        if "kb.capture" in sys.modules:
-            del sys.modules["kb.capture"]
-        with pytest.raises(RuntimeError, match="SECURITY: CAPTURES_DIR"):
-            importlib.import_module("kb.capture")
-        monkeypatch.undo()
-        importlib.import_module("kb.capture")
+        try:
+            symlink_dir.symlink_to(external_dir, target_is_directory=True)
+        except OSError as exc:  # pragma: no cover — Windows w/o developer mode
+            pytest.skip(f"symlink creation requires privileges on this OS: {exc}")
+        project_root = tmp_path / "project_root"
+        project_root.mkdir()
+
+        # Probe runs in a fresh interpreter so its sys.modules state is
+        # fully isolated from this test runner. The probe imports kb.capture
+        # under a deliberately-malicious CAPTURES_DIR (a symlink escaping
+        # PROJECT_ROOT) and asserts the module-import-time guard at
+        # src/kb/capture.py:832-844 raises RuntimeError("SECURITY: CAPTURES_DIR ...").
+        probe = textwrap.dedent(
+            """
+            import os
+            import sys
+            from pathlib import Path
+
+            os.environ["KB_PROJECT_ROOT"] = sys.argv[2]
+            import kb.config
+            kb.config.CAPTURES_DIR = Path(sys.argv[1])
+            kb.config.PROJECT_ROOT = Path(sys.argv[2])
+            try:
+                import kb.capture  # noqa: F401 — import is the test
+            except RuntimeError as exc:
+                if "SECURITY: CAPTURES_DIR" in str(exc):
+                    sys.exit(42)
+                sys.stderr.write(f"unexpected RuntimeError: {exc}\\n")
+                sys.exit(1)
+            sys.stderr.write("module imported without raising\\n")
+            sys.exit(2)
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(symlink_dir), str(project_root)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 42, (
+            f"expected SECURITY: CAPTURES_DIR exit 42, got {result.returncode}; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}"
+        )
 
 
 class TestExclusiveAtomicWrite:
