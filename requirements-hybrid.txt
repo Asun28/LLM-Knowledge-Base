@@ -1,0 +1,11 @@
+# Hybrid search dependencies — mirrors [project.optional-dependencies] hybrid in pyproject.toml.
+# Combines BM25 with vector embeddings for retrieval. Layer over runtime.
+#
+#   pip install -r requirements-runtime.txt -r requirements-hybrid.txt
+#
+# Cycle 37 AC5.
+
+-r requirements-runtime.txt
+model2vec>=0.5.0
+sqlite-vec>=0.1.0
+numpy>=1.26

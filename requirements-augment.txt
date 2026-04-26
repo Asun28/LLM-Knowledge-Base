@@ -1,0 +1,11 @@
+# Augment-mode dependencies — mirrors [project.optional-dependencies] augment in pyproject.toml.
+# Web fetching for kb_lint --augment / kb_lint_deep external link verification.
+#
+#   pip install -r requirements-runtime.txt -r requirements-augment.txt
+#
+# Cycle 37 AC5.
+
+-r requirements-runtime.txt
+httpx>=0.27
+httpcore>=1.0
+trafilatura>=1.12

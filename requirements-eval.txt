@@ -1,0 +1,17 @@
+# Evaluation-harness dependencies — mirrors [project.optional-dependencies] eval in pyproject.toml.
+# Ragas + datasets + LiteLLM for evaluation runs.
+#
+#   pip install -r requirements-runtime.txt -r requirements-eval.txt
+#
+# Cycle 37 AC5 + AC6.
+
+-r requirements-runtime.txt
+ragas>=0.4
+litellm>=1.83
+datasets>=4.0
+
+# Cycle 35 L8 floor pin — closes GHSA-r7w7-9xr2-qq2r (DNS-rebinding SSRF in
+# langchain-openai's image-token-counting helper, fix at 1.1.14). Pulled in
+# transitively by ragas; without this pin, the resolver may pick 1.1.10
+# (vulnerable). Mirrors the [eval] extra pin in pyproject.toml.
+langchain-openai>=1.1.14

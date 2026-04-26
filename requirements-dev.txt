@@ -1,0 +1,15 @@
+# Dev-tooling dependencies — mirrors [project.optional-dependencies] dev in pyproject.toml.
+# pytest + ruff + pip-audit + build/twine for local development and CI.
+#
+#   pip install -r requirements-runtime.txt -r requirements-dev.txt
+#
+# Cycle 37 AC5.
+
+-r requirements-runtime.txt
+pytest>=7.0
+pytest-timeout>=2.3
+ruff>=0.4.0
+pytest-httpx>=0.30
+pip-audit>=2.10
+build>=1.2
+twine>=5.0

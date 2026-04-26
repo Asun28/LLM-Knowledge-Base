@@ -10,7 +10,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Full suite: 3005 tests / 257 files (2985 passed + 20 skipped on Windows local; cycle 36 added 10 cycle-36 hardening tests + 10 `requires_real_api_key` skipif markers + 4 anti-POSIX skipif markers + cycle-23 multiprocessing CI=true skipif). New tests per cycle go in versioned files (e.g. `test_cycle36_ci_hardening.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
+Full suite: 3012 tests / 258 files (2991 passed + 21 skipped on Windows local; cycle 37 added 6 requirements-split regression tests in `test_cycle37_requirements_split.py` + 1 positive-case `test_qb_symlink_inside_raw_accepted` skipped on Windows-no-elevation). New tests per cycle go in versioned files (e.g. `test_cycle37_requirements_split.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
 
 ## Cycle 36 conventions (2026-04-26)
 

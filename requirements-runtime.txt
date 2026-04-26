@@ -1,0 +1,17 @@
+# Runtime-only dependencies — mirrors [project] dependencies in pyproject.toml.
+#
+# For full reproducibility (pinned transitives), use requirements.txt.
+# For per-feature installs, layer with -r requirements-{hybrid,augment,formats,eval}.txt.
+# For dev tooling (pytest, ruff, etc.), use -r requirements-dev.txt.
+#
+# Cycle 37 AC4: split requirements.txt into per-extra files mirroring pyproject.toml's
+# [project.optional-dependencies] structure. requirements.txt stays as the frozen
+# snapshot (cycle-37 Q3 amendment).
+
+click>=8.0
+python-frontmatter>=1.0
+fastmcp>=2.0
+networkx>=3.0
+anthropic>=0.7
+PyYAML>=6.0
+jsonschema>=4.20

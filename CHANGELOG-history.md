@@ -9,6 +9,55 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-26 — cycle 37 — POSIX symlink security fix + requirements split
+
+**Theme.** Two areas, both deferred from cycle 36: (a) production POSIX security gap in `pair_page_with_sources` whose existing symlink containment check was dead code due to a `.resolve()`-before-`is_symlink()` ordering bug; (b) `requirements.txt` split into per-extra layered files mirroring `pyproject.toml [project.optional-dependencies]`. ZERO new CI dimensions per cycle-36 L1 (the 5 remaining cycle-37 BACKLOG candidates — windows-latest matrix re-enable, GHA-Windows multiprocessing investigation, mock_scan_llm POSIX reload-leak, TestExclusiveAtomicWrite POSIX behaviour, Dependabot drift on 2 litellm GHSAs — DEFERRED to cycle 38+ to avoid extending the cycle-36 "endless CI failure runs" pattern the user explicitly flagged).
+
+**Two-commit sequence** (cycle-36 L1 CI-cost discipline — local-verify-first then push-once):
+
+- **Commit 1 (`<sha>`, security fix):** AC1 reorders `is_symlink()` capture to BEFORE `.resolve()` in `src/kb/review/context.py::pair_page_with_sources`; AC2 drops the cycle-36 POSIX-only skipif on `test_qb_symlink_outside_raw_rejected`; AC3 adds positive-case `test_qb_symlink_inside_raw_accepted` (intra-`raw/` symlink target stays within `raw_dir` — content read OK; divergent-fail per cycle-24 L4 against an over-broad AC1 fix that would reject all symlinks). Cycle-37 design docs (requirements + threat-model + design + plan) bundled.
+- **Commit 2 (`<sha>`, requirements split):** AC4 `requirements-runtime.txt` mirrors `[project] dependencies` (7 packages, version specifiers); AC5 5 NEW per-extra files (`requirements-{hybrid,augment,formats,eval,dev}.txt`) each layer `-r requirements-runtime.txt` plus extra-specific packages from `[project.optional-dependencies]`; AC6 `requirements-eval.txt` carries cycle-35 L8 floor pin `langchain-openai>=1.1.14`; AC7 (Q3 amendment) `requirements.txt` UNCHANGED — frozen 295-line snapshot preserved for `pip install -r requirements.txt` reproducibility; AC8 README install section gains "lean" + "per-feature" + "canonical extras" subsections alongside the existing snapshot install; AC9 `tests/test_cycle37_requirements_split.py` pins 6 invariants: file existence, no self-include in runtime, `-r requirements-runtime.txt` first-line in per-extra files, floor pin in eval, pyproject extras keys ↔ per-extra files set-equality cross-check via `tomllib`, and snapshot-preservation (line-count > 100).
+
+**Step-5 design-gate amendments (Q1-Q6 resolved primary-session per cycle-36 L2):**
+- Q1=a: AC1 fix shape — reorder `is_symlink()` over alternative `os.lstat()`/`stat.S_ISLNK`. Smallest diff, idiomatic pathlib.
+- Q2=a: AC4 dependency selection — verbatim from `pyproject.toml [project] dependencies` (7 names; no transitives double-pinned).
+- Q3=b: AC7 AMENDED from "shim" to "UNCHANGED". Replacing the 295-line snapshot with a 6-line shim trades reproducibility for tidiness — version drift would re-introduce "works on my machine" CI flakes the user has flagged before.
+- Q4=a+lite-c: AC9 tests are file-existence + grep + tomllib cross-check (skipping pip-install dry-run subprocess). Each assertion is divergent-fail under revert.
+- Q5=b: Per-extra files use version specifiers (`>=`) from pyproject — matches `pip install .[extra]` semantics. Exact-pin reproducibility stays via `requirements.txt`.
+- Q6=b: Skip pip install dry-run at Step 9. Trust pip resolver (same shape as `pip install .[hybrid]`); resolution failure surfaces at user-install time and is corrigible.
+
+**Threat-model verification (Step 11 a):**
+- T1 — POSIX symlink containment bypass IMPLEMENTED via AC1 (verified `is_link` captured at `context.py:71`, before `.resolve()` at `:73`).
+- T2 — Backward-compat shim risk IMPLEMENTED via AC7 unchanged (verified by AC9 `test_requirements_txt_remains_snapshot`).
+- T3 — Per-extra `-r` reference breakage IMPLEMENTED via AC9 file-existence + first-line tests (5 per-extra files × 1 invariant each).
+- T4 — Cycle-35 L8 floor pin loss IMPLEMENTED via AC6 + AC9 grep test (`re.search(r"^langchain-openai>=1\.1\.14"`).
+- T5 — Cycle-22 L4 mid-cycle CVE arrival IMPLEMENTED via Step 11 PR-CVE diff (INTRODUCED set empty: branch IDs == baseline IDs == 4 expected Class-A advisories).
+- T6 — Skipif marker over-disable IMPLEMENTED via AC2 (verified only Windows-elevation skipif remains; cycle-36 POSIX-only skipif removed).
+- T7 — README staleness IMPLEMENTED via AC8 (both old + new install paths documented).
+
+**Step 11 (b) PR-introduced CVE diff — PASS (empty INTRODUCED set):**
+- Baseline (`.data/cycle-37/cve-baseline.json`): 4 IDs — CVE-2025-69872 (diskcache, no upstream fix), CVE-2026-3219 (pip, no upstream fix), CVE-2026-6587 (ragas, no upstream fix), GHSA-xqmj-j6mv-4862 (litellm, fix=1.83.7 BLOCKED by `click<8.2`).
+- Branch (`.data/cycle-37/cve-branch.json`): same 4 IDs. Cycle 37 added zero new packages and bumped zero versions.
+
+**Step 11.5 (existing-CVE opportunistic patch):** Same 4 Dependabot alerts as cycle 36 (3 litellm `first_patched=1.83.7` blocked, 1 ragas `first_patched=null`). NO actionable patches — skip per skill's null-patch-version clause + cycle-32 click constraint blocker.
+
+**Files changed (8):**
+- `src/kb/review/context.py` — 9-line reorder in `pair_page_with_sources`.
+- `tests/test_phase45_theme3_sanitizers.py` — 1 skipif drop (8 lines) + 1 NEW positive-case test (~50 lines).
+- `requirements-runtime.txt` — NEW (~15 lines incl. comments).
+- `requirements-hybrid.txt` / `requirements-augment.txt` / `requirements-formats.txt` / `requirements-eval.txt` / `requirements-dev.txt` — NEW (~10-20 lines each).
+- `tests/test_cycle37_requirements_split.py` — NEW (~110 lines, 6 tests).
+- `README.md` — install section update (~15 lines added/replaced).
+- 4 cycle-37 decision docs in `docs/superpowers/decisions/`.
+
+**Test count delta:** 3005 → 3012 (+7).
+- +6 in `tests/test_cycle37_requirements_split.py` (all PASSED on Windows local since they're stdlib-only file/grep checks).
+- +1 in `tests/test_phase45_theme3_sanitizers.py::test_qb_symlink_inside_raw_accepted` (SKIPPED on Windows-no-elevation; will run on POSIX CI).
+
+**Cycle-37 lessons (full at Step 16):**
+- C37-L1 (preview): Two-commit cycles avoid CI cost. When the cycle's scope decomposes into 2 independent areas (security fix vs tooling), batch each as one commit, push once, single CI run. Cycle-36 four-commit pattern was driven by NEW CI dimension introduction; cycle-37 zero-new-dimension allowed local-verify-first + single push.
+- C37-L2 (preview): Q3 "additive vs replacement" trade-off — when adding a new workflow (per-extra requirements files), default to ADDITIVE rather than REPLACEMENT to preserve backward compat on the existing artifact (`requirements.txt`). Refines cycle-36 L3 (post-pivot doc-accuracy) — "additive" is one principle for avoiding pivot risk.
+
 ### 2026-04-26 — cycle 36 — Test + CI infrastructure hardening
 
 **Theme.** Closes 2 of 3 explicit cycle-36 BACKLOG follow-ups: strict pytest CI
