@@ -902,10 +902,17 @@ class TestGetModelTierLazy:
 
 class TestClaudeMdEvidenceTrailConvention:
     def test_section_present(self):
-        claude_md = Path(__file__).resolve().parent.parent / "CLAUDE.md"
-        assert claude_md.exists()
-        text = claude_md.read_text(encoding="utf-8")
+        # Cycle 35: CLAUDE.md split into docs/reference/* (commit 518db0e). The
+        # Evidence Trail Convention section moved to docs/reference/conventions.md.
+        # CLAUDE.md remains the index pointing at it.
+        repo_root = Path(__file__).resolve().parent.parent
+        conventions_md = repo_root / "docs" / "reference" / "conventions.md"
+        assert conventions_md.exists()
+        text = conventions_md.read_text(encoding="utf-8")
         assert "Evidence Trail Convention" in text
+        # CLAUDE.md still references the conventions reference file (linkage check).
+        claude_md_text = (repo_root / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "docs/reference/conventions.md" in claude_md_text
 
 
 # =============================================================================
