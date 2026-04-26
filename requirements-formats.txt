@@ -1,0 +1,9 @@
+# Format-extension dependencies — mirrors [project.optional-dependencies] formats in pyproject.toml.
+# Notebook (.ipynb) ingest support.
+#
+#   pip install -r requirements-runtime.txt -r requirements-formats.txt
+#
+# Cycle 37 AC5.
+
+-r requirements-runtime.txt
+nbformat>=5.0,<6.0

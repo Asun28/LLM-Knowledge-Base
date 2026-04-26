@@ -120,14 +120,27 @@ source .venv/bin/activate     # Unix
 pip install -r requirements.txt && pip install -e .
 kb --version
 
-# OR — minimal install (no hybrid search, no augment fetcher, no eval harness):
-#   pip install -e .
-# Then opt into specific feature groups via extras (added cycle 34):
-#   pip install -e '.[hybrid]'   # vector search via model2vec + sqlite-vec
-#   pip install -e '.[augment]'  # kb_lint --augment fetcher (httpx + trafilatura)
-#   pip install -e '.[formats]'  # kb_query --format=jupyter (nbformat)
-#   pip install -e '.[eval]'     # ragas / litellm evaluation harness
-#   pip install -e '.[dev]'      # pytest + ruff + pytest-httpx + build + twine
+# OR — lean install (cycle 37, runtime-only, no extras):
+#   pip install -r requirements-runtime.txt && pip install -e .
+#
+# OR — per-feature install (cycle 37, layered requirements files):
+#   pip install -r requirements-runtime.txt -r requirements-hybrid.txt && pip install -e .
+#   pip install -r requirements-runtime.txt -r requirements-augment.txt && pip install -e .
+#   pip install -r requirements-runtime.txt -r requirements-formats.txt && pip install -e .
+#   pip install -r requirements-runtime.txt -r requirements-eval.txt    && pip install -e .
+#   pip install -r requirements-runtime.txt -r requirements-dev.txt     && pip install -e .
+#
+# OR — canonical extras (pyproject.toml, equivalent to layered requirements):
+#   pip install -e .                # runtime only (no extras)
+#   pip install -e '.[hybrid]'      # vector search via model2vec + sqlite-vec
+#   pip install -e '.[augment]'     # kb_lint --augment fetcher (httpx + trafilatura)
+#   pip install -e '.[formats]'     # kb_query --format=jupyter (nbformat)
+#   pip install -e '.[eval]'        # ragas / litellm evaluation harness
+#   pip install -e '.[dev]'         # pytest + ruff + pytest-httpx + build + twine
+#
+# Use requirements.txt for full reproducibility (frozen transitive pins);
+# use requirements-runtime.txt + per-extra files when you want a leaner install
+# without the full snapshot's dev tooling.
 ```
 
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
