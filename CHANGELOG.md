@@ -32,7 +32,7 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
 #### 2026-04-26 — cycle 35 (Pre-Phase-5 BACKLOG batch + cycle-34 AC4e completion)
 
 - Items: 18 designed AC + AC1b T1b proactive close + AC-Dep1 GitPython bump + AC-Doc1 doc updates = 21 effective / 4 src (`utils/sanitize.py`, `ingest/pipeline.py`, `mcp/core.py`, `requirements.txt`) + 2 NEW test files (`tests/test_cycle35_ingest_index_writers.py`, `tests/test_cycle35_mcp_core_filename_validator.py`) + 4 docs (`docs/architecture/architecture-diagram.html`, `architecture-diagram-detailed.html`, `architecture-diagram.png`, `docs/reference/conventions.md`) + 3 doc-anchor test re-anchors after the cycle-34-followup CLAUDE.md split + 1 ruff format normalization carryover / +TBD commits (backfill post-merge per cycle-30 L1)
-- Tests: 2941 → 2993 (+52 passed: 4 new sanitize tests on `test_cycle33_mcp_core_path_leak.py`, 8 new ingest index-writer tests, 39 new mcp/core filename-validator tests, +1 baseline net adjustment after the doc-anchor re-anchor)
+- Tests: 2941 → 2995 (+54 passed: 6 new sanitize tests on `test_cycle33_mcp_core_path_leak.py` — including 4 AC1/AC1b/AC3 + 1 R1 Codex AC10 NIT + 2 R1 Sonnet PR-49 negatives — 8 new ingest index-writer tests, 39 new mcp/core filename-validator tests, +1 baseline net adjustment after the doc-anchor re-anchor)
 - Scope:
   Closes 6 pre-Phase-5 BACKLOG items (M11 RMW lock + M12 UNC slash-normalize + M13 empty-list +
   M14 backtick-dedup + M15 filename validator parity + M21 architecture v0.11.0 sync) plus

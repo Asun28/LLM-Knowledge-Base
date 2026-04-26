@@ -15,7 +15,7 @@ Generated 2026-04-26 by Opus subagent. Becomes the Step 11 verification checklis
 
 **Output flow.** `sanitize_text` is called from three sites: `kb.lint._safe_call.sanitize_error_text` (lint failure rows in `verdicts.jsonl`), `kb.mcp.app._sanitize_error_str` (MCP `Error[partial]:` strings returned to the client AND written to `wiki/log.md` via `_emit_ingest_jsonl`), and `kb.ingest.pipeline.sanitize_text` (refine telemetry). Every Windows `OSError.filename` flows through `_rel(Path(fn_str))` first which slash-normalises `\\server\share\path` to `//server/share/path` BEFORE the regex sweep. The current `_ABS_PATH_PATTERNS` UNC alternative is backslash-only, so the slash-normalised form survives.
 
-**Other slash-normalised shapes the regex misses.** The forward-slash UNC long-path `//?/UNC/server/share/...` does NOT match either current alternative. AC1 must add `(?://[^\s'\"?/]+/[^\s'\"]+(?:/[^\s'\"]*)?)`. The slash UNC long-path is a **T1b** follow-up if the Step-11 REPL probe confirms a leak.
+**Other slash-normalised shapes covered in cycle 35.** The forward-slash UNC long-path `//?/UNC/server/share/...` is T1b INCLUDED in cycle 35 (shipped via AC1+AC1b regex extension).
 
 ### File group B — `ingest/pipeline.py` RMW races (M11) + empty-list (M13) + backtick (M14)
 
@@ -47,7 +47,7 @@ T1: sanitize.py — UNC slash-normalize bypass leaks server/share names
     - pytest tests/test_cycle33_mcp_core_path_leak.py::TestSanitizeErrorTextUNCAndLongPath -v — xfail marker REMOVED + new positive test passes
     - mentally revert AC1: confirm test_forward_slash_unc_redacts_via_extended_pattern would FAIL
   Same-class peers: kb.lint._safe_call (verdicts.jsonl), kb.mcp.app:_sanitize_error_str, kb.ingest.pipeline:_emit_ingest_jsonl, _update_sources_mapping warning
-  T1b (defer-able): //?/UNC/server/share/... slash-normalised long-path UNC — REPL-probe at Step 11; add as same-cycle fix if leaks
+  T1b INCLUDED in cycle 35 (shipped via AC1+AC1b regex extension): //?/UNC/server/share/... slash-normalised long-path UNC
 
 T2: pipeline.py — _sources.md RMW race lost-update
   Trust boundary: concurrent ingest_source callers (MCP + CLI) -> shared wiki/_sources.md
