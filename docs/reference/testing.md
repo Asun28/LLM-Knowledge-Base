@@ -10,7 +10,7 @@ Pytest with `testpaths = ["tests"]`, `pythonpath = ["src"]`. Fixtures in `confte
 - `create_wiki_page` — factory fixture for creating wiki pages with proper frontmatter (parameterized: page_id, title, content, source_ref, page_type, confidence, updated, wiki_dir)
 - `create_raw_source` — factory fixture for creating raw source files
 
-Full suite: 3012 tests / 258 files (2991 passed + 21 skipped on Windows local; cycle 37 added 6 requirements-split regression tests in `test_cycle37_requirements_split.py` + 1 positive-case `test_qb_symlink_inside_raw_accepted` skipped on Windows-no-elevation). New tests per cycle go in versioned files (e.g. `test_cycle37_requirements_split.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
+Full suite: 3014 tests / 259 files (3003 passed + 11 skipped on Windows local; cycle 38 added `tests/test_cycle38_mock_scan_llm_reload_safe.py` with 2 cases pinning the dual-site `mock_scan_llm` fixture contract + unskipped 12 cycle-36 ubuntu-probe leftovers — 7 in `test_capture.py::TestCaptureItems` / `TestPipelineFrontmatterStrip` / `TestRoundTripIntegration`, 3 in `test_mcp_core.py::TestKbCaptureWrapper`, 2 in `test_capture.py::TestExclusiveAtomicWrite::test_cleans_up_*`). New tests per cycle go in versioned files (e.g. `test_cycle38_mock_scan_llm_reload_safe.py`). Per-cycle test-file details → `CHANGELOG-history.md`.
 
 ## Cycle 36 conventions (2026-04-26)
 
