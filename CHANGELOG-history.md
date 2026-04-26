@@ -5,9 +5,53 @@
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-04-25
+## Active-unreleased archive — 2026-04-16 to 2026-04-26
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-04-26 — cycle 35 — Pre-Phase-5 BACKLOG batch + cycle-34 AC4e completion
+
+21 effective ACs (18 designed + AC1b T1b proactive + AC-Dep1 GitPython + AC-Doc1 docs) / 4 src files modified (`utils/sanitize.py`, `ingest/pipeline.py`, `mcp/core.py`, `requirements.txt`) / 2 NEW test files (`tests/test_cycle35_ingest_index_writers.py` 8 tests, `tests/test_cycle35_mcp_core_filename_validator.py` 39 tests) + 4 new tests on `test_cycle33_mcp_core_path_leak.py` + 1 cleanup (xfail-strict marker removed) / 4 docs modified (`docs/architecture/architecture-diagram.html`, `architecture-diagram-detailed.html`, `architecture-diagram.png`, `docs/reference/conventions.md`) / 3 doc-anchor test re-anchors after the cycle-34-followup CLAUDE.md split (`tests/test_backlog_by_file_cycle7.py`, `tests/test_cycle10_capture.py`, `tests/test_cycle34_release_hygiene.py`) / 1 ruff format normalization carryover (`tests/test_capture.py`) / +TBD commits (backfill post-merge per cycle-30 L1). Tests: 2941 → 2993 (+52 passed, 10 skipped unchanged).
+
+**File group A — `utils/sanitize.py` (M12 + T1b proactive close):**
+- AC1: extend `_ABS_PATH_PATTERNS` with TWO new alternatives — slash-form Windows UNC long-path `(?://\?/UNC/[^\s'\"?]+/[^\s'\"]+(?:/[^\s'\"]*)?)` AND URI-guarded ordinary slash UNC `(?<!:)(?://[^\s'\"?/]+/[^\s'\"]+(?:/[^\s'\"]*)?)`. Insertion order: AFTER backslash UNC alternatives (more specific first), BEFORE POSIX absolute alternative.
+- Same-class peer fix on the EXISTING drive-letter alternative `(?:[A-Za-z]:[\\/][^\s'\"]+)`: gain `(?<![A-Za-z])` lookbehind so URLs like `https://host/path` no longer collapse to `<path>` via the `s://` collision. Pre-existing behavior since cycle 18 AC13 (no test had caught it); cycle-35 R2 R2 Codex review surfaced it during AC1 verification.
+- AC2: cycle-33 `test_windows_ordinary_unc_filename_redacts` xfail-strict marker REMOVED (XPASS-strict semantic forces removal once the test passes).
+- AC3 + AC1b: 4 new test methods in `TestSanitizeErrorTextUNCAndLongPath` — `test_forward_slash_unc_redacts_via_extended_pattern` (positive AC1), `test_slash_unc_long_path_redacts` (positive AC1b), `test_url_not_overmatched` (negative URL guard), `test_double_slash_comment_not_overmatched` (negative `//` comment guard). Cycle-24 L4 dual-anchor: each test FAILS under production revert.
+- `sanitize_error_text` per-path substitution now probes BOTH single-backslash form AND OSError-doubled-backslash form of the filename attribute. Closes the cycle-33 xfail-strict gap directly: previously `fn_str = r"\\server\share\..."` (single-backslash form) was checked against `s = str(exc)` (doubled-backslash form via `OSError.__str__`'s repr-style escaping) with no match → per-path sub never fired → backslash UNC survived to the regex sweep which only matched single-backslash form.
+
+**File group B — `ingest/pipeline.py` (M11 + M13 + M14):**
+- AC4: wrap `_update_sources_mapping` RMW window in `file_lock(sources_file)` covering BOTH branches (new-entry append + dedup/merge). Lock acquired AFTER the `sources_file.exists()` check (no point locking a missing file).
+- AC5: wrap `_update_index_batch` RMW window in `file_lock(index_path)`. Existing `if not entries: return` early-exit STAYS BEFORE lock acquisition.
+- AC6: empty-`wiki_pages` early-return at function entry kills the malformed `→ \n` line. Placed AFTER docstring + BEFORE `sources_file = ...` so an absent file with empty pages does NOT fire the `_sources.md not found` warning (T8 verification).
+- AC7: BOTH the membership check (was line 792) AND per-line scan (was line 799) now use `escaped_ref` so a backtick-bearing `source_ref` matches its on-disk escaped form (T5; was raw `source_ref` not in escaped content → false-miss → duplicate entry on re-call).
+- NO wrapper-level lock added in `_write_index_files` per Step-5 Q7 (`file_lock` is `os.O_EXCL` non-reentrant — wrapper lock would self-deadlock on every ingest). Confirmed via `utils/io.py:294,321,355,392` reading.
+- AC8/AC9: 8 new tests using a `_build_rmw_spies` helper that records `file_lock_enter` / `file_lock_exit` / `read_text` / `atomic_text_write` calls in invocation order. Assert lock-spans-RMW for both branches of `_update_sources_mapping` AND `_update_index_batch`.
+- AC10: byte-equal snapshot before/after empty-pages call on EXISTING file + assert no I/O fires (early-return before any read/lock). T8: empty + absent file → no warning fires.
+- AC11: backtick-source-ref dedup test with cycle-24 L4 dual-anchor — single-call invariant (escaped form on disk after call 1) + two-call invariant (single line after call 2 with same input) + merge-branch sanity (re-call with NEW pages adds them to the same line).
+
+**File group C — `mcp/core.py` (M15):**
+- AC12: new `_validate_filename_slug(filename: str) -> tuple[str, str | None]` helper near `_validate_save_as_slug` (precedent shape). Looser than the save_as slug validator: NO `slugify(slug) == slug` round-trip enforcement (free-form filenames legitimately differ from their slug). Rejects: NUL byte / path-separators (`/`, `\`) / `..` / trailing dot (Windows trim aliasing — evades `_is_windows_reserved` because Windows silently strips trailing dots) / non-ASCII (`[^\x00-\x7F]` blocks homoglyphs + RTL-override + zero-width attacks per cycle-16 L1) / length > 200 / Windows-reserved (via existing `_is_windows_reserved` import — DO NOT reimplement). Allows leading dot (`.env`) and leading dash (`-foo`) per Step-5 Q5 (POSIX legitimate, out of stated rejection set).
+- AC13: wire helper into `_validate_file_inputs` AFTER existing empty/length checks, BEFORE content-size check. Public return contract stays `str | None` (callers `kb_ingest_content` at line 695 + `kb_save_source` at line 832 unchanged).
+- AC14: 39 new tests — TestValidateFilenameSlugRejects (10 reject classes parametrized over NUL / Cyrillic homoglyph / emoji / Windows-reserved / path-separators / trailing dot / whitespace padding / oversized / empty / non-string), TestValidateFilenameSlugAccepts (9 legitimate inputs including `.env`, `-foo.md`, `karpathy-llm-knowledge-bases.md`), TestValidateFileInputsWiring (9 wiring tests + baseline preservation for empty/length/content-size).
+- /simplify follow-on (Step 9.5): replace bare `200` literal in `_validate_file_inputs`'s length check with the named `_FILENAME_MAX_LEN` constant; preserves byte-identical wording.
+
+**File group D — `docs/architecture/` (M21, AC4e from cycle 34):**
+- AC16/AC17: bump `architecture-diagram.html:501` and `architecture-diagram-detailed.html:398` from `v0.10.0` to `v0.11.0`. Closes deferred cycle-34 AC4e per design-doc fallback.
+- AC18: re-render `architecture-diagram.png` via headless Playwright (chromium, 1440×900 viewport, device_scale_factor=3, full_page=True, type="png"). Step-6 Context7 confirmed `browser.new_context(viewport=, device_scale_factor=)` is the canonical form (vs the `browser.new_page()` shortcut). PNG: 1.59 MB; v0.11.0 visible in rendered title block.
+- Step-5 Q13 follow-on: add the canonical Playwright snippet to `docs/reference/conventions.md` Architecture Diagram Sync section as a fenced code block. Prevents a third deferral if cycle 36+ touches the diagrams.
+
+**File group E — `requirements.txt` (Step 11b):**
+- AC-Dep1: pin `GitPython==3.1.46` → `GitPython>=3.1.47`. Closes Dependabot GHSA-x2qx-6953-8485 (high) + GHSA-rpm5-65cw-6hj4 (high). Pre-bump verification: `rg "^\s*(import git\b|from git\b)" src/kb/` returns ZERO matches — GitPython is a transitive tooling dep (pre-commit / scripts), not in the kb runtime path. Post-bump: `pip-audit` reports GitPython advisories absent; full suite 2983 passed (unchanged).
+
+**Doc-anchor test re-anchors (cycle-35 collateral):**
+- `tests/test_backlog_by_file_cycle7.py::TestClaudeMdEvidenceTrailConvention::test_section_present` — pointed at `docs/reference/conventions.md` (Evidence Trail Convention section moved per commit 518db0e); also asserts CLAUDE.md still LINKS to `docs/reference/conventions.md` (slim-index linkage check).
+- `tests/test_cycle10_capture.py::test_claude_md_documents_raw_captures_exception` — split assertions: `except raw/captures/` against `docs/reference/architecture.md`, `deletion-pruning` against `docs/reference/error-handling.md`.
+- `tests/test_cycle34_release_hygiene.py::test_kb_save_synthesis_clarification_in_claude_md` — `save_as=` against `docs/reference/mcp-servers.md`; retains `kb_save_synthesis` NOT in CLAUDE.md as a forward regression check on both files.
+
+**Step-5 design questions (13 resolved autonomously):** Q1 (regex form) → R2's two-pattern with URI lookbehind + slash-UNC long-path; Q2 (T1b inclusion) → proactive close in-cycle (R2 confirmed leak); Q3 (helper signature) → `tuple[str, str | None]` matching `_validate_save_as_slug` precedent; Q4 (trailing dot/space) → REJECT (Windows trim aliasing evades reserved-name check); Q5 (leading dot/dash) → ALLOW (POSIX legitimate); Q6 (non-ASCII) → strict `[^\x00-\x7F]` (stdlib-only, blocks RTL/ZW); Q7 (wrapper-level lock) → NO (`file_lock` is non-reentrant); Q8 (spy mechanism) → `unittest.mock.call_args_list` ordering (cycle-17 L4 stdlib pattern); Q9 (T8 warning suppression test) → ADD; Q10 (AC11 single-call invariant) → ADD; Q11 (AC3 negative tests) → ADD all three; Q12 (GitPython bundling) → bundle into cycle 35 PR; Q13 (Playwright snippet in conventions.md) → ADD.
+
+**Plan-gate REJECT (Step 8):** 5 gaps all resolved inline per cycle-21 L1 (doc/design gaps, no Step-5 re-run needed): TASK 2 spy mechanism rewritten to `_build_rmw_spies` helper + call_args_list ordering; AC8 dedup-merge branch test added; AC3 forward-slash test input form corrected; AC10 byte-equal snapshot + I/O-absence assertion added; CONDITION 16 same-class peer scan added to TASK 2 self-check.
 
 ### 2026-04-25 — cycle 34 — Release hygiene
 

@@ -9,12 +9,27 @@ from pathlib import Path
 from kb.config import PROJECT_ROOT
 
 _ABS_PATH_PATTERNS = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s'\"]+)"  # Windows: D:\foo\bar or D:/foo/bar
+    # Cycle 35 — `(?<![A-Za-z])` lookbehind prevents URI overmatch
+    # (`https://host/path` no longer matches as `s://host/path`). Drive-letter
+    # paths legitimately start at a word boundary in real logs.
+    r"(?<![A-Za-z])(?:[A-Za-z]:[\\/][^\s'\"]+)"  # Windows: D:\foo\bar or D:/foo/bar
     r"|(?:\\\\\?\\[^\s'\"]+)"  # Windows UNC long-path: \\?\C:\...
     # Cycle 18 AC13 — ordinary UNC: \\server\share\path. `?` excluded from the
     # server segment so this alternative does not shadow the long-path form
     # (which starts with \\?\). Must appear AFTER the long-path alternative.
     r"|(?:\\\\[^\s\\'\"?]+\\[^\s\\'\"]+(?:\\[^\s'\"]*)?)"
+    # Cycle 35 AC1b (T1b) — slash-form Windows UNC long-path: //?/UNC/server/share/...
+    # Produced by `_rel(Path(fn_str))` slash-normalising `\\?\UNC\server\share\...`.
+    # Must appear BEFORE the ordinary slash-UNC alternative (more specific first).
+    r"|(?://\?/UNC/[^\s'\"?]+/[^\s'\"]+(?:/[^\s'\"]*)?)"
+    # Cycle 35 AC1 (T1) — ordinary slash-UNC: //server/share/path. Produced by
+    # `_rel(Path(fn_str))` slash-normalising `\\server\share\path`. The `(?<!:)`
+    # lookbehind prevents URI overmatch (`https://host/path` would otherwise
+    # collide with `//host/path`). The pattern requires THREE slash-separated
+    # segments (host + share + path) so `//word/word` prose like a Markdown
+    # `<!-- //tag/section -->` comment is NOT redacted (R1 Sonnet PR-49 MAJOR);
+    # real UNC paths always have a file/path component after the share.
+    r"|(?<!:)(?://[^\s'\"?/]+/[^\s'\"?/]+/[^\s'\"]+)"
     r"|(?:/(?:home|Users|opt|var|srv|tmp|mnt|root)/[^\s'\"]+)"  # POSIX absolute
 )
 
@@ -69,11 +84,23 @@ def sanitize_error_text(exc: BaseException, *paths: Path | None) -> str:
         fn = getattr(exc, attr, None)
         if fn and isinstance(fn, (str, os.PathLike)):
             fn_str = str(fn)
-            if fn_str and fn_str in s:
-                try:
-                    s = s.replace(fn_str, _rel(Path(fn_str)))
-                except (TypeError, ValueError):
-                    s = s.replace(fn_str, "<path>")
+            # Cycle 35 — OSError.__str__ doubles backslashes when rendering the
+            # `filename` attribute (Windows-style paths). Probe both the raw
+            # single-backslash form AND the doubled-backslash form so UNC and
+            # ordinary Windows paths inside `str(exc)` both substitute. Cycle 33
+            # documented the gap via xfail-strict; cycle-35 closes it here AND
+            # adds slash-UNC regex alternatives in `_ABS_PATH_PATTERNS` for
+            # direct `sanitize_text` callers (kb.ingest.pipeline._emit_*).
+            candidates = [fn_str]
+            if "\\" in fn_str:
+                candidates.append(fn_str.replace("\\", "\\\\"))
+            for cand in candidates:
+                if cand and cand in s:
+                    try:
+                        s = s.replace(cand, _rel(Path(fn_str)))
+                    except (TypeError, ValueError):
+                        s = s.replace(cand, "<path>")
+                    break
     # Cycle 18 AC13 — final regex sweep is delegated to `sanitize_text` so both
     # callers (exception form + JSONL string form) share the same redaction
     # regex. Order is preserved (caller-supplied paths → filename attrs →

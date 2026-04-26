@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.11.0 · 2941 tests / 254 files (2930 passed + 10 skipped + 1 xfailed). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.11.0 · 2995 tests / 256 files (2985 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — use `tmp_wiki` / `tmp_project` / `tmp_kb_env`; never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Patch the owner module** for the four MCP-migrated callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) — not `kb.mcp.core.*`.

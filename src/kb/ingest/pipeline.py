@@ -775,12 +775,21 @@ def _update_sources_mapping(
     the same source-ref → existing line is MERGED via the dedup branch
     (single line carries all old + new page IDs).
 
-    **Idempotency holds for serial re-calls only.** Concurrent calls may race:
-    two parallel ingests writing the same source-ref simultaneously are NOT
-    synchronised — the read-modify-write window is unguarded. See BACKLOG
-    `IndexWriter` abstraction entry for the open concurrency surface.
-    Pinned by ``tests/test_cycle33_ingest_index_idempotency.py``.
+    Cycle 35 (M11/M13/M14):
+      - RMW window wrapped in ``file_lock(sources_file)`` for both the
+        new-entry append branch AND the dedup/merge branch.
+      - Empty ``wiki_pages`` returns silently at function entry (no
+        malformed ``→ \\n`` line written; no ``not found`` warning fires
+        when the file is missing).
+      - Membership and per-line checks both use ``escaped_ref`` so a
+        backtick-bearing ``source_ref`` matches its on-disk escaped form.
     """
+    if not wiki_pages:
+        logger.debug(
+            "_update_sources_mapping called with empty wiki_pages — skipping (source_ref=%s)",
+            source_ref,
+        )
+        return
     sources_file = (wiki_dir / "_sources.md") if wiki_dir is not None else WIKI_SOURCES
     pages_str = ", ".join(f"[[{p}]]" for p in wiki_pages)
     escaped_ref = source_ref.replace("`", r"\`")
@@ -788,22 +797,23 @@ def _update_sources_mapping(
     if not sources_file.exists():
         logger.warning("_sources.md not found — skipping source mapping for %s", source_ref)
         return
-    content = sources_file.read_text(encoding="utf-8")
-    if f"`{source_ref}`" not in content:
-        content += entry
-        atomic_text_write(content, sources_file)
-        return
-    # Re-ingest: merge new page IDs into the existing line
-    lines = content.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if f"`{source_ref}`" in line:
-            existing_ids = set(re.findall(r"\[\[([^\]]+)\]\]", line))
-            missing = [p for p in wiki_pages if p not in existing_ids]
-            if missing:
-                extra = ", ".join(f"[[{p}]]" for p in missing)
-                lines[i] = line.rstrip("\n") + f", {extra}\n"
-                atomic_text_write("".join(lines), sources_file)
+    with file_lock(sources_file):
+        content = sources_file.read_text(encoding="utf-8")
+        if f"`{escaped_ref}`" not in content:
+            content += entry
+            atomic_text_write(content, sources_file)
             return
+        # Re-ingest: merge new page IDs into the existing line
+        lines = content.splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if f"`{escaped_ref}`" in line:
+                existing_ids = set(re.findall(r"\[\[([^\]]+)\]\]", line))
+                missing = [p for p in wiki_pages if p not in existing_ids]
+                if missing:
+                    extra = ", ".join(f"[[{p}]]" for p in missing)
+                    lines[i] = line.rstrip("\n") + f", {extra}\n"
+                    atomic_text_write("".join(lines), sources_file)
+                return
 
 
 # Fix 2.18: Derive from WIKI_SUBDIR_TO_TYPE at module load time — single source of truth.
@@ -823,10 +833,11 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
     whose ``[[subdir/slug]]`` link is already present in the section
     (atomic_text_write does not fire when ``changed`` stays False).
 
-    **Idempotency holds for serial re-calls only.** Concurrent calls may race
-    on the same RMW window. See BACKLOG `IndexWriter` abstraction entry for
-    the open concurrency surface.
-    Pinned by ``tests/test_cycle33_ingest_index_idempotency.py``.
+    Cycle 35 (M11): RMW window wrapped in ``file_lock(index_path)`` so the
+    read + per-entry mutate + write fires under one lock. Caller MUST NOT hold
+    ``file_lock(index_path)`` already (``file_lock`` is non-reentrant — see
+    ``utils/io.py`` notes). The ``if not entries: return`` early-exit STAYS
+    BEFORE the lock acquisition (no point locking a no-op).
     """
     if not entries:
         return
@@ -834,27 +845,28 @@ def _update_index_batch(entries: list[tuple[str, str, str]], wiki_dir: Path | No
     if not index_path.exists():
         logger.warning("index.md not found — skipping index update for %d entries", len(entries))
         return
-    content = index_path.read_text(encoding="utf-8")
-    changed = False
-    for page_type, slug, title in entries:
-        section = _SECTION_HEADERS.get(page_type)
-        if not section or section not in content:
-            continue
-        subdir = _SUBDIR_MAP.get(page_type)
-        if not subdir:
-            continue
-        if f"[[{subdir}/{slug}|" in content or f"[[{subdir}/{slug}]]" in content:
-            continue
-        safe_title = wikilink_display_escape(title)
-        entry = f"- [[{subdir}/{slug}|{safe_title}]]"
-        placeholder = f"{section}\n\n*No pages yet.*"
-        if placeholder in content:
-            content = content.replace(placeholder, f"{section}\n\n{entry}")
-        else:
-            content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
-        changed = True
-    if changed:
-        atomic_text_write(content, index_path)
+    with file_lock(index_path):
+        content = index_path.read_text(encoding="utf-8")
+        changed = False
+        for page_type, slug, title in entries:
+            section = _SECTION_HEADERS.get(page_type)
+            if not section or section not in content:
+                continue
+            subdir = _SUBDIR_MAP.get(page_type)
+            if not subdir:
+                continue
+            if f"[[{subdir}/{slug}|" in content or f"[[{subdir}/{slug}]]" in content:
+                continue
+            safe_title = wikilink_display_escape(title)
+            entry = f"- [[{subdir}/{slug}|{safe_title}]]"
+            placeholder = f"{section}\n\n*No pages yet.*"
+            if placeholder in content:
+                content = content.replace(placeholder, f"{section}\n\n{entry}")
+            else:
+                content = content.replace(f"{section}\n", f"{section}\n{entry}\n", 1)
+            changed = True
+        if changed:
+            atomic_text_write(content, index_path)
 
 
 # Cycle 18 AC14 — `_write_index_files` helper consolidates the two index-file

@@ -86,7 +86,12 @@ def test_captured_at_reflects_submission_time_under_slow_llm(
 
 
 def test_claude_md_documents_raw_captures_exception():
-    content = (PROJECT_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    # Cycle 35: CLAUDE.md split into docs/reference/* (commit 518db0e). The
+    # raw/captures/ exception note moved to docs/reference/architecture.md
+    # (three-layer structure section); the deletion-pruning detail moved to
+    # docs/reference/error-handling.md. CLAUDE.md remains the slim index.
+    arch_md = (PROJECT_ROOT / "docs" / "reference" / "architecture.md").read_text(encoding="utf-8")
+    err_md = (PROJECT_ROOT / "docs" / "reference" / "error-handling.md").read_text(encoding="utf-8")
 
-    assert "except raw/captures/" in content
-    assert "deletion-pruning" in content
+    assert "except raw/captures/" in arch_md
+    assert "deletion-pruning" in err_md

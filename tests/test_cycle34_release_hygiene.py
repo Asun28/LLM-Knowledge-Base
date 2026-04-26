@@ -316,17 +316,23 @@ def test_pip_audit_invocation_audits_live_env():
 
 
 def test_kb_save_synthesis_clarification_in_claude_md():
-    """AC46 (positive regression for AC27): CLAUDE.md uses save_as= correctly.
+    """AC46 (positive regression for AC27): docs use save_as= correctly.
 
-    AC27 verified CLAUDE.md ALREADY uses kb_query(save_as=...) form. This test
-    pins the positive contract: ANY future cycle that re-introduces the
-    misleading kb_save_synthesis token can be caught by combining this test
-    with the README absence test (AC51).
+    Cycle 35: CLAUDE.md split into docs/reference/* (commit 518db0e). The
+    save_as= clarification moved to docs/reference/mcp-servers.md (the
+    Tool Catalogue section). The forward regression — kb_save_synthesis must
+    not be re-introduced as an MCP tool — applies to BOTH files.
     """
-    body = _read("CLAUDE.md")
-    assert "save_as=" in body, "CLAUDE.md must use save_as= form (AC27 verified)"
-    # Also: kb_save_synthesis appears nowhere in CLAUDE.md (forward regression)
-    assert "kb_save_synthesis" not in body, (
+    mcp_servers_body = _read("docs/reference/mcp-servers.md")
+    claude_md_body = _read("CLAUDE.md")
+    assert "save_as=" in mcp_servers_body, (
+        "docs/reference/mcp-servers.md must use save_as= form (AC27 verified)"
+    )
+    # Forward regression — kb_save_synthesis appears nowhere in either file.
+    assert "kb_save_synthesis" not in mcp_servers_body, (
+        "mcp-servers.md must NOT mention kb_save_synthesis (it was never an MCP tool)"
+    )
+    assert "kb_save_synthesis" not in claude_md_body, (
         "CLAUDE.md must NOT mention kb_save_synthesis (it was never an MCP tool)"
     )
 

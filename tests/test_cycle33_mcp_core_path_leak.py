@@ -13,8 +13,6 @@ import logging
 import os
 from pathlib import Path
 
-import pytest
-
 # Distinct slug-bearing fixture filenames so caplog assertions can disambiguate
 # across concurrent / interleaved tests (T10 / R1-05 mitigation).
 #
@@ -474,17 +472,9 @@ class TestSanitizeErrorTextUNCAndLongPath:
         assert "C:/Projects" not in out
         assert "foo.md" not in out
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "sanitize.py UNC slash-normalize bug — see BACKLOG cycle-34 candidate. "
-            "OSError.__str__ doubles backslashes; _ABS_PATH_PATTERNS UNC alternative "
-            "matches single backslashes only, so doubled-backslash UNC slips through. "
-            "Removing this xfail when the helper is fixed will force the marker "
-            "removal (strict=True semantic)."
-        ),
-    )
     def test_windows_ordinary_unc_filename_redacts(self):
+        # Cycle 35 AC2 — xfail-strict marker removed after AC1 (slash-UNC regex
+        # alternative + URI-overmatch lookbehind on the drive-letter pattern).
         from kb.utils.sanitize import sanitize_error_text
 
         out = sanitize_error_text(
@@ -504,3 +494,74 @@ class TestSanitizeErrorTextUNCAndLongPath:
         assert "server" not in out
         assert "share" not in out
         assert "foo.md" not in out
+
+    # Cycle 35 AC3 — direct sanitize_text coverage of the new forward-slash UNC
+    # alternative. Cycle-24 L4 dual-anchor: the OSError-via-_rel test above
+    # covers the integration path; this test pins the regex itself.
+    def test_forward_slash_unc_redacts_via_extended_pattern(self):
+        from kb.utils.sanitize import sanitize_text
+
+        out = sanitize_text("//corp.example.com/share$/secret.md")
+        assert "corp.example.com" not in out
+        assert "share$" not in out
+        assert "secret.md" not in out
+        assert "<path>" in out
+
+    # Cycle 35 AC1b (T1b) — slash-form Windows UNC long-path direct coverage.
+    # Produced by `_rel(Path(fn_str))` slash-normalising `\\?\UNC\server\share\...`.
+    def test_slash_unc_long_path_redacts(self):
+        from kb.utils.sanitize import sanitize_text
+
+        out = sanitize_text("//?/UNC/server/share/secret.md")
+        assert "server" not in out
+        assert "share" not in out
+        assert "secret.md" not in out
+        assert "<path>" in out
+
+    # Cycle 35 AC3 negative — URL not over-matched. The drive-letter alternative
+    # gained a `(?<![A-Za-z])` lookbehind to prevent `s://example.com/path`
+    # collision; the new slash-UNC alternative has its own `(?<!:)` lookbehind.
+    def test_url_not_overmatched(self):
+        from kb.utils.sanitize import sanitize_text
+
+        inp = "see https://example.com/path for details"
+        assert sanitize_text(inp) == inp
+
+    # Cycle 35 AC3 negative — C++ // comment not over-matched (slash-UNC
+    # alternative requires host segment + slash + path component).
+    def test_double_slash_comment_not_overmatched(self):
+        from kb.utils.sanitize import sanitize_text
+
+        inp = "// comment text\n// more comments"
+        assert sanitize_text(inp) == inp
+
+    # Cycle 35 R1 Sonnet PR-49 MAJOR — `//word/word` prose with no whitespace
+    # between `//` and the host token would have over-matched the original
+    # 2-segment pattern. The fix tightens the pattern to require THREE
+    # slash-separated segments (real UNC has host + share + file at minimum).
+    def test_two_segment_double_slash_prose_not_overmatched(self):
+        from kb.utils.sanitize import sanitize_text
+
+        # 2-segment cases: HTML/Markdown comment, mid-prose mirror reference.
+        for inp in (
+            "<!-- //comment/block -->",
+            "see //mirror/copy for the rsync target",
+            "ref //tag/section",
+        ):
+            assert sanitize_text(inp) == inp, f"over-matched: {inp!r}"
+
+    # Cycle 35 R1 Sonnet PR-49 NIT 2 — drive-letter `(?<![A-Za-z])` lookbehind
+    # negative regression. The lookbehind blocks `s://` URI collisions where
+    # the `s` is a letter; it does NOT block all over-matches (e.g. URL-embedded
+    # `/C:/foo` segments are still picked up because `/` is not a letter). The
+    # known acceptable over-match: `https://example.com/C:/foo` redacts the
+    # `C:/foo` segment. Adding `/` to the lookbehind would block legitimate
+    # drive-letter paths preceded by `/` in multi-path messages (rare, but
+    # possible). Documented here as the contract boundary.
+    def test_url_scheme_letter_not_overmatched_via_drive_letter_pattern(self):
+        from kb.utils.sanitize import sanitize_text
+
+        # URI scheme `https://example.com/path` — `s` (letter) precedes `://`,
+        # the lookbehind blocks the drive-letter pattern from matching `s:/`.
+        inp = "see https://example.com/path for details"
+        assert sanitize_text(inp) == inp
