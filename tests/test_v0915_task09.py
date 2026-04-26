@@ -18,6 +18,9 @@ Covers:
   9.21 — notes length cap in kb_save_lint_verdict
 """
 
+import sys
+
+import pytest
 
 # ── Fix 9.1 — empty question guard in kb_query ───────────────────────────────
 
@@ -393,6 +396,13 @@ class TestEmptyFilenameGuard:
 
 
 class TestValidatePageIdAbsoluteCheck:
+    @pytest.mark.skipif(
+        sys.platform != "win32",
+        reason=(
+            "Cycle 36 AC11 — Windows-style absolute path detection "
+            "(drive letter); POSIX absolute-path semantics differ."
+        ),
+    )
     def test_absolute_path_rejected(self):
         from kb.mcp.app import _validate_page_id
 

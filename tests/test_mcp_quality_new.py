@@ -47,8 +47,19 @@ def _setup_quality_paths(tmp_path, monkeypatch):
 # ── kb_affected_pages ────────────────────────────────────────────
 
 
-def test_kb_affected_pages_with_backlinks(monkeypatch):
-    """Pages with backlinks and shared sources are identified as affected."""
+def test_kb_affected_pages_with_backlinks(tmp_path, monkeypatch):
+    """Pages with backlinks and shared sources are identified as affected.
+
+    Cycle 36 AC11 fix — added tmp_path + _setup_quality_paths + page seed so
+    `_validate_page_id(check_exists=True)` (cycle 4 item #11 hardening) finds
+    the page on POSIX CI. Windows previously passed via cycle-23 multiprocessing-
+    hang masking; ubuntu-latest probe surfaced the gap.
+    """
+    wiki_dir, _ = _setup_quality_paths(tmp_path, monkeypatch)
+    (wiki_dir / "concepts" / "rag.md").write_text(
+        "---\ntitle: RAG\nsource:\n  - raw/articles/rag.md\n---\nRAG content.\n",
+        encoding="utf-8",
+    )
     mock_backlinks = {"concepts/rag": ["concepts/llm", "entities/openai"]}
     mock_pages = [
         {
