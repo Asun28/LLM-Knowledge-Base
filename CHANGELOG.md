@@ -64,6 +64,28 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
   `src/kb`; transitive tooling dep only).
 - Detail: [history archive](CHANGELOG-history.md#2026-04-26--cycle-35)
 
+#### 2026-04-26 — cycle 35 post-merge hotfix (CI pip-audit fix)
+
+- Items: 1 / 1 src (`pyproject.toml`) / 1 commit (`cf0f996`)
+- Tests: 2995 → 2995 (no test changes; CI pip-audit step now passes)
+- Scope:
+  Cycle-35 merge-commit CI failed at the `Pip-audit (live env)` step on a
+  late-arrival LOW-severity advisory: `langchain-openai 1.1.10
+  GHSA-r7w7-9xr2-qq2r` (DNS-rebinding SSRF in image-token-counting helper,
+  fix at 1.1.14). The advisory landed DURING cycle 35, AFTER the Step-2
+  baseline + Step-11.5 Dependabot read. `requirements.txt` already pinned
+  `langchain-openai==1.1.14` (so the local `.venv` was patched), but CI's
+  `pip install -e '.[dev,formats,augment,hybrid,eval]'` walks pyproject.toml
+  extras instead — and the `[eval]` extra had no floor pin on
+  langchain-openai (transitively pulled by ragas), so the CI resolver picked
+  1.1.10. One-line fix: add `langchain-openai>=1.1.14` to the `[eval]`
+  extra in pyproject.toml. Zero `import langchain_openai` in `src/kb`
+  (transitive eval-only dep used by the ragas evaluation harness). CI step-
+  level verification (cycle-34 L7) passed: every job step `success | skipped`,
+  zero failures. Process miss documented as C35-L8 skill patch in
+  `references/cycle-lessons.md`.
+- Detail: see commit message for full failure-reproduction trace.
+
 #### 2026-04-25 — cycle 34 (Release hygiene · v0.10.0 → v0.11.0)
 
 - Items: 54 AC delivered (out of 57 designed; AC4e diagram bump DEFERRED to cycle 35 + AC49 boot-lean fix DROPPED at Step 9 with test-anchor retention + AC55 architecture-diagram-version-test DROPPED with the deferred AC4e) / 4 src (`pyproject.toml`, `src/kb/__init__.py`, `src/kb/config.py`, `src/kb/ingest/pipeline.py`) + 2 NEW user-facing files (`SECURITY.md`, `.github/workflows/ci.yml`) + 1 NEW test file (`tests/test_cycle34_release_hygiene.py`) + 4 doc/config files modified (`README.md`, `README.zh-CN.md`, `requirements.txt`, `.gitignore`) + 6 untracked deletions (`findings.md`, `progress.md`, `task_plan.md`, `claude4.6.md`, `docs/repo_review.md`, `docs/repo_review.html`) + 2 NEW review artifacts committed (`docs/reviews/2026-04-25-comprehensive-repo-review.{md,html}`) / +TBD commits (backfill post-merge per cycle-15 L4 + cycle-30 L1)
