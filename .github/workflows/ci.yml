@@ -21,19 +21,31 @@ concurrency:
 
 jobs:
   test:
-    # cycle 34 fix-after-CI-failure-2: switched to windows-latest because the
-    # existing test suite was authored on Windows (developer env per CLAUDE.md
-    # OS=Windows 11) and assumes Windows path semantics in ~22 tests
-    # (symlinks, absolute-path validation, backslash normalisation, tmp-dir
-    # creation order). ubuntu-latest surfaces these as failures even though
-    # all 2941 tests pass locally on Windows. Cross-OS portability is tracked
-    # for cycle 36 (test-infrastructure cycle) per BACKLOG.md.
+    # Cycle 36 commit-1 PROBE: temporary `runs-on: ubuntu-latest` (single OS,
+    # NO matrix) to surface real cross-OS failures so cycle-36 AC11 markers
+    # land data-driven (per Step-5 design Q5=B / R1-NEW-1). The cycle-36
+    # commit-3 strict-gate replaces this with `runs-on: ${{ matrix.os }}` +
+    # `strategy.matrix.os: [ubuntu-latest, windows-latest]` per Step-5 Q16.
+    #
+    # `continue-on-error: true` STAYS ON for the pytest step during the probe
+    # so failures don't block PR review of the marker scaffolding; Commit 3
+    # drops it for the strict gate. Three-commit sequence (probe → fix →
+    # strict-gate) per Step-5 Q21 / cycle-36 design.
+    #
+    # Cycle 34 history: switched to windows-latest because the existing
+    # test suite was authored on Windows (developer env per CLAUDE.md
+    # OS=Windows 11) and assumes Windows path semantics in ~6 tests. Cycle
+    # 36 closes the cross-OS portability BACKLOG entry by adding skipif
+    # markers data-driven from this probe run.
     #
     # Dummy ANTHROPIC_API_KEY also set below so tests that instantiate the
     # Anthropic SDK (capture.py / mcp_core.py kb_capture wrapper) don't
     # error with "Could not resolve authentication method" — tests mock the
     # actual API calls; the SDK constructor just needs SOMETHING to be set.
-    runs-on: windows-latest
+    # Cycle 36 AC6 adds `requires_real_api_key()` predicate at
+    # `tests/_helpers/api_key.py` for any future test that would risk a
+    # real API call on the dummy key.
+    runs-on: ubuntu-latest
     env:
       ANTHROPIC_API_KEY: sk-ant-dummy-key-for-ci-tests-only
     steps:

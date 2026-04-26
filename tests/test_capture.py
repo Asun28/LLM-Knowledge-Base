@@ -161,8 +161,11 @@ class TestCheckRateLimit:
         allowed, retry_after = _check_rate_limit()
         assert allowed is False
         assert retry_after > 0
-        # Retry should be within an hour
-        assert retry_after <= 3600
+        # Retry should be within an hour. Cycle 36 AC7 — 1s tolerance for
+        # CI clock variance (the wall-clock time.time() can edge-case to
+        # 3601 under slow scheduler ticks; the static-clock variant below
+        # asserts the deterministic == 3600 invariant).
+        assert retry_after <= 3601
 
     def test_over_cap_retry_after_static_clock_is_one_hour(self, reset_rate_limit, monkeypatch):
         monkeypatch.setattr("kb.capture.time.time", lambda: 1000.0)
