@@ -29,6 +29,41 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-26 — cycle 35 (Pre-Phase-5 BACKLOG batch + cycle-34 AC4e completion)
+
+- Items: 18 designed AC + AC1b T1b proactive close + AC-Dep1 GitPython bump + AC-Doc1 doc updates = 21 effective / 4 src (`utils/sanitize.py`, `ingest/pipeline.py`, `mcp/core.py`, `requirements.txt`) + 2 NEW test files (`tests/test_cycle35_ingest_index_writers.py`, `tests/test_cycle35_mcp_core_filename_validator.py`) + 4 docs (`docs/architecture/architecture-diagram.html`, `architecture-diagram-detailed.html`, `architecture-diagram.png`, `docs/reference/conventions.md`) + 3 doc-anchor test re-anchors after the cycle-34-followup CLAUDE.md split + 1 ruff format normalization carryover / +TBD commits (backfill post-merge per cycle-30 L1)
+- Tests: 2941 → 2993 (+52 passed: 4 new sanitize tests on `test_cycle33_mcp_core_path_leak.py`, 8 new ingest index-writer tests, 39 new mcp/core filename-validator tests, +1 baseline net adjustment after the doc-anchor re-anchor)
+- Scope:
+  Closes 6 pre-Phase-5 BACKLOG items (M11 RMW lock + M12 UNC slash-normalize + M13 empty-list +
+  M14 backtick-dedup + M15 filename validator parity + M21 architecture v0.11.0 sync) plus
+  cycle-34's deferred AC4e diagram + PNG re-render. `_ABS_PATH_PATTERNS` gains TWO new
+  alternatives — slash-form Windows UNC long-path `(?://\?/UNC/...)` (T1b) AND URI-guarded
+  ordinary slash UNC `(?<!:)(?://...)` (T1) — plus a `(?<![A-Za-z])` lookbehind on the
+  drive-letter alternative to prevent URL overmatch (`https://host/path` no longer collapses
+  to `<path>` via the `s://` collision; pre-existing behavior since cycle 18 AC13 that no
+  prior cycle had caught). `sanitize_error_text` per-path substitution now probes both
+  single-backslash AND OSError-doubled-backslash forms of the filename attribute, closing
+  the cycle-33 xfail-strict gap directly (XPASS-strict semantic forced marker removal in
+  the same commit). `_update_sources_mapping` and `_update_index_batch` RMW windows wrapped
+  in `file_lock(target_path)` (cycle-19 discipline; NO wrapper-level lock in
+  `_write_index_files` because `file_lock` is `os.O_EXCL` non-reentrant per Step-5 Q7);
+  empty-`wiki_pages` early-return at function entry kills the malformed `→ \n` line +
+  suppresses the `_sources.md not found` warning (T8); membership + per-line scan switched
+  to `escaped_ref` so backtick-bearing source_refs dedup correctly. New shared
+  `_validate_filename_slug(filename) -> tuple[str, str | None]` helper rejects NUL byte /
+  path separators / `..` / trailing dot or space (Windows trim aliasing) / non-ASCII
+  (`[^\x00-\x7F]` blocks homoglyph + RTL-override + zero-width attacks) / over-200-char /
+  Windows-reserved (via existing `_is_windows_reserved`); allows leading dot (`.env`) and
+  leading dash (`-foo`) per Step-5 Q5. Wired into `_validate_file_inputs` so
+  `kb_ingest_content` + `kb_save_source` reach validation parity with `kb_query.save_as`
+  for the security-class checks (looser slug-equality contract appropriate to free-form
+  names). Architecture diagrams bumped v0.10.0 → v0.11.0 with Playwright PNG re-render
+  (closes deferred cycle-34 AC4e); canonical Playwright snippet codified in
+  `docs/reference/conventions.md` to prevent a third deferral. Step-11b GitPython 3.1.46 →
+  3.1.47 closes Dependabot GHSA-x2qx-6953-8485 + GHSA-rpm5-65cw-6hj4 (zero `import git` in
+  `src/kb`; transitive tooling dep only).
+- Detail: [history archive](CHANGELOG-history.md#2026-04-26--cycle-35)
+
 #### 2026-04-25 — cycle 34 (Release hygiene · v0.10.0 → v0.11.0)
 
 - Items: 54 AC delivered (out of 57 designed; AC4e diagram bump DEFERRED to cycle 35 + AC49 boot-lean fix DROPPED at Step 9 with test-anchor retention + AC55 architecture-diagram-version-test DROPPED with the deferred AC4e) / 4 src (`pyproject.toml`, `src/kb/__init__.py`, `src/kb/config.py`, `src/kb/ingest/pipeline.py`) + 2 NEW user-facing files (`SECURITY.md`, `.github/workflows/ci.yml`) + 1 NEW test file (`tests/test_cycle34_release_hygiene.py`) + 4 doc/config files modified (`README.md`, `README.zh-CN.md`, `requirements.txt`, `.gitignore`) + 6 untracked deletions (`findings.md`, `progress.md`, `task_plan.md`, `claude4.6.md`, `docs/repo_review.md`, `docs/repo_review.html`) + 2 NEW review artifacts committed (`docs/reviews/2026-04-25-comprehensive-repo-review.{md,html}`) / +TBD commits (backfill post-merge per cycle-15 L4 + cycle-30 L1)
