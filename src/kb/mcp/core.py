@@ -170,12 +170,72 @@ def _validate_file_inputs(filename: str, content: str) -> str | None:
         return "Error: Filename cannot be empty."
     if len(filename) > 200:
         return "Error: Filename too long (max 200 chars)."
+    # Cycle 35 AC13 — delegate the security-class checks (NUL / path-separator /
+    # Windows-reserved / homoglyph / trailing-dot) to the shared helper. Public
+    # return contract stays `str | None`.
+    _, slug_err = _validate_filename_slug(filename)
+    if slug_err:
+        return slug_err
     if len(content) > MAX_INGEST_CONTENT_CHARS:
         return (
             f"Error: Content too large ({len(content)} chars). "
             f"Maximum: {MAX_INGEST_CONTENT_CHARS} chars."
         )
     return None
+
+
+# Cycle 35 AC12 — free-form filename validator shared by `kb_ingest_content`
+# and `kb_save_source` (called via `_validate_file_inputs`). Looser than
+# `_validate_save_as_slug` because free-form filenames legitimately differ
+# from their slug form (e.g. `My Document.md` slugifies to `my-document`).
+# Returns `(filename, None)` on success; `("", error_msg)` on failure.
+# Mirrors `_validate_save_as_slug` signature for caller-pattern consistency.
+_FILENAME_NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
+_FILENAME_MAX_LEN = 200
+
+
+def _validate_filename_slug(filename: str) -> tuple[str, str | None]:
+    """Validate a free-form user-supplied filename for kb_ingest_content / kb_save_source.
+
+    Rejects:
+      - non-string input
+      - empty or whitespace-padded (existing `_validate_file_inputs` covers
+        these; helper catches them too in case a future caller bypasses)
+      - NUL byte (POSIX path truncation hazard)
+      - path separators (``/``, ``\\``) or ``..`` (traversal)
+      - trailing dot or trailing space (Windows trim aliasing — evades
+        ``_is_windows_reserved`` because Windows silently strips them)
+      - non-ASCII characters (homoglyph / RTL-override / zero-width attacks
+        — slugify preserves Cyrillic via ``\\w`` so an explicit ASCII gate
+        is required, mirroring cycle-16 L1)
+      - length > ``_FILENAME_MAX_LEN`` (200)
+      - Windows reserved basenames (``CON``, ``PRN``, ``NUL``, ``AUX``,
+        ``COM1-9``, ``LPT1-9``) via the existing ``_is_windows_reserved``.
+
+    Allows leading dot (``.env``) and leading dash (``-foo``) — both are
+    POSIX-legitimate filename shapes and out of the helper's stated
+    rejection set (Step-5 Q5).
+
+    MUST NOT raise — callers (``_validate_file_inputs``) propagate the
+    error_msg through MCP boundary as a string response.
+    """
+    if not isinstance(filename, str):
+        return "", "Error: filename must be a string"
+    if not filename or filename.strip() != filename:
+        return "", "Error: filename cannot be empty or have leading/trailing whitespace"
+    if "\x00" in filename:
+        return "", "Error: filename cannot contain NUL byte"
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return "", "Error: filename cannot contain path separators or .."
+    if filename.endswith("."):
+        return "", "Error: filename cannot end with a dot (Windows trims silently)"
+    if _FILENAME_NON_ASCII_RE.search(filename):
+        return "", "Error: filename must be ASCII (homoglyphs / non-ASCII chars rejected)"
+    if len(filename) > _FILENAME_MAX_LEN:
+        return "", f"Error: filename too long (max {_FILENAME_MAX_LEN} chars)"
+    if _is_windows_reserved(filename):
+        return "", "Error: filename uses a Windows reserved device name"
+    return filename, None
 
 
 # Cycle 16 AC17-AC19 — kb_query save_as validation.
