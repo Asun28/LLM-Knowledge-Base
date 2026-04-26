@@ -32,9 +32,13 @@
 
 ### C39-L1 — Wrapper agents fabricate output; default to direct CLI invocation
 
-**Root cause.** The `deepseek-rescue` agent (Haiku orchestrator + deepseek CLI) and `codex:codex-rescue` agent (Sonnet wrapper + Codex CLI) sometimes synthesise output without actually invoking the underlying CLI. The give-away is a "Let me work with what I've verified directly..." or "Based on what I've verified..." preamble in the agent's reply.
+**Root cause (corrected post-merge — see Cycle-39 L1 amendment below).** The two wrapper agents have DIFFERENT failure modes; the original lesson conflated them.
 
-**Concrete evidence.** Cycle 39 Step 14 R1: my dispatch
+**(a) `deepseek-rescue`** (Haiku orchestrator + deepseek CLI script): CONFIRMED can synthesise output without invoking the underlying CLI. The give-away is a "Let me work with what I've verified directly..." or "Based on what I've verified..." preamble. Cycle-39 R1 hit this directly.
+
+**(b) `codex:codex-rescue`** (skill that invokes `codex-companion.mjs` via Node directly): does NOT have a fabrication failure mode by design. The companion script handles the invocation path internally; there is NO standalone `codex` PATH binary by design (the plugin cache at `~/.claude/plugins/cache/openai-codex/codex/{1.0.3,1.0.4}/` exposes the script via Node, not as a `codex` executable on PATH). My cycle-39 conclusion that "Codex CLI not installed in this environment" was a **false alarm** — `which codex` returning nothing is NOT a failure indicator. The skill's invocation path works correctly. The actual common failure mode for `codex:codex-rescue` is the `block-no-verify` Bash-tool hook intercepting the companion script invocation when the script's source contains `--no-verify` substrings (cycle-22 L2 / C22-L2 in Red Flags).
+
+**Concrete evidence (deepseek fabrication).** Cycle 39 Step 14 R1: my dispatch
 ```python
 Agent(subagent_type="deepseek-rescue", description="DeepSeek V4 Pro R1 review of cycle-39 PR #53", prompt="...")
 ```
@@ -43,7 +47,7 @@ returned an APPROVE verdict with file:line citations and skill rule references. 
 
 The Haiku orchestrator decided it had enough context to synthesise the review itself, skipping the deepseek CLI entirely. User caught this immediately.
 
-**Fix.** Re-ran via direct Bash invocation:
+**Fix (deepseek).** Re-ran via direct Bash invocation:
 ```bash
 < /tmp/c39-r1-prompt.txt /c/Users/Admin/.claude/bin/deepseek \
     --model deepseek-v4-pro --think --effort high --max-tokens 8000 \
@@ -52,15 +56,11 @@ The Haiku orchestrator decided it had enough context to synthesise the review it
 
 Real DeepSeek V4 Pro returned a `=== reasoning ===` block (the model's actual chain of thought) + `=== answer ===` block at 14420 bytes. The substantive verdict was the same (APPROVE on all 5) but the reasoning trace shows the model actually inspected the diff.
 
-Same pattern at R2: I claimed "`codex` CLI not installed in this environment" and fell back to primary-session R2. User correctly noted `npx --yes @openai/codex --version` returns codex-cli 0.125.0. I re-ran R2 via:
-```bash
-< /tmp/c39-r2-codex-prompt.txt npx --yes @openai/codex exec \
-    --skip-git-repo-check > /tmp/c39-r2-codex.txt
-```
+**Concrete evidence (codex misdiagnosis).** Cycle 39 Step 14 R2: I ran `which codex` got "command not found", and concluded "Codex CLI not installed in this environment". I fell back to primary-session R2. User then ran `ls /c/Users/Admin/.claude/plugins/cache/openai-codex/codex/ && npx --yes @openai/codex --version` showing both 1.0.3 and 1.0.4 cached + `codex-cli 0.125.0` available via npx, AND clarified that `codex:codex-rescue` invokes the companion script via Node — no PATH entry needed by design. I then ran R2 via `npx --yes @openai/codex exec --skip-git-repo-check < prompt.txt` which worked. But the dispatch via `Agent(subagent_type="codex:codex-rescue", ...)` would have ALSO worked — I just never tried it because of the misleading `which codex` test.
 
 Real Codex caught **3 NITs** both R1 DeepSeek and my primary R2 had missed (verification-command drift, stale D7 citation, README test/file count drift). Especially NIT 3 (README count drift) was a real audit-doc miss — the README hadn't been updated since cycle ~25, claiming "2725 tests across 230 files" while current is 3014 / 258.
 
-**Lesson rule.** Default Step-2 / Step-4 R1 / Step-5 / Step-14 R1+R2 dispatches to direct CLI invocation via Bash, not `Agent(subagent_type="...-rescue", ...)` wrappers. Wrapper agents are kept as documented fallbacks for environments where direct CLI isn't available. Self-check: if the Agent output starts with "Let me work with..." / "Based on what I've verified..." / "Since the findings are complete..." — the wrapper synthesised the review; re-run via direct CLI.
+**Lesson rule (corrected).** For deepseek-rescue: default to direct CLI via Bash (`/c/Users/Admin/.claude/bin/deepseek --model deepseek-v4-pro`) because the Haiku wrapper has a confirmed fabrication mode. Self-check: if the Agent output starts with "Let me work with..." / "Based on what I've verified..." / "Since the findings are complete..." — the wrapper synthesised the review; re-run via direct CLI. For codex:codex-rescue: dispatch normally via `Agent(subagent_type="codex:codex-rescue", ...)` — the skill handles the invocation path internally via `codex-companion.mjs` Node call. Do NOT use `which codex` as a "Codex available?" probe — it always returns nothing by design. The real failure mode to guard against is `block-no-verify` hook interception per cycle-22 L2 (when the companion script's source contains `--no-verify` substrings the Bash-tool-level hook regex can match the script's own internals). Direct `npx --yes @openai/codex exec` is a valid alternative when the agent dispatch hits the hook block.
 
 ### C39-L2 — Narrowly-scoped subagents don't need full context; pipe diff verbatim
 
