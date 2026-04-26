@@ -130,19 +130,33 @@ class TestMockScanLlmReloadSafety:
         import kb.capture as kb_capture_mod
         import kb.utils.llm as kb_utils_llm_mod
 
-        real_call = kb_utils_llm_mod.call_llm_json
+        # Capture PRE-MOCK identity of BOTH sites. R1 Sonnet (cycle-38 PR review)
+        # noted that the original `real_call = kb_utils_llm_mod.call_llm_json`
+        # only-on-utils.llm capture was vacuous-pass-prone: if a prior fixture
+        # patched utils.llm to some `X` before this test ran, real_call would
+        # capture `X` and `mock_scan_llm`'s subsequent patch to `fake_call` would
+        # still satisfy `fake_call is not X` even WITHOUT cycle-38 AC1's utils.llm
+        # setattr. Capturing both sites' identities pre-mock and asserting BOTH
+        # CHANGED post-mock catches the AC1 revert at the correct divergence point.
+        pre_utils_llm_call = kb_utils_llm_mod.call_llm_json
+        pre_kb_capture_call = kb_capture_mod.call_llm_json
         canned = _make_canned_response()
 
         mock_scan_llm(canned)
 
-        # Cycle-38 AC1 contract: BOTH sites must be patched. Reverting AC1
-        # leaves kb.utils.llm.call_llm_json pointing at the REAL function.
-        assert kb_utils_llm_mod.call_llm_json is not real_call, (
+        # Cycle-38 AC1 contract — both sites MUST flip post-mock. Reverting AC1's
+        # `monkeypatch.setattr("kb.utils.llm.call_llm_json", fake_call)` line
+        # leaves kb.utils.llm.call_llm_json equal to its pre-mock identity, so
+        # `is not pre_utils_llm_call` evaluates False and this assertion fails.
+        # The pre-existing kb.capture line was patched pre-cycle-38 so the
+        # second assertion always passed pre-cycle-38; cycle-38 AC1 adds the
+        # utils.llm patch as the load-bearing new contract.
+        assert kb_utils_llm_mod.call_llm_json is not pre_utils_llm_call, (
             "cycle-38 AC1: mock_scan_llm must patch kb.utils.llm.call_llm_json. "
             "If you reverted the utils.llm setattr line in conftest's _install, "
             "this test correctly fails."
         )
-        assert kb_capture_mod.call_llm_json is not real_call, (
+        assert kb_capture_mod.call_llm_json is not pre_kb_capture_call, (
             "mock_scan_llm must patch kb.capture.call_llm_json (always patched, "
             "pre- and post-cycle-38)."
         )

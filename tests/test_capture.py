@@ -754,6 +754,7 @@ class TestSymlinkGuard:
             [sys.executable, "-c", probe, str(symlink_dir), str(project_root)],
             capture_output=True,
             text=True,
+            encoding="utf-8",  # cycle-38 R1 Sonnet MINOR: forward-portable across locales
             timeout=30,
         )
         assert result.returncode == 42, (

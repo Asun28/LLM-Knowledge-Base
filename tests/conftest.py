@@ -396,8 +396,14 @@ def mock_scan_llm(monkeypatch):
             assert not missing, f"mock response missing required schema keys: {missing}"
             return response
 
-        # Cycle 38 AC1 — patch utils.llm FIRST (canonical source) so any
-        # subsequent re-import of kb.capture re-snapshots the mocked function.
+        # Cycle 38 AC1 — install order INVARIANT: utils.llm MUST be patched
+        # BEFORE kb.capture. Rationale: any subsequent `del sys.modules["kb.capture"]`
+        # + reimport (cycle-36 contamination class) re-executes kb.capture's
+        # module-top `from kb.utils.llm import call_llm_json` which snapshots
+        # whatever value is currently bound on kb.utils.llm. Patching utils.llm
+        # FIRST guarantees the re-import picks up the mock; patching kb.capture
+        # second covers the in-place call path that does NOT re-import. Reversing
+        # the order is incorrect — see r1-sonnet-review §4 for the analysis.
         monkeypatch.setattr("kb.utils.llm.call_llm_json", fake_call)
         monkeypatch.setattr("kb.capture.call_llm_json", fake_call)
 
