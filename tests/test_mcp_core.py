@@ -336,7 +336,6 @@ def test_kb_compile_scan_reports_changed_sources(tmp_path, monkeypatch):
 class TestKbCaptureWrapper:
     """Spec §7 MCP response formats."""
 
-    @_REQUIRES_REAL_API_KEY
     def test_happy_path_format(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
         from kb.mcp.core import kb_capture
 
@@ -369,7 +368,6 @@ class TestKbCaptureWrapper:
         assert "raw/captures/" in result
         assert "Next: run kb_ingest" in result
 
-    @_REQUIRES_REAL_API_KEY
     def test_zero_items_format(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
         from kb.mcp.core import kb_capture
 
@@ -392,7 +390,6 @@ class TestKbCaptureWrapper:
         assert result.startswith("Error:")
         assert "empty" in result.lower()
 
-    @_REQUIRES_REAL_API_KEY
     def test_partial_write_format(
         self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
     ):

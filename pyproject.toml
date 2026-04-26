@@ -59,7 +59,11 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP"]
+# Cycle 38 design Q5 — T20 (flake8-print) added for probe-print defense.
+# AC7/AC8 use diagnostic print() in src/kb/capture.py during probe commits;
+# T20 ensures any unreverted prints fail the Step-10 ruff CI gate before
+# merging to main. Pre-cycle-38 baseline: zero T20 violations in src/.
+select = ["E", "F", "I", "W", "UP", "T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

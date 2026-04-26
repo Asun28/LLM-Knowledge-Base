@@ -416,6 +416,9 @@ class TestCycle9Task9And10Regressions:
         from kb.capture import _rate_limit_window
 
         _rate_limit_window.clear()
+        # Cycle 38 AC2 — dual-site patch (utils.llm FIRST, then kb.capture)
+        # so any reimport of kb.capture re-snapshots the mocked function.
+        monkeypatch.setattr("kb.utils.llm.call_llm_json", fake_call_llm_json)
         monkeypatch.setattr("kb.capture.call_llm_json", fake_call_llm_json)
         monkeypatch.setattr("kb.config.CAPTURES_DIR", captures_dir)
         monkeypatch.setattr("kb.capture.CAPTURES_DIR", captures_dir)
@@ -776,26 +779,33 @@ class TestExclusiveAtomicWrite:
         # Original content preserved
         assert path.read_text(encoding="utf-8") == "existing"
 
-    @_WINDOWS_ONLY
     def test_cleans_up_reservation_on_inner_write_failure(self, tmp_captures_dir, monkeypatch):
         path = tmp_captures_dir / "test.md"
 
         def boom(content, p):
             raise OSError("simulated disk full")
 
+        # Cycle 38 AC6 — dual-site patch (kb.utils.io.atomic_text_write FIRST,
+        # then kb.capture.atomic_text_write) defeats sys.modules-deletion
+        # contamination class. Strict scope per design Q3 (only the 2 cleans_up
+        # tests; cycle-16 L1 same-class peer scan in R2 Codex eval confirmed
+        # zero other test files patch kb.capture.atomic_text_write via
+        # string-path).
+        monkeypatch.setattr("kb.utils.io.atomic_text_write", boom)
         monkeypatch.setattr("kb.capture.atomic_text_write", boom)
         with pytest.raises(OSError, match="disk full"):
             _exclusive_atomic_write(path, "ignored")
         # No 0-byte poison file left behind
         assert not path.exists(), "reservation file must be cleaned up on failure"
 
-    @_WINDOWS_ONLY
     def test_cleans_up_on_keyboard_interrupt(self, tmp_captures_dir, monkeypatch):
         path = tmp_captures_dir / "test.md"
 
         def interrupted(content, p):
             raise KeyboardInterrupt()
 
+        # Cycle 38 AC6 — dual-site patch (see test_cleans_up_reservation rationale).
+        monkeypatch.setattr("kb.utils.io.atomic_text_write", interrupted)
         monkeypatch.setattr("kb.capture.atomic_text_write", interrupted)
         with pytest.raises(KeyboardInterrupt):
             _exclusive_atomic_write(path, "ignored")
@@ -1104,7 +1114,6 @@ class TestCaptureItems:
             "filtered_out_count": 2,
         }
 
-    @_REQUIRES_REAL_API_KEY
     def test_happy_path_writes_files(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
         content = "We decided to use atomic writes. We discovered a race." * 5
         mock_scan_llm(self._good_response(content))
@@ -1148,7 +1157,6 @@ class TestCaptureItems:
         assert "secret" in result.rejected_reason.lower()
         assert result.items == []
 
-    @_REQUIRES_REAL_API_KEY
     def test_rate_limit_class_a_reject(self, tmp_captures_dir, mock_scan_llm, reset_rate_limit):
         from kb.config import CAPTURE_MAX_CALLS_PER_HOUR
 
@@ -1168,11 +1176,13 @@ class TestCaptureItems:
         def raise_llm(*a, **kw):
             raise LLMError("API down")
 
+        # Cycle 38 AC2 — dual-site patch (utils.llm FIRST, then kb.capture)
+        # so any reimport of kb.capture re-snapshots the mocked function.
+        monkeypatch.setattr("kb.utils.llm.call_llm_json", raise_llm)
         monkeypatch.setattr("kb.capture.call_llm_json", raise_llm)
         with pytest.raises(LLMError):
             capture_items("real content here")
 
-    @_REQUIRES_REAL_API_KEY
     def test_zero_items_returned_class_c_success(
         self, tmp_captures_dir, mock_scan_llm, reset_rate_limit
     ):
@@ -1182,7 +1192,6 @@ class TestCaptureItems:
         assert result.items == []
         assert result.filtered_out_count == 8
 
-    @_REQUIRES_REAL_API_KEY
     def test_body_verbatim_drops_count_in_filtered(
         self, tmp_captures_dir, mock_scan_llm, reset_rate_limit
     ):
@@ -1212,7 +1221,6 @@ class TestCaptureItems:
         assert len(result.items) == 1
         assert result.filtered_out_count == 6  # 5 LLM + 1 body-drop
 
-    @_REQUIRES_REAL_API_KEY
     def test_partial_write_class_d(
         self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
     ):
@@ -1304,7 +1312,6 @@ class TestCaptureTemplate:
 class TestPipelineFrontmatterStrip:
     """Spec §10 — strip frontmatter from raw_content when source_type=='capture'."""
 
-    @_REQUIRES_REAL_API_KEY
     def test_frontmatter_stripped_for_capture_source(
         self, tmp_captures_dir, mock_scan_llm, reset_rate_limit, monkeypatch
     ):
@@ -1462,7 +1469,6 @@ class TestPipelineFrontmatterStrip:
 class TestRoundTripIntegration:
     """Spec §9 round-trip — capture → ingest → wiki summary rendered with content."""
 
-    @_REQUIRES_REAL_API_KEY
     def test_capture_then_ingest_renders_wiki_summary(
         self,
         patch_all_kb_dir_bindings,

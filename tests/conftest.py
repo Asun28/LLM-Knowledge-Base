@@ -363,6 +363,16 @@ _REQUIRED = object()  # sentinel — explicit "must be passed"
 def mock_scan_llm(monkeypatch):
     """Install a canned JSON response for call_llm_json inside kb.capture.
 
+    Cycle 38 AC1 — DUAL-SITE patch (kb.utils.llm.call_llm_json BEFORE
+    kb.capture.call_llm_json). Defends against contamination of
+    sys.modules["kb.capture"] (cycle-19 L2 / cycle-20 L1 reload-leak class
+    AND cycle-36 ubuntu-probe sys.modules deletion). Apply utils.llm FIRST
+    so any subsequent re-import of kb.capture picks up the mocked function
+    via ``from kb.utils.llm import call_llm_json``. Cycle 38 AC0 also
+    refactored TestSymlinkGuard to subprocess so the in-process
+    sys.modules deletion no longer happens at all; this dual-site patch
+    is defense-in-depth for any future contamination introduced.
+
     Mock signature mirrors the REAL call_llm_json signature
     (src/kb/utils/llm.py): tier and schema are keyword-only, schema is required.
     The sentinel + assertions catch the bug where capture.py forgets to pass
@@ -386,6 +396,9 @@ def mock_scan_llm(monkeypatch):
             assert not missing, f"mock response missing required schema keys: {missing}"
             return response
 
+        # Cycle 38 AC1 — patch utils.llm FIRST (canonical source) so any
+        # subsequent re-import of kb.capture re-snapshots the mocked function.
+        monkeypatch.setattr("kb.utils.llm.call_llm_json", fake_call)
         monkeypatch.setattr("kb.capture.call_llm_json", fake_call)
 
     return _install
