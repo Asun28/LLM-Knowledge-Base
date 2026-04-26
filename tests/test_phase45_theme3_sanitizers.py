@@ -396,18 +396,14 @@ def test_h14_build_review_checklist_has_untrusted_data_instruction():
     os.name == "nt" and not os.environ.get("ALLOW_SYMLINK_TESTS"),
     reason="Symlink creation requires elevated privileges on Windows — set ALLOW_SYMLINK_TESTS=1",
 )
-@pytest.mark.skipif(
-    os.name != "nt",
-    reason=(
-        "Cycle 36 AC11 — KNOWN POSIX SECURITY GAP: pair_page_with_sources "
-        "resolves symlinks without containment check on POSIX, allowing path "
-        "traversal via symlinks inside raw/. Test was masked on Windows by the "
-        "cycle-23 multiprocessing-hang; surfaced in cycle-36 ubuntu probe. "
-        "Tracked in cycle-37 BACKLOG as a real production bug to fix."
-    ),
-)
 def test_qb_symlink_outside_raw_rejected(tmp_path):
-    """Regression: Phase 4.5 HIGH item Q_B (symlink escaping raw/ is skipped)."""
+    """Regression: Phase 4.5 HIGH item Q_B (symlink escaping raw/ is skipped).
+
+    Cycle-37 AC2: skipif(os.name != "nt") removed after cycle-37 AC1 fixed the
+    POSIX security gap (is_symlink() check now precedes .resolve() in
+    pair_page_with_sources). Pre-AC1 the containment check was dead code on
+    POSIX; this test now exercises real production behaviour cross-platform.
+    """
     from kb.review.context import pair_page_with_sources
 
     wiki_dir = tmp_path / "wiki"
@@ -441,6 +437,53 @@ def test_qb_symlink_outside_raw_rejected(tmp_path):
         assert s.get("content") != "SECRET DATA", (
             "Symlink escaping raw/ was read — path traversal via symlink succeeded"
         )
+
+
+@pytest.mark.skipif(
+    os.name == "nt" and not os.environ.get("ALLOW_SYMLINK_TESTS"),
+    reason="Symlink creation requires elevated privileges on Windows — set ALLOW_SYMLINK_TESTS=1",
+)
+def test_qb_symlink_inside_raw_accepted(tmp_path):
+    """Cycle 37 AC3: positive case — symlink whose target STAYS within raw/ is read.
+
+    Pins the contract that AC1's reorder fix doesn't over-restrict: a legitimate
+    intra-raw/ symlink (e.g., raw/articles/foo.md -> raw/sources/foo.md) must
+    still resolve and read the target's content. Divergent against an over-broad
+    AC1 that would reject ALL symlinks regardless of target.
+    """
+    from kb.review.context import pair_page_with_sources
+
+    wiki_dir = tmp_path / "wiki"
+    raw_dir = tmp_path / "raw"
+    (wiki_dir / "concepts").mkdir(parents=True)
+    (raw_dir / "articles").mkdir(parents=True)
+    (raw_dir / "sources").mkdir(parents=True)
+
+    target_content = "LEGITIMATE INTRA-RAW CONTENT"
+    target = raw_dir / "sources" / "real.md"
+    target.write_text(target_content, encoding="utf-8")
+
+    symlink = raw_dir / "articles" / "alias.md"
+    try:
+        symlink.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Cannot create symlink on this system")
+
+    page = wiki_dir / "concepts" / "test.md"
+    page.write_text(
+        '---\ntitle: "Test"\nsource:\n  - "raw/articles/alias.md"\n'
+        "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+        "# Test\n",
+        encoding="utf-8",
+    )
+
+    result = pair_page_with_sources("concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir)
+    sources = result.get("source_contents", [])
+    assert len(sources) == 1, f"Expected 1 source entry, got {len(sources)}: {sources}"
+    assert sources[0].get("content") == target_content, (
+        f"Intra-raw symlink should be read; got content={sources[0].get('content')!r}, "
+        f"error={sources[0].get('error')!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

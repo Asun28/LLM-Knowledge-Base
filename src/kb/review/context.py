@@ -67,7 +67,13 @@ def pair_page_with_sources(
     effective_project_root = project_root if project_root is not None else raw_dir.parent
     for source_ref in sources_meta:
         # Resolve: "raw/articles/foo.md" -> project_root / "raw/articles/foo.md"
-        source_path = (effective_project_root / source_ref).resolve()
+        # Cycle 37 AC1: capture is_symlink() on the UNRESOLVED candidate path
+        # BEFORE calling .resolve() — .resolve() follows the symlink, after which
+        # is_symlink() always returns False on the resolved (target) path. The
+        # pre-cycle-37 ordering made the containment check below dead code.
+        candidate_path = effective_project_root / source_ref
+        is_link = candidate_path.is_symlink()
+        source_path = candidate_path.resolve()
         # Guard against path traversal — source must stay within project root
         try:
             source_path.relative_to(effective_project_root.resolve())
@@ -83,15 +89,14 @@ def pair_page_with_sources(
             continue
         # Q_B fix (Phase 4.5 HIGH): reject symlinks whose resolved target escapes RAW_DIR.
         # A symlink inside raw/ could point to /etc/passwd or project secrets.
-        if source_path.is_symlink():
-            resolved_target = source_path.resolve()
+        if is_link:
             try:
-                resolved_target.relative_to(raw_dir.resolve())
+                source_path.relative_to(raw_dir.resolve())
             except ValueError:
                 logger.warning(
                     "Source symlink escapes raw/ directory — skipping: %s -> %s",
                     source_ref,
-                    resolved_target,
+                    source_path,
                 )
                 source_contents.append(
                     {
