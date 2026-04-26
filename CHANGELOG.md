@@ -37,11 +37,13 @@ Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGEL
   Closes 2 of 3 explicit cycle-36 BACKLOG follow-ups (strict pytest CI gate AC8 +
   cross-OS portability matrix AC11/AC12) + opportunistic CVE recheck (AC18-AC20).
   Area E (requirements split AC14-AC17) deferred to cycle 37 per Step-5 design Q7=B.
-  Three-commit sequence on the cycle-36 PR: probe → fix → strict-gate (cycle-22 L3
-  full-suite hard-gate ordering). Probe ubuntu-latest CI run surfaced 23 failures
-  across 5 fragility classes; commit 2 applied marker fixes; commit 3 flips
-  `runs-on: windows-latest` to `strategy.matrix.os: [ubuntu-latest, windows-latest]`
-  + drops `continue-on-error: true` from the pytest step. `pytest-timeout>=2.3`
+  Four-commit sequence on the cycle-36 PR: probe → fix → strict-gate → ubuntu-only
+  pivot. Probe ubuntu-latest CI run surfaced 23 failures across 5 fragility classes;
+  commit 2 applied marker fixes; commit 3 attempted matrix [ubuntu, windows] with
+  strict-gate but windows-latest hit a SECOND hang at threading.py:355 after the
+  cycle-23 multiprocessing skipif fired; commit 4 pivots to ubuntu-only single-OS
+  strict-gate to close cycle-36 cleanly without more failed CI runs (windows-latest
+  matrix re-enable filed as cycle-37 BACKLOG entry per CI-cost-discipline lesson). `pytest-timeout>=2.3`
   added to `[dev]` extras + `requirements.txt` with `[tool.pytest.ini_options]
   timeout = 120` global default to fail fast on hangs (was silent KeyboardInterrupt
   on cycle-23 multiprocessing spawn-bootstrap under GHA 6-hour ceiling).

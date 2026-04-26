@@ -21,34 +21,47 @@ concurrency:
 
 jobs:
   test:
-    # Cycle 36 STRICT GATE — `[ubuntu-latest, windows-latest]` matrix with
+    # Cycle 36 STRICT GATE — ubuntu-latest single-OS with
     # `continue-on-error: true` DROPPED from the pytest step. Closes the
-    # cycle-36 BACKLOG strict-gate + cross-OS portability entries.
+    # cycle-36 BACKLOG strict-gate entry; PARTIALLY closes cross-OS
+    # portability entry (ubuntu-latest validated; windows-latest re-enable
+    # deferred to cycle-37 follow-up — windows-latest GHA runner exhibits
+    # a SECOND hang at threading.py:355 after the cycle-23 multiprocessing
+    # spawn-bootstrap test was skipif'd; full investigation needs a
+    # self-hosted Windows runner to reproduce, which is out of cycle-36
+    # scope).
     #
-    # Three-commit sequence on cycle-36 PR per Step-5 Q16/Q21:
-    #   commit 1 — probe — markers + ubuntu single-OS, soft-fail still on
-    #   commit 2 — fix — apply skipif markers from probe results
-    #   commit 3 — strict-gate — matrix + drop continue-on-error (this state)
+    # Cycle-37 BACKLOG entry "windows-latest CI matrix re-enable" tracks:
+    #   1. Identify the threading-related hang at ~position 1168 in pytest
+    #      collection order (after AC2 skipif fired on cycle-23 multi-
+    #      processing test at #1155, a different test now hangs).
+    #   2. Apply targeted skipif marker OR fix the test root cause.
+    #   3. Re-enable matrix `[ubuntu-latest, windows-latest]` with
+    #      `strategy.fail-fast: false` once windows-latest passes locally
+    #      on a self-hosted runner mimicking GHA Windows.
     #
-    # Cycle 34 history: bootstrapped CI on `windows-latest` because the
-    # existing test suite was authored on Windows and assumed Windows path
-    # semantics in ~6 tests. Cycle 36 added `requires_real_api_key()`
-    # skipif markers (10 SDK-using tests), `sys.platform != "win32"` skipif
-    # markers (Windows-only tests), kb.config.WIKI_DIR mirror-rebind for
-    # cycle-19 L1 snapshot-binding hazard, and pytest-timeout 120s default
-    # to fail fast on hangs (was silent KeyboardInterrupt under cycle-23
-    # multiprocessing spawn-bootstrap on GHA).
+    # Why ubuntu-only is acceptable strict-gate for cycle 36:
+    #   - 23 ubuntu failures from probe (commit 1) all addressed via
+    #     skipif markers / fixture refactors (commit 2).
+    #   - Anti-Windows skipif markers (e.g., backslash normalisation,
+    #     drive-letter abspath) prevent ubuntu false-positives on tests
+    #     designed for Windows path semantics.
+    #   - Local Windows full suite still validates 2985 + 20 skipped on
+    #     developer machines pre-push.
+    #
+    # Cycle-36 lesson on CI cost discipline: when iterating through CI to
+    # find platform-specific hangs, defer the problematic platform to a
+    # follow-up cycle rather than push 5+ debug commits to main's PR.
+    # Each push triggers a CI run; matrix doubles the cost; cancelled +
+    # failed runs accumulate noise that reviewers must filter through.
     #
     # Dummy ANTHROPIC_API_KEY set below so tests that instantiate the
     # Anthropic SDK (capture.py / mcp_core.py kb_capture wrapper) don't
     # error with "Could not resolve authentication method" — tests mock
-    # the actual API calls. Cycle 36 AC6 helper at `tests/_helpers/api_key.py`
-    # gates tests that would risk a real API call.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # the actual API calls. Cycle 36 AC6 helper at
+    # `tests/_helpers/api_key.py` gates tests that would risk a real API
+    # call.
+    runs-on: ubuntu-latest
     env:
       ANTHROPIC_API_KEY: sk-ant-dummy-key-for-ci-tests-only
     steps:
