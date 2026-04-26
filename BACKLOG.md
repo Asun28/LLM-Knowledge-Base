@@ -171,6 +171,8 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 
 - `Dependabot pip-audit drift on litellm GHSA-v4p8-mg3p-g94g` (cycle-40+) — Dependabot reports the high-severity advisory (LiteLLM authenticated MCP-stdio command execution; created 2026-04-25T23:37Z; fix=1.83.7 BLOCKED by same `click==8.1.8` transitive). Pip-audit on live CI install env still does not emit the ID as of 2026-04-27 (cycle-40 re-checked). Same handling as `GHSA-r75f-5x8p-qvmc` above. *(Cycle-36 spawn entry from Step-5 Q17; cycle-37/38/39/40 re-confirmed drift persists 2026-04-27.)*
 
+- `tests/test_compile.py::test_detect_source_drift_docstring_documents_deletion_pruning_persistence` upgrade candidate (cycle-N+1 follow-up; filed cycle 40 per C40-L3) — folded from `tests/test_cycle10_linker.py` cycle 40 AC2; R2 Codex correctly flagged it as the `feedback_inspect_source_tests` vacuous-grep pattern. Asserts `"deletion-pruning" in detect_source_drift.__doc__` and `"save_hashes=False" in detect_source_drift.__doc__` — reverting the FUNCTION'S BEHAVIOR would not fail the test; only deleting the docstring strings would. **Carry-forward from cycle 10**, not introduced by the cycle-40 fold. Upgrade approach: extract a helper that calls `detect_source_drift` with `save_hashes=False` on a tmp-fixture wiki + manifest, mutate one source's mtime, and assert the manifest is NOT mutated (no manifest write should occur when `save_hashes=False`). Replace the docstring assertions with the behavior assertion. Filed at cycle 40 per C40-L3 (fold cycles must file BACKLOG upgrade candidates for KNOWN-WEAK migrated tests, not just PR comments).
+
 ### LOW
 
 _All items resolved — see CHANGELOG cycle 28._
