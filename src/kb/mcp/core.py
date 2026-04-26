@@ -168,8 +168,8 @@ def _validate_file_inputs(filename: str, content: str) -> str | None:
     """Validate filename and content size. Returns error string or None if valid."""
     if not filename or not filename.strip():
         return "Error: Filename cannot be empty."
-    if len(filename) > 200:
-        return "Error: Filename too long (max 200 chars)."
+    if len(filename) > _FILENAME_MAX_LEN:
+        return f"Error: Filename too long (max {_FILENAME_MAX_LEN} chars)."
     # Cycle 35 AC13 — delegate the security-class checks (NUL / path-separator /
     # Windows-reserved / homoglyph / trailing-dot) to the shared helper. Public
     # return contract stays `str | None`.
