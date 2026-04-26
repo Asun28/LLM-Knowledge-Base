@@ -145,6 +145,20 @@ def test_wikilink_escape_handles_markdown_link_injection():
     assert "http://evil.com" in result
 
 
+def test_wikilink_display_escape_preserves_pipe_via_backslash():
+    """Folded from tests/test_cycle10_linker.py cycle 40.
+
+    Pins the backslash-pipe escape contract: ``A|B`` becomes ``A\\|B`` so
+    Obsidian renders the pipe as text rather than splitting display from
+    target. Plain titles round-trip unchanged; multiple pipes each escape.
+    """
+    from kb.utils.text import wikilink_display_escape
+
+    assert wikilink_display_escape("A|B") == r"A\|B"
+    assert wikilink_display_escape("plain title") == "plain title"
+    assert wikilink_display_escape("A|B|C") == r"A\|B\|C"
+
+
 def test_slugify_preserves_cjk():
     """Regression: Phase 4.5 CRITICAL item 11.
 

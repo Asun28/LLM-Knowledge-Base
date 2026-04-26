@@ -148,6 +148,20 @@ def test_compile_wiki_full(mock_ingest, tmp_path):
     assert result["sources_processed"] == 1
 
 
+def test_detect_source_drift_docstring_documents_deletion_pruning_persistence():
+    """Folded from tests/test_cycle10_linker.py cycle 40.
+
+    Pins the contract documented in detect_source_drift's docstring (cycle 10
+    Phase 4.5 HIGH item — the function must reference 'deletion-pruning' and
+    'save_hashes=False' so future maintainers don't reintroduce a
+    non-persisting drift-detection path).
+    """
+    from kb.compile.compiler import detect_source_drift
+
+    assert "deletion-pruning" in detect_source_drift.__doc__
+    assert "save_hashes=False" in detect_source_drift.__doc__
+
+
 # ── Linker tests ────────────────────────────────────────────────
 
 
