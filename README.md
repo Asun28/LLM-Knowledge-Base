@@ -359,7 +359,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 2716 passed, 9 skipped
+python -m pytest                # 2985 passed, 10 skipped
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```
