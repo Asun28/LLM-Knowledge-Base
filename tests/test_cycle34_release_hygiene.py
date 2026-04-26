@@ -294,7 +294,13 @@ def test_pip_audit_invocation_audits_live_env():
     spinning up a fresh venv install that fails resolution.
     """
     raw = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    audit_step_idx = raw.find("pip-audit `")
+    # Cycle 36: workflow switched from PowerShell backtick continuation to
+    # bash backslash continuation when CI matrix added ubuntu-latest (bash
+    # treats backtick as command-substitution start — broke pip-audit on
+    # POSIX). Accept either form for forward-compatibility.
+    audit_step_idx = raw.find("pip-audit \\")
+    if audit_step_idx < 0:
+        audit_step_idx = raw.find("pip-audit `")
     assert audit_step_idx >= 0, "pip-audit invocation not found"
     audit_step_end = raw.find("\n\n", audit_step_idx)
     audit_step = raw[

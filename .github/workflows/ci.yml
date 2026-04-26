@@ -21,31 +21,34 @@ concurrency:
 
 jobs:
   test:
-    # Cycle 36 commit-1 PROBE: temporary `runs-on: ubuntu-latest` (single OS,
-    # NO matrix) to surface real cross-OS failures so cycle-36 AC11 markers
-    # land data-driven (per Step-5 design Q5=B / R1-NEW-1). The cycle-36
-    # commit-3 strict-gate replaces this with `runs-on: ${{ matrix.os }}` +
-    # `strategy.matrix.os: [ubuntu-latest, windows-latest]` per Step-5 Q16.
+    # Cycle 36 STRICT GATE — `[ubuntu-latest, windows-latest]` matrix with
+    # `continue-on-error: true` DROPPED from the pytest step. Closes the
+    # cycle-36 BACKLOG strict-gate + cross-OS portability entries.
     #
-    # `continue-on-error: true` STAYS ON for the pytest step during the probe
-    # so failures don't block PR review of the marker scaffolding; Commit 3
-    # drops it for the strict gate. Three-commit sequence (probe → fix →
-    # strict-gate) per Step-5 Q21 / cycle-36 design.
+    # Three-commit sequence on cycle-36 PR per Step-5 Q16/Q21:
+    #   commit 1 — probe — markers + ubuntu single-OS, soft-fail still on
+    #   commit 2 — fix — apply skipif markers from probe results
+    #   commit 3 — strict-gate — matrix + drop continue-on-error (this state)
     #
-    # Cycle 34 history: switched to windows-latest because the existing
-    # test suite was authored on Windows (developer env per CLAUDE.md
-    # OS=Windows 11) and assumes Windows path semantics in ~6 tests. Cycle
-    # 36 closes the cross-OS portability BACKLOG entry by adding skipif
-    # markers data-driven from this probe run.
+    # Cycle 34 history: bootstrapped CI on `windows-latest` because the
+    # existing test suite was authored on Windows and assumed Windows path
+    # semantics in ~6 tests. Cycle 36 added `requires_real_api_key()`
+    # skipif markers (10 SDK-using tests), `sys.platform != "win32"` skipif
+    # markers (Windows-only tests), kb.config.WIKI_DIR mirror-rebind for
+    # cycle-19 L1 snapshot-binding hazard, and pytest-timeout 120s default
+    # to fail fast on hangs (was silent KeyboardInterrupt under cycle-23
+    # multiprocessing spawn-bootstrap on GHA).
     #
-    # Dummy ANTHROPIC_API_KEY also set below so tests that instantiate the
+    # Dummy ANTHROPIC_API_KEY set below so tests that instantiate the
     # Anthropic SDK (capture.py / mcp_core.py kb_capture wrapper) don't
-    # error with "Could not resolve authentication method" — tests mock the
-    # actual API calls; the SDK constructor just needs SOMETHING to be set.
-    # Cycle 36 AC6 adds `requires_real_api_key()` predicate at
-    # `tests/_helpers/api_key.py` for any future test that would risk a
-    # real API call on the dummy key.
-    runs-on: ubuntu-latest
+    # error with "Could not resolve authentication method" — tests mock
+    # the actual API calls. Cycle 36 AC6 helper at `tests/_helpers/api_key.py`
+    # gates tests that would risk a real API call.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       ANTHROPIC_API_KEY: sk-ant-dummy-key-for-ci-tests-only
     steps:
@@ -80,23 +83,28 @@ jobs:
       - name: Pytest collection (smoke check)
         run: python -m pytest --collect-only -q
 
-      - name: Pytest full suite (soft-fail per cycle 34 R1 fallback)
-        # cycle 34 fix-after-CI-failure-3: 2941-test suite passes locally on
-        # Windows (verified at Step 10) but fails on the CI runner due to:
-        # (a) tests assuming a populated wiki/ directory that ships gitignored,
-        # (b) tests requiring real ANTHROPIC_API_KEY for Anthropic SDK calls
-        # the dummy key can't satisfy, (c) timing-sensitive rate-limit tests
-        # with 1-second precision boundaries that flake on slower CI runners.
-        # These are PRE-EXISTING issues, not cycle-34 regressions; the cycle-
-        # 36 BACKLOG entry tracks the portability work to add pytest.mark.
-        # skip / fixture seeding / timing tolerance.  Soft-fail mirrors the
-        # `pip check` continue-on-error pattern (cycle 34 T5 strategy): the
-        # step still runs (logs visible) but doesn't block merge.  CI green-
-        # checkmark for cycle 34 means: ruff clean + pytest --collect-only OK
-        # + pip-audit clean + build OK — which IS the comprehensive-review
-        # Finding 2 deliverable.
+      - name: Pytest full suite (strict — cycle 36 closure)
+        # Cycle 36 strict-gate: `continue-on-error: true` DROPPED. Closes
+        # the cycle-36 strict-gate BACKLOG entry. Marker fixes that closed
+        # the previously-flaky classes (commit 1+2 of this PR):
+        #   AC2 — skipif `os.environ.get("CI") == "true"` on the cycle-23
+        #         multiprocessing spawn-hang test (1.03s local pass; GHA
+        #         Windows runner hangs at popen_spawn_win32.py:112).
+        #   AC3 — `pytest-timeout = 120` default + `pytest-timeout>=2.3`
+        #         in [dev] extras catches future hangs at 2-min boundary
+        #         instead of GHA's 6-hour silent kill.
+        #   AC5 — mirror-rebind `kb.config.WIKI_DIR` snapshot in cycle 10
+        #         quality tests + `kb.mcp.quality.WIKI_DIR` in MCP phase 2
+        #         tests (cycle-19 L1 snapshot pattern).
+        #   AC6 — `tests/_helpers/api_key.py::requires_real_api_key()`
+        #         predicate gates SDK-using tests on dummy CI key.
+        #   AC7 — wall-clock retry_after tolerance widened to <= 3601
+        #         (frozen-clock variant stays exact == 3600 per Q11).
+        #   AC11 — anti-Windows skipif markers on Windows-only tests
+        #         (backslash semantics, drive-letter abspath); anti-POSIX
+        #         skipif on Windows-helper tests; cycle-37 BACKLOG tracks
+        #         the deeper POSIX symlink security gap.
         run: python -m pytest -q
-        continue-on-error: true
 
       - name: Pip resolver check (soft-fail per cycle 34 T5)
         # T5 mitigation: three known conflicts (arxiv/requests, crawl4ai/lxml,
@@ -118,11 +126,16 @@ jobs:
         # venv install.  Audit coverage equivalent; no resolution conflict.
         # The four --ignore-vuln IDs match SECURITY.md's "Known Advisories"
         # table 1:1.  ANY new CVE on these or other packages will fail this step.
+        # Cycle 36 fix — use bash backslash line-continuation (works on both
+        # ubuntu-latest bash and windows-latest pwsh shell-parsing modes).
+        # Previous PowerShell backtick `\`` worked on windows-latest but
+        # ubuntu-latest bash treats backtick as command-substitution start
+        # and misparsed the --ignore-vuln args as commands.
         run: |
-          pip-audit `
-            --ignore-vuln=CVE-2025-69872 `
-            --ignore-vuln=GHSA-xqmj-j6mv-4862 `
-            --ignore-vuln=CVE-2026-3219 `
+          pip-audit \
+            --ignore-vuln=CVE-2025-69872 \
+            --ignore-vuln=GHSA-xqmj-j6mv-4862 \
+            --ignore-vuln=CVE-2026-3219 \
             --ignore-vuln=CVE-2026-6587
 
       - name: Build distribution + twine check

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.11.0 · 2995 tests / 256 files (2985 passed + 10 skipped). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.11.0 · 3005 tests / 257 files (2985 passed + 20 skipped on Windows local; CI matrix `[ubuntu-latest, windows-latest]` strict-gated since cycle 36). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — use `tmp_wiki` / `tmp_project` / `tmp_kb_env`; never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Patch the owner module** for the four MCP-migrated callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`) — not `kb.mcp.core.*`.
 - **Path safety** — `_validate_page_id` at MCP boundary; library calls use `_validate_path_under_project_root(path, field_name)` (dual-anchor: literal + resolved both under `PROJECT_ROOT`).
 - **Evidence Trail** — reverse-chronological, sentinel-guarded; sentinel is machine-maintained.
-- **Release artifacts** — `SECURITY.md` (narrow-role CVE acceptance + disclosure path) + `.github/workflows/ci.yml` (ruff + pytest + pip-audit + build gate; cycle 34).
+- **Release artifacts** — `SECURITY.md` (narrow-role CVE acceptance + disclosure path) + `.github/workflows/ci.yml` (ruff + pytest [strict, cycle 36] + pip-audit + build gate on `[ubuntu-latest, windows-latest]` matrix).
 - **Doc update checklist** on push — see §Automation at bottom.
 
 ## Detailed Documentation

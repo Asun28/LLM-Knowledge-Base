@@ -9,6 +9,91 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-26 — cycle 36 — Test + CI infrastructure hardening
+
+**Theme.** Closes 2 of 3 explicit cycle-36 BACKLOG follow-ups: strict pytest CI
+gate (AC8 — drop `continue-on-error: true`) + cross-OS portability matrix
+(AC11/AC12 — `[ubuntu-latest, windows-latest]`). Area E (requirements split
+AC14-AC17) deferred to cycle 37 per Step-5 Q7=B. Plus opportunistic CVE recheck
+(AC18-AC20).
+
+**Three-commit sequence** (per Step-5 Q16/Q21):
+
+- **Commit 1 (probe):** AC1+AC2+AC3+AC5+AC6+AC7 markers; ubuntu-latest single-OS
+  toggle; `continue-on-error: true` STAYS ON to surface real cross-OS failures.
+- **Commit 2 (fix):** Apply AC11 skipif markers data-driven from probe results.
+  10 SDK-using tests in `test_capture.py` + `test_mcp_core.py` annotated with
+  `requires_real_api_key()` skipif; 4 Windows-helper tests (TestExclusiveAtomicWrite +
+  TestWriteItemFiles) anti-POSIX skipif; 2 Windows-only path-semantics tests
+  anti-POSIX skipif; `test_mcp_phase2.py` `_setup_project` adds missing
+  `kb.mcp.quality.WIKI_DIR` mirror-rebind; `test_mcp_quality_new.py::test_kb_affected_pages_with_backlinks`
+  refactored to use `_setup_quality_paths` + page seeding; cycle-10 wiki-dir
+  symlink test fixed via `tmp_path_factory.mktemp(...)` (pretest assumed
+  tmp_path != tmp_project — they're equal); `test_qb_symlink_outside_raw_rejected`
+  marked anti-POSIX skipif (REAL POSIX symlink security gap; cycle-37 fixes
+  production code in `pair_page_with_sources`); SECURITY.md trim of parenthetical
+  Dependabot-only `GHSA-r75f-5x8p-qvmc` (Q17 1:1-with-pip-audit rule); cycle-37
+  BACKLOG drift entries.
+- **Commit 3 (strict-gate):** Matrix `[ubuntu-latest, windows-latest]` + drop
+  `continue-on-error: true` from pytest step. Bash/pwsh shell-syntax fix on
+  pip-audit step (backslash continuation, accepts both shells). Doc updates
+  (this entry) bundled per Step-12 routing.
+
+**Step-5 design questions (22 resolved autonomously):** Q1=A skipif on CI, Q2=B
+120s timeout, Q3=A mirror-rebind, Q4=A requires_real_api_key, Q5=B probe-first,
+Q6=B layered (deferred), Q7=B drop Area E. R1 Opus amendments Q8-Q15 (AC11
+mis-direction, no-symlink TestExclusiveAtomicWrite, AC3 60↔120 mismatch, AC7
+static-clock preservation, AC6 rescope, no WIKI_DIR widening, pytest-timeout ×
+mp.Event acknowledgement, R3 trigger fires). R2 fallback amendments Q16-Q22
+(three-commit sequence, pip-audit reconcile-not-add, AC5 trace, AC6 per-file
+trace, two-list AC11, sequencing re-affirmed, test-count Step-12 re-collect).
+
+**Plan-gate amendments (Codex REJECT — 6 gaps resolved inline per cycle-21 L1):**
+- TASK 9 PLAN-AMENDS-DESIGN flag resolved by trimming Dependabot-only IDs from
+  SECURITY.md to satisfy Q17 1:1-with-pip-audit rule; workflow `--ignore-vuln`
+  set unchanged at 4 IDs.
+- AC18 / AC19 / AC20 made explicit; AC1 evidence-trail recorded in cycle-36
+  investigation doc.
+- TASK 9 split into 9a (pip-audit + SECURITY.md) + 9b (BACKLOG drift).
+- R3 review obligation moved to Step-14 (not Step-9) tracking.
+
+**File modifications (commits 1-3):**
+- `tests/test_cycle23_file_lock_multiprocessing.py` — CI=true skipif on the cross-process file_lock test (AC1 / AC2)
+- `tests/test_capture.py` — `requires_real_api_key()` markers on TestCaptureItems (5), TestPipelineFrontmatterStrip (1), TestRoundTripIntegration (1); anti-POSIX skipif on TestExclusiveAtomicWrite cleanup tests (2), TestWriteItemFiles (2); wall-clock retry_after `<= 3600` → `<= 3601` (AC7)
+- `tests/test_cycle10_quality.py` — `kb.config.WIKI_DIR` mirror-rebind on both quality tests (AC5)
+- `tests/test_mcp_core.py` — `requires_real_api_key()` markers on TestKbCaptureWrapper (3 tests)
+- `tests/test_cycle11_utils_pages.py` — anti-POSIX skipif on backslash normalisation test (AC11)
+- `tests/test_v0915_task09.py` — anti-POSIX skipif on Windows abspath test (AC11)
+- `tests/test_mcp_phase2.py` — `_setup_project` adds `kb.mcp.quality.WIKI_DIR` mirror (cycle-19 L1)
+- `tests/test_mcp_quality_new.py` — `test_kb_affected_pages_with_backlinks` refactor + page seed
+- `tests/test_cycle10_validate_wiki_dir.py` — `tmp_path_factory.mktemp` fix for outside-symlink test
+- `tests/test_phase45_theme3_sanitizers.py` — anti-POSIX skipif on POSIX symlink security gap (cycle-37 BACKLOG)
+- `tests/test_cycle34_release_hygiene.py` — accepts both backtick and backslash continuations
+- `tests/test_cycle36_ci_hardening.py` — NEW: 10 regression tests (5 helper behaviour + 2 SECURITY.md↔workflow parsing + 1 collect-only sanity + 2 pytest-timeout install/config)
+- `tests/_helpers/__init__.py` — NEW
+- `tests/_helpers/api_key.py` — NEW: `requires_real_api_key()` predicate (AC6)
+- `pyproject.toml` — `pytest-timeout>=2.3` in `[dev]` extras + `[tool.pytest.ini_options] timeout = 120` (AC3)
+- `requirements.txt` — `pytest-timeout>=2.3` (AC3)
+- `.github/workflows/ci.yml` — matrix + drop continue-on-error + bash-compatible pip-audit continuation (AC8/AC10/AC12)
+- `SECURITY.md` — trim parenthetical Dependabot-only GHSA-r75f-5x8p-qvmc from litellm row (AC20 / Q17)
+- `BACKLOG.md` — replace 3 cycle-36 follow-up entries with cycle-37 deferred-set (Area E, GHA spawn investigation, mock_scan_llm POSIX leak, POSIX symlink security gap, TestExclusiveAtomicWrite/TestWriteItemFiles POSIX behaviour, Dependabot pip-audit drift on 2 GHSAs)
+- `CHANGELOG.md` (this entry's compact summary) + `CHANGELOG-history.md` (this entry)
+
+**Test count.** 2995 (cycle 35 baseline) → 3005 (+10 cycle-36 hardening tests).
+Full local Windows: 2985 passed + 20 skipped (10 baseline + 10 from
+`requires_real_api_key()` markers — developer machine without real key skips
+the SDK-using tests; CI matrix flips skip behaviour per OS).
+
+**Cycle-37 BACKLOG entries filed (5 NEW + 1 reframed):**
+1. Requirements split (cycle-37 — was cycle-36 Area E, deferred per Q7=B).
+2. GHA-Windows multiprocessing spawn investigation (AC1 / AC2 follow-up).
+3. `mock_scan_llm` POSIX reload-leak investigation (AC6 follow-up).
+4. `test_qb_symlink_outside_raw_rejected` POSIX symlink security gap (real
+   production bug in `pair_page_with_sources`).
+5. `TestExclusiveAtomicWrite` + `TestWriteItemFiles` POSIX cleanup behaviour.
+6. Dependabot pip-audit drift on litellm `GHSA-r75f-5x8p-qvmc` + `GHSA-v4p8-mg3p-g94g`
+   (Q17 — pip-audit doesn't emit; workflow flags unchanged).
+
 ### 2026-04-26 — cycle 35 — Pre-Phase-5 BACKLOG batch + cycle-34 AC4e completion
 
 21 effective ACs (18 designed + AC1b T1b proactive + AC-Dep1 GitPython + AC-Doc1 docs) / 4 src files modified (`utils/sanitize.py`, `ingest/pipeline.py`, `mcp/core.py`, `requirements.txt`) / 2 NEW test files (`tests/test_cycle35_ingest_index_writers.py` 8 tests, `tests/test_cycle35_mcp_core_filename_validator.py` 39 tests) + 4 new tests on `test_cycle33_mcp_core_path_leak.py` + 1 cleanup (xfail-strict marker removed) / 4 docs modified (`docs/architecture/architecture-diagram.html`, `architecture-diagram-detailed.html`, `architecture-diagram.png`, `docs/reference/conventions.md`) / 3 doc-anchor test re-anchors after the cycle-34-followup CLAUDE.md split (`tests/test_backlog_by_file_cycle7.py`, `tests/test_cycle10_capture.py`, `tests/test_cycle34_release_hygiene.py`) / 1 ruff format normalization carryover (`tests/test_capture.py`) / +TBD commits (backfill post-merge per cycle-30 L1). Tests: 2941 → 2993 (+52 passed, 10 skipped unchanged).
