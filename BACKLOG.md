@@ -185,51 +185,6 @@ _All items resolved — see CHANGELOG cycle 28._
 
 ---
 
-## Phase 4.6 — DeepSeek V4 Pro full-repo audit (2026-04-27)
-
-<!-- Discovered by DeepSeek V4 Pro (deepseek-v4-pro, MoE 37B-active, 128K ctx, hosted by 深度求索)
-     via the OpenAI-compatible /chat/completions endpoint. Identity verified by independent
-     org/architecture/paper-citation probe. Each finding cross-checked with grep + Read against
-     the live codebase before logging; 4 of 16 raw findings dropped as false positives
-     (different fence formats, different render domains, _resolve_project_root vs _rel
-     conflation, vague mcp helper claim). Severity assigned by Claude after verification. -->
-
-### MEDIUM
-
-<!-- Cycle 42 closed (2026-04-27): M1 cli._truncate → kb.utils.text.truncate;
-     M2 mcp.app._rel → kb.utils.sanitize._rel; M3 query/engine three cache-key
-     fns → single _compute_cache_key helper.
-     Cycle 44 closed (2026-04-27): M1 lint/checks.py 1046 LOC → 8 per-rule
-     submodules in kb/lint/checks/ + Q1 WIKI_DIR/RAW_DIR re-export pattern;
-     M2 lint/augment.py 1189 LOC → 9-file kb/lint/augment/ package
-     (collector / proposer / fetcher / persister / quality / manifest / rate /
-     orchestrator / __init__) + _augment_manifest.py / _augment_rate.py kept
-     as cycle-45-deletion compat shims per design Q2;
-     M4 atomic_text_write gains `exclusive: bool = False` kwarg; capture.py
-     `_exclusive_atomic_write` removed (was test-only fixture). -->
-
-- `mcp/core.py` (1149 LOC) — query, ingest, capture, compile, and helper-tool implementations co-resident despite the cycle-4-13 split that already moved browse / health / quality out. Adding any Phase 5 write-path tool (`kb_review_page` etc., open in Phase 4.5 MEDIUM) lands here by default. **Cycle 44 design Q13 DEFERRED to cycle 45** due to ≥50 patch sites across `tests/test_cycle11_task6_mcp_ingest_type.py`, `test_cycle32_cli_parity_and_fair_queue.py`, `test_fixes_v050.py`, `test_cycle19_mcp_monkeypatch_migration.py`, `test_cycle33_mcp_core_path_leak.py`, `test_mcp_core.py`, `test_v0914_phase395.py`, `test_v098_fixes.py`, `test_v4_11_mcp.py`, `test_cycle9_mcp_core.py`, `test_ingest.py`, `test_backlog_by_file_cycle1.py`, `test_cycle12_sanitize_context.py` (folded), `test_cycle16_kb_query_save_as.py` (R2 enumeration in cycle-44 design eval). Cycle-22 L4 conservative posture.
-  (fix: continue the cycle-4-13 pattern — add `mcp/ingest.py`, `mcp/compile.py`; keep `core.py` for the FastMCP app + cross-cutting helpers ≤300 LOC. Use lazy-lookup pattern (`import kb.mcp.core as core; core.RAW_DIR`) for moved-tool global reads per cycle-44 design Q8 option c, plus targeted patch-transparency regression tests + 29-tool registration regression. Cycle 45 also folds `lint/_augment_manifest.py` + `lint/_augment_rate.py` compat shims and migrates the ~25 cycle-44-deferred test patch sites.)
-
-### LOW
-
-<!-- Cycle 42 closed (2026-04-27): L1 lint/augment._load_purpose_text →
-     load_purpose(wiki_dir)[:5000]; L2 mcp.app._sanitize_error_str passthrough
-     deleted (46 call sites migrated to kb.utils.sanitize.sanitize_error_text);
-     L4 query/engine rephrasing helpers moved to query/rewriter.py;
-     L5 feedback/__init__.py and review/__init__.py gain module docstring +
-     empty __all__.
-     Cycle 44 closed (2026-04-27): L1 lint/_augment_manifest.py +
-     lint/_augment_rate.py absorbed into lint/augment/manifest.py +
-     lint/augment/rate.py as part of M2 package conversion; the legacy
-     filenames REMAIN as 5-line compat shims tagged for cycle-45 deletion
-     (per design Q2 — avoids 25-site test patch migration in cycle 44). -->
-
-- `lint/_augment_manifest.py` (213 LOC) and `lint/_augment_rate.py` (110 LOC) — leading-underscore "private" siblings used only by `lint/augment.py`. The leading underscore on a top-level *file* (vs a function) is non-standard Python; either inline or promote to public submodules.
-  (fix: covered by the `lint/augment.py` package-split MEDIUM item above — these become `lint/augment/manifest.py` and `lint/augment/rate.py`)
-
----
-
 ## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
 
 <!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
@@ -647,3 +602,4 @@ calls) are now load-bearing walls that block the enterprise path.
 - **Phase 5 three-round code review (2026-04-17)** — all items resolved in CHANGELOG `[Unreleased]` Backlog-by-file cycle 1 (3 HIGH: raw_dir threading, ingest raw_dir parameter, manifest failed-state advance; 4 MEDIUM: data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)
 - **Phase 5 pre-merge lint augment (2026-04-15)** — all items resolved in CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC12/AC13)
 - **Cycle 21/22 candidates** — all open candidate items resolved in CHANGELOG `[Unreleased]` cycle 22 (wiki-path guard, extraction grounding clause, inspect-source test rewrite)
+- **Phase 4.6 (DeepSeek V4 Pro full-repo audit, 2026-04-27)** — all items resolved across cycles 42 + 44 + 45 + 46. Cycle 42: M1 `cli._truncate` + M2 `mcp.app._rel` + M3 `query/engine` cache-key dedup; L1 `lint/augment._load_purpose_text` + L2 `mcp.app._sanitize_error_str` passthrough + L4 query rephrasing relocation + L5 `feedback/__init__.py` + `review/__init__.py` docstrings. Cycle 44: M1 `lint/checks.py` 8-submodule split + M2 `lint/augment.py` 9-file package + M4 `atomic_text_write exclusive: bool = False`; L1 `lint/_augment_manifest.py` + `lint/_augment_rate.py` absorbed (kept as transition shims). Cycle 45: M3 `mcp/core.py` 1149 → 447 LOC + `mcp/ingest.py` 612 LOC + `mcp/compile.py` 148 LOC. Cycle 46: L1 `lint/_augment_manifest.py` + `lint/_augment_rate.py` compat shims DELETED + 36 test patch sites migrated to canonical `kb.lint.augment.{manifest,rate}` paths + `_sync_legacy_shim` removed.
