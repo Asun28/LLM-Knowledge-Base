@@ -88,6 +88,13 @@ Post-cycle expectation (11 folds, no test count change):
 - 3014 tests (test count preserved by fold semantics)
 - 253 - 11 = 242 files
 
+**DESIGN-AMEND (added 2026-04-27 mid-Step-9 per cycle-17 L3):** AC5 source
+file `test_cycle11_ingest_coerce.py` had 11 tests but 7 were
+bare-function duplicates of AC2's parametrized `_coerce_str_field` test
+(already folded). Folded only the 4 unique tests; net cycle-43 test
+count: 3014 → 3007 (−7). File count unchanged at 251 → 242. Docs
+updated at Step 12 to reflect actual numbers.
+
 Doc sites to update at Step 12 per C26-L2 + C39-L3 + C41-L2 (load-bearing keyword grep):
 - CLAUDE.md (Quick Reference)
 - docs/reference/testing.md

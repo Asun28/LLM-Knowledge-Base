@@ -169,16 +169,25 @@ class TestProjectRootResolution:
         return Path(config.__file__).resolve().parents[2]
 
     @pytest.fixture(autouse=True)
-    def _restore_config_after_test(self, monkeypatch):
+    def _restore_config_after_test(self):
         """Restore kb.config to canonical snapshot after every test in this class.
 
         Cycle-19 L2 / cycle-20 L1 reload-isolation: this class reloads
         kb.config N times; without an autouse teardown, sibling tests in
         test_paths.py see whatever the LAST test in this class left behind.
+
+        Cycle-43 R1 Codex BLOCKER fix: NOT taking ``monkeypatch`` as a
+        dependency. Pytest finalizes fixtures in LIFO of setup order; if I
+        depended on monkeypatch, my finalize would run BEFORE monkeypatch
+        teardown, leaving the reload bound to the test's chdir / env
+        snapshot. By being autouse-only with no monkeypatch dependency, my
+        finalize runs AFTER monkeypatch's chdir / setenv / setattr have
+        already been restored, so the reload sees the canonical cwd / env
+        state.
         """
         yield
-        monkeypatch.delenv("KB_PROJECT_ROOT", raising=False)
-        # Force reload back to canonical heuristic-root state.
+        # Reload runs AFTER monkeypatch has restored cwd / env / setattrs,
+        # so kb.config's heuristic walk-up rebinds to the real PROJECT_ROOT.
         import kb.config as config
 
         importlib.reload(config)
