@@ -156,7 +156,12 @@ class TestSuggestRephrasingsHelper:
         """T11 — prompt log MUST NOT contain the full question body."""
         monkeypatch.setattr(rewriter, "call_llm", lambda *a, **k: "")
         long_q = "secret-topic-" + ("z" * 200)
-        caplog.set_level(logging.INFO, logger="kb.query.engine")
+        # Cycle 42 AC4 — _suggest_rephrasings was moved from kb.query.engine
+        # to kb.query.rewriter; the logger name follows. Targeting the old
+        # engine logger after the move would let a future leak slip past
+        # unobserved because caplog wouldn't reliably capture the rewriter
+        # logger's output (R1 DeepSeek MAJOR on PR #60).
+        caplog.set_level(logging.INFO, logger="kb.query.rewriter")
         engine._suggest_rephrasings(long_q, [{"title": "T"}])
         # Ensure no log message contains the full > 80 char question.
         for rec in caplog.records:
