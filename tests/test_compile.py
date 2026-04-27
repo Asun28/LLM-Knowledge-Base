@@ -148,18 +148,59 @@ def test_compile_wiki_full(mock_ingest, tmp_path):
     assert result["sources_processed"] == 1
 
 
-def test_detect_source_drift_docstring_documents_deletion_pruning_persistence():
-    """Folded from tests/test_cycle10_linker.py cycle 40.
+def test_detect_source_drift_does_not_mutate_manifest_when_sources_deleted(tmp_path):
+    """Behaviour-based regression for the cycle 4 R1 Codex MAJOR 3 fix
+    (upgraded from the docstring-grep test per C40-L3).
 
-    Pins the contract documented in detect_source_drift's docstring (cycle 10
-    Phase 4.5 HIGH item — the function must reference 'deletion-pruning' and
-    'save_hashes=False' so future maintainers don't reintroduce a
-    non-persisting drift-detection path).
+    Contract: detect_source_drift is fully read-only on the manifest. When
+    a manifest entry references a now-deleted raw source, the function must
+    REPORT the deletion (in `deleted_sources`) without persisting any change
+    to the manifest file. The persistence happens only on the next
+    compile_wiki run with save_hashes=True.
+
+    Reverting the cycle-4 fix (re-enabling `elif deleted_keys: save_manifest(...)`
+    in find_changed_sources) flips the post-call manifest content, failing
+    this test. The previous docstring-grep test passed under that revert.
     """
+    import json
+
     from kb.compile.compiler import detect_source_drift
 
-    assert "deletion-pruning" in detect_source_drift.__doc__
-    assert "save_hashes=False" in detect_source_drift.__doc__
+    # Set up tmp wiki + raw + manifest. Manifest has TWO entries:
+    # - "articles/alive.md" referencing a real on-disk file
+    # - "articles/deleted.md" referencing a now-missing file (the deletion
+    #   case the function is supposed to surface read-only)
+    raw_dir = tmp_path / "raw" / "articles"
+    raw_dir.mkdir(parents=True)
+    alive = raw_dir / "alive.md"
+    alive.write_text("# Alive\n", encoding="utf-8")
+
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True)
+
+    manifest_path = tmp_path / ".data" / "hashes.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_before = {
+        "articles/alive.md": "abc123",
+        "articles/deleted.md": "def456",
+    }
+    manifest_path.write_text(json.dumps(manifest_before, sort_keys=True), encoding="utf-8")
+    bytes_before = manifest_path.read_bytes()
+
+    result = detect_source_drift(
+        raw_dir=tmp_path / "raw",
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
+    )
+
+    # Manifest content + bytes are byte-identical post-call
+    bytes_after = manifest_path.read_bytes()
+    assert bytes_after == bytes_before, "detect_source_drift must not mutate manifest"
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == manifest_before
+
+    # And the deleted entry IS surfaced in the result (function is doing its job)
+    assert "articles/deleted.md" in result["deleted_sources"]
 
 
 # ── Linker tests ────────────────────────────────────────────────
