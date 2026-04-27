@@ -19,7 +19,8 @@ from kb.config import (
 from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint._safe_call import _safe_call
 from kb.lint.verdicts import add_verdict
-from kb.mcp.app import _sanitize_error_str, _validate_notes, _validate_page_id, mcp
+from kb.mcp.app import _validate_notes, _validate_page_id, mcp
+from kb.utils.sanitize import sanitize_error_text
 from kb.utils.pages import load_all_pages
 from kb.utils.text import yaml_escape
 
@@ -53,10 +54,10 @@ def kb_review_page(page_id: str) -> str:
 
         return build_review_context(page_id)
     except FileNotFoundError as e:
-        return f"Error reviewing {page_id}: {_sanitize_error_str(e)}"
+        return f"Error reviewing {page_id}: {sanitize_error_text(e)}"
     except Exception as e:
         logger.exception("Unexpected error reviewing %s", page_id)
-        return f"Error reviewing {page_id}: {_sanitize_error_str(e)}"
+        return f"Error reviewing {page_id}: {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -96,7 +97,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         result = refine_page(page_id, updated_content, revision_notes)
     except Exception as e:
         logger.exception("Unexpected error refining %s", page_id)
-        return f"Error refining {page_id}: {_sanitize_error_str(e)}"
+        return f"Error refining {page_id}: {sanitize_error_text(e)}"
     if "error" in result:
         return f"Error: {result['error']}"
 
@@ -146,10 +147,10 @@ def kb_lint_deep(page_id: str) -> str:
 
         return build_fidelity_context(page_id)
     except FileNotFoundError as e:
-        return f"Error checking fidelity for {page_id}: {_sanitize_error_str(e)}"
+        return f"Error checking fidelity for {page_id}: {sanitize_error_text(e)}"
     except Exception as e:
         logger.exception("Unexpected error in lint_deep for %s", page_id)
-        return f"Error checking fidelity for {page_id}: {_sanitize_error_str(e)}"
+        return f"Error checking fidelity for {page_id}: {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -181,7 +182,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
         return build_consistency_context(ids)
     except Exception as e:
         logger.exception("Error running consistency check")
-        return f"Error running consistency check: {_sanitize_error_str(e)}"
+        return f"Error running consistency check: {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -216,7 +217,7 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
         return f"Error: {e}"
     except Exception as e:
         logger.exception("Error storing feedback for question: %s", question)
-        return f"Error: Failed to store feedback — {_sanitize_error_str(e)}"
+        return f"Error: Failed to store feedback — {sanitize_error_text(e)}"
 
     action = {
         "useful": "Trust scores boosted for cited pages.",
@@ -242,7 +243,7 @@ def kb_reliability_map() -> str:
         flagged = set(get_flagged_pages())
     except Exception as e:
         logger.exception("Error computing reliability map")
-        return f"Error computing reliability map: {_sanitize_error_str(e)}"
+        return f"Error computing reliability map: {sanitize_error_text(e)}"
 
     lines = ["# Page Reliability Map\n"]
     for pid, s in sorted_pages:
@@ -287,7 +288,7 @@ def kb_affected_pages(page_id: str) -> str:
         back = backlinks_map.get(page_id, [])
     except Exception as e:
         logger.exception("Error building backlinks for %s", page_id)
-        return f"Error computing affected pages: {_sanitize_error_str(e)}"
+        return f"Error computing affected pages: {sanitize_error_text(e)}"
 
     def _compute_shared() -> list[str]:
         out: list[str] = []
@@ -550,7 +551,7 @@ confidence: {confidence}
     except FileExistsError:
         return f"Error: Page already exists: {page_id}. Use kb_refine_page to update."
     except OSError as e:
-        return f"Error: Failed to write page: {_sanitize_error_str(e)}"
+        return f"Error: Failed to write page: {sanitize_error_text(e)}"
 
     # Log — MCP production boundary always uses WIKI_DIR / "log.md".
     try:
@@ -596,7 +597,7 @@ def kb_refine_sweep(hours: int = 168, action: str = "mark_failed", dry_run: bool
         return f"Error: {e}"
     except Exception as e:  # noqa: BLE001 — MCP boundary never raises
         logger.exception("kb_refine_sweep failed")
-        return f"Error: sweep failed: {_sanitize_error_str(e)}"
+        return f"Error: sweep failed: {sanitize_error_text(e)}"
     # Cycle-20 R3 Sonnet MAJOR — T5 extension to dry_run candidates. The
     # underlying `sweep_stale_pending(dry_run=True)` returns full row dicts
     # (including `revision_notes`) so the CLI can render the preview. The MCP
@@ -642,7 +643,7 @@ def kb_refine_list_stale(hours: int = 24) -> str:
         return f"Error: {e}"
     except Exception as e:  # noqa: BLE001 — MCP boundary never raises
         logger.exception("kb_refine_list_stale failed")
-        return f"Error: list failed: {_sanitize_error_str(e)}"
+        return f"Error: list failed: {sanitize_error_text(e)}"
 
     # T5 mitigation — project to minimal field set. revision_notes is NOT
     # returned via MCP. notes_length exposes the size without leaking content.

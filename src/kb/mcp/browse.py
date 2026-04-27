@@ -12,7 +12,8 @@ from kb.config import (
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
-from kb.mcp.app import _sanitize_error_str, _validate_page_id, _validate_wiki_dir, mcp
+from kb.mcp.app import _validate_page_id, _validate_wiki_dir, mcp
+from kb.utils.sanitize import sanitize_error_text
 from kb.utils.pages import load_all_pages
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def kb_search(query: str, max_results: int = 10) -> str:
         return _format_search_results(results)
     except Exception as e:
         logger.exception("Error in kb_search for query: %s", query)
-        return f"Error: Search failed — {_sanitize_error_str(e)}"
+        return f"Error: Search failed — {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -136,7 +137,7 @@ def kb_read_page(page_id: str) -> str:
             raw = f.read(cap_bytes + 1)
     except OSError as e:
         logger.error("Error reading page %s: %s", page_id, e)
-        return f"Error: Could not read page {page_id}: {_sanitize_error_str(e)}"
+        return f"Error: Could not read page {page_id}: {sanitize_error_text(e)}"
     truncated_at_read = len(raw) > cap_bytes
     if truncated_at_read:
         raw = raw[:cap_bytes]
@@ -217,7 +218,7 @@ def kb_list_pages(page_type: str = "", limit: int = 200, offset: int = 0) -> str
         return "\n".join(lines)
     except Exception as e:
         logger.exception("Error in kb_list_pages")
-        return f"Error: Could not list pages — {_sanitize_error_str(e)}"
+        return f"Error: Could not list pages — {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -326,7 +327,7 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
         return "\n".join(lines)
     except OSError as e:
         logger.error("Error listing sources: %s", e)
-        return f"Error: Could not list sources: {_sanitize_error_str(e)}"
+        return f"Error: Could not list sources: {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -345,7 +346,7 @@ def kb_stats(wiki_dir: str | None = None) -> str:
         stats = graph_stats(graph)
     except Exception as e:
         logger.exception("Error computing wiki stats")
-        return f"Error computing wiki stats: {_sanitize_error_str(e)}"
+        return f"Error computing wiki stats: {sanitize_error_text(e)}"
 
     lines = [
         "# Wiki Statistics\n",
