@@ -185,6 +185,57 @@ _All items resolved — see CHANGELOG cycle 28._
 
 ---
 
+## Phase 4.6 — DeepSeek V4 Pro full-repo audit (2026-04-27)
+
+<!-- Discovered by DeepSeek V4 Pro (deepseek-v4-pro, MoE 37B-active, 128K ctx, hosted by 深度求索)
+     via the OpenAI-compatible /chat/completions endpoint. Identity verified by independent
+     org/architecture/paper-citation probe. Each finding cross-checked with grep + Read against
+     the live codebase before logging; 4 of 16 raw findings dropped as false positives
+     (different fence formats, different render domains, _resolve_project_root vs _rel
+     conflation, vague mcp helper claim). Severity assigned by Claude after verification. -->
+
+### MEDIUM
+
+- `cli.py:34` `_truncate(msg, limit=600)` — exact-signature duplicate of `utils/text.py:9` `truncate(msg, limit=600)`. Two implementations risk drift on length-limit policy changes.
+  (fix: delete `cli._truncate`, replace call sites with `from kb.utils.text import truncate`)
+
+- `mcp/app.py:116` `_rel(path)` duplicates `utils/sanitize.py:37` `_rel(path)` — both compute `path.relative_to(PROJECT_ROOT)` for error-message scrubbing. The MCP copy was added before sanitize.py existed; both are now imported across the package.
+  (fix: keep `utils.sanitize._rel`, delete `mcp.app._rel`, update the 1-2 call sites in `mcp/app.py` to import from utils.sanitize)
+
+- `query/engine.py:615/639/688` three private cache-key fns — `_pagerank_cache_key`, `_wiki_bm25_cache_key`, `_raw_sources_cache_key` each compute the same `(path_str, mtime, size, ...)` tuple-hash pattern with minor field variations. Adding a 4th cache (e.g. dedup, embeddings) means a 4th near-copy.
+  (fix: single `_compute_cache_key(path, *, extra_fields=())` helper; or move all three plus the cache dicts into a new `query/_cache.py` module)
+
+- `lint/checks.py` (1046 LOC) — frontmatter, dead-link, orphan, cycle-detection, staleness, and duplicate-slug rules all live in one file. Cycle-30 added consistency lint, cycle-31 added deep-lint — every new rule grows the same module, defeating per-rule test isolation.
+  (fix: split into `lint/checks/<rule>.py` per rule + `lint/checks/__init__.py` registry; or `lint/rules/` matching `lint/runner.py`'s dispatch contract)
+
+- `lint/augment.py` (1186 LOC) — collector, proposer, URL fetcher, persister, outcome recorder, post-ingest quality. The dual `_augment_manifest.py` (213 LOC) and `_augment_rate.py` (110 LOC) sibling helpers further confirm the file is at-or-past the natural decomposition point.
+  (fix: convert `lint/augment.py` → `lint/augment/` package with `collector.py` / `proposer.py` / `fetcher.py` / `persister.py` / `quality.py`; absorb `_augment_manifest.py` and `_augment_rate.py` as `manifest.py` and `rate.py` inside the new package — covers Phase 4.6 LOW item below)
+
+- `mcp/core.py` (1149 LOC) — query, ingest, capture, compile, and helper-tool implementations co-resident despite the cycle-4-13 split that already moved browse / health / quality out. Adding any Phase 5 write-path tool (`kb_review_page` etc., open in Phase 4.5 MEDIUM) lands here by default.
+  (fix: continue the cycle-4-13 pattern — add `mcp/ingest.py`, `mcp/compile.py`; keep `core.py` for the FastMCP app + cross-cutting helpers ≤300 LOC)
+
+- `capture.py:461` `_exclusive_atomic_write` and `utils/io.py:144` `atomic_text_write` are two write-helpers with different invariants — capture's uses `O_EXCL` for slug-collision detection, utils's uses tempfile+rename for crash-atomicity. Cycle 38 AC6 widened test-side patching to cover both sites but the duplication itself was not collapsed; any future write-discipline change (e.g. `fsync` parent dir, lock acquisition) must be applied twice.
+  (fix: single `atomic_text_write(path, content, *, exclusive=False)` in `utils/io.py` accepting both modes; capture.py imports it; cycle-38 dual-site test patches collapse to a single patch)
+
+### LOW
+
+- `lint/augment.py:292` `_load_purpose_text` re-implements `utils/pages.py:186 load_purpose` with a 5000-char truncation and silent OSError-swallow. The `@cache` on the canonical `load_purpose` is bypassed.
+  (fix: `load_purpose(wiki_dir)[:5000] if (text := load_purpose(wiki_dir)) else ""` — or expose a `load_purpose_truncated(wiki_dir, max_chars=5000)` in `utils/pages.py`)
+
+- `mcp/app.py:136-138` `_sanitize_error_str` is a 2-line passthrough wrapper for `utils/sanitize.py:71 sanitize_error_text`. It exists in 30+ MCP call sites across `core.py`, `browse.py`, `health.py`, `quality.py`. Adds no behavior; only adds a tier of indirection that future readers must trace.
+  (fix: replace each `from kb.mcp.app import _sanitize_error_str` with `from kb.utils.sanitize import sanitize_error_text`; delete the wrapper)
+
+- `lint/_augment_manifest.py` (213 LOC) and `lint/_augment_rate.py` (110 LOC) — leading-underscore "private" siblings used only by `lint/augment.py`. The leading underscore on a top-level *file* (vs a function) is non-standard Python; either inline or promote to public submodules.
+  (fix: covered by the `lint/augment.py` package-split MEDIUM item above — these become `lint/augment/manifest.py` and `lint/augment/rate.py`)
+
+- `query/engine.py:301/319` `_build_rephrasing_prompt` + `_suggest_rephrasings` — query-rephrasing logic living in the search engine while `query/rewriter.py:94 rewrite_query` already owns query-side rewriting. Different concerns (rephrasing surfaces alternatives to the user; rewriting expands for retrieval) but related enough to belong in one module.
+  (fix: move both functions to `query/rewriter.py` with a clarifying docstring distinguishing rephrasing-for-UI from rewriting-for-retrieval)
+
+- `feedback/__init__.py` and `review/__init__.py` are empty — no `__all__`, no re-exports, no docstring. Modules `feedback/store.py`, `feedback/reliability.py`, `review/context.py`, `review/refiner.py` are imported via fully-qualified paths everywhere. Boundary is unclear: are these public sub-packages or implementation-only namespaces?
+  (fix: add a one-line module docstring + an `__all__ = ()` (or the actual public surface) to each; this is the documented "implementation-only" pattern used elsewhere in the package)
+
+---
+
 ## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
 
 <!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
