@@ -1,12 +1,21 @@
 """Tests for the ingest pipeline."""
 
+import json
 import threading
 from unittest.mock import patch
 
 import pytest
 
 from kb.ingest.extractors import build_extraction_prompt, extract_from_source, load_template
-from kb.ingest.pipeline import detect_source_type, ingest_source
+from kb.ingest.pipeline import (
+    _build_summary_content,
+    _coerce_str_field,
+    _extract_entity_context,
+    detect_source_type,
+    ingest_source,
+)
+from kb.mcp import core as mcp_core
+from kb.utils.hashing import hash_bytes
 from kb.utils.text import slugify
 
 # -- Extractors tests -----------------------------------------------------------
@@ -613,3 +622,187 @@ def test_duplicate_content_concurrent_ingest(mock_extract, tmp_path):
     )
     # The non-duplicate must have created pages
     assert non_duplicates[0]["pages_created"], "Non-duplicate ingest created no pages"
+
+
+# ── Cycle 10 AC22: _coerce_str_field type-rejection (cycle 43 fold) ─
+
+
+@pytest.mark.parametrize(
+    ("extraction", "field", "expected", "type_name"),
+    [
+        ({"title": "A title"}, "title", "A title", None),
+        ({"title": ""}, "title", "", None),
+        ({}, "title", "", None),
+        ({"title": None}, "title", "", None),
+        ({"title": 1}, "title", None, "int"),
+        ({"title": 1.5}, "title", None, "float"),
+        ({"title": {"nested": "dict"}}, "title", None, "dict"),
+        ({"title": ["list"]}, "title", None, "list"),
+        ({"title": b"bytes"}, "title", None, "bytes"),
+        ({"title": True}, "title", None, "bool"),
+    ],
+)
+def test_coerce_str_field_accepts_string_missing_none_and_rejects_non_strings(
+    extraction, field, expected, type_name
+):
+    before = dict(extraction)
+
+    if type_name is None:
+        assert _coerce_str_field(extraction, field) == expected
+    else:
+        with pytest.raises(ValueError, match=rf"title.*must be string.*{type_name}"):
+            _coerce_str_field(extraction, field)
+    assert extraction == before
+
+
+def test_ingest_source_rejects_non_string_extraction_before_writes_and_manifest(
+    tmp_project, monkeypatch
+):
+    data_dir = tmp_project / ".data"
+    data_dir.mkdir()
+    manifest_path = data_dir / "hashes.json"
+    raw_path = tmp_project / "raw" / "articles" / "bad.md"
+    raw_path.write_text("# Bad\n\nBenign content.", encoding="utf-8")
+    raw_hash = hash_bytes(raw_path.read_bytes())
+    monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", manifest_path)
+
+    with pytest.raises(ValueError, match=r"core_argument.*must be string.*dict"):
+        ingest_source(
+            raw_path,
+            "article",
+            extraction={"title": "Bad", "core_argument": {"nested": "dict"}},
+            wiki_dir=tmp_project / "wiki",
+            raw_dir=tmp_project / "raw",
+            _skip_vector_rebuild=True,
+        )
+
+    assert list((tmp_project / "wiki" / "summaries").iterdir()) == []
+    assert list((tmp_project / "wiki" / "entities").iterdir()) == []
+    assert list((tmp_project / "wiki" / "concepts").iterdir()) == []
+    if manifest_path.exists():
+        assert raw_hash not in json.loads(manifest_path.read_text(encoding="utf-8")).values()
+
+
+def test_build_summary_content_defensively_rejects_non_string_fields():
+    with pytest.raises(ValueError, match=r"core_argument.*must be string.*dict"):
+        _build_summary_content(
+            {"title": "Bad", "core_argument": {"nested": "dict"}},
+            "article",
+        )
+
+
+def test_ingest_source_accepts_valid_string_extraction(tmp_project, monkeypatch):
+    data_dir = tmp_project / ".data"
+    data_dir.mkdir()
+    monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+    raw_path = tmp_project / "raw" / "articles" / "good.md"
+    raw_path.write_text("# Good\n\nBenign content.", encoding="utf-8")
+
+    result = ingest_source(
+        raw_path,
+        "article",
+        extraction={
+            "title": "Good Article",
+            "author": "A. Writer",
+            "core_argument": "A valid overview.",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        },
+        wiki_dir=tmp_project / "wiki",
+        raw_dir=tmp_project / "raw",
+        _skip_vector_rebuild=True,
+    )
+
+    assert result["pages_created"]
+    assert list((tmp_project / "wiki" / "summaries").glob("*.md"))
+
+
+# ── Cycle 11 — extract_entity_context + summary callee type rejection ─
+# (cycle 43 fold from test_cycle11_ingest_coerce.py; 7 _coerce_str_field
+#  bare-function duplicates of the AC22 parametrized test above were
+#  dropped per cycle-17 L3 scope narrowing)
+
+
+def _valid_extraction_cycle11(**overrides):
+    extraction = {
+        "title": "ok",
+        "core_argument": "ok",
+        "key_claims": [],
+        "entities_mentioned": [],
+        "concepts_mentioned": [],
+    }
+    extraction.update(overrides)
+    return extraction
+
+
+def test_ingest_source_rejects_non_string_summary_callee(tmp_project, monkeypatch):
+    data_dir = tmp_project / ".data"
+    data_dir.mkdir()
+    monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+    source_path = tmp_project / "raw" / "articles" / "bad.md"
+    source_path.write_text("# Bad\n\ncontent", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        ingest_source(
+            source_path,
+            source_type="article",
+            extraction=_valid_extraction_cycle11(core_argument=42),
+            wiki_dir=tmp_project / "wiki",
+            raw_dir=tmp_project / "raw",
+            _skip_vector_rebuild=True,
+        )
+
+
+def test_extract_entity_context_rejects_non_string_context_field_cleanly():
+    with pytest.raises(ValueError):
+        _extract_entity_context(
+            "ok",
+            _valid_extraction_cycle11(description=123, quotes="ok"),
+        )
+
+
+@pytest.mark.parametrize("source_type", ["comparison", "synthesis"])
+def test_ingest_source_rejects_comparison_and_synthesis_with_kb_create_page_message(
+    tmp_project, monkeypatch, source_type
+):
+    data_dir = tmp_project / ".data"
+    data_dir.mkdir()
+    manifest_path = data_dir / "hashes.json"
+    monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", manifest_path)
+    source_path = tmp_project / "raw" / "articles" / f"{source_type}.md"
+    source_path.write_text("# Unsupported\n\ncontent", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="kb_create_page"):
+        ingest_source(
+            source_path,
+            source_type=source_type,
+            extraction=_valid_extraction_cycle11(),
+            wiki_dir=tmp_project / "wiki",
+            raw_dir=tmp_project / "raw",
+            _skip_vector_rebuild=True,
+        )
+
+    assert not manifest_path.exists()
+    assert list((tmp_project / "wiki" / "summaries").iterdir()) == []
+
+
+@pytest.mark.parametrize("source_type", ["comparison", "synthesis"])
+def test_kb_ingest_content_rejects_page_types_without_raw_file(
+    tmp_project, monkeypatch, source_type
+):
+    raw_dir = tmp_project / "raw"
+    before = sorted(path.relative_to(raw_dir) for path in raw_dir.rglob("*") if path.is_file())
+    monkeypatch.setattr(mcp_core, "PROJECT_ROOT", tmp_project)
+    monkeypatch.setattr(mcp_core, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(mcp_core, "SOURCE_TYPE_DIRS", {"article": raw_dir / "articles"})
+
+    result = mcp_core.kb_ingest_content(
+        content="# Unsupported\n\ncontent",
+        filename=f"{source_type}.md",
+        source_type=source_type,
+        extraction_json='{"title": "Unsupported"}',
+    )
+
+    assert "kb_create_page" in result
+    after = sorted(path.relative_to(raw_dir) for path in raw_dir.rglob("*") if path.is_file())
+    assert after == before
