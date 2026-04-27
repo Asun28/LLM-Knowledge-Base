@@ -624,7 +624,7 @@ def test_duplicate_content_concurrent_ingest(mock_extract, tmp_path):
     assert non_duplicates[0]["pages_created"], "Non-duplicate ingest created no pages"
 
 
-# ── Cycle 10 AC22 — _coerce_str_field type-rejection contract (folded from test_cycle10_extraction_validation.py) ─
+# ── Cycle 10 AC22: _coerce_str_field type-rejection (cycle 43 fold) ─
 
 
 @pytest.mark.parametrize(
@@ -717,7 +717,10 @@ def test_ingest_source_accepts_valid_string_extraction(tmp_project, monkeypatch)
     assert list((tmp_project / "wiki" / "summaries").glob("*.md"))
 
 
-# ── Cycle 11 — extract_entity_context + summary callee type rejection (folded from test_cycle11_ingest_coerce.py; 7 _coerce_str_field bare-function duplicates of the AC22 parametrized test above were dropped per cycle-17 L3 scope narrowing) ─
+# ── Cycle 11 — extract_entity_context + summary callee type rejection ─
+# (cycle 43 fold from test_cycle11_ingest_coerce.py; 7 _coerce_str_field
+#  bare-function duplicates of the AC22 parametrized test above were
+#  dropped per cycle-17 L3 scope narrowing)
 
 
 def _valid_extraction_cycle11(**overrides):

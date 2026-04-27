@@ -101,7 +101,7 @@ def test_make_source_ref_default_raw_dir(tmp_path):
     assert result == "raw/articles/default-test.md"
 
 
-# ── tmp_project fixture-contract pins (cycle 43 AC4 fold from test_cycle11_conftest_fixture.py) ───────
+# ── tmp_project fixture-contract pins (cycle 43 AC4 fold) ───────
 
 
 class TestTmpProjectFixtureContract:
@@ -146,7 +146,7 @@ class TestTmpProjectFixtureContract:
         assert (wiki / "log.md").read_text(encoding="utf-8") == "# Wiki Log\n\n"
 
 
-# ── PROJECT_ROOT resolution pins (cycle 43 AC7 fold from test_cycle12_config_project_root.py; reload-isolated per cycle-19 L2 / cycle-20 L1) ───────
+# ── PROJECT_ROOT resolution pins (cycle 43 AC7 fold; reload-isolated per c-19/20 L1/L2) ─
 
 
 class TestProjectRootResolution:
@@ -194,9 +194,7 @@ class TestProjectRootResolution:
         assert config.RAW_DIR == project.resolve() / "raw"
         assert config.WIKI_DIR == project.resolve() / "wiki"
 
-    def test_env_set_but_nonexistent_path_warns_and_falls_back(
-        self, monkeypatch, tmp_path, caplog
-    ):
+    def test_env_set_but_nonexistent_path_warns_and_falls_back(self, monkeypatch, tmp_path, caplog):
         missing = tmp_path / "base" / "missing"
         monkeypatch.setenv("KB_PROJECT_ROOT", str(missing))
 
@@ -241,9 +239,7 @@ class TestProjectRootResolution:
         wiki = project / "wiki"
         cwd.mkdir(parents=True)
         wiki.mkdir()
-        (project / "pyproject.toml").write_text(
-            "[project]\nname = 'detected'\n", encoding="utf-8"
-        )
+        (project / "pyproject.toml").write_text("[project]\nname = 'detected'\n", encoding="utf-8")
         monkeypatch.delenv("KB_PROJECT_ROOT", raising=False)
         monkeypatch.chdir(cwd)
         monkeypatch.setattr(Path, "exists", exists_with_heuristic_pyproject_hidden)

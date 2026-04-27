@@ -43,7 +43,7 @@ def test_content_hash(tmp_path):
     assert content_hash(f) == h
 
 
-# ── Cycle 12 — load_page_frontmatter cache + lint integration (folded from test_cycle12_frontmatter_cache.py) ─
+# ── Cycle 12: load_page_frontmatter cache + lint integration (cycle 43 fold) ─
 
 
 def _write_page_cycle12(path, *, title="Test Page", body="Body text"):

@@ -215,7 +215,7 @@ def test_format_report_clean():
     assert "No issues found" in text
 
 
-# ── augment._resolve_raw_dir branch coverage (cycle 43 AC11 fold from test_cycle13_augment_raw_dir.py) ─
+# ── augment._resolve_raw_dir branch coverage (cycle 43 AC11 fold) ─
 
 
 from kb.lint import augment  # noqa: E402  — imported at fold site to keep above tests independent

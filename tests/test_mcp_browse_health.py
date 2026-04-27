@@ -158,7 +158,7 @@ def test_kb_read_page_case_insensitive_fallback(tmp_project, monkeypatch, create
     assert "Error" not in result
 
 
-# ── Cycle 10 AC21 — kb_read_page ambiguous case-insensitive page_id (folded from test_cycle10_browse.py) ─
+# ── Cycle 10 AC21: kb_read_page ambiguous case-insensitive page_id (cycle 43 fold) ─
 
 
 def test_kb_read_page_rejects_case_insensitive_ambiguity_regression_pin(
