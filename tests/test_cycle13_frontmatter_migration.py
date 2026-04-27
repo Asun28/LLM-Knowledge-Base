@@ -528,7 +528,7 @@ class TestRunAugmentVerdictGuardIntegration:
         }
 
         # Seed propose-mode output (gate 1) to satisfy gate 2/3 contract.
-        with mock_patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+        with mock_patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
             augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
 
         # Force the verdict to fail so the production guard fires the callout.
@@ -548,7 +548,7 @@ class TestRunAugmentVerdictGuardIntegration:
         monkeypatch.setattr(augment, "_record_verdict_gap_callout", _spy)
 
         with mock_patch(
-            "kb.lint.augment.call_llm_json",
+            "kb.lint.augment.proposer.call_llm_json",
             side_effect=[
                 {"score": 0.95},  # relevance
                 fake_extraction,  # pre-extract
@@ -640,7 +640,7 @@ class TestRunAugmentVerdictGuardIntegration:
             "rationale": "wp",
         }
 
-        with mock_patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+        with mock_patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
             augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
 
         # Force a PASS verdict (the negative case).
@@ -660,7 +660,7 @@ class TestRunAugmentVerdictGuardIntegration:
         monkeypatch.setattr(augment, "_record_verdict_gap_callout", _spy)
 
         with mock_patch(
-            "kb.lint.augment.call_llm_json",
+            "kb.lint.augment.proposer.call_llm_json",
             side_effect=[
                 {"score": 0.95},  # relevance
                 fake_extraction,  # pre-extract

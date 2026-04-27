@@ -13,7 +13,7 @@ def _seed_proposals(wiki_dir, raw_dir, fake_propose_response):
     """
     from kb.lint.augment import run_augment
 
-    with patch("kb.lint.augment.call_llm_json", return_value=fake_propose_response):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose_response):
         return run_augment(
             wiki_dir=wiki_dir,
             raw_dir=raw_dir,
@@ -164,7 +164,7 @@ def test_proposer_propose_action_returns_filtered_urls():
         ],
         "rationale": "two authoritative sources",
     }
-    with patch("kb.lint.augment.call_llm_json", return_value=fake_response):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_response):
         result = _propose_urls(
             stub={
                 "page_id": "concepts/mixture-of-experts",
@@ -187,7 +187,7 @@ def test_proposer_abstain_action_passthrough():
     from kb.lint.augment import _propose_urls
 
     fake_response = {"action": "abstain", "reason": "no authoritative source"}
-    with patch("kb.lint.augment.call_llm_json", return_value=fake_response):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_response):
         result = _propose_urls(
             stub={
                 "page_id": "concepts/internal-thing",
@@ -210,7 +210,7 @@ def test_proposer_drops_all_urls_treated_as_abstain():
         "urls": ["https://attacker.example/x", "https://malicious.test/y"],
         "rationale": "...",
     }
-    with patch("kb.lint.augment.call_llm_json", return_value=fake_response):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_response):
         result = _propose_urls(
             stub={
                 "page_id": "concepts/x",
@@ -248,7 +248,7 @@ def test_proposer_escapes_title_in_prompt():
 def test_proposer_invalid_response_returns_abstain():
     from kb.lint.augment import _propose_urls
 
-    with patch("kb.lint.augment.call_llm_json", return_value={"unexpected": "shape"}):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value={"unexpected": "shape"}):
         result = _propose_urls(
             stub={
                 "page_id": "concepts/x",
@@ -283,7 +283,7 @@ def test_wikipedia_fallback_returns_url_for_concept():
 def test_relevance_score_uses_scan_tier_llm():
     from kb.lint.augment import _relevance_score
 
-    with patch("kb.lint.augment.call_llm_json", return_value={"score": 0.85}):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value={"score": 0.85}):
         score = _relevance_score(
             stub_title="Mixture of Experts",
             extracted_text="MoE is a neural architecture...",
@@ -294,7 +294,7 @@ def test_relevance_score_uses_scan_tier_llm():
 def test_relevance_score_invalid_response_returns_zero():
     from kb.lint.augment import _relevance_score
 
-    with patch("kb.lint.augment.call_llm_json", return_value={"unexpected": "shape"}):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value={"unexpected": "shape"}):
         score = _relevance_score(stub_title="X", extracted_text="...")
     assert score == 0.0
 
@@ -323,7 +323,7 @@ def test_propose_mode_writes_proposals_file_no_network(tmp_project, create_wiki_
         "urls": ["https://en.wikipedia.org/wiki/Mixture_of_experts"],
         "rationale": "wikipedia",
     }
-    with patch("kb.lint.augment.call_llm_json", return_value=fake_propose):
+    with patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
         result = run_augment(
             wiki_dir=wiki_dir, raw_dir=tmp_project / "raw", mode="propose", max_gaps=5
         )
@@ -350,7 +350,9 @@ def test_propose_mode_max_gaps_caps(tmp_project, create_wiki_page):
             wiki_dir=wiki_dir,
             page_type="entity",
         )
-    with patch("kb.lint.augment.call_llm_json", return_value={"action": "abstain", "reason": "x"}):
+    with patch(
+        "kb.lint.augment.proposer.call_llm_json", return_value={"action": "abstain", "reason": "x"}
+    ):
         result = run_augment(
             wiki_dir=wiki_dir, raw_dir=tmp_project / "raw", mode="propose", max_gaps=3
         )
@@ -369,7 +371,9 @@ def test_propose_mode_dry_run_does_not_write_proposals(tmp_project, create_wiki_
         wiki_dir=wiki_dir,
         page_type="entity",
     )
-    with patch("kb.lint.augment.call_llm_json", return_value={"action": "abstain", "reason": "x"}):
+    with patch(
+        "kb.lint.augment.proposer.call_llm_json", return_value={"action": "abstain", "reason": "x"}
+    ):
         run_augment(
             wiki_dir=wiki_dir,
             raw_dir=tmp_project / "raw",
@@ -431,7 +435,7 @@ def test_execute_mode_writes_raw_file_no_ingest(
 
     fake_relevance = {"score": 0.9}
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         return_value=fake_relevance,
     ):
         result = run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5)
@@ -492,7 +496,7 @@ def test_execute_mode_relevance_below_threshold_skips(
 
     fake_relevance = {"score": 0.1}  # below 0.5 threshold
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         return_value=fake_relevance,
     ):
         result = run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5)
@@ -545,7 +549,7 @@ def test_execute_mode_writes_manifest(tmp_project, create_wiki_page, httpx_mock,
     _seed_proposals(wiki_dir, raw_dir, fake_propose)
 
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         return_value={"score": 0.9},
     ):
         result = run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="execute", max_gaps=5)
@@ -731,7 +735,7 @@ def test_auto_ingest_creates_wiki_page_with_speculative_confidence(
     _seed_proposals(wiki_dir, raw_dir, fake_propose)
 
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         side_effect=[
             {"score": 0.95},  # relevance
             fake_extraction,  # pre-extract for ingest
@@ -787,7 +791,7 @@ def test_auto_ingest_missing_api_key_raises_clear_error(
     _seed_proposals(wiki_dir, raw_dir, fake_propose)
 
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         side_effect=[
             {"score": 0.9},
             # When ingest extraction is attempted, simulate ANTHROPIC_API_KEY missing
@@ -904,7 +908,7 @@ def test_g6_cooldown_writeback_after_propose_attempt(tmp_project, create_wiki_pa
 
     before = _dt.now(_UTC).replace(microsecond=0) - _td(seconds=1)
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         return_value={"action": "abstain", "reason": "testing"},
     ):
         run_augment(
@@ -943,7 +947,7 @@ def test_g6_cooldown_writeback_skipped_on_dry_run(tmp_project, create_wiki_page)
     )
 
     with patch(
-        "kb.lint.augment.call_llm_json",
+        "kb.lint.augment.proposer.call_llm_json",
         return_value={"action": "abstain", "reason": "dry"},
     ):
         run_augment(

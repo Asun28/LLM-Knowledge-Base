@@ -1,0 +1,180 @@
+"""Augment run-state manifest with atomic JSON writes + cross-process file lock."""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from kb.config import PROJECT_ROOT
+from kb.utils.io import atomic_json_write, file_lock
+
+logger = logging.getLogger(__name__)
+
+MANIFEST_DIR = PROJECT_ROOT / ".data"
+
+TERMINAL_STATES = frozenset({"done", "abstained", "failed", "cooldown"})
+RESUME_COMPLETE_STATES = TERMINAL_STATES | frozenset({"ingested", "verdict"})
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _get_manifest_dir() -> Path:
+    return Path(MANIFEST_DIR)
+
+
+def _resolve_data_dir(data_dir: Path | None) -> Path:
+    """Honor caller-supplied data_dir so custom-project runs do not leak state."""
+    return data_dir if data_dir is not None else _get_manifest_dir()
+
+
+def _runs_index_path(data_dir: Path | None = None) -> Path:
+    """Derive the runs-index path with lazy data-dir resolution."""
+    return _resolve_data_dir(data_dir) / "augment_runs.jsonl"
+
+
+@dataclass
+class Manifest:
+    """Augment run state. Use Manifest.start() or Manifest.resume(); never instantiate directly."""
+
+    run_id: str
+    path: Path
+    data: dict
+    data_dir: Path = field(default_factory=_get_manifest_dir)
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        run_id: str,
+        mode: str,
+        max_gaps: int,
+        stubs: list[dict[str, Any]],
+        data_dir: Path | None = None,
+    ) -> Manifest:
+        resolved = _resolve_data_dir(data_dir)
+        resolved.mkdir(parents=True, exist_ok=True)
+        path = resolved / f"augment-run-{run_id[:8]}.json"
+        ts = _now_iso()
+        data = {
+            "schema": 1,
+            "run_id": run_id,
+            "started_at": ts,
+            "ended_at": None,
+            "mode": mode,
+            "max_gaps": max_gaps,
+            "gaps": [
+                {
+                    "page_id": stub["page_id"],
+                    "title": stub.get("title", ""),
+                    "state": "pending",
+                    "transitions": [{"state": "pending", "ts": ts}],
+                }
+                for stub in stubs
+            ],
+        }
+        with file_lock(path):
+            atomic_json_write(data, path)
+        return cls(run_id=run_id, path=path, data=data, data_dir=resolved)
+
+    @classmethod
+    def resume(cls, *, run_id: str, data_dir: Path | None = None) -> Manifest | None:
+        """Resume an incomplete run by exact 8-char hex id."""
+        resolved = _resolve_data_dir(data_dir)
+        if not resolved.exists():
+            return None
+        path = resolved / f"augment-run-{run_id}.json"
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Skipping corrupt manifest %s: %s", path, e)
+            return None
+        if data.get("ended_at"):
+            return None
+        return cls(run_id=data["run_id"], path=path, data=data, data_dir=resolved)
+
+    def advance(self, page_id: str, state: str, payload: dict[str, Any] | None = None) -> None:
+        """Transition a gap to a new state under file lock."""
+        ts = _now_iso()
+        with file_lock(self.path):
+            try:
+                latest = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                latest = self.data
+            for gap in latest["gaps"]:
+                if gap["page_id"] == page_id:
+                    gap["state"] = state
+                    transition: dict[str, Any] = {"state": state, "ts": ts}
+                    if payload is not None:
+                        transition["payload"] = payload
+                    gap["transitions"].append(transition)
+                    atomic_json_write(latest, self.path)
+                    self.data = latest
+                    return
+        raise KeyError(f"Gap not found in manifest: {page_id}")
+
+    def close(self) -> None:
+        with file_lock(self.path):
+            try:
+                latest = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                latest = self.data
+            latest["ended_at"] = _now_iso()
+            atomic_json_write(latest, self.path)
+            self.data = latest
+        self._append_runs_index()
+
+    def _append_runs_index(self) -> None:
+        counts = {"done": 0, "abstained": 0, "failed": 0, "cooldown": 0}
+        for gap in self.data["gaps"]:
+            counts[gap["state"]] = counts.get(gap["state"], 0) + 1
+        entry = {
+            "run_id": self.run_id,
+            "started_at": self.data["started_at"],
+            "ended_at": self.data["ended_at"],
+            "mode": self.data["mode"],
+            "gaps_examined": len(self.data["gaps"]),
+            "gaps_succeeded": counts["done"],
+            "gaps_abstained": counts["abstained"],
+            "gaps_failed": counts["failed"],
+            "gaps_cooldown": counts["cooldown"],
+        }
+        runs_index = _runs_index_path(self.data_dir)
+        runs_index.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock(runs_index):
+            with runs_index.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+
+    def incomplete_gaps(self) -> list[dict[str, Any]]:
+        return [g for g in self.data["gaps"] if g["state"] not in RESUME_COMPLETE_STATES]
+
+    def gap_state(self, page_id: str) -> str | None:
+        for gap in self.data["gaps"]:
+            if gap["page_id"] == page_id:
+                return gap["state"]
+        return None
+
+
+def _sync_legacy_shim() -> None:
+    legacy = sys.modules.get("kb.lint._augment_manifest")
+    if legacy is None:
+        return
+    legacy.__dict__.update(
+        {
+            "Manifest": Manifest,
+            "MANIFEST_DIR": MANIFEST_DIR,
+            "TERMINAL_STATES": TERMINAL_STATES,
+            "RESUME_COMPLETE_STATES": RESUME_COMPLETE_STATES,
+        }
+    )
+
+
+_sync_legacy_shim()

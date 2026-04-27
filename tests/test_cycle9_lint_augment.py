@@ -67,7 +67,7 @@ def test_summary_counts_per_stub_not_per_url(tmp_project, monkeypatch):
 
     with (
         patch(
-            "kb.lint.augment.call_llm_json",
+            "kb.lint.augment.proposer.call_llm_json",
             side_effect=[
                 {"score": 0.95},
                 {

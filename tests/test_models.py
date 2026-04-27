@@ -209,20 +209,3 @@ def test_check_frontmatter_reports_malformed_page(tmp_path):
         )
         for issue in issues
     )
-
-
-def test_graph_builder_documents_case_sensitivity_caveat():
-    """Cycle 43 AC8 — vacuous-test fold per C40-L3 (do not auto-upgrade).
-
-    This is a docstring-introspection assertion (gb.__doc__ contains specific
-    strings); reverting the docstring would fail it but reverting any actual
-    case-sensitivity logic in `kb.graph.builder.page_id` would NOT. See
-    BACKLOG.md Phase 4.5 HIGH #4 vacuous-test upgrade candidate entry for the
-    behavior-based replacement plan.
-    """
-    import kb.graph.builder as gb
-
-    doc = (gb.__doc__ or "").lower()
-    assert "case-sensitiv" in doc  # handles case-sensitivity / case-sensitive
-    assert "path" in doc
-    assert "id" in doc

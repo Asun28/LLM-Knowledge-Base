@@ -88,17 +88,7 @@ _All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-
 
 - `tests/` coverage-visibility — ~50 of 94 files are named `test_v0NNN_taskNN.py` / `test_v0NNN_phaseNNN.py` / `test_phase4_audit_*.py`. To verify `evolve/analyzer.py` has tier-budget coverage you must grep ~50 versioned files because canonical `test_evolve.py` has only 11 tests (none touch numeric tokens, redundant scans, or three-level break — all open in Phase 4.5 MEDIUM). `_compute_pagerank_scores` is searched across 25 files. (R3)
   (fix: freeze-and-fold rule — once a version ships, fold its tests INTO the canonical module file (`test_v0917_dedup.py` → `test_query.py::class TestDedup`); enable `coverage` in CI and surface per-module % in PR comments)
-  *(cycle-43 progress: 19 files folded total. Cycle 38: mock_scan_llm dual-site fold via cycle 39. Cycle 40: cycle10_safe_call → test_mcp_browse_health; cycle10_linker SPLIT to test_compile + test_utils_text; cycle11_stale_results → test_query. Cycle 41: cycle10_validate_wiki_dir → test_mcp_browse_health; cycle10_capture → test_capture; cycle10_quality → test_mcp_quality_new; cycle11_cli_imports → test_cli. Cycle 43: cycle10_browse → test_mcp_browse_health; cycle10_extraction_validation → test_ingest; cycle10_vector_min_sim → test_query; cycle11_conftest_fixture → test_paths (new TestTmpProjectFixtureContract class); cycle11_ingest_coerce → test_ingest (4-of-11 unique; 7 _coerce_str_field bare-function duplicates of cycle-43 AC2's parametrized fold dropped per cycle-17 L3); cycle11_utils_pages → test_utils; cycle12_config_project_root → test_paths (new TestProjectRootResolution class with autouse reload-isolation per cycle-19 L2); cycle12_frontmatter_cache → test_models (1 vacuous-test flagged); cycle12_io_sweep → test_utils_io (2 vacuous-tests flagged); cycle13_augment_raw_dir → test_lint (TestRawDirDerivation class); cycle13_sweep_wiring → test_cli (TestCliBootSweep class). Cycle-43 deferred: cycle12_sanitize_context (AC10) deferred to cycle 44+ due to active cycle-42 mcp/* dedup interference. tests/ now 242 files, was 251 at cycle-41 end. HIGH item remains open with ~190+ versioned files still to fold across future cycles)*
-
-  **Cycle 43 vacuous-test upgrade candidates (C40-L3 — flagged but not auto-upgraded; future behavior-based replacement plan):**
-
-  1. `tests/test_models.py::test_graph_builder_documents_case_sensitivity_caveat` (folded from `test_cycle12_frontmatter_cache.py:180-186`) — asserts `kb.graph.builder.__doc__` contains "case-sensitiv" / "path" / "id". Reverting any case-sensitivity logic in `kb.graph.builder.page_id` would NOT fail this. **Upgrade approach:** write a behavioral test that calls `page_id(Path("wiki/concepts/FOO.md"), wiki_dir=Path("wiki"))` and asserts the lowercase normalisation, plus a sibling test exercising case-collision handling — both already exist as folded `test_page_id_*` tests in `test_utils.py`, so the docstring test could simply be DELETED rather than upgraded.
-
-  2. `tests/test_utils_io.py::test_load_page_frontmatter_docstring_documents_mtime_caveat` (folded from `test_cycle12_io_sweep.py:91-102`) — asserts `kb.utils.pages.load_page_frontmatter.__doc__` contains "mtime" / "filesystem" / one of {FAT32, SMB, OneDrive}. Reverting cache-key logic would NOT fail this. **Upgrade approach:** write a behavioral test that creates a page on a temp directory, simulates an mtime collision (force two `os.utime` calls to coarse-resolution timestamps), and asserts the cache returns the FRESH page content via `load_page_frontmatter` — pinning the cache-key behavior, not the docstring text.
-
-  3. `tests/test_utils_io.py::test_cycle12_io_doc_caveats_are_present` (folded from `test_cycle12_io_sweep.py:105-116`) — asserts `file_lock.__doc__` contains "PID" + "recycling"; `atomic_json_write.__doc__` contains "OneDrive" + "sweep_orphan_tmp"; `atomic_text_write.__doc__` contains the same. **Upgrade approach:** for `file_lock` PID-recycling, write a behavioral test that creates a stale `.lock` file with a recycled PID (or simulates the recycling via monkeypatched `psutil.pid_exists` returning False then True) and confirms the lock is reaped. For `atomic_*_write` OneDrive caveat, the actual sweep behavior is already covered by `test_sweep_orphan_tmp_*` tests — the docstring assertion is fully redundant.
-
-  **Cycle 43 deferral (AC10):** `tests/test_cycle12_sanitize_context.py` → `tests/test_mcp_core.py` postponed due to active cycle-42 Phase 4.6 dedup interference. The `_sanitize_conversation_context` symbol survives cycle-42, but co-location with cycle-42's surrounding `mcp/core.py` edits creates merge surface. Revisit in cycle 44+ once cycle-42 lands. Current file count baseline reflects AC10 still as a separate `test_cycle12_*.py` file (counted in the 242 above).
+  *(cycle-44 progress: 20 files folded total. Cycle 38-43 progress preserved in CHANGELOG-history.md. Cycle 44 closed AC10 deferral: cycle12_sanitize_context → test_mcp_core (parametrized + standalone preserved + 3 new behavioral tests for ≥6 sanitize cases per cycle-44 CONDITION 5); plus all 3 cycle-43 vacuous-test upgrade candidates (test_graph_builder_documents_case_sensitivity_caveat DELETED — covered by `test_page_id_*` in test_utils.py; test_load_page_frontmatter_docstring_documents_mtime_caveat REPLACED by behavioral cache-stability test pinning the documented stale-read contract; test_cycle12_io_doc_caveats_are_present atomic_*_write OneDrive portion DELETED, file_lock PID portion REPLACED by behavioral dead-PID-reaping test patching `kb.utils.io.os.kill`). tests/ now 241 files, was 240 at cycle-43 end (cycle 44 net +1: −1 cycle12_sanitize_context fold + 2 new test_lint_*_split.py regression files). HIGH item remains open with ~190+ versioned files still to fold across future cycles)*
 
 - `tests/conftest.py` `project_root` / `raw_dir` / `wiki_dir` leak surface — fixtures point at REAL `PROJECT_ROOT` and are documented as "read-only use" but nothing enforces it. `test_cli.py:61-63` proves the global-escape paths exist (multi-global monkeypatch). Phase 4.5 already flagged `WIKI_CONTRADICTIONS` leaking, `load_purpose()` reading the real file, `append_wiki_log` defaulting to production. Phase 5 will add `wiki/hot.md`, `wiki/overview.md`, `wiki/_schema.md`, `raw/captures/` — one more leak surface each. (R3; cycle 7 only added autouse embeddings reset)
   (fix: make read-only fixtures fail loudly — return paths under a sandbox by default; provide explicit `real_project_root` fixture requiring `pytest --use-real-paths`; autouse monkeypatch of all `WIKI_*` constants to `tmp_path` for tests that don't explicitly opt out)
@@ -208,19 +198,18 @@ _All items resolved — see CHANGELOG cycle 28._
 
 <!-- Cycle 42 closed (2026-04-27): M1 cli._truncate → kb.utils.text.truncate;
      M2 mcp.app._rel → kb.utils.sanitize._rel; M3 query/engine three cache-key
-     fns → single _compute_cache_key helper. -->
+     fns → single _compute_cache_key helper.
+     Cycle 44 closed (2026-04-27): M1 lint/checks.py 1046 LOC → 8 per-rule
+     submodules in kb/lint/checks/ + Q1 WIKI_DIR/RAW_DIR re-export pattern;
+     M2 lint/augment.py 1189 LOC → 9-file kb/lint/augment/ package
+     (collector / proposer / fetcher / persister / quality / manifest / rate /
+     orchestrator / __init__) + _augment_manifest.py / _augment_rate.py kept
+     as cycle-45-deletion compat shims per design Q2;
+     M4 atomic_text_write gains `exclusive: bool = False` kwarg; capture.py
+     `_exclusive_atomic_write` removed (was test-only fixture). -->
 
-- `lint/checks.py` (1046 LOC) — frontmatter, dead-link, orphan, cycle-detection, staleness, and duplicate-slug rules all live in one file. Cycle-30 added consistency lint, cycle-31 added deep-lint — every new rule grows the same module, defeating per-rule test isolation.
-  (fix: split into `lint/checks/<rule>.py` per rule + `lint/checks/__init__.py` registry; or `lint/rules/` matching `lint/runner.py`'s dispatch contract)
-
-- `lint/augment.py` (1186 LOC) — collector, proposer, URL fetcher, persister, outcome recorder, post-ingest quality. The dual `_augment_manifest.py` (213 LOC) and `_augment_rate.py` (110 LOC) sibling helpers further confirm the file is at-or-past the natural decomposition point.
-  (fix: convert `lint/augment.py` → `lint/augment/` package with `collector.py` / `proposer.py` / `fetcher.py` / `persister.py` / `quality.py`; absorb `_augment_manifest.py` and `_augment_rate.py` as `manifest.py` and `rate.py` inside the new package — covers Phase 4.6 LOW item below)
-
-- `mcp/core.py` (1149 LOC) — query, ingest, capture, compile, and helper-tool implementations co-resident despite the cycle-4-13 split that already moved browse / health / quality out. Adding any Phase 5 write-path tool (`kb_review_page` etc., open in Phase 4.5 MEDIUM) lands here by default.
-  (fix: continue the cycle-4-13 pattern — add `mcp/ingest.py`, `mcp/compile.py`; keep `core.py` for the FastMCP app + cross-cutting helpers ≤300 LOC)
-
-- `capture.py:461` `_exclusive_atomic_write` and `utils/io.py:144` `atomic_text_write` are two write-helpers with different invariants — capture's uses `O_EXCL` for slug-collision detection, utils's uses tempfile+rename for crash-atomicity. Cycle 38 AC6 widened test-side patching to cover both sites but the duplication itself was not collapsed; any future write-discipline change (e.g. `fsync` parent dir, lock acquisition) must be applied twice.
-  (fix: single `atomic_text_write(path, content, *, exclusive=False)` in `utils/io.py` accepting both modes; capture.py imports it; cycle-38 dual-site test patches collapse to a single patch)
+- `mcp/core.py` (1149 LOC) — query, ingest, capture, compile, and helper-tool implementations co-resident despite the cycle-4-13 split that already moved browse / health / quality out. Adding any Phase 5 write-path tool (`kb_review_page` etc., open in Phase 4.5 MEDIUM) lands here by default. **Cycle 44 design Q13 DEFERRED to cycle 45** due to ≥50 patch sites across `tests/test_cycle11_task6_mcp_ingest_type.py`, `test_cycle32_cli_parity_and_fair_queue.py`, `test_fixes_v050.py`, `test_cycle19_mcp_monkeypatch_migration.py`, `test_cycle33_mcp_core_path_leak.py`, `test_mcp_core.py`, `test_v0914_phase395.py`, `test_v098_fixes.py`, `test_v4_11_mcp.py`, `test_cycle9_mcp_core.py`, `test_ingest.py`, `test_backlog_by_file_cycle1.py`, `test_cycle12_sanitize_context.py` (folded), `test_cycle16_kb_query_save_as.py` (R2 enumeration in cycle-44 design eval). Cycle-22 L4 conservative posture.
+  (fix: continue the cycle-4-13 pattern — add `mcp/ingest.py`, `mcp/compile.py`; keep `core.py` for the FastMCP app + cross-cutting helpers ≤300 LOC. Use lazy-lookup pattern (`import kb.mcp.core as core; core.RAW_DIR`) for moved-tool global reads per cycle-44 design Q8 option c, plus targeted patch-transparency regression tests + 29-tool registration regression. Cycle 45 also folds `lint/_augment_manifest.py` + `lint/_augment_rate.py` compat shims and migrates the ~25 cycle-44-deferred test patch sites.)
 
 ### LOW
 
@@ -229,7 +218,12 @@ _All items resolved — see CHANGELOG cycle 28._
      deleted (46 call sites migrated to kb.utils.sanitize.sanitize_error_text);
      L4 query/engine rephrasing helpers moved to query/rewriter.py;
      L5 feedback/__init__.py and review/__init__.py gain module docstring +
-     empty __all__. -->
+     empty __all__.
+     Cycle 44 closed (2026-04-27): L1 lint/_augment_manifest.py +
+     lint/_augment_rate.py absorbed into lint/augment/manifest.py +
+     lint/augment/rate.py as part of M2 package conversion; the legacy
+     filenames REMAIN as 5-line compat shims tagged for cycle-45 deletion
+     (per design Q2 — avoids 25-site test patch migration in cycle 44). -->
 
 - `lint/_augment_manifest.py` (213 LOC) and `lint/_augment_rate.py` (110 LOC) — leading-underscore "private" siblings used only by `lint/augment.py`. The leading underscore on a top-level *file* (vs a function) is non-standard Python; either inline or promote to public submodules.
   (fix: covered by the `lint/augment.py` package-split MEDIUM item above — these become `lint/augment/manifest.py` and `lint/augment/rate.py`)
