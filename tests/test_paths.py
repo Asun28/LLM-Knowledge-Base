@@ -94,3 +94,48 @@ def test_make_source_ref_default_raw_dir(tmp_path):
         result = make_source_ref(source)
 
     assert result == "raw/articles/default-test.md"
+
+
+# ── tmp_project fixture-contract pins (cycle 43 AC4 fold from test_cycle11_conftest_fixture.py) ───────
+
+
+class TestTmpProjectFixtureContract:
+    """Pin the conftest-defined ``tmp_project`` fixture's canonical wiki files.
+
+    The fixture must create wiki/index.md, wiki/_sources.md, and wiki/log.md
+    with specific frontmatter+body shapes. A future change that accidentally
+    mutates these defaults would silently break every consuming test; this
+    single-purpose pin catches the drift early.
+    """
+
+    EXPECTED_INDEX = (
+        "---\n"
+        "title: Wiki Index\n"
+        "source: []\n"
+        "type: index\n"
+        "---\n\n"
+        "# Knowledge Base Index\n\n"
+        "## Pages\n\n"
+        "*No pages yet.*\n\n"
+        "## Entities\n\n"
+        "*No pages yet.*\n\n"
+        "## Concepts\n\n"
+        "*No pages yet.*\n\n"
+        "## Comparisons\n\n"
+        "*No pages yet.*\n\n"
+        "## Summaries\n\n"
+        "*No pages yet.*\n\n"
+        "## Synthesis\n\n"
+        "*No pages yet.*\n"
+    )
+
+    EXPECTED_SOURCES = (
+        "---\ntitle: Source Mapping\nsource: []\ntype: index\n---\n\n# Source Mapping\n"
+    )
+
+    def test_tmp_project_creates_canonical_index_sources_and_log(self, tmp_project):
+        wiki = tmp_project / "wiki"
+
+        assert (wiki / "index.md").read_text(encoding="utf-8") == self.EXPECTED_INDEX
+        assert (wiki / "_sources.md").read_text(encoding="utf-8") == self.EXPECTED_SOURCES
+        assert (wiki / "log.md").read_text(encoding="utf-8") == "# Wiki Log\n\n"
