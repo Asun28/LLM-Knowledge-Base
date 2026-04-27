@@ -1,6 +1,11 @@
 """Tests for kb.utils.paths — canonical source reference computation."""
 
+import importlib
+import logging
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from kb.utils.paths import make_source_ref
 
@@ -139,3 +144,128 @@ class TestTmpProjectFixtureContract:
         assert (wiki / "index.md").read_text(encoding="utf-8") == self.EXPECTED_INDEX
         assert (wiki / "_sources.md").read_text(encoding="utf-8") == self.EXPECTED_SOURCES
         assert (wiki / "log.md").read_text(encoding="utf-8") == "# Wiki Log\n\n"
+
+
+# ── PROJECT_ROOT resolution pins (cycle 43 AC7 fold from test_cycle12_config_project_root.py; reload-isolated per cycle-19 L2 / cycle-20 L1) ───────
+
+
+class TestProjectRootResolution:
+    """Cycle 12 TASK 3 tests for kb.config.PROJECT_ROOT resolution.
+
+    Each test mutates env vars and reloads kb.config; the autouse fixture
+    restores the canonical config snapshot after every test so sibling
+    tests in test_paths.py don't see leaked PROJECT_ROOT/RAW_DIR/WIKI_DIR
+    state.
+    """
+
+    @staticmethod
+    def _reload_config():
+        import kb.config as config
+
+        return importlib.reload(config)
+
+    @staticmethod
+    def _heuristic_root(config) -> Path:
+        return Path(config.__file__).resolve().parents[2]
+
+    @pytest.fixture(autouse=True)
+    def _restore_config_after_test(self, monkeypatch):
+        """Restore kb.config to canonical snapshot after every test in this class.
+
+        Cycle-19 L2 / cycle-20 L1 reload-isolation: this class reloads
+        kb.config N times; without an autouse teardown, sibling tests in
+        test_paths.py see whatever the LAST test in this class left behind.
+        """
+        yield
+        monkeypatch.delenv("KB_PROJECT_ROOT", raising=False)
+        # Force reload back to canonical heuristic-root state.
+        import kb.config as config
+
+        importlib.reload(config)
+
+    def test_valid_env_var_path_used(self, monkeypatch, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.setenv("KB_PROJECT_ROOT", str(project))
+
+        config = self._reload_config()
+
+        assert config.PROJECT_ROOT == project.resolve()
+        assert config.RAW_DIR == project.resolve() / "raw"
+        assert config.WIKI_DIR == project.resolve() / "wiki"
+
+    def test_env_set_but_nonexistent_path_warns_and_falls_back(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        missing = tmp_path / "base" / "missing"
+        monkeypatch.setenv("KB_PROJECT_ROOT", str(missing))
+
+        with caplog.at_level(logging.WARNING, logger="kb.config"):
+            config = self._reload_config()
+
+        assert config.PROJECT_ROOT == self._heuristic_root(config)
+        assert "KB_PROJECT_ROOT" in caplog.text
+        assert str(missing) in caplog.text
+        assert "not a directory" in caplog.text
+
+    def test_env_set_but_regular_file_warns_and_falls_back(self, monkeypatch, tmp_path, caplog):
+        project = tmp_path / "project"
+        project.mkdir()
+        file_path = project / "not-a-dir.txt"
+        file_path.write_text("not a directory", encoding="utf-8")
+        monkeypatch.setenv("KB_PROJECT_ROOT", str(file_path))
+
+        with caplog.at_level(logging.WARNING, logger="kb.config"):
+            config = self._reload_config()
+
+        assert config.PROJECT_ROOT == self._heuristic_root(config)
+        assert "KB_PROJECT_ROOT" in caplog.text
+        assert str(file_path) in caplog.text
+        assert "not a directory" in caplog.text
+
+    def test_env_unset_walk_up_finds_pyproject_within_five_levels(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        import kb.config as config
+
+        heuristic_pyproject = Path(config.__file__).resolve().parents[2] / "pyproject.toml"
+        original_exists = Path.exists
+
+        def exists_with_heuristic_pyproject_hidden(path):
+            if Path(path) == heuristic_pyproject:
+                return False
+            return original_exists(path)
+
+        project = tmp_path / "detected"
+        cwd = project / "one" / "two" / "three" / "four" / "five"
+        wiki = project / "wiki"
+        cwd.mkdir(parents=True)
+        wiki.mkdir()
+        (project / "pyproject.toml").write_text(
+            "[project]\nname = 'detected'\n", encoding="utf-8"
+        )
+        monkeypatch.delenv("KB_PROJECT_ROOT", raising=False)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr(Path, "exists", exists_with_heuristic_pyproject_hidden)
+
+        with caplog.at_level(logging.INFO, logger="kb.config"):
+            config = self._reload_config()
+
+        assert config.PROJECT_ROOT == project.resolve()
+        assert "KB_PROJECT_ROOT" not in caplog.text
+        assert "pyproject.toml" in caplog.text
+        assert str(project.resolve()) in caplog.text
+        assert "wiki_exists=True" in caplog.text
+
+    def test_env_unset_no_match_within_five_levels_falls_back_without_raise(
+        self, monkeypatch, tmp_path
+    ):
+        cwd = tmp_path / "one" / "two" / "three" / "four" / "five" / "six"
+        cwd.mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'too-far'\n", encoding="utf-8")
+        monkeypatch.delenv("KB_PROJECT_ROOT", raising=False)
+        monkeypatch.chdir(cwd)
+
+        config = self._reload_config()
+
+        assert config.PROJECT_ROOT == self._heuristic_root(config)
