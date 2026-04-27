@@ -450,7 +450,7 @@ class TestBuildGraphPagesKwarg:
 
 class TestSanitizeErrorStr:
     def test_strips_windows_drive_letter(self):
-        from kb.mcp.app import _sanitize_error_str
+        from kb.utils.sanitize import sanitize_error_text as _sanitize_error_str
 
         exc = OSError(2, "No such file", r"D:\secret\raw\x.md")
         out = _sanitize_error_str(exc)
@@ -458,14 +458,14 @@ class TestSanitizeErrorStr:
         assert "<path>" in out or "_" in out or "raw/" in out  # some redaction applied
 
     def test_handles_none_path(self):
-        from kb.mcp.app import _sanitize_error_str
+        from kb.utils.sanitize import sanitize_error_text as _sanitize_error_str
 
         exc = OSError("generic")
         out = _sanitize_error_str(exc, None)
         assert "D:\\" not in out
 
     def test_replaces_known_path(self, tmp_path):
-        from kb.mcp.app import _sanitize_error_str
+        from kb.utils.sanitize import sanitize_error_text as _sanitize_error_str
 
         p = tmp_path / "x.md"
         exc = OSError(f"Could not read {p}")
