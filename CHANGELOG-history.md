@@ -5,9 +5,75 @@
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-04-27
+## Active-unreleased archive — 2026-04-16 to 2026-04-28
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-04-28 — cycle 46 — Phase 4.6 LOW closeout + dep-CVE re-verify + BACKLOG hygiene
+
+**Theme:** delete `lint/_augment_*.py` compat shims (deferred cycle-44 → 45 → 46), migrate 36 test patch sites to canonical paths, drop dead `_sync_legacy_shim()` machinery, re-verify 9 dep-CVE BACKLOG entries, collapse Phase 4.6 to Resolved Phases.
+
+**Items shipped (12 ACs):**
+
+- **AC1** — migrated 36 test patch sites across 8 files from `kb.lint._augment_(manifest|rate)` → `kb.lint.augment.(manifest|rate)`. Per-file counts: `test_backlog_by_file_cycle1.py` (2), `test_cycle13_frontmatter_migration.py` (2), `test_cycle17_resume.py` (1), `test_cycle9_lint_augment.py` (2), `test_v5_kb_lint_signature.py` (1), `test_v5_lint_augment_manifest.py` (6), `test_v5_lint_augment_orchestrator.py` (16), `test_v5_lint_augment_rate.py` (6). Implementation: 14 `Edit replace_all=True` calls (one per file per substring) per Q6 / cycle-24 L1 single-line literal pattern; mandatory post-edit `rg -c "kb\.lint\._augment_(manifest|rate)" tests/` returning zero. Targeted pytest after migration: 116 passed + 1 skipped.
+
+- **AC2** — `tests/test_lint_augment_split.py` cycle-44 anchor refresh per CONDITION 2 / Q12 amendment:
+  - Deleted `test_augment_compat_shims_resolve_to_new_package` (purpose vanishes when shims deleted).
+  - Inverted 2× `assert (ROOT / "src" / "kb" / "lint" / "_augment_*.py").is_file()` → `assert not (...).is_file()`.
+  - Added behavioural `pytest.raises(ModuleNotFoundError): import kb.lint._augment_manifest` and same for `_augment_rate` per `feedback_test_behavior_over_signature` / C40-L3 — file-presence is signature-shaped, import-failure is the behavioural contract.
+  - Added new test `test_run_augment_docstring_survives_cycle46_import_flip` per CONDITION 3 / cycle-23 L1 forward-protection (asserts `run_augment.__doc__` contains "Three-gate" — pins the docstring against future function-local-import edits that could orphan it).
+
+- **AC3** — `src/kb/lint/augment/orchestrator.py` lines 79-80 function-local imports flipped from `kb.lint._augment_*` to `kb.lint.augment.*`. Single-line literal substring substitution; cycle-23 L1 docstring orphan risk verified absent (line 75 docstring `"""Three-gate augment orchestrator."""` is single-line and closes BEFORE imports at lines 76+).
+
+- **AC4** — `src/kb/lint/augment/manifest.py`: deleted `import sys` (line 7) + `_sync_legacy_shim()` function (lines 165-176) + module-level call (line 179). Per CONDITION 4 / Q5 — only one `sys.` reference (in `_sync_legacy_shim` body); ruff F401 would otherwise fire on the orphan import.
+
+- **AC5** — `src/kb/lint/augment/rate.py`: deleted `import sys` (line 7) + `_sync_legacy_shim()` function (lines 80-84) + module-level call (line 87). Same justification as AC4.
+
+- **AC6** — Deleted `src/kb/lint/_augment_manifest.py` (27 LOC compat shim).
+
+- **AC7** — Deleted `src/kb/lint/_augment_rate.py` (25 LOC compat shim).
+
+- **AC8** — Deleted Phase 4.6 LOW BACKLOG entry (`lint/_augment_manifest.py (213 LOC) and lint/_augment_rate.py (110 LOC) — leading-underscore "private" siblings...`). Resolved by AC6+AC7. Also deleted the cycle-44 historical comment block per design Q7 / BACKLOG-as-open-work format guide.
+
+- **AC9** — Deleted Phase 4.6 MEDIUM BACKLOG entry for `mcp/core.py` (1149 LOC). Stale documentation only — cycle-45 PR #65 already shipped the M3 split: `mcp/core.py` 1149 → 447 LOC + `mcp/ingest.py` 612 LOC + `mcp/compile.py` 148 LOC.
+
+- **Phase 4.6 collapse** — entire Phase 4.6 section removed from BACKLOG.md (no remaining open items); single one-liner added to "Resolved Phases" summarising M1-M4 + L1-L5 closeouts across cycles 42 + 44 + 45 + 46.
+
+- **AC10** — Dep-CVE re-verification per CONDITION 5 / Q11. Live `pip-audit --format=json` against `.venv` returned same 4 vulns as cycle-41 baseline (diskcache CVE-2025-69872 fix=[]; litellm GHSA-xqmj-j6mv-4862 fix=['1.83.7'] BLOCKED; pip CVE-2026-3219 fix=[]; ragas CVE-2026-6587 fix=[]). `gh api repos/Asun28/llm-wiki-flywheel/dependabot/alerts` returned same 4 alerts (3 litellm + 1 ragas). `pip index versions {diskcache,ragas,litellm,pip}` confirms all four LATEST versions match cycle-41 baseline. `pip download --no-deps litellm==1.83.14` wheel METADATA verification: `Requires-Dist: click==8.1.8` (still pinned; upstream has not relaxed across 7+ patch releases). `gh api graphql ... GHSA-58qw-9mgm-455v` confirms pip advisory metadata still `vulnerableVersionRange: <= 26.0.1`, `firstPatchedVersion: null` — DO NOT bump pin per cycle-22 L4 conservative posture. `pip check` confirms 3 resolver conflicts persist verbatim (arxiv requests~=2.32.0 vs 2.33.0; crawl4ai lxml~=5.3 vs 6.1.0; instructor rich<15.0.0 vs 15.0.0). Bumped cycle tags: `cycle-41+` → `cycle-47+` on 5 dep-CVE entries + 2 Dependabot drift; `cycle-40+` → `cycle-47+` on 3 deferred CI items (windows-latest matrix, GHA-Windows multiprocessing spawn, TestWriteItemFiles POSIX). `cycle-37/38/39/40/41 re-confirmed drift persists 2026-04-27` → `cycle-37/38/39/40/41/46 re-confirmed drift persists 2026-04-28` on 2 Dependabot drift entries. Diskcache history list `cycle-25 AC9 + cycle-32 + cycle-39 + cycle-40 + cycle-41` extended with `+ cycle-46`.
+
+- **AC11** — Multi-site test-count narrative sync per C26-L2 + C39-L3. Corrected 2-file drift: CLAUDE.md said 3027/244 (cycle-45 ship state, missing CI hotfix #67 delta); `docs/reference/testing.md` + `docs/reference/implementation-status.md` + `README.md` said 3019/241 (cycle-44 ship state, missing both cycle-45 ship + CI hotfix updates). All 4 sites updated to **3025 tests / 243 files** (3014 passed + 11 skipped on Windows local). Cycle 46 itself is net-0 delta (AC2 -1 deleted shim test + 1 added docstring forward-protection test). The cycle-45 ship-narrative gap (3019 → 3027 → 3025) is reconstructed in the testing.md + implementation-status.md updates.
+
+- **AC12** — Phase 4.5 HIGH #4 (`tests/` coverage-visibility freeze-and-fold) BACKLOG progress note appended: cycle-46 prioritised Phase 4.6 LOW shim deletion (no new fold this cycle); cycle-45 closed Phase 4.6 M3 split + 3 cycle-45 regression files (file count 241 → 244); cycle-45 CI hotfix deleted test_cycle45_init_reexports_match_legacy_surface.py (244 → 243). Cumulative ~190+ versioned files still to fold across future cycles. HIGH item remains open.
+
+**Step routing:**
+
+- Steps 1-2 + 5 + 7-15: primary-session per C37-L5 (12 ACs ≤ 15 threshold; ≤5 src files; primary holds context from Step 1-5 grep verification).
+- Step 5 (design decision gate): Opus 4.7 subagent dispatch per skill mandate (every cycle). Resolved 13 questions with explicit `## Analysis` block per Opus 4.7 hygiene rule, all HIGH confidence except Q2 MEDIUM (cosmetic commit cadence). 7 binding CONDITIONS encoded the empirical corrections (CLAUDE.md drift, AC1 patch-site re-count, `import sys` removability) + forward-protection assertions (Q12, Q13).
+- Steps 4 (design eval) + 6 (Context7) + 9.5 (simplify): SKIPPED per skip-eligibility — hygiene cycle, no third-party libs, signature-preserving pure deletion src/ diff (~-75 LOC net).
+- Step 14 PR review: planned R1 DeepSeek V4 Pro (direct CLI) + R1 Codex (agent dispatch) parallel architecture / edge-cases; R2 Codex verify; R3 Sonnet audit-doc drift triggered per cycle-17 L4 (b)+(d) thresholds (12 ACs + 13 design Qs ≥ 10).
+
+**Operational notes:**
+
+- **Worktree isolation:** cycle-46 worktree at `D:/Projects/llm-wiki-flywheel-c46` per C42-L4 reminder (parallel cycles MAY be running). Created via `git worktree add ../llm-wiki-flywheel-c46 -b cycle-46-batch` from main. Main worktree's `.venv` editable kb pointer was repointed to c46 worktree via `pip install --no-deps -e D:/Projects/llm-wiki-flywheel-c46/` to avoid the cycle-22 L1 ResolutionImpossible (pre-existing requests==2.33.0 vs arxiv requests~=2.32.0 conflict) when creating a fresh c46 venv.
+- **Initial c46 venv install failed silently:** `pip install -r requirements.txt -e .` ResolutionImpossible'd on `requests` constraint. Workaround was repointing the main `.venv`'s editable install to c46 src/. Restore at Step 15 cleanup. Worth a Step 16 skill-patch candidate: cycle-46 L? — c46-isolated-venv path is `pip install --no-deps -e <c46>/` from main `.venv` rather than `python -m venv <c46>/.venv && pip install -r requirements.txt -e .` because the project's documented resolver conflicts (cycle-34 AC52) prevent the latter from working.
+- **Pre-decision Opus empirical corrections:** Opus subagent grep'd live worktree state and corrected 4 claims in the requirements doc — (1) AC1 actual scope is 36/8 not 38/9 (16 vs 14 sites in `test_v5_lint_augment_orchestrator.py`); (2) test count baseline is 3025/243 not 3027/244 (CLAUDE.md drift from cycle-45 CI hotfix); (3) `import sys` removable from manifest.py + rate.py (only one `sys.` ref each); (4) orchestrator.py docstring placement is structurally safe (line 75 single-line `"""..."""` closes before line 76+ imports).
+
+**Test count chain:**
+
+| Cycle | Tests | Files | Passed/skipped |
+|---|---|---|---|
+| 44 ship | 3019 | 241 | 3008 + 11 |
+| 45 ship | 3027 | 244 | 3016 + 11 |
+| 45 CI hotfix #67 | 3025 | 243 | 3014 + 11 |
+| 46 ship (this cycle) | 3025 | 243 | 3014 + 11 (-1 AC2 shim test + 1 AC2 docstring test = net 0) |
+
+**Threat-model verification (all clean):**
+
+- T1 PR-introduced CVE diff = empty (cycle 46 changes 0 dependencies).
+- T2 same-class peer scan: pure deletion + path renames — no new validation, sanitization, or path-containment logic introduced.
+- T3 test contract preservation: 116 + 51 + 18 targeted pytest results green throughout the 6 implementation tasks; full suite at Step 10 expected green.
+- T4 deferred-promise BACKLOG sync: 2 Phase 4.6 entries deleted (resolved); cycle-44 historical comment block deleted (per BACKLOG format guide); 9 dep-CVE entries re-tagged.
+- T5 doc-text drift: 4-site grep + sync to 3025/243 baseline; cycle-46 ship state captured in CHANGELOG + CHANGELOG-history.
 
 ### 2026-04-27 — cycle 45 — M3 mcp/core.py split + AC32-AC34 regression tests
 
