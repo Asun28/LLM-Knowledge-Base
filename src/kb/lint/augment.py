@@ -30,7 +30,7 @@ from kb.lint.checks import check_stub_pages
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.llm import call_llm_json
-from kb.utils.pages import load_page_frontmatter, save_page_frontmatter
+from kb.utils.pages import load_page_frontmatter, load_purpose, save_page_frontmatter
 from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
@@ -290,14 +290,17 @@ def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
 
 
 def _load_purpose_text(wiki_dir: Path) -> str:
-    """Load wiki/purpose.md (first 5000 chars) or empty string on any error."""
-    purpose_path = wiki_dir / "purpose.md"
-    if not purpose_path.exists():
-        return ""
-    try:
-        return purpose_path.read_text(encoding="utf-8")[:5000]
-    except OSError:
-        return ""
+    """Load wiki/purpose.md (first 5000 chars) or empty string on any error.
+
+    Cycle 42 AC5 — delegates to :func:`kb.utils.pages.load_purpose` so the
+    augment path benefits from the LRU cache (cycle 6 AC14) instead of
+    re-reading the file on every propose-mode call. The canonical loader
+    strips trailing whitespace and returns ``None`` on missing/empty file;
+    we adapt to ``""`` and re-apply the 5000-char cap that scopes the
+    prompt-construction context.
+    """
+    text = load_purpose(wiki_dir)
+    return text[:5000] if text else ""
 
 
 def _format_proposals_md(proposals: list[dict[str, Any]], run_id: str) -> str:
