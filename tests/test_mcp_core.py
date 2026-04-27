@@ -473,6 +473,7 @@ def test_cycle12_ac14_conversation_context_sanitized_before_both_branches(
     captured: list[str | None] = []
 
     if use_api:
+
         def fake_query_wiki(*args: object, **kwargs: object) -> dict[str, object]:
             captured.append(kwargs.get("conversation_context"))
             return {
@@ -486,6 +487,7 @@ def test_cycle12_ac14_conversation_context_sanitized_before_both_branches(
 
         monkeypatch.setattr(_qe, "query_wiki", fake_query_wiki)
     else:
+
         def fake_rewrite_query(question: str, conv_ctx: str) -> str:
             captured.append(conv_ctx)
             return question

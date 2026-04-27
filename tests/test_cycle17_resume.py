@@ -120,7 +120,7 @@ class TestAC12CliResumeFlag:
 
         runner = CliRunner()
         with (
-            patch("kb.lint.augment.run_augment", side_effect=spy_run_augment),
+            patch("kb.lint.augment.orchestrator.run_augment", side_effect=spy_run_augment),
             patch(
                 "kb.lint.runner.run_all_checks",
                 return_value={"summary": {"error": 0}, "fixes_applied": []},
@@ -165,7 +165,7 @@ class TestAC13McpResumeParam:
             }
 
         with (
-            patch("kb.lint.augment.run_augment", side_effect=spy_run_augment),
+            patch("kb.lint.augment.orchestrator.run_augment", side_effect=spy_run_augment),
             patch(
                 "kb.lint.runner.run_all_checks",
                 return_value={"summary": {"error": 0}, "fixes_applied": []},

@@ -209,5 +209,3 @@ def test_check_frontmatter_reports_malformed_page(tmp_path):
         )
         for issue in issues
     )
-
-

@@ -4,7 +4,7 @@ import os
 import time
 
 from kb.utils import io as io_mod
-from kb.utils.io import atomic_json_write, atomic_text_write, file_lock, sweep_orphan_tmp
+from kb.utils.io import atomic_text_write, file_lock, sweep_orphan_tmp
 
 
 def test_file_lock_cleans_up_on_exception_during_acquire(tmp_path, monkeypatch):

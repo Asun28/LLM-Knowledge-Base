@@ -111,7 +111,10 @@ def kb_lint(
 
     if augment:
         try:
-            from kb.lint.augment import run_augment
+            # Cycle 44 M2 / C42-L3: import from canonical owner module so
+            # tests patching `kb.lint.augment.orchestrator.run_augment`
+            # actually intercept this call.
+            from kb.lint.augment.orchestrator import run_augment
 
             mode = "auto_ingest" if auto_ingest else ("execute" if execute else "propose")
             augment_result = run_augment(

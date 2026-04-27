@@ -8,6 +8,7 @@ from kb.utils.pages import page_id, scan_wiki_pages
 
 _DUPLICATE_SLUGS_PAGE_CAP: int = 10_000
 
+
 def _bounded_edit_distance(a: str, b: str, threshold: int) -> int:
     """Return Levenshtein distance between ``a`` and ``b`` capped at ``threshold + 1``.
 

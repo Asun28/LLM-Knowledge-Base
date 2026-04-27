@@ -341,7 +341,11 @@ def lint(
                 click.echo(f"  Fixed: {f['message']}")
 
         if augment:
-            from kb.lint.augment import run_augment
+            # Cycle 44 M2 / C42-L3: import from canonical owner module so
+            # tests patching `kb.lint.augment.orchestrator.run_augment`
+            # actually intercept this call (the package re-export creates
+            # a separate binding that patches don't reach).
+            from kb.lint.augment.orchestrator import run_augment
 
             mode = "auto_ingest" if auto_ingest else ("execute" if execute else "propose")
             augment_result = run_augment(
