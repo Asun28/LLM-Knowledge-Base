@@ -76,8 +76,8 @@ def run_augment(
     from urllib.parse import urlparse
 
     import kb
-    from kb.lint._augment_manifest import RESUME_COMPLETE_STATES, Manifest
-    from kb.lint._augment_rate import RateLimiter
+    from kb.lint.augment.manifest import RESUME_COMPLETE_STATES, Manifest
+    from kb.lint.augment.rate import RateLimiter
     from kb.mcp.app import _validate_run_id
 
     resume_manifest: Manifest | None = None

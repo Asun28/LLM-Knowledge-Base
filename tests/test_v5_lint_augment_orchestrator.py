@@ -394,9 +394,9 @@ def test_execute_mode_writes_raw_file_no_ingest(
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     _seed_stub(
@@ -457,9 +457,9 @@ def test_execute_mode_relevance_below_threshold_skips(
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/dropout", title="Dropout")
@@ -512,9 +512,9 @@ def test_execute_mode_writes_manifest(tmp_project, create_wiki_page, httpx_mock,
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
@@ -563,9 +563,9 @@ def test_execute_mode_dry_run_does_not_fetch(tmp_project, create_wiki_page, monk
     from kb.lint.augment import run_augment
 
     wiki_dir = tmp_project / "wiki"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
     create_wiki_page(
@@ -675,9 +675,9 @@ def _patch_ingest_dirs(monkeypatch, tmp_project):
     monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md")
     monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw)
     monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json")
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
 
@@ -979,9 +979,9 @@ def test_rate_limit_bucket_uses_normalized_hostname_not_netloc(
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     # Capture the hostnames passed to RateLimiter.acquire to prove normalization.
@@ -993,7 +993,7 @@ def test_rate_limit_bucket_uses_normalized_hostname_not_netloc(
             # Deny so we don't need to stand up a full fetch mock for both
             return False, 60
 
-    monkeypatch.setattr("kb.lint._augment_rate.RateLimiter", lambda *a, **kw: _FakeLimiter())
+    monkeypatch.setattr("kb.lint.augment.rate.RateLimiter", lambda *a, **kw: _FakeLimiter())
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
     create_wiki_page(
@@ -1036,9 +1036,9 @@ def test_rate_limit_bucket_lowercases_hostname(tmp_project, create_wiki_page, mo
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     acquired: list[str] = []
@@ -1048,7 +1048,7 @@ def test_rate_limit_bucket_lowercases_hostname(tmp_project, create_wiki_page, mo
             acquired.append(host)
             return False, 60
 
-    monkeypatch.setattr("kb.lint._augment_rate.RateLimiter", lambda *a, **kw: _FakeLimiter())
+    monkeypatch.setattr("kb.lint.augment.rate.RateLimiter", lambda *a, **kw: _FakeLimiter())
 
     _seed_stub(create_wiki_page, wiki_dir, "concepts/x", title="X")
     create_wiki_page(

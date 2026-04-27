@@ -456,9 +456,9 @@ class TestRunAugmentVerdictGuardIntegration:
         monkeypatch.setattr(
             "kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json"
         )
-        monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+        monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
         monkeypatch.setattr(
-            "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+            "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
         )
 
     def test_run_augment_invokes_callout_on_fail_verdict(

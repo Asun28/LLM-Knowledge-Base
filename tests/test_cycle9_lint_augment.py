@@ -9,9 +9,9 @@ def test_summary_counts_per_stub_not_per_url(tmp_project, monkeypatch):
 
     wiki_dir = tmp_project / "wiki"
     raw_dir = tmp_project / "raw"
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     monkeypatch.setattr(
-        "kb.lint._augment_rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
     )
 
     proposals = [

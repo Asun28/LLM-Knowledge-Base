@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parent.parent
 
 
@@ -22,8 +24,17 @@ def test_augment_package_structure_cycle44() -> None:
     ):
         assert (pkg / f"{module}.py").is_file(), f"M2: {module}.py missing"
     assert not (ROOT / "src" / "kb" / "lint" / "augment.py").exists()
-    assert (ROOT / "src" / "kb" / "lint" / "_augment_manifest.py").is_file()
-    assert (ROOT / "src" / "kb" / "lint" / "_augment_rate.py").is_file()
+    # Cycle 46 — Phase 4.6 LOW closeout: legacy `_augment_*.py` compat shims deleted
+    # (deferred from cycle 44 → 45 → 46). Both file presence AND importability are
+    # pinned per CONDITION 2 / `feedback_test_behavior_over_signature` / C40-L3 —
+    # `is_file()` covers disk state; `pytest.raises(ModuleNotFoundError)` is the
+    # behavioural contract. Either failure flags a partial cycle-46 revert.
+    assert not (ROOT / "src" / "kb" / "lint" / "_augment_manifest.py").is_file()
+    assert not (ROOT / "src" / "kb" / "lint" / "_augment_rate.py").is_file()
+    with pytest.raises(ModuleNotFoundError):
+        import kb.lint._augment_manifest  # noqa: F401
+    with pytest.raises(ModuleNotFoundError):
+        import kb.lint._augment_rate  # noqa: F401
 
 
 def test_augment_package_reexports_match_former_flat_symbols_cycle44() -> None:
@@ -51,16 +62,6 @@ def test_augment_package_reexports_match_former_flat_symbols_cycle44() -> None:
     assert _record_verdict_gap_callout is kb.lint.augment.quality._record_verdict_gap_callout
 
 
-def test_augment_compat_shims_resolve_to_new_package() -> None:
-    import kb.lint._augment_manifest
-    import kb.lint._augment_rate
-    import kb.lint.augment.manifest
-    import kb.lint.augment.rate
-
-    assert kb.lint._augment_manifest.Manifest is kb.lint.augment.manifest.Manifest
-    assert kb.lint._augment_rate.RateLimiter is kb.lint.augment.rate.RateLimiter
-
-
 def test_augment_package_imports_with_nonexistent_wiki_dir_cycle44(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("kb.config.WIKI_DIR", tmp_path / "nonexistent" / "wiki")
     import kb.lint.augment.manifest
@@ -71,3 +72,14 @@ def test_augment_package_imports_with_nonexistent_wiki_dir_cycle44(monkeypatch, 
 
     assert hasattr(kb.lint.augment.manifest, "Manifest")
     assert hasattr(kb.lint.augment.rate, "RateLimiter")
+
+
+def test_run_augment_docstring_survives_cycle46_import_flip() -> None:
+    """CONDITION 3 forward-protection — `run_augment.__doc__` must keep the
+    `"Three-gate"` marker even after the AC3 import flip. Catches any future
+    edit that orphans the docstring per cycle-23 L1 (function-local imports
+    placed BEFORE the closing triple-quote)."""
+    from kb.lint.augment.orchestrator import run_augment
+
+    assert run_augment.__doc__ is not None
+    assert "Three-gate" in run_augment.__doc__
