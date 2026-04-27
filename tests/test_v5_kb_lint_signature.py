@@ -49,7 +49,7 @@ def test_kb_lint_augment_appends_summary_section(tmp_project, create_wiki_page, 
     from kb.mcp.health import kb_lint
 
     monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_project / ".data")
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
     create_wiki_page(
         page_id="entities/foo",
         title="Foo",

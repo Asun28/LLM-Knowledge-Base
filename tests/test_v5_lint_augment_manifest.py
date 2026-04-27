@@ -5,8 +5,8 @@ import uuid
 
 
 def _make_manifest(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
-    from kb.lint._augment_manifest import Manifest
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_path)
+    from kb.lint.augment.manifest import Manifest
 
     run_id = str(uuid.uuid4())
     stubs = [
@@ -59,8 +59,8 @@ def test_close_writes_ended_at(tmp_path, monkeypatch):
 
 
 def test_resume_finds_incomplete_run(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
-    from kb.lint._augment_manifest import Manifest
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_path)
+    from kb.lint.augment.manifest import Manifest
 
     run_id = "abcd1234-5678-90ab-cdef-1234567890ab"
     initial = {
@@ -84,8 +84,8 @@ def test_resume_finds_incomplete_run(tmp_path, monkeypatch):
 
 
 def test_resume_returns_none_for_unknown_run(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.lint._augment_manifest.MANIFEST_DIR", tmp_path)
-    from kb.lint._augment_manifest import Manifest
+    monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_path)
+    from kb.lint.augment.manifest import Manifest
 
     assert Manifest.resume(run_id="zzzzzzzz") is None
 

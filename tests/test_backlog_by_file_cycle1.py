@@ -154,7 +154,7 @@ def test_b1_run_augment_has_data_dir_param():
 
 def test_b2_manifest_accepts_data_dir(tmp_path):
     """B2: Manifest.start honors data_dir override."""
-    from kb.lint._augment_manifest import Manifest
+    from kb.lint.augment.manifest import Manifest
 
     data_dir = tmp_path / "custom_data"
     m = Manifest.start(run_id="abc123", mode="propose", max_gaps=3, stubs=[], data_dir=data_dir)
@@ -163,7 +163,7 @@ def test_b2_manifest_accepts_data_dir(tmp_path):
 
 def test_b3_rate_limiter_accepts_data_dir(tmp_path):
     """B3: RateLimiter stores state under supplied data_dir."""
-    from kb.lint._augment_rate import RateLimiter
+    from kb.lint.augment.rate import RateLimiter
 
     data_dir = tmp_path / "custom_data"
     limiter = RateLimiter(data_dir=data_dir)

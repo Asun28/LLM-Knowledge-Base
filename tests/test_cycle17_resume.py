@@ -16,7 +16,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from kb.cli import cli
-from kb.lint._augment_manifest import Manifest
+from kb.lint.augment.manifest import Manifest
 
 
 def _write_manifest(path: Path, run_id: str, gaps: list[dict]) -> None:
