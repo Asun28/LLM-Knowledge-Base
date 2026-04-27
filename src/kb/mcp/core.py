@@ -1,53 +1,16 @@
-"""Core MCP tools — query, ingest, compile.
+"""Core MCP query tool and compatibility exports.
 
-Cycle 17 AC4 (narrowed): `kb.capture` remains the only direct deferral at
-module level — it is NOT transitively loaded via any other kb.mcp.core import
-chain and has no test monkeypatches on `kb.mcp.core.capture_items`. Function-
-body imports for `anthropic`, `frontmatter`, `kb.utils.pages.save_page_frontmatter`,
-and `kb.utils.llm.LLMError` remain inside tool bodies — these never had
-test monkeypatches on `kb.mcp.core.*`.
-
-Cycle 19 AC15 — owner-module-attribute call style for the four migrated callables
-(`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`). The
-imports now bring in the OWNER MODULES (`kb.ingest.pipeline as ingest_pipeline`,
-`kb.query.engine as query_engine`, `kb.feedback.reliability as reliability`)
-and the call sites use ``ingest_pipeline.ingest_source(...)`` /
-``query_engine.query_wiki(...)`` / etc. This means tests should monkeypatch
-the OWNER module attribute (e.g. ``patch("kb.ingest.pipeline.ingest_source")``);
-the MCP tool's call resolves the patched attribute at call time, not at import
-time. See `tests/test_cycle19_mcp_monkeypatch_migration.py` for the four
-vacuity tests that pin this contract.
-
-Cycle 19 AC16 — snapshot-binding asymmetry for CONSTANTS. Constants
-(`PROJECT_ROOT`, `RAW_DIR`, `SOURCE_TYPE_DIRS`) are imported via
-``from kb.config import X`` at module scope, which creates a snapshot binding.
-Tests patching ``kb.config.X`` post-import will NOT propagate to
-``kb.mcp.core.X`` because the local name still references the snapshot value.
-For constants the tests MUST use ``monkeypatch.setattr("kb.mcp.core.X", ...)``
-directly. The asymmetry is intentional: callables go through one extra
-attribute lookup at call time (negligible cost — see R2 N2 in
-`docs/superpowers/decisions/2026-04-21-cycle19-design.md`); constants are
-hot-path values that the import-time snapshot caches for free.
-
-Tests: tests/test_cycle17_lazy_imports.py enforces the `kb.capture` denylist;
-tests/test_cycle19_mcp_monkeypatch_migration.py enforces the AC15 / AC16
-owner-module patch contract.
+Cycle 19 AC15 keeps owner-module call style for patchable callables
+(`query_engine.query_wiki`, `query_engine.search_pages`,
+`reliability.compute_trust_scores`). Cycle 19 AC16 keeps snapshot-binding
+semantics for config constants: patch ``kb.mcp.core.X`` directly rather than
+``kb.config.X`` when tests need a local override.
 """
 
 import logging
 import os
 import re
 from datetime import date
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    # Reserved for future cycle-17 AC4 re-try. Cycle 17 kept kb.capture at
-    # module level because its import-time CAPTURES_DIR security check
-    # must run under the REAL PROJECT_ROOT (before any test monkeypatch of
-    # kb.config.CAPTURES_DIR redirects it to a tmp path). A dedicated cycle
-    # needs to move the security check to runtime or provide a dev-only
-    # opt-out before this can be lazy.
-    pass
 
 from kb.config import (
     MAX_INGEST_CONTENT_CHARS,
@@ -84,43 +47,19 @@ _INGEST_COMPAT_BINDINGS = (
     _validate_wiki_dir,
 )
 
-# Cycle 17 AC4 (narrowed): `anthropic` and `frontmatter` stay deferred to tool
-# bodies even though they leak transitively — the direct deferral removes them
-# from kb.mcp.core's self-reported import surface. `kb.utils.pages.save_page_frontmatter`
-# and `kb.utils.llm.LLMError` also stay inside tool bodies (no test monkeypatch).
-
-# Cycle 23 AC4 — PEP 562 module-level lazy-shim for heavy owner modules.
-# Keeps ``kb.mcp.core.<name>`` reachable as an attribute (preserves the
-# cycle-19 AC15 monkeypatch contract: ``monkeypatch.setattr(mcp_core.ingest_pipeline, ...)``)
-# while deferring ``anthropic``/``networkx``/``sentence-transformers`` loads
-# until the first MCP tool that actually needs them runs. Boot-time probes
-# assert absence via ``tests/test_cycle23_mcp_boot_lean.py``.
-#
-# Closed allowlist — names NOT in this dict raise AttributeError through
-# ``__getattr__`` rather than falling through to arbitrary ``importlib``
-# lookups (threat I3 — closed allowlist for attacker-controlled names).
+# Cycle 23 AC4 — PEP 562 lazy-shim for heavy owner modules with a closed
+# allowlist; preserves the cycle-19 AC15 monkeypatch contract.
 _LAZY_MODULES: dict[str, str] = {
     "ingest_pipeline": "kb.ingest.pipeline",
     "query_engine": "kb.query.engine",
     "reliability": "kb.feedback.reliability",
 }
 
-# MCP-only whitelist — previously in ``kb.ingest.pipeline`` but importing
-# even a single constant from there forced the whole pipeline module (and
-# anthropic transitively) to load. Relocated cycle-23 AC4 to a local
-# ``frozenset`` so bare ``import kb.mcp`` stays lean.
 _TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".json", ".yaml", ".yml"})
 
 
 def __getattr__(name: str):
-    """PEP 562 lazy loader for the heavy owner modules.
-
-    The cached ``globals()[name] = module`` write is idempotent — Python's
-    import system returns the same module object across concurrent calls, so
-    even if two threads race through this function they write the same value.
-    No explicit lock required (cycle-6 L2 converse: locks prevent duplicate
-    construction; here construction is already idempotent).
-    """
+    """PEP 562 lazy loader for the heavy owner modules."""
     module_path = _LAZY_MODULES.get(name)
     if module_path is None:
         raise AttributeError(f"module 'kb.mcp.core' has no attribute {name!r}")
@@ -501,4 +440,3 @@ from kb.mcp.ingest import (  # noqa: E402, F401  # re-exported for backward comp
     kb_ingest_content,
     kb_save_source,
 )
-
