@@ -141,18 +141,10 @@ def atomic_json_write(data: object, path: Path) -> None:
         raise
 
 
-def atomic_text_write(content: str, path: Path) -> None:
-    """Write text to path atomically (temp file + rename).
-
-    Creates parent directories if needed. On failure, cleans up the
-    temp file and re-raises the exception.
-
-    Caveat: cloud-synced or network-backed directories such as OneDrive or SMB
-    shares can transiently lock the temp file or destination and make the final
-    replace time out or fail. Failed writes attempt immediate cleanup, but a
-    locked sibling `.tmp` can remain; callers that write in those directories
-    should periodically call `sweep_orphan_tmp(path.parent)` to remove old
-    orphan temp files.
+def _atomic_text_write_replace(content: str, path: Path) -> None:
+    """Tempfile + os.replace crash-atomic write. Internal — used by both the
+    default ``atomic_text_write`` path and the ``exclusive=True`` branch (after
+    O_EXCL reserves the destination).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -171,6 +163,44 @@ def atomic_text_write(content: str, path: Path) -> None:
             except OSError:
                 pass
         _cleanup_tmp(tmp_path)
+        raise
+
+
+def atomic_text_write(content: str, path: Path | str, *, exclusive: bool = False) -> None:
+    """Write text to path atomically (temp file + rename).
+
+    Creates parent directories if needed. On failure, cleans up the
+    temp file and re-raises the exception.
+
+    ``exclusive=False`` (default) — replace-or-create semantics via
+    tempfile + ``os.replace``. Existing files are atomically overwritten.
+
+    ``exclusive=True`` — create-or-fail semantics via
+    ``os.open(O_CREAT | O_EXCL | O_WRONLY)`` for race-safe slug reservation,
+    followed by the same tempfile + rename for crash-safety. Raises
+    ``FileExistsError`` if ``path`` already exists. Cleans up the empty
+    reservation on any failure of the inner write, including ``BaseException``
+    (KeyboardInterrupt, SystemExit). Cycle 44 unifies ``capture._exclusive_atomic_write``
+    into this helper per Phase 4.6 M4.
+
+    Caveat: cloud-synced or network-backed directories such as OneDrive or SMB
+    shares can transiently lock the temp file or destination and make the final
+    replace time out or fail. Failed writes attempt immediate cleanup, but a
+    locked sibling `.tmp` can remain; callers that write in those directories
+    should periodically call `sweep_orphan_tmp(path.parent)` to remove old
+    orphan temp files.
+    """
+    path = Path(path)
+    if not exclusive:
+        _atomic_text_write_replace(content, path)
+        return
+    # Cycle 44 M4: O_EXCL race-safe reservation + tempfile crash-safety
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    os.close(fd)
+    try:
+        _atomic_text_write_replace(content, path)
+    except BaseException:
+        path.unlink(missing_ok=True)
         raise
 
 

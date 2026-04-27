@@ -118,43 +118,108 @@ def test_sweep_orphan_tmp_never_raises_on_non_directory(tmp_path, caplog):
     assert "not a directory" in caplog.text
 
 
-def test_load_page_frontmatter_docstring_documents_mtime_caveat():
-    """Cycle 43 AC9 — vacuous-test fold per C40-L3 (do not auto-upgrade).
+def test_atomic_text_write_default_replaces_existing(tmp_path):
+    """Cycle 44 AC25 / CONDITION 6 — default (exclusive=False) atomically
+    replaces an existing file via tempfile + os.replace.
+    """
+    target = tmp_path / "page.md"
+    target.write_text("old content", encoding="utf-8")
+    atomic_text_write("new content", target)
+    assert target.read_text(encoding="utf-8") == "new content"
 
-    AC8 security-verify fix: design-gate condition 3 requires the helper to
-    document the coarse-filesystem mtime resolution caveat so future
-    maintainers understand the cache-key collision window on FAT32/SMB. This
-    is a docstring-introspection assertion; reverting any actual cache logic
-    in `load_page_frontmatter` would NOT fail it. See BACKLOG.md Phase 4.5
-    HIGH #4 vacuous-test upgrade candidate entry for the behavior-based
-    replacement plan.
+
+def test_atomic_text_write_exclusive_raises_on_existing(tmp_path):
+    """Cycle 44 AC25 / CONDITION 6 — exclusive=True uses O_CREAT|O_EXCL|O_WRONLY
+    for slug-collision detection. Raises FileExistsError if the destination
+    already exists, cleans up nothing (caller's content preserved).
+    """
+    import pytest
+
+    target = tmp_path / "slug.md"
+    target.write_text("reserved", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        atomic_text_write("collision", target, exclusive=True)
+    # Original content preserved
+    assert target.read_text(encoding="utf-8") == "reserved"
+
+
+def test_atomic_text_write_exclusive_creates_new(tmp_path):
+    """Cycle 44 AC25 / CONDITION 6 — exclusive=True creates a new file
+    successfully when the destination does not exist.
+    """
+    target = tmp_path / "fresh.md"
+    atomic_text_write("first write", target, exclusive=True)
+    assert target.read_text(encoding="utf-8") == "first write"
+
+
+def test_load_page_frontmatter_caches_within_same_mtime_tick(tmp_path):
+    """Cycle 44 CONDITION 8 — behavioral replacement for the docstring caveat
+    test deleted in cycle 44. Pins the DOCUMENTED stale-read contract from
+    `kb.utils.pages.load_page_frontmatter` (cache key is `(path_str, mtime_ns)`,
+    so two edits within the same coarse mtime tick share a cache key and the
+    second read returns the cached metadata).
+
+    Self-check (cycle-16 L2): mutate `_load_page_frontmatter_cached` to bypass
+    the cache (e.g. recompute on every call) → this test FAILS because the
+    second read would return the new content "B" instead of cached "A".
+
+    See BACKLOG.md Phase 4.5 HIGH #4 vacuous-test upgrade candidate (C40-L3 +
+    C41-L1) for the upgrade history.
     """
     from kb.utils.pages import load_page_frontmatter
 
-    doc = load_page_frontmatter.__doc__ or ""
-    assert "mtime" in doc.lower()
-    assert "filesystem" in doc.lower()
-    # Mention at least one coarse-resolution filesystem explicitly
-    assert any(name in doc for name in ("FAT32", "SMB", "OneDrive"))
+    page = tmp_path / "page.md"
+    page.write_text("---\ntitle: A\n---\nbody A\n", encoding="utf-8")
+    load_page_frontmatter.cache_clear()  # start clean per cycle-19 L2 isolation
+    first_meta, first_body = load_page_frontmatter(page)
+    assert first_meta["title"] == "A"
+    assert first_body == "body A"  # frontmatter.load strips trailing newline
+
+    # Force the same mtime_ns the cache was keyed on, then rewrite content
+    stat = page.stat()
+    page.write_text("---\ntitle: B\n---\nbody B\n", encoding="utf-8")
+    os.utime(page, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+    second_meta, second_body = load_page_frontmatter(page)
+    # Cache hit: documented stale read contract preserved (cycle 44 non-goal #1
+    # — no behavior changes; pin the EXISTING semantic).
+    assert second_meta["title"] == "A", "stale-read contract: cache returns 'A'"
+    assert second_body == "body A", "stale-read contract: cache returns body 'A'"
 
 
-def test_cycle12_io_doc_caveats_are_present():
-    """Cycle 43 AC9 — vacuous-test fold per C40-L3 (do not auto-upgrade).
+def test_file_lock_reaps_stale_lock_with_dead_pid(tmp_path, monkeypatch):
+    """Cycle 44 CONDITION 9 — behavioral replacement for the file_lock /
+    atomic_*_write docstring tests deleted in cycle 44. Exercises the
+    stale-lock-reaping path at `src/kb/utils/io.py:412-415`: if the PID stored
+    in a stale .lock file refers to a dead process (`os.kill(pid, 0)` raises
+    `ProcessLookupError`), `file_lock` unlinks the stale lock and acquires.
 
-    Asserts file_lock / atomic_json_write / atomic_text_write docstrings
-    contain specific caveat strings (PID recycling, OneDrive, sweep_orphan_tmp).
-    Reverting any actual lock-recycling or atomic-write logic would NOT fail
-    this. See BACKLOG.md Phase 4.5 HIGH #4 vacuous-test upgrade candidate
-    entry for the behavior-based replacement plan.
+    Self-check (cycle-16 L2): mutate `lock_path.unlink(missing_ok=True)` at
+    `src/kb/utils/io.py:415` to a no-op (e.g. `pass`) → this test FAILS with
+    a TimeoutError because the stale lock survives.
+
+    See BACKLOG.md Phase 4.5 HIGH #4 vacuous-test upgrade candidate (C40-L3 +
+    C41-L1) for the upgrade history. The OneDrive/sweep_orphan_tmp docstring
+    portions were deleted as redundant vs `test_sweep_orphan_tmp_*` tests.
     """
-    assert file_lock.__doc__ is not None
-    assert "PID" in file_lock.__doc__
-    assert "recycling" in file_lock.__doc__
+    target = tmp_path / "target.json"
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    fake_dead_pid = 999_999_999
+    lock_path.write_text(str(fake_dead_pid), encoding="utf-8")
 
-    assert atomic_json_write.__doc__ is not None
-    assert "OneDrive" in atomic_json_write.__doc__
-    assert "sweep_orphan_tmp" in atomic_json_write.__doc__
+    real_kill = io_mod.os.kill
 
-    assert atomic_text_write.__doc__ is not None
-    assert "OneDrive" in atomic_text_write.__doc__
-    assert "sweep_orphan_tmp" in atomic_text_write.__doc__
+    def _kill_raises_for_dead_pid(pid, sig):
+        if pid == fake_dead_pid:
+            raise ProcessLookupError(f"no such process: {pid}")
+        return real_kill(pid, sig)
+
+    monkeypatch.setattr(io_mod.os, "kill", _kill_raises_for_dead_pid)
+
+    # If the stale-lock-reaping path works, file_lock acquires within timeout.
+    # Otherwise the stale .lock survives and acquire raises TimeoutError.
+    with file_lock(target, timeout=2.0):
+        # Inside the with-block, the lock is held by us; the .lock file exists
+        # and contains the current PID (not the fake dead PID we wrote earlier).
+        assert lock_path.exists()
+        assert lock_path.read_text(encoding="utf-8").strip() != str(fake_dead_pid)

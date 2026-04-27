@@ -27,7 +27,6 @@ from kb.capture import (
     CaptureResult,
     _build_slug,
     _check_rate_limit,
-    _exclusive_atomic_write,
     _extract_items_via_llm,
     _is_path_within_captures,
     _normalize_for_scan,
@@ -774,52 +773,60 @@ class TestSymlinkGuard:
 
 
 class TestExclusiveAtomicWrite:
-    """Spec §3 atomic write helper."""
+    """Spec §3 atomic write helper. Cycle 44 M4: `_exclusive_atomic_write` was
+    consolidated into `kb.utils.io.atomic_text_write(content, path, exclusive=True)`
+    per Phase 4.6 BACKLOG. Tests now exercise the unified API directly."""
 
     def test_writes_new_file(self, tmp_captures_dir):
+        from kb.utils.io import atomic_text_write
+
         path = tmp_captures_dir / "test.md"
-        _exclusive_atomic_write(path, "hello world\n")
+        atomic_text_write("hello world\n", path, exclusive=True)
         assert path.exists()
         assert path.read_text(encoding="utf-8") == "hello world\n"
 
     def test_raises_file_exists_on_collision(self, tmp_captures_dir):
+        from kb.utils.io import atomic_text_write
+
         path = tmp_captures_dir / "test.md"
         path.write_text("existing", encoding="utf-8")
         with pytest.raises(FileExistsError):
-            _exclusive_atomic_write(path, "would replace")
+            atomic_text_write("would replace", path, exclusive=True)
         # Original content preserved
         assert path.read_text(encoding="utf-8") == "existing"
 
     def test_cleans_up_reservation_on_inner_write_failure(self, tmp_captures_dir, monkeypatch):
+        from kb.utils.io import atomic_text_write
+
         path = tmp_captures_dir / "test.md"
 
         def boom(content, p):
             raise OSError("simulated disk full")
 
-        # Cycle 38 AC6 — dual-site patch (kb.utils.io.atomic_text_write FIRST,
-        # then kb.capture.atomic_text_write) defeats sys.modules-deletion
-        # contamination class. Strict scope per design Q3 (only the 2 cleans_up
-        # tests; cycle-16 L1 same-class peer scan in R2 Codex eval confirmed
-        # zero other test files patch kb.capture.atomic_text_write via
-        # string-path).
-        monkeypatch.setattr("kb.utils.io.atomic_text_write", boom)
-        monkeypatch.setattr("kb.capture.atomic_text_write", boom)
+        # Cycle 44 M4 / AC27: cycle-38 dual-site patch collapses to a single-site
+        # patch on the inner `_atomic_text_write_replace` helper because
+        # `kb.capture.atomic_text_write` no longer exists (capture.py imports
+        # removed in cycle 44). The exclusive=True branch reserves via O_EXCL
+        # then delegates the content write to `_atomic_text_write_replace`;
+        # patching that helper to raise reproduces the disk-full-mid-write path.
+        monkeypatch.setattr("kb.utils.io._atomic_text_write_replace", boom)
         with pytest.raises(OSError, match="disk full"):
-            _exclusive_atomic_write(path, "ignored")
+            atomic_text_write("ignored", path, exclusive=True)
         # No 0-byte poison file left behind
         assert not path.exists(), "reservation file must be cleaned up on failure"
 
     def test_cleans_up_on_keyboard_interrupt(self, tmp_captures_dir, monkeypatch):
+        from kb.utils.io import atomic_text_write
+
         path = tmp_captures_dir / "test.md"
 
         def interrupted(content, p):
             raise KeyboardInterrupt()
 
-        # Cycle 38 AC6 — dual-site patch (see test_cleans_up_reservation rationale).
-        monkeypatch.setattr("kb.utils.io.atomic_text_write", interrupted)
-        monkeypatch.setattr("kb.capture.atomic_text_write", interrupted)
+        # Cycle 44 M4 / AC27 — single-site patch (see above rationale).
+        monkeypatch.setattr("kb.utils.io._atomic_text_write_replace", interrupted)
         with pytest.raises(KeyboardInterrupt):
-            _exclusive_atomic_write(path, "ignored")
+            atomic_text_write("ignored", path, exclusive=True)
         assert not path.exists(), "must clean up on BaseException too"
 
 
