@@ -28,17 +28,7 @@ import click  # noqa: E402
 from kb import __version__  # noqa: E402
 from kb.config import SOURCE_TYPE_DIRS  # noqa: E402
 from kb.utils.io import sweep_orphan_tmp  # noqa: E402
-from kb.utils.text import truncate as _truncate_text  # noqa: E402
-
-
-def _truncate(msg: str, limit: int = 600) -> str:
-    """Truncate long error messages to avoid terminal flooding.
-
-    Cycle 3 M17: delegate to `kb.utils.text.truncate` so CLI errors use the
-    same head+tail smart-truncate as every other error surface. Default
-    limit raised from 500 to 600 to match the utils helper.
-    """
-    return _truncate_text(msg, limit=limit)
+from kb.utils.text import truncate  # noqa: E402
 
 
 def _is_debug_mode() -> bool:
@@ -66,7 +56,7 @@ def _error_exit(exc: BaseException, *, code: int = 1) -> None:
     """
     if _is_debug_mode():
         click.echo(traceback.format_exc(), err=True)
-    click.echo(f"Error: {_truncate(str(exc))}", err=True)
+    click.echo(f"Error: {truncate(str(exc))}", err=True)
     sys.exit(code)
 
 

@@ -9,7 +9,8 @@ import logging
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
-from kb.mcp.app import _sanitize_error_str, _validate_wiki_dir, mcp
+from kb.mcp.app import _validate_wiki_dir, mcp
+from kb.utils.sanitize import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def kb_lint(
         result = format_report(report)
     except Exception as e:
         logger.error("Error running lint checks: %s", e)
-        return f"Error: kb_lint failed: {type(e).__name__}: {_sanitize_error_str(e)}"
+        return f"Error: kb_lint failed: {type(e).__name__}: {sanitize_error_text(e)}"
 
     # Append feedback-flagged pages (Cycle 7 AC27: route through _safe_call so
     # failures surface in the report label instead of silently degrading).
@@ -123,7 +124,7 @@ def kb_lint(
             result += "\n\n" + augment_result["summary"]
         except Exception as e:
             logger.error("Error running augment: %s", e)
-            return f"Error: kb_lint failed: {type(e).__name__}: {_sanitize_error_str(e)}"
+            return f"Error: kb_lint failed: {type(e).__name__}: {sanitize_error_text(e)}"
 
     return result
 
@@ -147,7 +148,7 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
         result = format_evolution_report(report)
     except Exception as e:
         logger.error("Error running evolution analysis: %s", e)
-        return f"Error: Evolution analysis failed — {_sanitize_error_str(e)}"
+        return f"Error: Evolution analysis failed — {sanitize_error_text(e)}"
 
     # Append coverage gaps from query feedback (fail-safe)
     try:
@@ -205,7 +206,7 @@ def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
         return export_mermaid(max_nodes=max_nodes, wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error exporting graph: %s", e)
-        return f"Error: Graph export failed — {_sanitize_error_str(e)}"
+        return f"Error: Graph export failed — {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -229,7 +230,7 @@ def kb_verdict_trends(wiki_dir: str | None = None) -> str:
         return format_verdict_trends(trends)
     except Exception as e:
         logger.error("Error computing verdict trends: %s", e)
-        return f"Error: Verdict trends failed — {_sanitize_error_str(e)}"
+        return f"Error: Verdict trends failed — {sanitize_error_text(e)}"
 
 
 @mcp.tool()
@@ -252,7 +253,7 @@ def kb_detect_drift(wiki_dir: str | None = None) -> str:
         result = detect_source_drift(wiki_dir=wiki_path)
     except Exception as e:
         logger.error("Error detecting source drift: %s", e)
-        return f"Error: Source drift detection failed — {_sanitize_error_str(e)}"
+        return f"Error: Source drift detection failed — {sanitize_error_text(e)}"
 
     lines = ["# Source Drift Detection\n", result["summary"], ""]
 

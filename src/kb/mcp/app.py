@@ -8,7 +8,12 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
-from kb.utils.sanitize import sanitize_error_text
+
+# Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
+# downstream caller that previously imported from `kb.mcp.app`. Ruff autofix
+# (`F401 unused-import`) will silently strip the line if the noqa is missing —
+# class-of-bug per cycle-22 L2 / feedback_ruff_unused_import_monkeypatch.
+from kb.utils.sanitize import _rel, sanitize_error_text  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -113,31 +118,6 @@ mcp = FastMCP(
 )
 
 
-def _rel(path: "Path | None") -> str:
-    """Return path relative to project root with forward slashes.
-
-    Cycle 7 AC12/13 defence-in-depth — handles ``None`` and non-``Path`` inputs
-    without raising so ``_sanitize_error_str`` (which may pass the attribute
-    from an arbitrary exception type) never hits an ``AttributeError`` on the
-    path-sanitisation hot path.
-    """
-    if path is None:
-        return "<path>"
-    try:
-        return str(path.relative_to(PROJECT_ROOT)).replace("\\", "/")
-    except (AttributeError, TypeError):
-        # Non-Path input — stringify and return verbatim (regex sweep in
-        # _sanitize_error_str will still scrub absolute-path literals).
-        return str(path).replace("\\", "/")
-    except ValueError:
-        return str(path).replace("\\", "/")
-
-
-def _sanitize_error_str(exc: BaseException, *paths: "Path | None") -> str:
-    """Render an exception as a string with filesystem paths redacted."""
-    return sanitize_error_text(exc, *paths)
-
-
 def _validate_wiki_dir(
     wiki_dir: str | None, *, project_root: Path | None = None
 ) -> tuple[Path | None, str | None]:
@@ -147,19 +127,19 @@ def _validate_wiki_dir(
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
-        return None, f"wiki_dir invalid: {_sanitize_error_str(e)}"
+        return None, f"wiki_dir invalid: {sanitize_error_text(e)}"
     if not path.is_absolute():
         return None, f"wiki_dir must be an absolute path (got: {wiki_dir})"
     if not path.exists():
-        return None, f"wiki_dir does not exist: {_sanitize_error_str(str(path))}"
+        return None, f"wiki_dir does not exist: {sanitize_error_text(str(path))}"
     if not path.is_dir():
-        return None, f"wiki_dir is not a directory: {_sanitize_error_str(str(path))}"
+        return None, f"wiki_dir is not a directory: {sanitize_error_text(str(path))}"
     path_resolved = path.resolve()
     root = effective_project_root.resolve()
     if path_resolved != root and not path_resolved.is_relative_to(root):
         return (
             None,
-            f"wiki_dir must be inside project root — got {_sanitize_error_str(str(path_resolved))}",
+            f"wiki_dir must be inside project root — got {sanitize_error_text(str(path_resolved))}",
         )
     return path_resolved, None
 

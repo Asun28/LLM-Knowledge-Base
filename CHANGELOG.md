@@ -29,6 +29,13 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-27 — cycle 42 (Phase 4.6 small dedup batch — Phase 4.6 MEDIUM M1+M2+M3 + LOW L1+L2+L4+L5)
+
+- Items: 7 AC (M1 cli._truncate / M2 mcp.app._rel / M3 query/engine cache-keys / L1 lint/augment._load_purpose_text / L2 mcp.app._sanitize_error_str wrapper / L4 query rephrasing relocation / L5 feedback+review __init__) / 6 src files (cli.py, mcp/{app,browse,health,quality,core}.py, query/{engine,rewriter}.py, lint/augment.py, feedback/__init__.py, review/__init__.py) / 3 commits + 1 doc-update + 1 self-review = 5 total
+- Tests: 3014 → 3014 (+0; pure behavior-preserving dedup. 3003 passed + 11 skipped local Windows)
+- Scope: collapse 7 Phase 4.6 DeepSeek-audit MEDIUM/LOW duplications — three near-identical cache-key helpers fold into a single `_compute_cache_key`; `_truncate` / `_rel` / `_sanitize_error_str` MCP-app passthroughs deleted in favour of canonical `kb.utils.text.truncate` / `kb.utils.sanitize.{_rel,sanitize_error_text}`; rephrasing-for-UI helpers moved from `query/engine.py` to `query/rewriter.py` alongside `rewrite_query`; `lint/augment._load_purpose_text` now delegates to LRU-cached `kb.utils.pages.load_purpose`; empty `feedback/` and `review/` `__init__.py` gain module docstring + explicit empty `__all__`.
+- Detail: [history archive](CHANGELOG-history.md#cycle-42)
+
 #### 2026-04-27 — cycle 41 (Backlog hygiene + freeze-and-fold continuation + C40-L3 docstring-grep upgrade + dep-drift re-verification)
 
 - Items: 6 AC (AC1-AC6) / 1 src (`src/kb/compile/compiler.py` docstring alignment, 6 lines net) / 4 test-file edits (`tests/test_mcp_browse_health.py` +212 / -0; `tests/test_capture.py` +97 / -2; `tests/test_mcp_quality_new.py` +60 / -1; `tests/test_cli.py` +146 / -2; `tests/test_compile.py` +44 / -10) + 4 test-file deletes (`tests/test_cycle10_validate_wiki_dir.py` -224; `tests/test_cycle10_capture.py` -97; `tests/test_cycle10_quality.py` -67; `tests/test_cycle11_cli_imports.py` -159) + BACKLOG.md (cycle-41 re-confirmation tags + C40-L3 entry deletion) + CHANGELOG/CHANGELOG-history/CLAUDE.md test-FILE count narrative / +TBD commits (Step-9 expected 5 implementation + 1 doc-update + 1 self-review = 7 total)

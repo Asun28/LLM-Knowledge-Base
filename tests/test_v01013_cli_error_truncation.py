@@ -86,17 +86,17 @@ def test_evolve_error_truncates_long_message(monkeypatch):
 
 
 def test_truncate_preserves_short_messages():
-    from kb.cli import _truncate
+    from kb.utils.text import truncate
 
     short = "error"
-    assert _truncate(short) == short
+    assert truncate(short) == short
 
 
 def test_truncate_cuts_long_messages():
-    from kb.cli import _truncate
+    from kb.utils.text import truncate
 
     long = "x" * 1000
-    result = _truncate(long)
+    result = truncate(long)
     # Cycle 3 M17: smart head+tail truncation with `...N chars elided...`
     # marker. Result fits within ~2×half + marker + elided-count digits;
     # the precise length depends on the marker. Contract: shorter than
