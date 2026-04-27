@@ -29,6 +29,14 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-27 — cycle 45 (M3 mcp/core.py split + AC32-AC34 regression tests; M1/M2/M4 already shipped via cycle 44 parallel)
+
+- Items: 8 ACs (M3 AC19+AC20+AC22+AC23+AC24 + AC32+AC33+AC34) / 5 src files (mcp/{core,ingest,compile,__init__,health}.py — 1149 LOC core split into 447 LOC core + 612 LOC ingest + ~140 LOC compile) / 3 new test files / 4 commits
+- Tests: 3019 → 3027 (+8). Windows local: 3016 passed + 11 skipped.
+- Scope:
+  M3 mcp/core.py split — extract 5 ingest tools to mcp/ingest.py; extract 2 compile tools to mcp/compile.py; update kb/mcp/__init__.py:_register_all_tools() to import all 6 modules; mcp/core.py reduced from 1149 LOC → 447 LOC under hard ≤450 cap; 28 MCP tools registered. AC32-AC34 regression coverage: package-constants propagation parametrised, lint-runner-order snapshot. Cycle 44 (PR #63) merged in parallel with M1+M2+M4+AC10+AC28-30 — cycle 45 PR #65 was rebased onto cycle-44's main, dropping redundant M1/M2/M4 commits, dropping 3 surface-regression parametrize cases that tested cycle-45-specific structural choices that cycle 44 chose differently, and retargeting source-coverage propagation to cycle 44's actual checks.consistency module. Per cycle-43 L4 + new cycle-45 L1 lesson on parallel-cycle merge handling.
+- Detail: [history archive](CHANGELOG-history.md#2026-04-27--cycle-45)
+
 #### 2026-04-27 — cycle 44 (Phase 4.6 close: M1+M2+M4 splits + AC10 fold + vacuous-test upgrades)
 
 - Items: 23 AC + 7 CONDITIONS / 25+ src files (M1: 8 new submodules + 1 delete; M2: 9 new submodules + 2 shim rewrites + 1 delete; M4: utils/io.py + capture.py; cli.py + mcp/health.py canonical imports) / 4 commits + 1 doc-update + 1 self-review = 6 total

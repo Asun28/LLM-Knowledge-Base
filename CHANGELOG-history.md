@@ -9,6 +9,20 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-27 — cycle 45 — M3 mcp/core.py split + AC32-AC34 regression tests
+
+**Theme.** Recovery for PR #65 after cycle 44 (PR #63) shipped M1/M2/M4 in parallel with a different decomposition. Cycle 45 now carries the M3-only source split plus the still-valid AC32-AC34 regression coverage, rebased onto cycle-44's main and filtered for the cycle-44 surface choices. Scope: 8 ACs (M3 AC19+AC20+AC22+AC23+AC24 + AC32+AC33+AC34), 5 source files (`mcp/{core,ingest,compile,__init__,health}.py`), 3 new cycle-45 test files, 4 branch commits.
+
+**M3 — `mcp/core.py` split.** Extracted the 5 ingest tools to `src/kb/mcp/ingest.py` and the 2 compile tools to `src/kb/mcp/compile.py`; kept `src/kb/mcp/core.py` focused on query/core compatibility exports and under the hard 450 LOC cap (1149 LOC core split into 447 LOC core + 612 LOC ingest + ~140 LOC compile). Updated `kb/mcp/__init__.py:_register_all_tools()` to import all 6 MCP modules, preserving 28 registered tools. `mcp/health.py` imports were adjusted for the split. Restored the cycle-17 AC4 `kb.capture` security-check note in `mcp/core.py` after the split moved capture implementation details to `mcp/ingest.py`.
+
+**AC32-AC34 regression coverage.** Added `tests/test_cycle45_init_reexports_match_legacy_surface.py`, `tests/test_cycle45_package_constants_propagate_to_submodules.py`, and `tests/test_cycle45_lint_runner_order_invariant.py`. Coverage pins the valid remaining legacy import surfaces, package-constant patch propagation into split lint submodules, and the lint runner order snapshot.
+
+**Cycle-44 parallel merge recovery.** Dropped the cycle-45-specific surface-regression params for `src/kb/lint/checks.py`, `src/kb/lint/_augment_manifest.py`, and `src/kb/lint/_augment_rate.py` because cycle 44's M1/M2 chose a different decomposition: `checks` has a narrower package contract, and `_augment_manifest.py` / `_augment_rate.py` remain compatibility shims rather than full legacy mirrors. Retargeted the source coverage patch-propagation test from the cycle-45-designed `kb.lint.checks.source_coverage` module to cycle 44's actual `kb.lint.checks.consistency.check_source_coverage`.
+
+**Test counts.** 3019 → 3027 (+8). Windows local: 3016 passed + 11 skipped, 48 warnings. Focused recovery checks: 8 cycle-45 regression tests passed after filtering; the restored cycle-17 core-header pin also passed. Ruff check clean; ruff format clean after formatting `mcp/core.py`.
+
+**Operational lesson.** Parallel-cycle recovery needs an explicit surface-classification pass after rebase: keep behavior/contract tests that can target the merged surface, but drop regression params that only asserted a superseded structural choice. This follows cycle-43 L4 and becomes the cycle-45 L1 lesson for future parallel-cycle merge handling.
+
 ### 2026-04-27 — cycle 44 — Phase 4.6 close: M1+M2+M4 splits + AC10 fold + 3 vacuous-test upgrades
 
 **Theme.** 23-AC + 7-CONDITION cycle closing Phase 4.6 MEDIUM M1, M2, M4 + LOW L1, plus the cycle-43 carry-overs (AC10 fold + 3 vacuous-test upgrade candidates per C40-L3 + C41-L1). M3 (mcp/core.py split) DEFERRED to cycle 45 per design Q13 — R2's enumeration found ≥50 patch sites across 14 test files and cycle-22 L4 conservative posture argued for splitting the cycle. Cycle-44 worktree isolation from-the-start at `D:/Projects/llm-wiki-flywheel-c44` per cycle-43 L1; main worktree never touched. Steps 4 R1 DeepSeek direct CLI + R2 Codex agent ran in parallel; Step 5 Opus subagent resolved Q1-Q14 with HIGH confidence + 7 binding CONDITIONS; Step 9 hybrid execution (primary-session for TASKs 1-7 + 12-14 + ruff cleanup; Codex subagent dispatches for M1 + M2 splits in parallel — both Codex agents successfully wrote to the c44 worktree, with one self-detecting an early apply_patch path issue and reverting via git restore before completing in PowerShell mode).

@@ -1,5 +1,9 @@
 """Core MCP query tool and compatibility exports.
 
+Cycle 17 AC4 (narrowed): `kb.capture` remains module-level in
+`kb.mcp.ingest` after the cycle-45 M3 split because its security check must
+run under the real project config before test monkeypatches.
+
 Cycle 19 AC15 keeps owner-module call style for patchable callables
 (`query_engine.query_wiki`, `query_engine.search_pages`,
 `reliability.compute_trust_scores`). Cycle 19 AC16 keeps snapshot-binding
@@ -424,6 +428,7 @@ def kb_query(
             f"Title: {r['title']}\n\n{r['content']}\n"
         )
     return "\n".join(lines)
+
 
 from kb.mcp.compile import (  # noqa: E402, F401  # re-exported for backward compat (cycle-23 L5)
     kb_compile,
