@@ -196,14 +196,9 @@ _All items resolved — see CHANGELOG cycle 28._
 
 ### MEDIUM
 
-- `cli.py:34` `_truncate(msg, limit=600)` — exact-signature duplicate of `utils/text.py:9` `truncate(msg, limit=600)`. Two implementations risk drift on length-limit policy changes.
-  (fix: delete `cli._truncate`, replace call sites with `from kb.utils.text import truncate`)
-
-- `mcp/app.py:116` `_rel(path)` duplicates `utils/sanitize.py:37` `_rel(path)` — both compute `path.relative_to(PROJECT_ROOT)` for error-message scrubbing. The MCP copy was added before sanitize.py existed; both are now imported across the package.
-  (fix: keep `utils.sanitize._rel`, delete `mcp.app._rel`, update the 1-2 call sites in `mcp/app.py` to import from utils.sanitize)
-
-- `query/engine.py:615/639/688` three private cache-key fns — `_pagerank_cache_key`, `_wiki_bm25_cache_key`, `_raw_sources_cache_key` each compute the same `(path_str, mtime, size, ...)` tuple-hash pattern with minor field variations. Adding a 4th cache (e.g. dedup, embeddings) means a 4th near-copy.
-  (fix: single `_compute_cache_key(path, *, extra_fields=())` helper; or move all three plus the cache dicts into a new `query/_cache.py` module)
+<!-- Cycle 42 closed (2026-04-27): M1 cli._truncate → kb.utils.text.truncate;
+     M2 mcp.app._rel → kb.utils.sanitize._rel; M3 query/engine three cache-key
+     fns → single _compute_cache_key helper. -->
 
 - `lint/checks.py` (1046 LOC) — frontmatter, dead-link, orphan, cycle-detection, staleness, and duplicate-slug rules all live in one file. Cycle-30 added consistency lint, cycle-31 added deep-lint — every new rule grows the same module, defeating per-rule test isolation.
   (fix: split into `lint/checks/<rule>.py` per rule + `lint/checks/__init__.py` registry; or `lint/rules/` matching `lint/runner.py`'s dispatch contract)
@@ -219,20 +214,15 @@ _All items resolved — see CHANGELOG cycle 28._
 
 ### LOW
 
-- `lint/augment.py:292` `_load_purpose_text` re-implements `utils/pages.py:186 load_purpose` with a 5000-char truncation and silent OSError-swallow. The `@cache` on the canonical `load_purpose` is bypassed.
-  (fix: `load_purpose(wiki_dir)[:5000] if (text := load_purpose(wiki_dir)) else ""` — or expose a `load_purpose_truncated(wiki_dir, max_chars=5000)` in `utils/pages.py`)
-
-- `mcp/app.py:136-138` `_sanitize_error_str` is a 2-line passthrough wrapper for `utils/sanitize.py:71 sanitize_error_text`. It exists in 30+ MCP call sites across `core.py`, `browse.py`, `health.py`, `quality.py`. Adds no behavior; only adds a tier of indirection that future readers must trace.
-  (fix: replace each `from kb.mcp.app import _sanitize_error_str` with `from kb.utils.sanitize import sanitize_error_text`; delete the wrapper)
+<!-- Cycle 42 closed (2026-04-27): L1 lint/augment._load_purpose_text →
+     load_purpose(wiki_dir)[:5000]; L2 mcp.app._sanitize_error_str passthrough
+     deleted (46 call sites migrated to kb.utils.sanitize.sanitize_error_text);
+     L4 query/engine rephrasing helpers moved to query/rewriter.py;
+     L5 feedback/__init__.py and review/__init__.py gain module docstring +
+     empty __all__. -->
 
 - `lint/_augment_manifest.py` (213 LOC) and `lint/_augment_rate.py` (110 LOC) — leading-underscore "private" siblings used only by `lint/augment.py`. The leading underscore on a top-level *file* (vs a function) is non-standard Python; either inline or promote to public submodules.
   (fix: covered by the `lint/augment.py` package-split MEDIUM item above — these become `lint/augment/manifest.py` and `lint/augment/rate.py`)
-
-- `query/engine.py:301/319` `_build_rephrasing_prompt` + `_suggest_rephrasings` — query-rephrasing logic living in the search engine while `query/rewriter.py:94 rewrite_query` already owns query-side rewriting. Different concerns (rephrasing surfaces alternatives to the user; rewriting expands for retrieval) but related enough to belong in one module.
-  (fix: move both functions to `query/rewriter.py` with a clarifying docstring distinguishing rephrasing-for-UI from rewriting-for-retrieval)
-
-- `feedback/__init__.py` and `review/__init__.py` are empty — no `__all__`, no re-exports, no docstring. Modules `feedback/store.py`, `feedback/reliability.py`, `review/context.py`, `review/refiner.py` are imported via fully-qualified paths everywhere. Boundary is unclear: are these public sub-packages or implementation-only namespaces?
-  (fix: add a one-line module docstring + an `__all__ = ()` (or the actual public surface) to each; this is the documented "implementation-only" pattern used elsewhere in the package)
 
 ---
 
