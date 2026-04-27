@@ -67,13 +67,13 @@ from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
     _rel,
-        _validate_wiki_dir,
+    _validate_wiki_dir,
     error_tag,
     mcp,
 )
-from kb.utils.sanitize import sanitize_error_text
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
+from kb.utils.sanitize import sanitize_error_text
 from kb.utils.text import slugify, yaml_escape, yaml_sanitize
 
 # Cycle 17 AC4 (narrowed): `anthropic` and `frontmatter` stay deferred to tool

@@ -20,8 +20,8 @@ from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint._safe_call import _safe_call
 from kb.lint.verdicts import add_verdict
 from kb.mcp.app import _validate_notes, _validate_page_id, mcp
-from kb.utils.sanitize import sanitize_error_text
 from kb.utils.pages import load_all_pages
+from kb.utils.sanitize import sanitize_error_text
 from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)

@@ -13,8 +13,8 @@ from kb.config import (
     WIKI_SUBDIR_TO_TYPE,
 )
 from kb.mcp.app import _validate_page_id, _validate_wiki_dir, mcp
-from kb.utils.sanitize import sanitize_error_text
 from kb.utils.pages import load_all_pages
+from kb.utils.sanitize import sanitize_error_text
 
 logger = logging.getLogger(__name__)
 

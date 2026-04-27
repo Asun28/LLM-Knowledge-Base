@@ -18,7 +18,6 @@ from kb.lint._safe_call import _safe_call
 from kb.lint.runner import run_all_checks
 from kb.mcp import browse, health
 from kb.mcp.app import _validate_wiki_dir
-from kb.utils.sanitize import sanitize_error_text as _sanitize_error_str
 from kb.mcp.browse import (
     kb_list_pages,
     kb_list_sources,
@@ -33,6 +32,7 @@ from kb.mcp.health import (
     kb_lint,
     kb_verdict_trends,
 )
+from kb.utils.sanitize import sanitize_error_text as _sanitize_error_str
 
 # ── Helpers ──────────────────────────────────────────────────────
 

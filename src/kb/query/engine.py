@@ -19,7 +19,6 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     QUERY_COVERAGE_CONFIDENCE_THRESHOLD,
     QUERY_MAX_TOKENS,
-    QUERY_REPHRASING_MAX,
     RAW_SOURCE_MAX_BYTES,
     SEARCH_TITLE_WEIGHT,
     SOURCE_DECAY_DEFAULT_DAYS,
@@ -37,10 +36,10 @@ from kb.query.citations import extract_citations
 from kb.query.dedup import dedup_results
 from kb.query.embeddings import _vec_db_path
 from kb.query.hybrid import rrf_fusion
-from kb.utils.llm import LLMError, call_llm
+from kb.utils.llm import call_llm
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.pages import load_all_pages, load_purpose
-from kb.utils.text import wrap_purpose, yaml_escape
+from kb.utils.text import wrap_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -290,8 +289,8 @@ assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
 # Re-exported here so monkeypatch sites (`engine._suggest_rephrasings`,
 # `engine._normalise_for_echo`) and direct imports keep working.
 from kb.query.rewriter import (  # noqa: E402, F401  (re-export, used downstream)
-    _build_rephrasing_prompt,
     _BULLET_PREFIX_RE,
+    _build_rephrasing_prompt,
     _normalise_for_echo,
     _suggest_rephrasings,
 )

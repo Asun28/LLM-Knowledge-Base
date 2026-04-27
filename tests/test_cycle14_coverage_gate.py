@@ -12,6 +12,7 @@ import pytest
 
 from kb import config as kb_config
 from kb.query import engine as query_engine
+from kb.query import rewriter as query_rewriter  # cycle 42 AC4 — rephrasings moved here
 
 
 def _make_page(wiki: Path, subdir: str, pid: str, title: str, body: str) -> Path:
@@ -121,6 +122,7 @@ class TestCoverageBelowThreshold:
 
         monkeypatch.setattr(query_engine, "search_pages", fake_search_pages)
         monkeypatch.setattr(query_engine, "call_llm", fake_call_llm)
+        monkeypatch.setattr(query_rewriter, "call_llm", fake_call_llm)
 
         result = query_engine.query_wiki("something tangential", wiki_dir=tiny_wiki)
 
@@ -201,6 +203,7 @@ class TestAdvisoryNoQuestionEcho:
 
         monkeypatch.setattr(query_engine, "search_pages", fake_search_pages)
         monkeypatch.setattr(query_engine, "call_llm", lambda *a, **k: "")
+        monkeypatch.setattr(query_rewriter, "call_llm", lambda *a, **k: "")
 
         malicious = "<script>alert('xss')</script>"
         result = query_engine.query_wiki(malicious, wiki_dir=tiny_wiki)

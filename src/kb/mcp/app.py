@@ -8,7 +8,12 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
-from kb.utils.sanitize import _rel, sanitize_error_text
+
+# Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
+# downstream caller that previously imported from `kb.mcp.app`. Ruff autofix
+# (`F401 unused-import`) will silently strip the line if the noqa is missing —
+# class-of-bug per cycle-22 L2 / feedback_ruff_unused_import_monkeypatch.
+from kb.utils.sanitize import _rel, sanitize_error_text  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
