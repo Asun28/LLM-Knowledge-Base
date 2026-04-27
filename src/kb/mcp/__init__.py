@@ -6,10 +6,10 @@ startup). A bare ``import kb.mcp`` no longer pulls the heavy transitive
 deps (``anthropic``, ``networkx``, ``sentence-transformers``) into
 ``sys.modules``; they load only when a caller actually reaches for the
 server object via ``from kb.mcp import mcp`` — that attribute access
-triggers a PEP 562 ``__getattr__`` which imports the four tool
-submodules (``browse``, ``core``, ``health``, ``quality``), letting each
-``@mcp.tool()`` decorator register its handlers against the cached
-FastMCP instance.
+triggers a PEP 562 ``__getattr__`` which imports the six tool
+submodules (``browse``, ``compile``, ``core``, ``health``,
+``ingest``, ``quality``), letting each ``@mcp.tool()`` decorator
+register its handlers against the cached FastMCP instance.
 
 Explicit submodule imports (``from kb.mcp import core``) still work
 unchanged — Python's import machinery loads the submodule normally and
@@ -34,7 +34,7 @@ def _register_all_tools() -> None:
     startup) does no extra work.
     """
     # noqa: F401 — imports are for decorator side effects, no local use.
-    from kb.mcp import browse, core, health, quality  # noqa: F401
+    from kb.mcp import browse, compile, core, health, ingest, quality  # noqa: F401
 
 
 def __getattr__(name: str):
