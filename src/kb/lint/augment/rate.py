@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -76,13 +75,3 @@ class RateLimiter:
 
         self._this_run_total += 1
         return True, 0
-
-
-def _sync_legacy_shim() -> None:
-    legacy = sys.modules.get("kb.lint._augment_rate")
-    if legacy is None:
-        return
-    legacy.__dict__.update({"RateLimiter": RateLimiter, "RATE_PATH": RATE_PATH})
-
-
-_sync_legacy_shim()

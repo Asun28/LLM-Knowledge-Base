@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -161,20 +160,3 @@ class Manifest:
             if gap["page_id"] == page_id:
                 return gap["state"]
         return None
-
-
-def _sync_legacy_shim() -> None:
-    legacy = sys.modules.get("kb.lint._augment_manifest")
-    if legacy is None:
-        return
-    legacy.__dict__.update(
-        {
-            "Manifest": Manifest,
-            "MANIFEST_DIR": MANIFEST_DIR,
-            "TERMINAL_STATES": TERMINAL_STATES,
-            "RESUME_COMPLETE_STATES": RESUME_COMPLETE_STATES,
-        }
-    )
-
-
-_sync_legacy_shim()
