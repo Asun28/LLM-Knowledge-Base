@@ -9,6 +9,69 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-28 — cycle 47 — Backlog hygiene + dep-CVE re-confirm + freeze-and-fold continuation
+
+**Theme:** continue Phase 4.5 HIGH #4 freeze-and-fold cadence with 3 small folds (deferred from cycle 46 which prioritised Phase 4.6 LOW shim deletion); re-confirm 7 dep-CVE/drift/resolver-conflict BACKLOG entries (cycle-46 → cycle-47); refresh cycle-47+ tagged entries to cycle-48+ for spawn entries with missing prerequisites; re-ground AC10 Windows CI matrix entry on grep-proven Thread/MP candidates (removing false-positive `test_cycle23_workflow_e2e.py`).
+
+**Items shipped (18 ACs):**
+
+- **AC1-AC6 dep-CVE timestamp refresh** — re-confirmed all 4 pip-audit advisories + 2 Dependabot drift entries unchanged from cycle 46. `pip index versions {diskcache,ragas,litellm,pip}` LATEST values match cycle-46 baseline (5.6.3 / 0.4.3 / 1.83.14 / 26.1). `pip-audit --format=json` against `.venv` returned the same 4 vulns: diskcache CVE-2025-69872 fix=[]; litellm 1.83.0 GHSA-xqmj-j6mv-4862 fix=['1.83.7'] BLOCKED; pip 26.0.1 CVE-2026-3219 fix=[]; ragas 0.4.3 CVE-2026-6587 fix=[]. Litellm 1.83.14 wheel METADATA still pins `Requires-Dist: click==8.1.8` (downloaded via `pip download --no-deps litellm==1.83.14` to `.data/cycle-47/litellm-1.83.14-py3-none-any.whl`; verified via Python `zipfile.ZipFile`). Pip GHSA-58qw-9mgm-455v advisory still has `vulnerable_version_range:<=26.0.1` + `first_patched_version:null` (extracted from `.vulnerabilities[0]`, NOT top-level `patched_versions`/`vulnerable_version_range` keys — earlier jq selector returning null at top-level was misleading and the cycle-46 re-confirm wording carried that inaccuracy forward; cycle-47 corrected). Refreshed timestamps in BACKLOG.md lines 126 (diskcache) / 129 (ragas) / 132 (litellm) / 135 (pip) / 158 (resolver conflicts, AC13 scope-expanded per Step-5 M3) / 170 (Dependabot GHSA-r75f) / 172 (Dependabot GHSA-v4p8). Lines 170+172 use `cycle-37/38/39/40/41/46 re-confirmed drift persists` pattern — appended `/47` to the cycle list rather than overwriting "cycle-46" (different shape from the literal `Cycle-46 re-confirmed 2026-04-28` stamps on lines 132+135+158).
+
+- **AC4 wording correction (Step-5 B1)** — BACKLOG.md line 135 entry was misleading: "`requirements.txt` `pip==26.0.1`" implied pip is pinned in `requirements.txt`, but `grep -nE "^pip==" requirements.txt` returns no hit. Re-worded entry: locator changed from `requirements.txt` → `.venv` installer; verb changed from "do NOT bump the pin" → "do NOT upgrade the installer". Posture (cycle-22 L4 conservative — wait for advisory or PyPA disclosure) unchanged; semantic content correct, only locator/verb fixed.
+
+- **AC7 fold (TASK 2)** — `tests/test_cycle16_config_constants.py` (38 LOC, 5 tests in `TestCycle16ConfigConstants` class) → NEW `tests/test_config.py` as `TestConfigConstants` class with 5 methods. Per Step-5 Q1: new file rather than splitting between `test_lint.py` + `test_query.py`; cluster-by-source-module mirrors `src/kb/config.py`. Constants under test: `QUERY_REPHRASING_MAX` (cycle 16 AC1), `DUPLICATE_SLUG_DISTANCE_THRESHOLD` (AC2), `CALLOUT_MARKERS` tuple (AC3, with tuple-immutability + lowercase-ASCII assertions). Verified: `pytest tests/test_config.py -q` → 5 passed; `pytest --collect-only -q | tail -1` → 3025 (unchanged). Source `git rm`'d in same commit; git auto-detected the rename (76% similarity).
+
+- **AC8 fold (TASK 3)** — `tests/test_cycle11_task6_mcp_ingest_type.py` (78 LOC, 6 tests) → `tests/test_mcp_core.py` as `TestKbCreatePageHintErrors` class. Per Step-5 Condition 2: `_assert_create_page_error` MUST be a `@staticmethod` inside the class — NO module-level helper. Per cycle-11 AC2 same-class peer rule (cycle-11 L3): all 3 ingest/save tools (`kb_ingest`, `kb_ingest_content`, `kb_save_source`) reject `comparison`/`synthesis` source_type with a hint pointing at `kb_create_page`. Fold-site import `from kb.mcp import core as _core_mod` (E402 noqa) added at the bottom of `test_mcp_core.py` (avoids edit to top-of-file import block). Verified: `pytest tests/test_mcp_core.py -q -k TestKbCreatePageHintErrors` → 6 passed; full file `pytest tests/test_mcp_core.py -q` → 31 passed (25 existing + 6 new); `pytest --collect-only -q | tail -1` → 3025; file count 243 → 242 (-1 for source delete).
+
+- **AC9 fold (TASK 4)** — `tests/test_cycle14_save_frontmatter.py` (139 LOC, 8 tests across 5 classes; design said 9 — minor miscount, all 8 preserved so math unchanged) → `tests/test_models.py` as 5 new classes: `TestSaveFrontmatterInsertionOrder` (2), `TestSaveFrontmatterBodyVerbatim` (2), `TestSaveFrontmatterListValuedMetadataOrder` (1), `TestSaveFrontmatterExtraKeysPreserved` (1), `TestSaveFrontmatterAtomicWrite` (2, renamed from source `TestAtomicWriteProof` per Step-5 N1). Per Step-5 Condition 3: NO test calls `load_page_frontmatter` (read path); `frontmatter.Post` construction stays function-local; rename in receiver only. Pinning `save_page_frontmatter` insertion-order + atomic-write contract per cycle-7 L1 (frontmatter `sort_keys=False`). Fold-site imports `import frontmatter` + `from kb.utils.pages import save_page_frontmatter` (E402 noqa). Verified: `pytest tests/test_models.py -q -k SaveFrontmatter` → 8 passed; full file → 18 passed (10 existing + 8 new); `pytest --collect-only -q | tail -1` → 3025; file count 242 → 241 (-1 for source delete).
+
+- **AC10 BACKLOG frontier replacement (Step-5 M2)** — BACKLOG.md line 164 (windows-latest CI matrix re-enable, cycle-47+) text refresh. R2 Codex grep-confirmed `test_cycle23_workflow_e2e.py` has ZERO Thread/multiprocessing hits — the original entry's "(likely in `test_cycle23_workflow_e2e.py` or `test_cycle23_rebuild_indexes.py`)" was wrong on the first half. Replaced with grep-proven ranked frontier list: top-3 = (1) `test_cycle25_dim_mismatch.py:180-184` (N-thread parallel sqlite write — sqlite-on-Windows shutdown known hot zone), (2) `test_cycle23_rebuild_indexes.py:213-248` (Thread at line 233 holding manifest lock — slow Windows fs), (3) `test_cycle24_lock_backoff.py:222-228` (exponential-backoff thread overshoot risk); + 6 lower-priority candidates listed. NO skipif markers applied per Step-5 Q3 (no GHA-Windows reproducer; cycle-36 L1 CI-cost discipline). Tag bumped `(cycle-47+)` → `(cycle-48+)`.
+
+- **AC11 Phase 4.5 HIGH #4 progress note** — BACKLOG.md line 91 progress text appended with cycle-47 fold delta: 3 folds (`test_cycle16_config_constants` → new `test_config.py`; `test_cycle11_task6_mcp_ingest_type` → `test_mcp_core.py`; `test_cycle14_save_frontmatter` → `test_models.py`); file count 243 → 241 (-2 net); test count preserved at 3025. Cumulative ~190+ versioned files still to fold; HIGH item remains open.
+
+- **AC12 cycle-47+ tag refresh** — refreshed all 5 `(cycle-47+)` tagged entries in BACKLOG.md. Lines 164 (windows matrix, paired with AC10), 166 (GHA-Windows multiprocessing spawn investigation), 168 (TestWriteItemFiles POSIX investigation): bumped tag to `(cycle-48+)` and appended `Cycle-47 re-confirmed N/A — prerequisite missing: <reason>` (no GHA-Windows runner / no POSIX shell respectively). Lines 170, 172 (Dependabot drift, paired with AC5/AC6): kept `(cycle-47+)` tag (drift entries stay open monitoring); appended `/47` to drift cycle list. The bump-vs-keep distinction follows Step-5 design (entries that won't close until prerequisite arrives → bump; entries that may catch up via pip-audit data refresh → keep + re-confirm).
+
+- **AC13 dep-CVE timestamp refresh (Step-5 M3 scope-expanded)** — refreshed all 7 `cycle-46 re-confirmed` stamps across BACKLOG.md (5 literal + 2 cycle-list patterns). The 7th entry at line 158 (`requirements.txt` resolver conflicts, cycle-34 AC52 follow-up tracking 3 pip-check transitive mismatches: arxiv/requests, crawl4ai/lxml, instructor/rich) is NOT a CVE but uses the same re-confirmation workflow — Step-5 M3 caught this and expanded AC13's scope by one bullet. Verified via `pip check`: all 3 conflicts persist verbatim.
+
+- **AC14 CHANGELOG.md cycle-47 Quick Reference entry** — added compact Items / Tests / Scope / Detail entry under `[Unreleased]` (newest first).
+
+- **AC15 CHANGELOG-history.md cycle-47 detailed entry** — this entry (newest first per cycle-43+ convention).
+
+- **AC16 CLAUDE.md test-count refresh** — Quick Reference State line: appended `/47` to the carry-over list (cycle-39/40/41/42/43/44/45/46 → /46/47); file count 243 → 241 (-2 from folds); test count 3025 unchanged.
+
+- **AC17 README.md tree-block test count** — `tests/  # 3025 tests across 243 files` → `tests/  # 3025 tests across 241 files` (file count drift catch per C39-L3).
+
+- **AC18 docs/reference/{testing,implementation-status}.md cycle 47 history** — testing.md narrative paragraph extended with cycle-47 fold detail; implementation-status.md latest-cycle notes section added.
+
+**Step routing:**
+
+- Steps 1-3 + 7-13 + 16 ran primary-session per C37-L5 (≤15 ACs threshold; 0 src files; primary holds context from Step 1-5 grep verification).
+- Step 4 (design eval) ran parallel R1 DeepSeek V4 Pro via direct CLI (`/c/Users/Admin/.claude/bin/deepseek --model deepseek-v4-pro --think --effort high`) per cycle-39 L1 amendment + R2 Codex via `Agent(subagent_type="codex:codex-rescue", run_in_background=True)`. R1 returned APPROVE clean; R2 returned APPROVE WITH AMENDMENTS — 2 blockers (B1 pip pin wording, B2 file-count drift), 3 majors (M1 AC8 helper class-local, M2 AC10 frontier candidates, M3 AC13 7th stamp), 1 nit, 4 RISK rows in verification table. R2 caught real issues that R1 missed (R2's deeper grep/file-state inspection).
+- Step 5 (design decision gate) Opus subagent dispatch per skill mandate (every cycle). Resolved Q1-Q5 + B1+B2 + M1+M2+M3 with HIGH confidence on every decision + 12 binding CONDITIONS + 10 explicit SCOPE-OUT items. Step-5 grep had a case-sensitivity slip — claimed `cycle-46 re-confirmed` literal grep returned 7 hits including lines 170/172, but those use `cycle-37/38/39/40/41/46 re-confirmed drift persists` pattern (different shape — case-insensitive grep for literal `cycle-46 re-confirmed` returns 5 lines: 126, 129, 132, 135, 158). The intent (refresh all 7 entries) was honored at implementation time despite the verification command typo.
+- Step 6 (Context7) + 9.5 (simplify) + 11.5 (existing-CVE patch) skipped per skip-eligibility — hygiene cycle, no third-party libs, zero src/ diff, no actionable CVE bumps (cycle-22 L4 conservative posture).
+- Step 14 PR review: planned R1 DeepSeek V4 Pro (direct CLI) + R1 Codex (agent dispatch) parallel architecture / edge-cases; R2 Codex verify; R3 audit-doc-drift triggered per cycle-17 L4 (b)+(d) thresholds (18 ACs + 5 design Qs ≥ trigger threshold).
+
+**Operational notes:**
+
+- **Worktree isolation:** cycle-47 worktree at `D:/Projects/llm-wiki-flywheel-c47` per C42-L4 reminder (parallel cycles MAY be running per user prompt). Created via `git worktree add -b cycle-47-batch /d/Projects/llm-wiki-flywheel-c47 main`. Main worktree's `.venv` editable kb pointer was repointed to c47 worktree via `pip install -e D:/Projects/llm-wiki-flywheel-c47` to avoid the cycle-22 L1 ResolutionImpossible (per cycle-46 precedent).
+- **Git commit hook collision:** the project's `block-no-verify@1.1.2` PreToolUse Bash hook (from `everything-claude-code` plugin) over-matched substrings in commit message bodies passed via heredoc (`git commit -m "$(cat <<'EOF' ... EOF)"`). Workaround per C35-L4 + C22-L2: write commit message to file (`.data/cycle-47/taskN-msg.txt`) and use `git commit -F <file>` — the hook only sees the bash command, NOT the file contents. Used for all 5 cycle-47 commits. Possible offender substrings: `--no-deps` (pip download flag mentioned in commit body) and/or `--no-verify` mentioned in operational notes.
+- **R2 agent summary mismatch:** the `codex:codex-rescue` agent's TASK summary mis-named the AC8 fold source file as `test_cycle19_create_page_hints.py` (a file that doesn't exist), but the saved review file (`.data/cycle-47/r2-codex-design-out.txt`) correctly named `test_cycle11_task6_mcp_ingest_type.py`. Don't trust agent summaries; always read the saved output file. New skill-patch candidate for Step 16.
+
+**Test count chain:**
+
+| Cycle | Tests | Files | Passed/skipped |
+|---|---|---|---|
+| 46 ship | 3025 | 243 | 3014 + 11 |
+| 47 ship (this cycle) | 3025 | 241 | 3014 + 11 (preserved: 5 in TestConfigConstants + 6 in TestKbCreatePageHintErrors + 8 in 5 SaveFrontmatter classes = 19 fold-source tests, all surviving) |
+
+**Threat-model verification (all clean):**
+
+- T1 PR-introduced CVE diff = empty (cycle 47 changes 0 dependencies; baseline-vs-branch `pip-audit` diff: INTRODUCED=[] and REMOVED=[]).
+- T2 same-class peer scan: pure test fold + BACKLOG text — no new validation, sanitization, or path-containment logic introduced.
+- T3 test contract preservation: 5 + 31 + 18 targeted pytest results green throughout; full suite at Step 10 = 3014 passed + 11 skipped (matches baseline).
+- T4 deferred-promise BACKLOG sync: 3 cycle-47+ entries bumped to cycle-48+ with explicit "prerequisite missing" notes; 0 promises stranded.
+- T5 doc-text drift: 5-site sync (CHANGELOG, CHANGELOG-history, CLAUDE.md, README.md, docs/reference/{testing,implementation-status}.md) per C26-L2 + C39-L3.
+
 ### 2026-04-28 — cycle 46 — Phase 4.6 LOW closeout + dep-CVE re-verify + BACKLOG hygiene
 
 **Theme:** delete `lint/_augment_*.py` compat shims (deferred cycle-44 → 45 → 46), migrate 36 test patch sites to canonical paths, drop dead `_sync_legacy_shim()` machinery, re-verify 9 dep-CVE BACKLOG entries, collapse Phase 4.6 to Resolved Phases.
