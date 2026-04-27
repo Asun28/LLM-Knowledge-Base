@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from kb.query import engine
+from kb.query import engine, rewriter
 from kb.utils.llm import LLMError
 
 
@@ -21,7 +21,7 @@ class TestSuggestRephrasingsHelper:
             called["n"] += 1
             return "should-not-happen"
 
-        monkeypatch.setattr(engine, "call_llm", _spy)
+        monkeypatch.setattr(rewriter, "call_llm", _spy)
         assert engine._suggest_rephrasings("test q", []) == []
         assert called["n"] == 0
 
@@ -31,7 +31,7 @@ class TestSuggestRephrasingsHelper:
         def _raise_llm(*a, **k):
             raise LLMError("rate limit")
 
-        monkeypatch.setattr(engine, "call_llm", _raise_llm)
+        monkeypatch.setattr(rewriter, "call_llm", _raise_llm)
         result = engine._suggest_rephrasings("q", [{"title": "x"}])
         assert result == []
 
@@ -41,7 +41,7 @@ class TestSuggestRephrasingsHelper:
         def _raise_os(*a, **k):
             raise OSError("network down")
 
-        monkeypatch.setattr(engine, "call_llm", _raise_os)
+        monkeypatch.setattr(rewriter, "call_llm", _raise_os)
         result = engine._suggest_rephrasings("q", [{"title": "x"}])
         assert result == []
 
@@ -51,14 +51,14 @@ class TestSuggestRephrasingsHelper:
         def _raise_val(*a, **k):
             raise ValueError("programmer bug")
 
-        monkeypatch.setattr(engine, "call_llm", _raise_val)
+        monkeypatch.setattr(rewriter, "call_llm", _raise_val)
         with pytest.raises(ValueError):
             engine._suggest_rephrasings("q", [{"title": "x"}])
 
     def test_echo_case_insensitive_filtered(self, monkeypatch) -> None:
         """AC9 — case-shifted echo filtered."""
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: "What Is X\nother phrasing",
         )
@@ -69,7 +69,7 @@ class TestSuggestRephrasingsHelper:
     def test_echo_punctuation_shifted_filtered(self, monkeypatch) -> None:
         """Q6/C5 — question with trailing '?' filters out candidate without '?'."""
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: "What is attention\nDefine attention",
         )
@@ -81,7 +81,7 @@ class TestSuggestRephrasingsHelper:
     def test_echo_whitespace_normalised_filtered(self, monkeypatch) -> None:
         """Q6 — weird whitespace around LLM candidate still matches question."""
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: " a  b \nreal alt",
         )
@@ -91,7 +91,7 @@ class TestSuggestRephrasingsHelper:
     def test_bullet_prefix_stripped(self, monkeypatch) -> None:
         """Q5/C5 — bullet/number prefixes removed so clean text emerges."""
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: "1. alpha\n2) beta\n- gamma\n* delta\n• epsilon",
         )
@@ -104,7 +104,7 @@ class TestSuggestRephrasingsHelper:
         """Q5/C5 — lines > 300 chars dropped as garbage."""
         long_line = "foo " + ("x" * 400)
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: f"{long_line}\ngood alt",
         )
@@ -114,7 +114,7 @@ class TestSuggestRephrasingsHelper:
     def test_cap_applied(self, monkeypatch) -> None:
         """AC7 — output capped at max_suggestions even when LLM over-supplies."""
         monkeypatch.setattr(
-            engine,
+            rewriter,
             "call_llm",
             lambda *a, **k: "a\nb\nc\nd\ne\nf",
         )
@@ -129,7 +129,7 @@ class TestSuggestRephrasingsHelper:
             captured["prompt"] = prompt
             return ""
 
-        monkeypatch.setattr(engine, "call_llm", _capture)
+        monkeypatch.setattr(rewriter, "call_llm", _capture)
         hostile_title = "x" * 2000
         engine._suggest_rephrasings("q", [{"title": hostile_title}])
         # The full 2000-char title must NOT appear in the prompt.
@@ -145,7 +145,7 @@ class TestSuggestRephrasingsHelper:
             captured["prompt"] = prompt
             return ""
 
-        monkeypatch.setattr(engine, "call_llm", _capture)
+        monkeypatch.setattr(rewriter, "call_llm", _capture)
         engine._suggest_rephrasings("q", [{"title": "Foo"}, {"title": "Bar"}])
         assert "<page_title>Foo</page_title>" in captured["prompt"]
         assert "<page_title>Bar</page_title>" in captured["prompt"]
@@ -154,7 +154,7 @@ class TestSuggestRephrasingsHelper:
         self, monkeypatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         """T11 — prompt log MUST NOT contain the full question body."""
-        monkeypatch.setattr(engine, "call_llm", lambda *a, **k: "")
+        monkeypatch.setattr(rewriter, "call_llm", lambda *a, **k: "")
         long_q = "secret-topic-" + ("z" * 200)
         caplog.set_level(logging.INFO, logger="kb.query.engine")
         engine._suggest_rephrasings(long_q, [{"title": "T"}])

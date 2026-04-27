@@ -1,11 +1,25 @@
-"""Multi-turn query rewriting — expand pronouns/references using conversation context."""
+"""Query-side text helpers.
+
+Two related but distinct concerns:
+
+* **Rewriting for retrieval** (:func:`rewrite_query`) — expand pronouns /
+  references using prior conversation context so BM25/vector retrieval
+  has the entity name to match against.
+* **Rephrasing for the user** (:func:`_suggest_rephrasings`, cycle 16
+  AC7-AC9) — when retrieval coverage is low, propose alternative phrasings
+  that match different page titles so the operator can re-issue the query.
+
+Both are LLM scan-tier calls; both live here to share the same error-
+swallow + length-cap discipline.
+"""
 
 import logging
 import re as _re
 import unicodedata
 
-from kb.config import MAX_CONVERSATION_CONTEXT_CHARS, MAX_REWRITE_CHARS
+from kb.config import MAX_CONVERSATION_CONTEXT_CHARS, MAX_REWRITE_CHARS, QUERY_REPHRASING_MAX
 from kb.utils.llm import LLMError, call_llm
+from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -169,3 +183,94 @@ def rewrite_query(
         logger.warning("Query rewriting failed for %r (non-fatal): %s", question[:80], e)
 
     return question
+
+
+# ── Cycle 16 AC7-AC9 — low-coverage rephrasing suggestions ─────────
+# Moved from kb.query.engine in cycle 42 AC4 — rephrasing-for-UI is a
+# query-side text concern, not a search-engine one. engine.py re-exports
+# the public names so existing test monkeypatches (`engine._suggest_rephrasings`)
+# still work.
+_BULLET_PREFIX_RE = _re.compile(r"^\s*(?:\d+[.)]|[-*•])\s*")
+
+
+def _build_rephrasing_prompt(question: str, titles_block: str, max_suggestions: int) -> str:
+    """Compose the scan-tier rephrasing prompt without str.format() risk.
+
+    Built via plain string concatenation rather than ``str.format(named_kwargs)``
+    so there is zero interaction between user-supplied question content and
+    Python's formatting machinery.
+    """
+    return (
+        'The user asked: "' + question + '"\n'
+        "Known wiki pages (titles only):\n"
+        + titles_block
+        + "\nSuggest up to "
+        + str(max_suggestions)
+        + " alternative phrasings that would match different\n"
+        "page titles. Return one phrasing per line. Do not repeat the original question.\n"
+    )
+
+
+def _normalise_for_echo(s: str) -> str:
+    """Collapse punctuation + case + whitespace to a canonical form for echo-filter."""
+    return _re.sub(r"[\W_]+", " ", s).strip().lower()
+
+
+def _suggest_rephrasings(
+    question: str,
+    context_pages: list[dict],
+    *,
+    max_suggestions: int = QUERY_REPHRASING_MAX,
+) -> list[str]:
+    """Return up to ``max_suggestions`` alternative phrasings grounded in ``context_pages``.
+
+    Cycle 16 AC7-AC9 contract:
+      - Empty ``context_pages`` → return ``[]`` without LLM call.
+      - Any :class:`LLMError` or :class:`OSError` → return ``[]`` (never raises).
+      - Per-line hardening (Q5/C5): strip bullet/number prefix, drop empty /
+        > 300-char / embedded-newline lines, drop echoes via
+        :func:`_normalise_for_echo` (case + whitespace + punctuation insensitive).
+      - Logs only ``question[:80]`` — never the full question (T11).
+      - Titles in the prompt are truncated to 200 chars each and wrapped in
+        ``<page_title>…</page_title>`` fences to prevent instruction injection (T4).
+    """
+    if not context_pages:
+        return []
+    logger.info("rephrasings request for q=%r", question[:80])
+
+    titles: list[str] = []
+    for page in context_pages[: max_suggestions * 3]:
+        raw_title = str(page.get("title") or page.get("id") or "")
+        if not raw_title:
+            continue
+        safe = yaml_escape(raw_title)[:200]
+        titles.append(f"<page_title>{safe}</page_title>")
+    titles_block = "\n".join(titles) if titles else "<page_title></page_title>"
+
+    prompt = _build_rephrasing_prompt(
+        question=question[:80],
+        titles_block=titles_block,
+        max_suggestions=max_suggestions,
+    )
+    try:
+        raw = call_llm(prompt, tier="scan")
+    except (LLMError, OSError) as exc:
+        logger.debug("rephrasings failed: %s", exc)
+        return []
+
+    normalised_question = _normalise_for_echo(question)
+    out: list[str] = []
+    for line in raw.splitlines():
+        candidate = _BULLET_PREFIX_RE.sub("", line.strip()).strip()
+        if not candidate:
+            continue
+        if len(candidate) > 300:
+            continue
+        if "\n" in candidate:
+            continue
+        if _normalise_for_echo(candidate) == normalised_question:
+            continue
+        out.append(candidate)
+        if len(out) >= max_suggestions:
+            break
+    return out

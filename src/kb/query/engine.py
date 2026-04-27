@@ -286,96 +286,15 @@ assert _TRUSTED_STATUSES <= set(PAGE_STATUSES), (
 )
 
 
-# ── Cycle 16 AC7-AC9 — low-coverage rephrasing suggestions ─────────
-_BULLET_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s*")
-# R1 Sonnet Minor 5 / R2 N3 — readability cleanup. The prompt is composed
-# via plain string concatenation rather than str.format(named_kwargs) so
-# there is zero interaction between user-supplied question content and
-# Python's formatting machinery. (Note: Python's str.format does NOT
-# re-parse braces inside replacement values, so this is NOT fixing a
-# latent KeyError — R2 correctly flagged the original claim as a phantom
-# failure mode. The concat form is retained because it's marginally
-# easier to audit for prompt-structure drift.)
-
-
-def _build_rephrasing_prompt(question: str, titles_block: str, max_suggestions: int) -> str:
-    """Compose the scan-tier rephrasing prompt without str.format() risk."""
-    return (
-        'The user asked: "' + question + '"\n'
-        "Known wiki pages (titles only):\n"
-        + titles_block
-        + "\nSuggest up to "
-        + str(max_suggestions)
-        + " alternative phrasings that would match different\n"
-        "page titles. Return one phrasing per line. Do not repeat the original question.\n"
-    )
-
-
-def _normalise_for_echo(s: str) -> str:
-    """Collapse punctuation + case + whitespace to a canonical form for echo-filter."""
-    return re.sub(r"[\W_]+", " ", s).strip().lower()
-
-
-def _suggest_rephrasings(
-    question: str,
-    context_pages: list[dict],
-    *,
-    max_suggestions: int = QUERY_REPHRASING_MAX,
-) -> list[str]:
-    """Return up to ``max_suggestions`` alternative phrasings grounded in ``context_pages``.
-
-    Cycle 16 AC7-AC9 contract:
-      - Empty ``context_pages`` → return ``[]`` without LLM call.
-      - Any :class:`LLMError` or :class:`OSError` → return ``[]`` (never raises).
-      - Per-line hardening (Q5/C5): strip bullet/number prefix, drop empty /
-        > 300-char / embedded-newline lines, drop echoes via
-        :func:`_normalise_for_echo` (case + whitespace + punctuation insensitive).
-      - Logs only ``question[:80]`` — never the full question (T11).
-      - Titles in the prompt are truncated to 200 chars each and wrapped in
-        ``<page_title>…</page_title>`` fences to prevent instruction injection (T4).
-    """
-    if not context_pages:
-        return []
-    logger.info("rephrasings request for q=%r", question[:80])
-
-    # Build fenced + truncated titles block. Pull up to 3x max_suggestions titles
-    # so the LLM has room to diversify without us ballooning the prompt.
-    titles: list[str] = []
-    for page in context_pages[: max_suggestions * 3]:
-        raw_title = str(page.get("title") or page.get("id") or "")
-        if not raw_title:
-            continue
-        safe = yaml_escape(raw_title)[:200]
-        titles.append(f"<page_title>{safe}</page_title>")
-    titles_block = "\n".join(titles) if titles else "<page_title></page_title>"
-
-    prompt = _build_rephrasing_prompt(
-        question=question[:80],
-        titles_block=titles_block,
-        max_suggestions=max_suggestions,
-    )
-    try:
-        raw = call_llm(prompt, tier="scan")
-    except (LLMError, OSError) as exc:
-        logger.debug("rephrasings failed: %s", exc)
-        return []
-
-    normalised_question = _normalise_for_echo(question)
-    out: list[str] = []
-    for line in raw.splitlines():
-        candidate = _BULLET_PREFIX_RE.sub("", line.strip()).strip()
-        if not candidate:
-            continue
-        if len(candidate) > 300:
-            continue
-        if "\n" in candidate:
-            continue
-        if _normalise_for_echo(candidate) == normalised_question:
-            continue
-        out.append(candidate)
-        if len(out) >= max_suggestions:
-            break
-    return out
+# Cycle 16 AC7-AC9 rephrasing helpers moved to kb.query.rewriter in cycle 42 AC4.
+# Re-exported here so monkeypatch sites (`engine._suggest_rephrasings`,
+# `engine._normalise_for_echo`) and direct imports keep working.
+from kb.query.rewriter import (  # noqa: E402, F401  (re-export, used downstream)
+    _build_rephrasing_prompt,
+    _BULLET_PREFIX_RE,
+    _normalise_for_echo,
+    _suggest_rephrasings,
+)
 
 
 def _apply_status_boost(page: dict) -> dict:
@@ -612,18 +531,31 @@ _PAGERANK_CACHE: dict[tuple[str, int, int], dict[str, float]] = {}
 _PAGERANK_CACHE_LOCK = threading.Lock()
 
 
-def _pagerank_cache_key(wiki_dir: Path | None) -> tuple[str, int, int] | None:
-    """Return cache key (wiki_dir, max_mtime_ns, page_count) or None on error."""
-    if wiki_dir is None:
-        wiki_dir = WIKI_DIR
+def _compute_cache_key(
+    base_dir: Path,
+    *,
+    extra_fields: tuple = (),
+    skip_dirs: frozenset[str] = frozenset(),
+) -> tuple | None:
+    """Walk ``base_dir/*/*.md`` collecting page count + max mtime_ns.
+
+    Returns ``(resolved_path, count, max_mtime_ns, *extra_fields)`` or
+    ``None`` if ``base_dir.resolve()`` raises ``OSError``.
+
+    Cycle 42 AC3 — single source of truth replacing the three near-duplicate
+    `_pagerank_cache_key` / `_wiki_bm25_cache_key` / `_raw_sources_cache_key`
+    helpers. Each caller passes the trailing tuple components it cares about
+    (e.g. ``BM25_TOKENIZER_VERSION``) and any subdir basenames to skip
+    (``"assets"`` for raw_dir).
+    """
     try:
-        resolved = str(wiki_dir.resolve())
+        resolved = str(base_dir.resolve())
     except OSError:
         return None
     count = 0
     max_mtime = 0
-    for subdir in wiki_dir.iterdir() if wiki_dir.exists() else ():
-        if not subdir.is_dir() or subdir.name.startswith("."):
+    for subdir in base_dir.iterdir() if base_dir.exists() else ():
+        if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name in skip_dirs:
             continue
         for f in subdir.glob("*.md"):
             try:
@@ -633,33 +565,26 @@ def _pagerank_cache_key(wiki_dir: Path | None) -> tuple[str, int, int] | None:
                     max_mtime = mt
             except OSError:
                 continue
-    return (resolved, max_mtime, count)
+    return (resolved, count, max_mtime, *extra_fields)
+
+
+def _pagerank_cache_key(wiki_dir: Path | None) -> tuple[str, int, int] | None:
+    """Return cache key ``(wiki_dir, count, max_mtime_ns)`` or ``None`` on error.
+
+    Cycle 42 AC3 — thin shim over ``_compute_cache_key``. Tuple order changed
+    from ``(resolved, max_mtime, count)`` to ``(resolved, count, max_mtime)``
+    to match the unified helper; safe because ``_PAGERANK_CACHE`` is
+    process-local (no on-disk persistence) so old keys cannot survive an
+    upgrade.
+    """
+    return _compute_cache_key(wiki_dir or WIKI_DIR)
 
 
 def _wiki_bm25_cache_key(wiki_dir: Path | None) -> tuple[str, int, int, int] | None:
-    """Return cache key (wiki_dir, page_count, max_mtime_ns, tokenizer_version) or None."""
-    if wiki_dir is None:
-        wiki_dir = WIKI_DIR
-    try:
-        resolved = str(wiki_dir.resolve())
-    except OSError:
-        return None
+    """Return cache key (wiki_dir, count, max_mtime_ns, tokenizer_version) or None."""
     from kb.utils.text import BM25_TOKENIZER_VERSION
 
-    count = 0
-    max_mtime = 0
-    for subdir in wiki_dir.iterdir() if wiki_dir.exists() else ():
-        if not subdir.is_dir() or subdir.name.startswith("."):
-            continue
-        for f in subdir.glob("*.md"):
-            try:
-                count += 1
-                mt = f.stat().st_mtime_ns
-                if mt > max_mtime:
-                    max_mtime = mt
-            except OSError:
-                continue
-    return (resolved, count, max_mtime, BM25_TOKENIZER_VERSION)
+    return _compute_cache_key(wiki_dir or WIKI_DIR, extra_fields=(BM25_TOKENIZER_VERSION,))
 
 
 # I3 (Phase 4.5 R4 HIGH): rewrite-leak detection. PR review round 1
@@ -688,30 +613,18 @@ _LEAK_KEYWORD_RE = re.compile(
 def _raw_sources_cache_key(raw_dir: Path) -> tuple[str, int, int, int] | None:
     """Return cache key for raw_dir or None if it can't be computed.
 
-    Cycle 4 item #18 — added ``BM25_TOKENIZER_VERSION`` as the 4th tuple
+    Cycle 4 item #18 — ``BM25_TOKENIZER_VERSION`` added as the 4th tuple
     component so any change to STOPWORDS or tokenize() semantics invalidates
     the cache on next query (mtime-based keys miss pure code edits).
+    Cycle 42 AC3 — thin shim over ``_compute_cache_key`` skipping ``assets/``.
     """
-    try:
-        resolved = str(raw_dir.resolve())
-    except OSError:
-        return None
     from kb.utils.text import BM25_TOKENIZER_VERSION
 
-    count = 0
-    max_mtime = 0
-    for subdir in raw_dir.iterdir():
-        if not subdir.is_dir() or subdir.name.startswith(".") or subdir.name == "assets":
-            continue
-        for f in subdir.glob("*.md"):
-            try:
-                count += 1
-                mt = f.stat().st_mtime_ns
-                if mt > max_mtime:
-                    max_mtime = mt
-            except OSError:
-                continue
-    return (resolved, count, max_mtime, BM25_TOKENIZER_VERSION)
+    return _compute_cache_key(
+        raw_dir,
+        extra_fields=(BM25_TOKENIZER_VERSION,),
+        skip_dirs=frozenset({"assets"}),
+    )
 
 
 def search_raw_sources(
