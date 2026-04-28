@@ -404,3 +404,66 @@ class TestRawDirDerivation:
         assert calls, "spy never called — run_augment did not route through _resolve_raw_dir"
         assert calls[0][0] == wiki, f"unexpected wiki_dir arg: {calls[0]}"
         assert calls[0][1] is None, f"unexpected raw_dir arg: {calls[0]}"
+
+
+# ── Test-suite lint guards (cycle 52 fold) ─
+# Source: tests/test_cycle19_lint_redundant_patches.py (deleted in same commit).
+# Cycle 19 AC18 — forward-looking lint guard. A test method that takes
+# tmp_kb_env as a parameter MUST NOT also call
+# monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", ...) because the
+# fixture (cycle-18 D6 extension) already redirects HASH_MANIFEST under the
+# tmp project. Method-scope detection (NOT file-scope) avoids the false
+# positive where a sibling test class in the same file uses tmp_project.
+# AC17 (cleanup of existing redundant patches) was DROPPED at plan-gate per
+# cycle-17 L3 scope-narrowing rule.
+# Per cycle-52 design-gate Q1 decision (b), the self-exclusion guard uses
+# Path(__file__).resolve() so future receiver renames do not break exclusion.
+
+import ast as _ast  # noqa: E402  — imported at fold site to keep above tests independent
+
+_TESTS_DIR = Path(__file__).parent
+
+
+def _method_uses_tmp_kb_env(node: _ast.FunctionDef) -> bool:
+    return any(arg.arg == "tmp_kb_env" for arg in node.args.args)
+
+
+def _method_body_text(source: str, node: _ast.FunctionDef) -> str:
+    lines = source.splitlines()
+    return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+
+
+def test_no_redundant_hash_manifest_patch_inside_tmp_kb_env_method() -> None:
+    """A test method that takes tmp_kb_env MUST NOT also patch kb.compile.compiler.HASH_MANIFEST.
+
+    Method-scope detection: walks each test file's AST, finds every
+    ``def test_*(...tmp_kb_env...)`` function, and checks the function's
+    own source body (NOT the whole file) for a literal HASH_MANIFEST patch.
+    File-scope grep produces false positives when a sibling test class uses
+    ``tmp_project`` and patches HASH_MANIFEST inside its own helper.
+    """
+    offenders: list[str] = []
+    _self = Path(__file__).resolve()
+    for py in _TESTS_DIR.glob("test_*.py"):
+        if py.resolve() == _self:
+            continue
+        source = py.read_text(encoding="utf-8")
+        try:
+            tree = _ast.parse(source)
+        except SyntaxError:
+            continue
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.FunctionDef):
+                continue
+            if not node.name.startswith("test_"):
+                continue
+            if not _method_uses_tmp_kb_env(node):
+                continue
+            body = _method_body_text(source, node)
+            if "kb.compile.compiler.HASH_MANIFEST" in body and "monkeypatch.setattr" in body:
+                offenders.append(f"{py.name}::{node.name}")
+    assert not offenders, (
+        "Test methods using tmp_kb_env must not also monkeypatch "
+        "kb.compile.compiler.HASH_MANIFEST; the fixture (cycle-18 D6) already "
+        f"redirects it. Offenders: {offenders}"
+    )
