@@ -9,6 +9,51 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-28 — cycle 49 — Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm
+
+**Theme:** continue the freeze-and-fold cadence established in cycles 46-48 (Phase 4.5 HIGH #4) with 4 small fold targets (24/33/36/37 LOC each); refresh dep-CVE timestamps cycle-48 → cycle-49 (4 pip-audit + 2 Dependabot drift + 1 resolver-conflict, all unchanged from cycle-48 baseline); bump cycle-49+ → cycle-50+ on 3 N/A prerequisite-missing items; bump cycle-47+ → cycle-49+ on 2 Dependabot drift entries.
+
+**ACs shipped (18 total, primary-session per C37-L5):**
+- **AC1** — Fold `tests/test_cycle12_mcp_console_script.py` (24 LOC, 3 bare tests: `test_kb_mcp_package_exposes_main`, `test_kb_mcp_server_reexports_main_and_mcp`, `test_pyproject_has_kb_mcp_script_entry`) into `tests/test_v070.py` as new `TestKbMcpConsoleScript` class with three method implementations preserving function-local imports per cycle-23 L1 docstring discipline. Source file deleted in same commit.
+- **AC2** — Fold `tests/test_cycle9_capture_runtime_guard.py` (33 LOC, 1 bare test: `test_extract_items_via_llm_rejects_oversize_prompt`) into `tests/test_capture.py` as top-level bare function inserted BEFORE the existing `@pytest.fixture(autouse=True) _restore_kb_capture` cleanup. Receiver host-shape mixed; bare-function cluster region matches per C40-L5.
+- **AC3 (AMENDED at Step 5)** — Fold `tests/test_cycle9_package_exports.py` (36 LOC, 1 bare test: `test_ingest_source_export_lazy_loads_pipeline` — subprocess.run PYTHONPATH probe) into `tests/test_v070.py` as a top-level bare function (NOT a class). Step-5 design AMEND from "new class TestPackageExportLazyLoading" to bare function form per C40-L5 host-shape (test_v070.py is purely bare-function shaped — 28 bare functions, 0 classes pre-cycle-49; single test does not warrant class wrapping). Function-local imports (os, subprocess, sys, Path) avoid polluting receiver's module namespace per Step-5 C10. One-line subprocess rationale comment added per Step-5 C3.
+- **AC4** — Fold `tests/test_cycle9_mcp_app.py` (37 LOC, 1 bare test + 1 module-level `_instruction_tool_groups` helper) into `tests/test_v070.py` as new `TestMcpAppInstructions` class with `@staticmethod _instruction_tool_groups` per Step-5 C8 + cycle-47 L1 (staticmethod is canonical for module-internal helpers without self/cls dependency). Class appended AFTER `TestKbMcpConsoleScript` per Step-5 C6 class-cluster end-of-file. The `import re` is function-local in the staticmethod (only call site).
+- **AC5** — Each fold (AC1-AC4) revert-verified per C40-L3: temporarily inserted `assert False, "revert-verify proof: cycle-49 AC5"` in the moved method body → pytest -x reported FAIL → restored. Confirms the test method is collected + run from the new location, not silently skipped due to relocation drift.
+- **AC6** — File count: `find tests -maxdepth 1 -name '*.py' | wc -l` returns 237 (was 241 at cycle-48 ship; -4 net from 4 source-file deletes). Test count: `pytest --collect-only | tail -1` returns "3025 tests collected" (preserved — folds move tests, do not duplicate).
+- **AC7-AC10** — Refresh diskcache / ragas / litellm / pip CVE timestamps cycle-48 → cycle-49 (BACKLOG.md lines 126/129/132/135) with re-verified pip-audit baseline `.data/cycle-49/cve-baseline.json` (21089 bytes; 4 open vulns, all `fix_versions=[]` or blocked-by-transitive). `pip index versions` confirms no new releases since cycle 48 for diskcache (5.6.3 LATEST), ragas (0.4.3 LATEST), litellm (1.83.14 LATEST with click==8.1.8 transitive blocker preserved), pip (26.1 LATEST with `first_patched_version: null` per cycle-22 L4 conservative posture).
+- **AC11-AC12 + AC15** — 2 Dependabot drift entries (BACKLOG.md lines 170/172) bumped (cycle-47+) → (cycle-49+); narrative extended `cycle-37..47 + cycle-48 re-confirmed drift persists` → `cycle-37..48 + cycle-49 re-confirmed drift persists`; baseline path bumped `.data/cycle-48/alerts-baseline.json` → `.data/cycle-49/alerts-baseline.json`. Both alert IDs (#14 GHSA-r75f-5x8p-qvmc, #15 GHSA-v4p8-mg3p-g94g) still open per cycle-49 Dependabot snapshot.
+- **AC13** — Refresh resolver-conflict entry (BACKLOG.md line 158, cycle-34 AC52 follow-up): cycle-48 → cycle-49 timestamp. All three conflicts (arxiv/crawl4ai/instructor transitive constraints) persist verbatim per `pip check` output.
+- **AC14** — 3 N/A prerequisite-missing entries (BACKLOG.md lines 164/166/168: windows-latest CI matrix re-enable, GHA-Windows multiprocessing spawn, TestWriteItemFiles POSIX off-by-one) bumped (cycle-49+) → (cycle-50+) AND `Cycle-48 re-confirmed N/A` → `Cycle-49 re-confirmed N/A` AND `Tag bumped to cycle-49+` → `Tag bumped to cycle-50+`. None of the prerequisites (self-hosted Windows runner, POSIX shell, GHA-Windows reproducer) became available during cycle 49.
+- **AC16** — Phase 4.5 HIGH #4 freeze-and-fold progress note (BACKLOG.md line 91) extended with cycle-49 fold summary: 4 folds, file count 241 → 237 (-4), test count preserved at 3025, each fold revert-verified per C40-L3.
+- **AC17** — Multi-site test/file count update across CLAUDE.md (Quick Reference State row), README.md (tests/ tree-block), docs/reference/testing.md (Full suite narrative), docs/reference/implementation-status.md (Latest full-suite narrative) per C26-L2 + C39-L3 multi-site rule. Headline numbers updated from "3025 tests / 241 files" to "3025 tests / 237 files"; CLAUDE.md windows-CI defer-list extended `cycle-39..48` → `cycle-39..49` and target bumped `cycle-49+` → `cycle-50+` matching BACKLOG bump.
+- **AC18** — CHANGELOG.md `[Unreleased]` Quick Reference compact entry + this CHANGELOG-history.md full archive entry. Commit count uses `+TBD` per C30-L1 self-referential pattern; backfill on squash-merge landing.
+
+**Commit cadence (6 commits + post-merge self-review):**
+1. `966c10c` — AC1 fold `test_cycle12_mcp_console_script.py` → `test_v070.py::TestKbMcpConsoleScript` (2 files, +27/-24)
+2. `942065d` — AC2 fold `test_cycle9_capture_runtime_guard.py` → `test_capture.py` bare function (2 files, +33/-33)
+3. `cf83327` — AC3 fold `test_cycle9_package_exports.py` → `test_v070.py` bare function (Step-5 host-shape AMEND) (2 files, +39/-36)
+4. `4aeb8dd` — AC4 fold `test_cycle9_mcp_app.py` → `test_v070.py::TestMcpAppInstructions` (2 files, +38/-37)
+5. `2fa93a5` — AC7-AC16 BACKLOG.md cycle-48 → cycle-49 timestamp + tag bump refresh (1 file, +11/-11)
+6. (this commit — AC17-AC18) — Doc sync across CLAUDE.md / README.md / docs/reference/{testing,implementation-status}.md / CHANGELOG.md / CHANGELOG-history.md (+TBD)
+
+**Verification:**
+- Step 10 CI hard gate: `pytest --rootdir=D:/Projects/llm-wiki-flywheel-c49 D:/Projects/llm-wiki-flywheel-c49/tests/` returns 3014 passed + 11 skipped in 130.19s.
+- Step 10 ruff: `ruff check src/ tests/` returns "All checks passed!"; `ruff format --check src/ tests/` returns "329 files already formatted".
+- Step 11 PR-CVE diff: `INTRODUCED=[]`, `REMOVED=[]` (cycle 49 changes 0 dependencies).
+- Step 4 R1 DeepSeek V4 Pro direct CLI per cycle-39 L1 returned APPROVE-WITH-CONDITIONS (5 conditions; all addressed at Step 5 + Step 9). R2 Codex SKIPPED per cycle-48 cadence (hygiene-only cycle, no security surface).
+- Step 5 design decision gate primary-session per cycle-21 L1 + cycle-48 precedent (R1 conditions are doc/design gaps, no code-exploration; operator holds full context). Promoted R1's 5 conditions + added 1 binding amendment (AC3 host-shape per C40-L5) + 6 additional binding conditions.
+- Step 6 Context7 SKIPPED — no third-party libs.
+- Step 9.5 Simplify SKIPPED — zero src/ diff.
+- Step 11 threat-model verification SKIPPED per Step-2 skip-eligibility (pure test-fold + doc-only, no I/O or trust boundary changes).
+- Step 11.5 existing-CVE patch SKIPPED — all 4 baseline pip-audit advisories have either empty `fix_versions` (diskcache, ragas, pip) OR a fix blocked by transitive `click==8.1.8` (litellm trio); per cycle-22 L4 conservative posture.
+
+**Operational notes:**
+- Step 4 R1 DeepSeek did not flag the AC3 host-shape concern (test_v070.py is purely bare-function shaped, not mixed); primary caught it on receiver inspection at Step 5 boundary. Surfaces a candidate refinement to the design-eval prompt: explicitly ask the reviewer to compare proposed-fold-shape against receiver-host-shape per C40-L5.
+- Cycle-49 worktree at `D:/Projects/llm-wiki-flywheel-c49` per C42-L4 from-the-start isolation; main worktree never touched. Editable install repointed via `pip install -e D:/Projects/llm-wiki-flywheel-c49 --quiet` before any code edits; verified with `import kb; print(kb.__file__)`.
+- Step 9 implementation: 4 folds + 1 BACKLOG update commit + 1 doc-sync commit landed in primary session inside the worktree. Each fold ran the AC5 revert-verify cycle: insert `assert False` → pytest -x FAIL → restore → pytest -v PASS → commit. Total per-fold wall-clock: ~3 minutes.
+
+---
+
 ### 2026-04-28 — cycle 48 — Test-quality upgrades + freeze-and-fold + dep-CVE re-confirm
 
 **Theme:** close both cycle-48+ test-quality upgrade-candidates filed by cycle-47 R2 Codex review (TestKbCreatePageHintErrors reload-leak forward-protection per cycle-23 L5; TestSaveFrontmatterBodyVerbatim/AtomicWrite under-asserted upgrades per C40-L3 + C41-L1); continue freeze-and-fold cadence (2 small cycle-9 folds); refresh dep-CVE timestamps cycle-47 → cycle-48 (4 pip-audit + 2 Dependabot drift + 1 resolver-conflict); bump cycle-48+ → cycle-49+ on 3 N/A prerequisite-missing items.
