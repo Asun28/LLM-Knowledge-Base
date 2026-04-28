@@ -434,6 +434,45 @@ def test_mcp_all_tools_registered():
     assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
 
+def test_ingest_source_export_lazy_loads_pipeline():
+    """Folded from tests/test_cycle9_package_exports.py (cycle 49 — Phase 4.5 HIGH #4).
+
+    Subprocess child verifies lazy-import contract: kb.ingest.pipeline must
+    NOT be in sys.modules until kb.ingest.ingest_source attribute is accessed
+    (cycle-9 PEP-562 lazy-shim).
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_src = repo_root / "src"
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = (
+        str(repo_src) if not existing_pythonpath else f"{repo_src}{os.pathsep}{existing_pythonpath}"
+    )
+    probe = """
+import sys
+
+import kb.ingest
+
+assert "kb.ingest.pipeline" not in sys.modules
+kb.ingest.ingest_source
+assert "kb.ingest.pipeline" in sys.modules
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        env={**os.environ, "PYTHONPATH": pythonpath},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 class TestKbMcpConsoleScript:
     """Folded from tests/test_cycle12_mcp_console_script.py (cycle 49 — Phase 4.5 HIGH #4)."""
 
