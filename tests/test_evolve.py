@@ -156,3 +156,24 @@ def test_format_evolution_report(tmp_wiki):
     assert "# Wiki Evolution Report" in text
     assert "Coverage" in text
     assert "Graph" in text
+
+
+# ── Cycle 9 evolve regression test (cycle 48 fold per AC4) ─────────
+# Source: tests/test_cycle9_evolve.py (deleted in same commit).
+def test_bare_slug_link_not_reported_as_orphan(tmp_project):
+    wiki_dir = tmp_project / "wiki"
+    page_a = wiki_dir / "concepts" / "a.md"
+    page_b = wiki_dir / "concepts" / "b.md"
+
+    page_a.write_text(
+        "---\ntitle: A\ntype: concept\n---\n\nSee [[b]].\n",
+        encoding="utf-8",
+    )
+    page_b.write_text(
+        "---\ntitle: B\ntype: concept\n---\n\nTarget concept.\n",
+        encoding="utf-8",
+    )
+
+    report = analyze_coverage(wiki_dir=wiki_dir)
+
+    assert "concepts/b" not in report["orphan_concepts"]
