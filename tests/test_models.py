@@ -274,17 +274,32 @@ class TestSaveFrontmatterInsertionOrder:
 
 
 class TestSaveFrontmatterBodyVerbatim:
-    """Cycle 14 AC17(b) — body content verbatim including trailing newline."""
+    """Cycle 14 AC17(b) — body content verbatim including trailing newline.
+
+    Cycle-48 AC2: upgraded from substring-only to exact-byte body equality
+    per C40-L3. Substring asserts would pass even if production stripped
+    trailing newlines or blank lines; exact equality catches that revert.
+    """
 
     def test_body_content_with_trailing_newline(self, tmp_path):
         target = tmp_path / "body.md"
-        post = frontmatter.Post(content="Line 1\nLine 2\n\nLine 4\n")
+        body = "Line 1\nLine 2\n\nLine 4\n"
+        post = frontmatter.Post(content=body)
         post.metadata["title"] = "T"
         save_page_frontmatter(target, post)
         text = target.read_text(encoding="utf-8")
-        # The body follows the second `---` delimiter.
-        assert "Line 1" in text
-        assert "Line 4" in text
+        # Cycle-48 AC2: pin exact body region so a production revert that
+        # collapses internal blank lines or rewrites trailing-newline policy
+        # fails the test. frontmatter.dumps inserts a blank line before the
+        # body and strips trailing newlines (python-frontmatter convention),
+        # so the expected region is "\n\n" + body.rstrip("\n").
+        body_region = text.split("---", 2)[2]
+        assert body_region == "\n\n" + body.rstrip("\n"), (
+            f"body interior must round-trip; got {body_region!r}"
+        )
+        # Verify the meaningful content (interior blank line + every line)
+        # round-trips — the contract this test pins.
+        assert "Line 1\nLine 2\n\nLine 4" in body_region
 
     def test_body_preserved_with_special_chars(self, tmp_path):
         target = tmp_path / "special.md"
@@ -331,16 +346,38 @@ class TestSaveFrontmatterAtomicWrite:
     """Cycle 14 AC17(e) — writes atomically; no partial .tmp sibling on success.
 
     Renamed from source TestAtomicWriteProof per Step-5 N1 + Condition 3.
+    Cycle-48 AC3: upgraded to spy on `kb.utils.io.atomic_text_write` per
+    C40-L3. The original assertion (no .tmp sibling) would also pass for a
+    direct `open(target, "w").write(...)` revert; the spy directly pins the
+    contract that `save_page_frontmatter` IS the atomic_text_write path.
     """
 
-    def test_no_tmp_sibling_left_after_success(self, tmp_path):
+    def test_no_tmp_sibling_left_after_success(self, tmp_path, monkeypatch):
         target = tmp_path / "atomic.md"
         post = frontmatter.Post(content="body\n")
         post.metadata["title"] = "T"
+
+        # Spy on the production atomic-write helper as bound in utils.pages.
+        from kb.utils import pages as _pages_mod
+
+        calls = []
+        real_atomic = _pages_mod.atomic_text_write
+
+        def _spy(content, path):
+            calls.append((content, path))
+            return real_atomic(content, path)
+
+        monkeypatch.setattr(_pages_mod, "atomic_text_write", _spy)
         save_page_frontmatter(target, post)
 
-        # atomic_text_write creates a .tmp file then renames it to target.
-        # Post-success, no .tmp sibling should remain.
+        # Cycle-48 AC3: pin the contract that atomic_text_write IS the path.
+        assert len(calls) == 1, (
+            f"save_page_frontmatter must delegate to atomic_text_write exactly "
+            f"once; got {len(calls)} calls"
+        )
+        assert calls[0][1] == target
+
+        # Cycle 14 AC17(e) original contract: post-success, no .tmp sibling.
         siblings = list(tmp_path.glob(f"{target.name}.tmp*"))
         assert siblings == []
         assert target.exists()
