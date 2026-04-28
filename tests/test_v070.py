@@ -3,10 +3,13 @@ trust threshold fix, template hash detection, lint verdicts, entity enrichment,
 new MCP tools, and MCP package split."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import patch
 
 import networkx as nx
 import pytest
+
+from kb.mcp.app import _validate_run_id
 
 # ── 1. Graph: PageRank and Centrality ────────────────────────────
 
@@ -473,6 +476,55 @@ assert "kb.ingest.pipeline" in sys.modules
     assert result.returncode == 0, result.stderr
 
 
+# ── 9. tmp_kb_env fixture coverage (cycle 51 fold from test_cycle12_conftest.py) ─
+
+
+def _is_under(path: Path, base: Path) -> bool:
+    return path.resolve().is_relative_to(base.resolve())
+
+
+def test_tmp_kb_env_rebinds_preimported_config_consumers(request):
+    import kb.capture as capture
+    import kb.config as config
+    import kb.mcp.browse as browse
+    import kb.mcp.core as core
+
+    original_source_keys = tuple(config.SOURCE_TYPE_DIRS)
+
+    project = request.getfixturevalue("tmp_kb_env")
+    raw = project / "raw"
+
+    for module in (config, core, browse, capture):
+        assert _is_under(module.PROJECT_ROOT, project)
+
+    for module in (config, core, browse):
+        assert _is_under(module.RAW_DIR, project)
+
+    for module in (config, browse):
+        assert _is_under(module.WIKI_DIR, project)
+
+    assert _is_under(config.CAPTURES_DIR, project)
+    assert _is_under(capture.CAPTURES_DIR, project)
+
+    assert tuple(config.SOURCE_TYPE_DIRS) == original_source_keys
+    assert tuple(core.SOURCE_TYPE_DIRS) == original_source_keys
+    for source_dir in config.SOURCE_TYPE_DIRS.values():
+        assert _is_under(source_dir, raw)
+    for source_dir in core.SOURCE_TYPE_DIRS.values():
+        assert _is_under(source_dir, raw)
+
+    assert _is_under(capture._CAPTURES_DIR_RESOLVED, project)
+    assert _is_under(capture._captures_resolved, project)
+    assert _is_under(capture._project_resolved, project)
+
+
+def test_tmp_kb_env_is_not_autouse(tmp_project):
+    import kb.config as config
+
+    assert config.PROJECT_ROOT != tmp_project
+    assert config.PROJECT_ROOT == Path(__file__).resolve().parents[1]
+
+
 class TestKbMcpConsoleScript:
     """Folded from tests/test_cycle12_mcp_console_script.py (cycle 49 — Phase 4.5 HIGH #4)."""
 
@@ -536,3 +588,168 @@ class TestMcpAppInstructions:
         registered_tool_names = {tool.name for tool in registered_tools}
 
         assert rendered_tool_names == registered_tool_names
+
+
+class TestValidateRunId:
+    """T1 (cycle 17) — shared validator contract.
+
+    Folded from tests/test_cycle17_validators.py (cycle 51 — Phase 4.5 HIGH #4).
+    """
+
+    def test_empty_string_is_sentinel_for_no_resume(self) -> None:
+        assert _validate_run_id("") is None
+
+    def test_valid_8_hex_chars(self) -> None:
+        assert _validate_run_id("abc12345") is None
+        assert _validate_run_id("00000000") is None
+        assert _validate_run_id("ffffffff") is None
+        assert _validate_run_id("deadbeef") is None
+
+    @pytest.mark.parametrize(
+        "bad_input",
+        [
+            "../etc",
+            "../../secret",
+            "abc",
+            "abc1234",
+            "abcdef012",
+            "abcdef0123",
+            "ABCD1234",
+            "abcdefgh",
+            "abc1234*",
+            "abc1234?",
+            "abc12[34",
+            "abc/1234",
+            "abc\\1234",
+            "abc 1234",
+            "abc-1234",
+            "abc.1234",
+            "  abc12345  ",
+            "abc12345\n",
+            "\x00abc12345",
+        ],
+    )
+    def test_rejects_invalid(self, bad_input: str) -> None:
+        result = _validate_run_id(bad_input)
+        assert result is not None, f"Expected rejection for {bad_input!r}"
+        assert "Invalid resume id" in result
+
+    def test_rejection_message_quotes_input(self) -> None:
+        """Error message should include the offending value for operator visibility."""
+        result = _validate_run_id("../etc")
+        assert result is not None
+        assert "'../etc'" in result or '"../etc"' in result or "../etc" in result
+
+    def test_rejection_message_hints_format(self) -> None:
+        """Error message should state the expected format."""
+        result = _validate_run_id("bad")
+        assert result is not None
+        assert "8 hex" in result or "0-9a-f" in result
+
+
+# ── 10. Package export curation (cycle 51 fold from test_cycle8_package_exports.py) ─
+
+
+def _run_export_import_probe(code: str):
+    """Helper: run an `import` probe in a fresh subprocess against repo src/.
+
+    Renamed from `_run_import_probe` per cycle-51 design Q2 (helper-name uniqueness
+    in receiver). The 6 callers below use this helper.
+    """
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[1]
+    src_dir = repo_root / "src"
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(src_dir) if not existing else f"{src_dir}{os.pathsep}{existing}"
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_kb_top_level_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb import ("
+        "ingest_source, compile_wiki, query_wiki, build_graph, "
+        "WikiPage, RawSource, LLMError, __version__"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_kb_top_level_all_is_curated():
+    import kb
+
+    # Cycle 20 AC3 — kb.errors taxonomy exports added: KBError + 5 subclasses.
+    assert kb.__all__ == [
+        "ingest_source",
+        "compile_wiki",
+        "query_wiki",
+        "build_graph",
+        "WikiPage",
+        "RawSource",
+        "LLMError",
+        "KBError",
+        "IngestError",
+        "CompileError",
+        "QueryError",
+        "ValidationError",
+        "StorageError",
+        "__version__",
+    ]
+
+
+def test_utils_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb.utils import ("
+        "slugify, yaml_escape, yaml_sanitize, STOPWORDS, atomic_json_write, "
+        "atomic_text_write, file_lock, content_hash, extract_wikilinks, "
+        "extract_raw_refs, FRONTMATTER_RE, append_wiki_log, load_all_pages, "
+        "normalize_sources, make_source_ref"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_utils_all_is_curated():
+    import kb.utils as utils
+
+    assert utils.__all__ == [
+        "slugify",
+        "yaml_escape",
+        "yaml_sanitize",
+        "STOPWORDS",
+        "atomic_json_write",
+        "atomic_text_write",
+        "file_lock",
+        "content_hash",
+        "extract_wikilinks",
+        "extract_raw_refs",
+        "FRONTMATTER_RE",
+        "append_wiki_log",
+        "load_all_pages",
+        "normalize_sources",
+        "make_source_ref",
+    ]
+
+
+def test_models_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe("from kb.models import WikiPage, RawSource")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_models_all_is_curated():
+    import kb.models as models
+
+    assert models.__all__ == ["WikiPage", "RawSource"]
