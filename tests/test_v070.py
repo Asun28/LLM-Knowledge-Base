@@ -9,6 +9,8 @@ from unittest.mock import patch
 import networkx as nx
 import pytest
 
+from kb.mcp.app import _validate_run_id
+
 # ── 1. Graph: PageRank and Centrality ────────────────────────────
 
 
@@ -586,3 +588,60 @@ class TestMcpAppInstructions:
         registered_tool_names = {tool.name for tool in registered_tools}
 
         assert rendered_tool_names == registered_tool_names
+
+
+class TestValidateRunId:
+    """T1 (cycle 17) — shared validator contract.
+
+    Folded from tests/test_cycle17_validators.py (cycle 51 — Phase 4.5 HIGH #4).
+    """
+
+    def test_empty_string_is_sentinel_for_no_resume(self) -> None:
+        assert _validate_run_id("") is None
+
+    def test_valid_8_hex_chars(self) -> None:
+        assert _validate_run_id("abc12345") is None
+        assert _validate_run_id("00000000") is None
+        assert _validate_run_id("ffffffff") is None
+        assert _validate_run_id("deadbeef") is None
+
+    @pytest.mark.parametrize(
+        "bad_input",
+        [
+            "../etc",
+            "../../secret",
+            "abc",
+            "abc1234",
+            "abcdef012",
+            "abcdef0123",
+            "ABCD1234",
+            "abcdefgh",
+            "abc1234*",
+            "abc1234?",
+            "abc12[34",
+            "abc/1234",
+            "abc\\1234",
+            "abc 1234",
+            "abc-1234",
+            "abc.1234",
+            "  abc12345  ",
+            "abc12345\n",
+            "\x00abc12345",
+        ],
+    )
+    def test_rejects_invalid(self, bad_input: str) -> None:
+        result = _validate_run_id(bad_input)
+        assert result is not None, f"Expected rejection for {bad_input!r}"
+        assert "Invalid resume id" in result
+
+    def test_rejection_message_quotes_input(self) -> None:
+        """Error message should include the offending value for operator visibility."""
+        result = _validate_run_id("../etc")
+        assert result is not None
+        assert "'../etc'" in result or '"../etc"' in result or "../etc" in result
+
+    def test_rejection_message_hints_format(self) -> None:
+        """Error message should state the expected format."""
+        result = _validate_run_id("bad")
+        assert result is not None
+        assert "8 hex" in result or "0-9a-f" in result
