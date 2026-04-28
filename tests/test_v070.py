@@ -645,3 +645,111 @@ class TestValidateRunId:
         result = _validate_run_id("bad")
         assert result is not None
         assert "8 hex" in result or "0-9a-f" in result
+
+
+# ── 10. Package export curation (cycle 51 fold from test_cycle8_package_exports.py) ─
+
+
+def _run_export_import_probe(code: str):
+    """Helper: run an `import` probe in a fresh subprocess against repo src/.
+
+    Renamed from `_run_import_probe` per cycle-51 design Q2 (helper-name uniqueness
+    in receiver). The 6 callers below use this helper.
+    """
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[1]
+    src_dir = repo_root / "src"
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(src_dir) if not existing else f"{src_dir}{os.pathsep}{existing}"
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_kb_top_level_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb import ("
+        "ingest_source, compile_wiki, query_wiki, build_graph, "
+        "WikiPage, RawSource, LLMError, __version__"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_kb_top_level_all_is_curated():
+    import kb
+
+    # Cycle 20 AC3 — kb.errors taxonomy exports added: KBError + 5 subclasses.
+    assert kb.__all__ == [
+        "ingest_source",
+        "compile_wiki",
+        "query_wiki",
+        "build_graph",
+        "WikiPage",
+        "RawSource",
+        "LLMError",
+        "KBError",
+        "IngestError",
+        "CompileError",
+        "QueryError",
+        "ValidationError",
+        "StorageError",
+        "__version__",
+    ]
+
+
+def test_utils_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb.utils import ("
+        "slugify, yaml_escape, yaml_sanitize, STOPWORDS, atomic_json_write, "
+        "atomic_text_write, file_lock, content_hash, extract_wikilinks, "
+        "extract_raw_refs, FRONTMATTER_RE, append_wiki_log, load_all_pages, "
+        "normalize_sources, make_source_ref"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_utils_all_is_curated():
+    import kb.utils as utils
+
+    assert utils.__all__ == [
+        "slugify",
+        "yaml_escape",
+        "yaml_sanitize",
+        "STOPWORDS",
+        "atomic_json_write",
+        "atomic_text_write",
+        "file_lock",
+        "content_hash",
+        "extract_wikilinks",
+        "extract_raw_refs",
+        "FRONTMATTER_RE",
+        "append_wiki_log",
+        "load_all_pages",
+        "normalize_sources",
+        "make_source_ref",
+    ]
+
+
+def test_models_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe("from kb.models import WikiPage, RawSource")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_models_all_is_curated():
+    import kb.models as models
+
+    assert models.__all__ == ["WikiPage", "RawSource"]
