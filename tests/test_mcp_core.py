@@ -618,11 +618,19 @@ def test_sanitize_conversation_context_strips_fence_and_control_combo() -> None:
 # source_type with a hint pointing at kb_create_page.
 
 from kb.mcp import core as _core_mod  # noqa: E402  # post-existing tests, fold-site import
+from kb.mcp import ingest as _ingest_mod  # noqa: E402  # cycle-48 AC1 forward-protection
 
 
 class TestKbCreatePageHintErrors:
     """Cycle-11 same-class peer rule (C11-L3): all 3 ingest/save tools reject
     comparison/synthesis source_type with a hint pointing at kb_create_page.
+
+    Cycle-48 AC1: forward-protection per cycle-23 L5 + cycle-42 L3. The
+    cycle-45 mcp split moved kb_ingest / kb_ingest_content to kb.mcp.ingest;
+    its _refresh_legacy_bindings() copies core globals into ingest's globals
+    on every tool call (self-healing today). Patch BOTH modules so a future
+    test that reads kb.mcp.ingest globals directly (without invoking an
+    ingest tool first) sees tmp_path, not stale core values.
     """
 
     @staticmethod
@@ -636,6 +644,8 @@ class TestKbCreatePageHintErrors:
     def test_kb_ingest_comparison_names_kb_create_page(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_core_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(_core_mod, "RAW_DIR", tmp_path)
+        monkeypatch.setattr(_ingest_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(_ingest_mod, "RAW_DIR", tmp_path)
         source = tmp_path / "fake.md"
         source.write_text("raw content", encoding="utf-8")
         result = _core_mod.kb_ingest(source_path="fake.md", source_type="comparison")
@@ -644,6 +654,8 @@ class TestKbCreatePageHintErrors:
     def test_kb_ingest_synthesis_names_kb_create_page(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_core_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(_core_mod, "RAW_DIR", tmp_path)
+        monkeypatch.setattr(_ingest_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(_ingest_mod, "RAW_DIR", tmp_path)
         source = tmp_path / "fake.md"
         source.write_text("raw content", encoding="utf-8")
         result = _core_mod.kb_ingest(source_path="fake.md", source_type="synthesis")
@@ -651,6 +663,7 @@ class TestKbCreatePageHintErrors:
 
     def test_kb_ingest_content_comparison_names_kb_create_page(self, monkeypatch):
         monkeypatch.setattr(_core_mod, "SOURCE_TYPE_DIRS", {"article": object()})
+        monkeypatch.setattr(_ingest_mod, "SOURCE_TYPE_DIRS", {"article": object()})
         result = _core_mod.kb_ingest_content(
             content="x",
             filename="x.md",
@@ -661,6 +674,7 @@ class TestKbCreatePageHintErrors:
 
     def test_kb_ingest_content_synthesis_names_kb_create_page(self, monkeypatch):
         monkeypatch.setattr(_core_mod, "SOURCE_TYPE_DIRS", {"article": object()})
+        monkeypatch.setattr(_ingest_mod, "SOURCE_TYPE_DIRS", {"article": object()})
         result = _core_mod.kb_ingest_content(
             content="x",
             filename="x.md",

@@ -242,7 +242,11 @@ def save_page_frontmatter(path: Path, post: frontmatter.Post) -> None:
 
     Uses ``frontmatter.dumps(post, sort_keys=False)`` so that downstream
     YAML-diff tools and the Evidence Trail sentinel contract survive the
-    round-trip. Delegates to ``atomic_text_write`` for crash-safe
+    round-trip. Body content (``post.content``) is preserved with
+    interior bytes intact (blank lines, special chars, wikilinks); note
+    that ``frontmatter.dumps`` inserts a blank line between the closing
+    ``---`` and the body and strips trailing newlines per python-frontmatter
+    conventions. Delegates to ``atomic_text_write`` for crash-safe
     temp+rename; produces LF line endings per that helper's contract.
 
     Args:

@@ -9,6 +9,55 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-04-28 — cycle 48 — Test-quality upgrades + freeze-and-fold + dep-CVE re-confirm
+
+**Theme:** close both cycle-48+ test-quality upgrade-candidates filed by cycle-47 R2 Codex review (TestKbCreatePageHintErrors reload-leak forward-protection per cycle-23 L5; TestSaveFrontmatterBodyVerbatim/AtomicWrite under-asserted upgrades per C40-L3 + C41-L1); continue freeze-and-fold cadence (2 small cycle-9 folds); refresh dep-CVE timestamps cycle-47 → cycle-48 (4 pip-audit + 2 Dependabot drift + 1 resolver-conflict); bump cycle-48+ → cycle-49+ on 3 N/A prerequisite-missing items.
+
+**ACs shipped (16 total, primary-session per C37-L5):**
+- **AC1** — `tests/test_mcp_core.py::TestKbCreatePageHintErrors`: add `monkeypatch.setattr(_ingest_mod, "PROJECT_ROOT"/"RAW_DIR"/"SOURCE_TYPE_DIRS", tmp_path)` alongside existing core patches in 4 methods (kb_ingest comparison/synthesis, kb_ingest_content comparison/synthesis); kb_save_source methods unchanged (uses `tmp_project` sandbox-safe fixture). Forward-protection per cycle-23 L5 + cycle-42 L3 — today's `_refresh_legacy_bindings()` self-heals at next ingest call but a future test reading `kb.mcp.ingest` globals directly without first invoking an ingest tool would see stale tmp_path values.
+- **AC2** — `tests/test_models.py::TestSaveFrontmatterBodyVerbatim::test_body_content_with_trailing_newline`: replace `assert "Line 1" in text; assert "Line 4" in text` with exact body-region equality `body_region = text.split("---", 2)[2]; assert body_region == "\n\n" + body.rstrip("\n")`. Per C41-L1, also update `src/kb/utils/pages.py` `save_page_frontmatter` docstring to describe ACTUAL leading-blank-line + trailing-newline-strip behavior of `frontmatter.dumps` (the prior "verbatim" claim was technically false; divergence caught when first AC2 attempt failed with `'\n\nLine 1...Line 4' != '\nLine 1...Line 4\n'`).
+- **AC3** — `tests/test_models.py::TestSaveFrontmatterAtomicWrite::test_no_tmp_sibling_left_after_success`: spy on `kb.utils.pages.atomic_text_write`, assert `len(calls) == 1` AND `calls[0][1] == target`. Revert-verified: replacing `atomic_text_write(...)` with `path.write_text(frontmatter.dumps(post, sort_keys=False), encoding="utf-8")` makes the test FAIL with "save_page_frontmatter must delegate to atomic_text_write exactly once; got 0 calls".
+- **AC4** — Fold `test_cycle9_evolve.py` (20 LOC, 1 test `test_bare_slug_link_not_reported_as_orphan`) into `tests/test_evolve.py` as bare function with cycle-9 source citation comment.
+- **AC5** — Fold `test_cycle9_compiler.py` (28 LOC, 1 test `test_load_manifest_recovers_from_os_error`) into `tests/test_compile.py` as bare function with cycle-9 source citation comment.
+- **AC6** — Test count preserved at 3025 (`pytest --collect-only | tail -1` confirms).
+- **AC7** — File count: actual `find tests -maxdepth 1 -name "*.py" | wc -l` was 243 on main (cycle-47 doc said 241 due to historical drift) → 241 post-fold (-2 net). Cycle 48 brings actual into alignment with stated.
+- **AC8-AC11** — Refresh diskcache / ragas / litellm / pip CVE timestamps cycle-47 → cycle-48 with re-verified `pip-audit --format=json` empty `fix_versions` per `.data/cycle-48/cve-baseline.json` (21 KB); `pip index versions {pkg}` confirms no new releases since cycle 47.
+- **AC12-AC13** — Refresh 2 Dependabot drift entries (litellm GHSA-r75f-5x8p-qvmc, GHSA-v4p8-mg3p-g94g) + 1 resolver-conflict entry (cycle-34 AC52: arxiv/crawl4ai/instructor) cycle-47 → cycle-48.
+- **AC14** — Remove BACKLOG.md HIGH lines 93-95 (the 2 cycle-48+ upgrade-candidate entries) — both resolved by AC1+AC2+AC3. Per C3 design-gate condition: lands AS SEPARATE COMMIT after pytest passes.
+- **AC15** — Extend HIGH #4 freeze-and-fold progress note with cycle-48 entry: 2 folds, file count 243 → 241, test count 3025 preserved, both cycle-48+ candidates closed.
+- **AC16** — Bump cycle-48+ → cycle-49+ on 3 N/A prerequisite-missing items (windows-latest CI matrix, GHA-Windows mp investigation, POSIX TestWriteItemFiles off-by-one) — none of self-hosted Windows runner / POSIX shell became available during cycle 48.
+- **AC17-AC20** — Doc sync: CHANGELOG.md (this entry), CHANGELOG-history.md (this archive), CLAUDE.md windows-CI defer-list cycle-48 → cycle-49+, README.md unchanged (file count 241 still accurate post-fold), docs/reference/{testing,implementation-status}.md cycle-48 narrative.
+
+**Commit cadence (6 commits + post-merge self-review):**
+1. `882ef92` — AC1 forward-protection (1 file, +14 lines)
+2. `4ad9236` — AC2+AC3 contract upgrades + C41-L1 docstring augment (2 files, +50/-9)
+3. `a02b9cd` — AC4+AC5 folds + 2 deletions (4 files, +50/-48)
+4. `d29c035` — AC8-AC13+AC16 BACKLOG dep-CVE refresh + tag bumps (1 file, +10/-10)
+5. `777f9c9` — AC14+AC15 BACKLOG cleanup post-pytest per C3 (1 file, +1/-5)
+6. (this commit) — AC17-AC20 doc sync
+
+**Verification:**
+- Step 10 full pytest: 3014 passed + 11 skipped in 156s (`/d/Projects/llm-wiki-flywheel/.venv/Scripts/python.exe -m pytest -q`).
+- `ruff check src/ tests/`: All checks passed.
+- `ruff format --check src/ tests/`: 333 files already formatted.
+- Step 11 PR-introduced CVE diff: EMPTY (cycle 48 changes 0 dependencies). Baseline + branch pip-audit at `.data/cycle-48/{cve-baseline,cve-branch}.json`.
+- Step 11.5 Class A patch: SKIPPED (all 4 open advisories have empty `fix_versions` on `main`).
+- Revert-verify: AC3 spy assertion FAILS when `save_page_frontmatter` is reverted to `path.write_text(...)` direct write; PASSES when restored.
+
+**Skipped steps (per skip-eligibility):**
+- Step 2 threat model — pure hygiene scope, zero `src/kb/` logic changes (only docstring augment); zero new I/O or trust boundary surface.
+- Step 3 brainstorming — primary holds full context; same-shape as cycle 47.
+- Step 6 Context7 — no third-party library kwargs introduced.
+- Step 9.5 simplify — total `src/` diff is 7-line docstring augment, well under 50 LoC threshold.
+- Step 11.5 existing-CVE patch — all 4 open advisories have `fix_versions=[]`; no patchable upstream.
+
+**Carry-overs to cycle 49+:**
+- 3 N/A prerequisite-missing items (windows-latest CI matrix re-enable, GHA-Windows mp spawn investigation, POSIX TestWriteItemFiles off-by-one) — tag bumped, BACKLOG entries unchanged.
+- 2 Dependabot drift entries (still don't surface in pip-audit on the live CI install env).
+- 4 dep-CVEs (track for upstream patch releases).
+
+---
+
 ### 2026-04-28 — cycle 47 — Backlog hygiene + dep-CVE re-confirm + freeze-and-fold continuation
 
 **Theme:** continue Phase 4.5 HIGH #4 freeze-and-fold cadence with 3 small folds (deferred from cycle 46 which prioritised Phase 4.6 LOW shim deletion); re-confirm 7 dep-CVE/drift/resolver-conflict BACKLOG entries (cycle-46 → cycle-47); refresh cycle-47+ tagged entries to cycle-48+ for spawn entries with missing prerequisites; re-ground AC10 Windows CI matrix entry on grep-proven Thread/MP candidates (removing false-positive `test_cycle23_workflow_e2e.py`).
