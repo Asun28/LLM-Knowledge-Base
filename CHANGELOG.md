@@ -29,6 +29,14 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-28 — cycle 52 (Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm)
+
+- Items: 13 ACs / 0 src files modified / 4 test files DELETED via fold (`test_cycle19_prune_base_consistency_anchor.py`, `test_cycle19_lint_redundant_patches.py`, `test_cycle15_load_all_pages_fields.py`, `test_cycle15_query_tier1_wiring.py`) + 4 receivers EDITED (`test_compile.py`, `test_lint.py`, `test_utils.py`, `test_query.py`) + BACKLOG.md (4 dep-CVE timestamp refreshes cycle-51 → cycle-52 + 2 Dependabot drift bumps cycle-51+ → cycle-52+ + 1 resolver-conflict refresh + 3 cycle-52+ → cycle-53+ tag bumps + Phase 4.5 HIGH #4 progress note appended + new cycle-53+ behavioral-upgrade candidate filed for AC1 prune-base anchor per C40-L3) + CLAUDE.md / README.md / docs/reference/{testing,implementation-status}.md narrative + 3 cycle-52 decision docs / 4 implementation commits + +TBD doc-sync + self-review.
+- Tests: 3025 → 3025 (unchanged — folds move 2+1+6+2 = 11 tests + 1 helper across 4 receivers; net 0 because moves preserve names). Windows local: 3014 passed + 11 skipped in 138.41s.
+- Scope:
+  Pure tests/ + BACKLOG.md + docs/ hygiene cycle. Zero `src/kb/` changes. Zero new dependencies. R1 DeepSeek V4 Pro returned APPROVE-WITH-AMENDMENTS — caught a real MAJOR for AC2 (post-fold self-exclusion guard would no longer skip the receiver file, causing potential false positive on test_lint.py drift). Step 5 promoted R1's amendment to binding decision (b) — replaced hardcoded source-filename string with `Path(__file__).resolve()` self-reference. R1's AC1 NIT (vacuousness claim arguable for inspect.getsource test) routed to a cycle-53+ BACKLOG behavioral-upgrade candidate per C40-L3.
+- Detail: [history archive](CHANGELOG-history.md#2026-04-28--cycle-52--backlog-hygiene--freeze-and-fold-continuation--dep-cve-re-confirm)
+
 #### 2026-04-28 — cycle 51 (Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm)
 
 - Items: 25 ACs / 0 src files modified / 4 test files DELETED via fold (`test_cycle12_conftest.py`, `test_cycle17_capture_prompt.py`, `test_cycle17_validators.py`, `test_cycle8_package_exports.py`) + 2 receivers EDITED (`test_v070.py`, `test_capture.py`) + BACKLOG.md (4 dep-CVE timestamp refreshes cycle-50 → cycle-51 + 2 Dependabot drift bumps cycle-50+ → cycle-51+ + 1 resolver-conflict refresh + 3 cycle-51+ → cycle-52+ tag bumps + Phase 4.5 HIGH #4 progress note appended) + CLAUDE.md / README.md / docs/reference/{testing,implementation-status}.md narrative + 4 cycle-51 decision docs / 4 implementation commits + +TBD doc-sync + self-review.
