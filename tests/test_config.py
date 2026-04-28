@@ -1,7 +1,9 @@
-"""Cycle 16 AC1-AC3 — config constants for query refinement + lint quality.
+"""Tests for kb.config constants — values, types, immutability.
 
-Behavioural regressions that pin the new constants' values, types, and
-immutability. No inspect.getsource / source-scan assertions (cycle-11 L2).
+Cycle 47 fold receiver: TestConfigConstants from cycle 16
+(test_cycle16_config_constants.py, fold per Phase 4.5 HIGH #4 freeze-and-fold
+rule + Step-5 design Q1 — new test_config.py file rather than splitting
+constants between test_lint.py + test_query.py).
 """
 
 import pytest
@@ -9,7 +11,9 @@ import pytest
 from kb import config
 
 
-class TestCycle16ConfigConstants:
+class TestConfigConstants:
+    # ── Cycle 16 AC1-AC3 — config constants for query refinement + lint quality ─
+
     def test_query_rephrasing_max_is_int_three(self) -> None:
         """AC1 — QUERY_REPHRASING_MAX == 3, typed int."""
         assert isinstance(config.QUERY_REPHRASING_MAX, int)

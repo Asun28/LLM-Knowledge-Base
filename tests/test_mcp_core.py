@@ -607,3 +607,82 @@ def test_sanitize_conversation_context_strips_fence_and_control_combo() -> None:
     assert "‭" not in out, f"BIDI override not stripped: {out!r}"
     assert "good prefix" in out
     assert "good suffix" in out
+
+
+# ── Cycle 11 task 6: kb_create_page hint errors (cycle 47 fold per AC8) ─
+# Source: tests/test_cycle11_task6_mcp_ingest_type.py (deleted in same commit).
+# Per Step-5 design Condition 2: _assert_create_page_error MUST be a
+# @staticmethod inside TestKbCreatePageHintErrors — NO module-level helper.
+# Per cycle-11 AC2 same-class peer rule (cycle-11 L3): kb_ingest,
+# kb_ingest_content, AND kb_save_source ALL reject 'comparison'/'synthesis'
+# source_type with a hint pointing at kb_create_page.
+
+from kb.mcp import core as _core_mod  # noqa: E402  # post-existing tests, fold-site import
+
+
+class TestKbCreatePageHintErrors:
+    """Cycle-11 same-class peer rule (C11-L3): all 3 ingest/save tools reject
+    comparison/synthesis source_type with a hint pointing at kb_create_page.
+    """
+
+    @staticmethod
+    def _assert_create_page_error(result: str) -> None:
+        assert isinstance(result, str)
+        assert "kb_create_page" in result
+        assert "fake.md" not in result
+        assert "x.md" not in result
+        assert " x" not in result
+
+    def test_kb_ingest_comparison_names_kb_create_page(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_core_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(_core_mod, "RAW_DIR", tmp_path)
+        source = tmp_path / "fake.md"
+        source.write_text("raw content", encoding="utf-8")
+        result = _core_mod.kb_ingest(source_path="fake.md", source_type="comparison")
+        self._assert_create_page_error(result)
+
+    def test_kb_ingest_synthesis_names_kb_create_page(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_core_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(_core_mod, "RAW_DIR", tmp_path)
+        source = tmp_path / "fake.md"
+        source.write_text("raw content", encoding="utf-8")
+        result = _core_mod.kb_ingest(source_path="fake.md", source_type="synthesis")
+        self._assert_create_page_error(result)
+
+    def test_kb_ingest_content_comparison_names_kb_create_page(self, monkeypatch):
+        monkeypatch.setattr(_core_mod, "SOURCE_TYPE_DIRS", {"article": object()})
+        result = _core_mod.kb_ingest_content(
+            content="x",
+            filename="x.md",
+            source_type="comparison",
+            extraction_json="{}",
+        )
+        self._assert_create_page_error(result)
+
+    def test_kb_ingest_content_synthesis_names_kb_create_page(self, monkeypatch):
+        monkeypatch.setattr(_core_mod, "SOURCE_TYPE_DIRS", {"article": object()})
+        result = _core_mod.kb_ingest_content(
+            content="x",
+            filename="x.md",
+            source_type="synthesis",
+            extraction_json="{}",
+        )
+        self._assert_create_page_error(result)
+
+    def test_kb_save_source_comparison_names_kb_create_page(self, tmp_project):
+        result = _core_mod.kb_save_source(
+            content="x",
+            filename="x",
+            source_type="comparison",
+        )
+        assert "kb_create_page" in result
+        assert "comparison" in result
+
+    def test_kb_save_source_synthesis_names_kb_create_page(self, tmp_project):
+        result = _core_mod.kb_save_source(
+            content="x",
+            filename="x",
+            source_type="synthesis",
+        )
+        assert "kb_create_page" in result
+        assert "synthesis" in result
