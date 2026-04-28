@@ -44,6 +44,7 @@ from kb.config import (
     CAPTURE_MAX_CALLS_PER_HOUR,
     CAPTURES_DIR,
     PROJECT_ROOT,
+    TEMPLATES_DIR,
 )
 from kb.utils.llm import LLMError
 from kb.utils.text import yaml_escape
@@ -1325,6 +1326,66 @@ class TestCaptureTemplate:
         schema = build_extraction_schema(tpl)
         assert isinstance(schema, dict)
         assert "properties" in schema or "type" in schema
+
+
+class TestCapturePromptFile:
+    """Cycle 17 AC9 — capture prompt template loaded from `templates/capture_prompt.txt`.
+
+    Folded from tests/test_cycle17_capture_prompt.py (cycle 51 — Phase 4.5 HIGH #4).
+    Renamed from TestAC9PromptTemplate to disambiguate from TestCaptureTemplate
+    above (which tests user-facing template output; this tests on-disk file load).
+    """
+
+    def test_prompt_template_begins_with_expected_first_line(self) -> None:
+        """The loaded template must start with the known atomisation instruction.
+
+        Uses the canonical lazy accessor `_get_prompt_template()` per cycle-19 L2
+        (the bare `_PROMPT_TEMPLATE` module attribute is `None` until the accessor
+        is called; reading the attribute directly creates a test-ordering
+        dependency).
+        """
+        from kb.capture import _get_prompt_template
+
+        assert _get_prompt_template().startswith(
+            "You are atomizing messy text into discrete knowledge items."
+        ), "AC9 regression: loaded prompt text differs from expected first line."
+
+    def test_prompt_template_file_exists(self) -> None:
+        """`templates/capture_prompt.txt` must exist at the hardcoded path."""
+        assert (TEMPLATES_DIR / "capture_prompt.txt").is_file(), (
+            f"AC9 regression: {TEMPLATES_DIR / 'capture_prompt.txt'} is missing. "
+            "The capture prompt loader expects this file at module-import time."
+        )
+
+    def test_prompt_template_contains_named_placeholders(self) -> None:
+        """Prompt must keep `{max_items}`, `{boundary_start}`, `{content}`, `{boundary_end}`."""
+        from kb.capture import _get_prompt_template
+
+        template = _get_prompt_template()
+        for placeholder in ("{max_items}", "{boundary_start}", "{content}", "{boundary_end}"):
+            assert placeholder in template, (
+                f"AC9 regression: capture prompt missing required placeholder {placeholder}"
+            )
+
+    def test_prompt_template_renders_without_error(self) -> None:
+        """`.format(...)` must succeed with the expected keys."""
+        from kb.capture import _get_prompt_template
+
+        rendered = _get_prompt_template().format(
+            max_items=20,
+            boundary_start="<<<INPUT-abc123>>>",
+            boundary_end="<<<END-INPUT-abc123>>>",
+            content="hello world",
+        )
+        assert "hello world" in rendered
+        assert "<<<INPUT-abc123>>>" in rendered
+        assert "<<<END-INPUT-abc123>>>" in rendered
+        assert "Cap the output at 20 items" in rendered
+
+    def test_loader_path_is_hardcoded(self) -> None:
+        """T11 — loader path is compile-time constant, not caller-controlled."""
+        assert isinstance(TEMPLATES_DIR, Path)
+        assert TEMPLATES_DIR.name == "templates"
 
 
 class TestPipelineFrontmatterStrip:
