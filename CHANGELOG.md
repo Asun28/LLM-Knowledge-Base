@@ -29,6 +29,14 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+#### 2026-04-28 — cycle 51 (Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm)
+
+- Items: 25 ACs / 0 src files modified / 4 test files DELETED via fold (`test_cycle12_conftest.py`, `test_cycle17_capture_prompt.py`, `test_cycle17_validators.py`, `test_cycle8_package_exports.py`) + 2 receivers EDITED (`test_v070.py`, `test_capture.py`) + BACKLOG.md (4 dep-CVE timestamp refreshes cycle-50 → cycle-51 + 2 Dependabot drift bumps cycle-50+ → cycle-51+ + 1 resolver-conflict refresh + 3 cycle-51+ → cycle-52+ tag bumps + Phase 4.5 HIGH #4 progress note appended) + CLAUDE.md / README.md / docs/reference/{testing,implementation-status}.md narrative + 4 cycle-51 decision docs / 4 implementation commits + +TBD doc-sync + self-review.
+- Tests: 3025 → 3025 (unchanged — folds move 2+5+5+6 = 18 method declarations across 2 receivers but parametrize expansion matches source so net 0). Windows local: 3014 passed + 11 skipped in 151.95s.
+- Scope:
+  Pure tests/ + BACKLOG.md + docs/ hygiene cycle. Zero `src/kb/` changes. Zero new dependencies. Step 2 threat-model SKIP per pure-test-fold (only dep-CVE baseline captured). C41-L1 in-fold behavioral upgrade applied to test_cycle17_capture_prompt fold: 3 of 5 tests had latent test-ordering dependency on `_PROMPT_TEMPLATE` lazy-init; switched to canonical `_get_prompt_template()` accessor per cycle-19 L2.
+- Detail: [history archive](CHANGELOG-history.md#2026-04-28--cycle-51--backlog-hygiene--freeze-and-fold-continuation--dep-cve-re-confirm)
+
 #### 2026-04-28 — cycle 50 (Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm)
 
 - Items: 25 ACs / 0 src files modified / 4 test files DELETED via fold (`test_cycle9_lint_checks.py`, `test_cycle45_lint_runner_order_invariant.py`, `test_cycle8_llm_telemetry.py`, `test_cycle9_mcp_path_validation.py`) + 3 receivers EDITED (`test_lint.py`, `test_llm.py`, `test_mcp_core.py`) + BACKLOG.md (4 dep-CVE timestamp refreshes cycle-49 → cycle-50 + 2 Dependabot drift bumps cycle-49+ → cycle-50+ + 1 resolver-conflict refresh + 3 cycle-50+ → cycle-51+ tag bumps + Phase 4.5 HIGH #4 progress note appended) + CLAUDE.md / README.md / docs/reference/{testing,implementation-status}.md narrative + 3 cycle-50 decision docs / 4 implementation commits + +TBD doc-sync + self-review.
