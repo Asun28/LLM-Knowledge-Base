@@ -432,3 +432,107 @@ def test_mcp_all_tools_registered():
         "kb_create_page",
     }
     assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
+
+
+def test_ingest_source_export_lazy_loads_pipeline():
+    """Folded from tests/test_cycle9_package_exports.py (cycle 49 — Phase 4.5 HIGH #4).
+
+    Subprocess child verifies lazy-import contract: kb.ingest.pipeline must
+    NOT be in sys.modules until kb.ingest.ingest_source attribute is accessed
+    (cycle-9 PEP-562 lazy-shim).
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_src = repo_root / "src"
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = (
+        str(repo_src) if not existing_pythonpath else f"{repo_src}{os.pathsep}{existing_pythonpath}"
+    )
+    probe = """
+import sys
+
+import kb.ingest
+
+assert "kb.ingest.pipeline" not in sys.modules
+kb.ingest.ingest_source
+assert "kb.ingest.pipeline" in sys.modules
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        env={**os.environ, "PYTHONPATH": pythonpath},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+class TestKbMcpConsoleScript:
+    """Folded from tests/test_cycle12_mcp_console_script.py (cycle 49 — Phase 4.5 HIGH #4)."""
+
+    def test_kb_mcp_package_exposes_main(self):
+        from kb.mcp import main
+
+        assert callable(main)
+
+    def test_kb_mcp_server_reexports_main_and_mcp(self):
+        from kb.mcp import main as pkg_main
+        from kb.mcp import mcp as pkg_mcp
+        from kb.mcp_server import main as shim_main
+        from kb.mcp_server import mcp as shim_mcp
+
+        assert shim_main is pkg_main
+        assert shim_mcp is pkg_mcp
+
+    def test_pyproject_has_kb_mcp_script_entry(self):
+        import tomllib
+
+        with open("pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+        scripts = data.get("project", {}).get("scripts", {})
+        assert scripts.get("kb-mcp") == "kb.mcp:main"
+        assert scripts.get("kb") == "kb.cli:cli"
+
+
+class TestMcpAppInstructions:
+    """Folded from tests/test_cycle9_mcp_app.py (cycle 49 — Phase 4.5 HIGH #4)."""
+
+    @staticmethod
+    def _instruction_tool_groups(instructions: str) -> dict[str, list[str]]:
+        import re
+
+        groups: dict[str, list[str]] = {}
+        current_group: str | None = None
+
+        for line in instructions.splitlines():
+            if match := re.fullmatch(r"### (?P<group>.+)", line):
+                current_group = match.group("group")
+                groups[current_group] = []
+                continue
+
+            if current_group and (match := re.fullmatch(r"- `(?P<name>kb_[^`]+)` — .+", line)):
+                groups[current_group].append(match.group("name"))
+
+        return groups
+
+    def test_instructions_tool_names_sorted_within_groups(self):
+        from kb.mcp import mcp
+
+        groups = self._instruction_tool_groups(mcp.instructions or "")
+
+        assert groups
+        for group_name, tool_names in groups.items():
+            assert tool_names, f"{group_name} has no documented tools"
+            assert sorted(tool_names) == tool_names
+
+        rendered_tool_names = {name for tool_names in groups.values() for name in tool_names}
+        registered_tools = asyncio.run(mcp.list_tools(run_middleware=False))
+        registered_tool_names = {tool.name for tool in registered_tools}
+
+        assert rendered_tool_names == registered_tool_names
