@@ -1,5 +1,7 @@
 """Tests for kb.utils.llm — retry logic, error handling, model tiering."""
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import anthropic
@@ -7,6 +9,7 @@ import httpx
 import pytest
 
 from kb.config import MODEL_TIERS
+from kb.utils import llm
 from kb.utils.llm import LLMError, call_llm
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -51,6 +54,33 @@ def _make_timeout_error() -> anthropic.APITimeoutError:
     """Construct a real APITimeoutError."""
     req = httpx.Request("POST", "https://api.anthropic.com")
     return anthropic.APITimeoutError(request=req)
+
+
+class _TelemetryFakeMessages:
+    """Cycle 8 telemetry helper — captures kwargs passed to messages.create.
+
+    Renamed from cycle-8 source `_FakeMessages` per cycle-50 Step-5 Q1
+    decision (telemetry-scoped, prevents future helper-name collisions per
+    R1 amendment). Used only by the telemetry tests in this file.
+    """
+
+    def __init__(self, response):
+        self.response = response
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.response
+
+
+def _install_telemetry_client(monkeypatch, response):
+    """Cycle 8 telemetry helper — install a fake Anthropic client.
+
+    Renamed from cycle-8 source `_install_client` per cycle-50 Step-5 Q1.
+    """
+    messages = _TelemetryFakeMessages(response)
+    monkeypatch.setattr(llm, "get_client", lambda: SimpleNamespace(messages=messages))
+    return messages
 
 
 # ── Success path ─────────────────────────────────────────────────
@@ -416,3 +446,55 @@ def test_backoff_delay_cap():
     from kb.utils.llm import RETRY_MAX_DELAY, _backoff_delay
 
     assert _backoff_delay(100) == RETRY_MAX_DELAY
+
+
+# ── Telemetry: _make_api_call success path (cycle 50 fold) ──────
+
+
+def test_make_api_call_success_logs_info_record_without_prompt_leak(monkeypatch, caplog):
+    """Cycle 8 contract: _make_api_call emits a single INFO row with model,
+    attempt, token counts, latency_ms — and NEVER includes the prompt or
+    system text (cycle 50 fold from `test_cycle8_llm_telemetry.py`).
+    """
+    usage = SimpleNamespace(input_tokens=123, output_tokens=45)
+    response = SimpleNamespace(usage=usage, content=[])
+    fake_messages = _install_telemetry_client(monkeypatch, response)
+    prompt = "sensitive prompt text that must not appear in logs"
+    system = "sensitive system text that must not appear in logs"
+    kwargs = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [{"role": "user", "content": prompt}],
+        "system": system,
+    }
+
+    with caplog.at_level(logging.INFO, logger="kb.utils.llm"):
+        returned = llm._make_api_call(kwargs, "claude-test")
+
+    assert returned is response
+    assert fake_messages.calls == [kwargs]
+    records = [r for r in caplog.records if r.name == "kb.utils.llm" and r.levelno == logging.INFO]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "model=claude-test" in message
+    assert "attempt=1" in message
+    assert "tokens_in=123" in message
+    assert "tokens_out=45" in message
+    assert "latency_ms=" in message
+    assert prompt not in message
+    assert system not in message
+
+
+def test_make_api_call_missing_usage_logs_zero_tokens(monkeypatch, caplog):
+    """Cycle 8: when the SDK response has no `usage` attr, the telemetry row
+    still emits with `tokens_in=0` / `tokens_out=0` (cycle 50 fold).
+    """
+    response = SimpleNamespace(content=[])
+    _install_telemetry_client(monkeypatch, response)
+
+    with caplog.at_level(logging.INFO, logger="kb.utils.llm"):
+        llm._make_api_call({"model": "claude-test", "messages": []}, "claude-test")
+
+    message = next(r.getMessage() for r in caplog.records if r.name == "kb.utils.llm")
+    assert "tokens_in=0" in message
+    assert "tokens_out=0" in message

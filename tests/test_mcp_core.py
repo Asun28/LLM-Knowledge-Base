@@ -7,6 +7,7 @@ import pytest
 
 import kb.config
 from kb.mcp.core import kb_compile_scan, kb_ingest_content, kb_save_source
+from kb.mcp.health import kb_evolve, kb_lint
 from tests._helpers.api_key import requires_real_api_key
 
 # Cycle 36 AC6 marker — TestKbCaptureWrapper tests reach a real Anthropic SDK
@@ -328,6 +329,73 @@ def test_kb_compile_scan_reports_changed_sources(tmp_path, monkeypatch):
     assert "Changed sources" in result
     assert "updated-paper.md" in result
     assert "1 source(s) to process" in result
+
+
+# ── MCP wiki_dir boundary validation (cycle 50 fold) ────────────
+
+
+class TestMcpWikiDirValidation:
+    """Cycle 9 contract: MCP boundary tools reject invalid wiki_dir.
+
+    kb_compile_scan / kb_lint / kb_evolve must each reject:
+      (a) non-existent absolute paths,
+      (b) relative paths (rejected before existence check),
+      (c) regular files passed in place of directories.
+
+    Folded from `test_cycle9_mcp_path_validation.py` — kb_compile_scan lives
+    in `kb.mcp.core`; kb_lint and kb_evolve live in `kb.mcp.health`. Single
+    class hosts all 9 tests because they share validation contract +
+    `_missing_abs_path` helper (Step-5 Q2 decision).
+    """
+
+    @staticmethod
+    def _missing_abs_path(tmp_path):
+        path = tmp_path / "does-not-exist" / "wiki"
+        assert path.is_absolute()
+        assert not path.exists()
+        return str(path)
+
+    def test_kb_compile_scan_rejects_nonexistent_wiki_dir(self, tmp_path):
+        result = kb_compile_scan(wiki_dir=self._missing_abs_path(tmp_path))
+        assert "wiki_dir does not exist" in result
+
+    def test_kb_compile_scan_rejects_relative_wiki_dir(self):
+        result = kb_compile_scan(wiki_dir="wiki")
+        assert "wiki_dir must be an absolute path" in result
+
+    def test_kb_compile_scan_rejects_file_instead_of_dir(self, tmp_path):
+        wiki_file = tmp_path / "wiki-file"
+        wiki_file.write_text("not a directory", encoding="utf-8")
+        result = kb_compile_scan(wiki_dir=str(wiki_file))
+        assert "wiki_dir is not a directory" in result
+
+    def test_kb_lint_rejects_nonexistent_wiki_dir(self, tmp_path):
+        result = kb_lint(wiki_dir=self._missing_abs_path(tmp_path))
+        assert "wiki_dir does not exist" in result
+
+    def test_kb_lint_rejects_relative_wiki_dir(self):
+        result = kb_lint(wiki_dir="wiki")
+        assert "wiki_dir must be an absolute path" in result
+
+    def test_kb_lint_rejects_file_instead_of_dir(self, tmp_path):
+        wiki_file = tmp_path / "wiki-file"
+        wiki_file.write_text("not a directory", encoding="utf-8")
+        result = kb_lint(wiki_dir=str(wiki_file))
+        assert "wiki_dir is not a directory" in result
+
+    def test_kb_evolve_rejects_nonexistent_wiki_dir(self, tmp_path):
+        result = kb_evolve(wiki_dir=self._missing_abs_path(tmp_path))
+        assert "wiki_dir does not exist" in result
+
+    def test_kb_evolve_rejects_relative_wiki_dir(self):
+        result = kb_evolve(wiki_dir="wiki")
+        assert "wiki_dir must be an absolute path" in result
+
+    def test_kb_evolve_rejects_file_instead_of_dir(self, tmp_path):
+        wiki_file = tmp_path / "wiki-file"
+        wiki_file.write_text("not a directory", encoding="utf-8")
+        result = kb_evolve(wiki_dir=str(wiki_file))
+        assert "wiki_dir is not a directory" in result
 
 
 # ── kb_capture wrapper ───────────────────────────────────────────

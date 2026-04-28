@@ -3,6 +3,9 @@
 from datetime import date, timedelta
 from pathlib import Path
 
+import frontmatter.default_handlers
+
+from kb.lint import runner
 from kb.lint.checks import (
     check_dead_links,
     check_frontmatter,
@@ -160,6 +163,52 @@ def test_check_source_coverage_empty(tmp_wiki, tmp_path):
     assert issues == []
 
 
+def test_check_source_coverage_parses_yaml_once_per_page(tmp_project, monkeypatch):
+    """check_source_coverage parses each page's YAML frontmatter exactly once.
+
+    Cycle 9 contract: spy on `frontmatter.default_handlers.yaml.load` and
+    assert the call count equals the number of wiki pages (3). A revert that
+    re-opens frontmatter in a downstream loop would push the count > 3 and
+    fail this test (cycle 50 fold from `test_cycle9_lint_checks.py`).
+    """
+    wiki_dir = tmp_project / "wiki"
+    raw_dir = tmp_project / "raw"
+    articles_dir = raw_dir / "articles"
+
+    for name in ("a", "b", "c"):
+        (articles_dir / f"{name}.md").write_text(f"{name} source\n", encoding="utf-8")
+        (wiki_dir / "concepts" / f"{name}.md").write_text(
+            (
+                "---\n"
+                f'title: "{name.upper()}"\n'
+                "source:\n"
+                f'  - "raw/articles/{name}.md"\n'
+                "created: 2026-04-18\n"
+                "updated: 2026-04-18\n"
+                "type: concept\n"
+                "confidence: stated\n"
+                "---\n\n"
+                f"{name.upper()} references raw/articles/{name}.md in body text.\n"
+            ),
+            encoding="utf-8",
+        )
+
+    original_load = frontmatter.default_handlers.yaml.load
+
+    def spy_load(*args, **kwargs):
+        spy_load.call_count += 1
+        return original_load(*args, **kwargs)
+
+    spy_load.call_count = 0
+    monkeypatch.setattr(frontmatter.default_handlers.yaml, "load", spy_load)
+
+    issues = check_source_coverage(wiki_dir=wiki_dir, raw_dir=raw_dir)
+
+    assert spy_load.call_count == 3
+    orphan_sources = {issue["source"] for issue in issues if issue["check"] == "source_coverage"}
+    assert orphan_sources == set()
+
+
 # ── Runner tests ───────────────────────────────────────────────
 
 
@@ -213,6 +262,54 @@ def test_format_report_clean():
     }
     text = format_report(report)
     assert "No issues found" in text
+
+
+def test_lint_runner_enumeration_order_unchanged(monkeypatch, tmp_path):
+    """Cycle 45 AC34: run_all_checks emits checks in a stable contract order.
+
+    Reverting the runner's check enumeration to a different sequence (e.g.,
+    moving status_mature_stale before authored_by_drift) flips the asserted
+    list and fails the test (cycle 50 fold from
+    `test_cycle45_lint_runner_order_invariant.py`).
+    """
+    expected_check_order = [
+        "dead_links",
+        "orphan_pages",
+        "staleness",
+        "frontmatter_staleness",
+        "status_mature_stale",
+        "authored_by_drift",
+        "frontmatter",
+        "source_coverage",
+        "wikilink_cycles",
+        "stub_pages",
+        "duplicate_slugs",
+        "inline_callouts",
+    ]
+
+    monkeypatch.setattr(runner, "scan_wiki_pages", lambda _wiki_dir: [])
+    monkeypatch.setattr(runner, "build_graph", lambda _wiki_dir: object())
+    monkeypatch.setattr(runner, "get_verdict_summary", lambda _path=None: None)
+
+    for name in (
+        "check_dead_links",
+        "check_orphan_pages",
+        "check_staleness",
+        "check_frontmatter_staleness",
+        "check_status_mature_stale",
+        "check_authored_by_drift",
+        "check_frontmatter",
+        "check_source_coverage",
+        "check_cycles",
+        "check_stub_pages",
+        "check_duplicate_slugs",
+        "check_inline_callouts",
+    ):
+        monkeypatch.setattr(runner, name, lambda *a, **k: [])
+
+    report = runner.run_all_checks(tmp_path / "wiki", tmp_path / "raw")
+
+    assert [check["name"] for check in report["checks_run"]] == expected_check_order
 
 
 # ── augment._resolve_raw_dir branch coverage (cycle 43 AC11 fold) ─
