@@ -5,6 +5,7 @@ from pathlib import Path
 
 import frontmatter.default_handlers
 
+from kb.lint import runner
 from kb.lint.checks import (
     check_dead_links,
     check_frontmatter,
@@ -261,6 +262,54 @@ def test_format_report_clean():
     }
     text = format_report(report)
     assert "No issues found" in text
+
+
+def test_lint_runner_enumeration_order_unchanged(monkeypatch, tmp_path):
+    """Cycle 45 AC34: run_all_checks emits checks in a stable contract order.
+
+    Reverting the runner's check enumeration to a different sequence (e.g.,
+    moving status_mature_stale before authored_by_drift) flips the asserted
+    list and fails the test (cycle 50 fold from
+    `test_cycle45_lint_runner_order_invariant.py`).
+    """
+    expected_check_order = [
+        "dead_links",
+        "orphan_pages",
+        "staleness",
+        "frontmatter_staleness",
+        "status_mature_stale",
+        "authored_by_drift",
+        "frontmatter",
+        "source_coverage",
+        "wikilink_cycles",
+        "stub_pages",
+        "duplicate_slugs",
+        "inline_callouts",
+    ]
+
+    monkeypatch.setattr(runner, "scan_wiki_pages", lambda _wiki_dir: [])
+    monkeypatch.setattr(runner, "build_graph", lambda _wiki_dir: object())
+    monkeypatch.setattr(runner, "get_verdict_summary", lambda _path=None: None)
+
+    for name in (
+        "check_dead_links",
+        "check_orphan_pages",
+        "check_staleness",
+        "check_frontmatter_staleness",
+        "check_status_mature_stale",
+        "check_authored_by_drift",
+        "check_frontmatter",
+        "check_source_coverage",
+        "check_cycles",
+        "check_stub_pages",
+        "check_duplicate_slugs",
+        "check_inline_callouts",
+    ):
+        monkeypatch.setattr(runner, name, lambda *a, **k: [])
+
+    report = runner.run_all_checks(tmp_path / "wiki", tmp_path / "raw")
+
+    assert [check["name"] for check in report["checks_run"]] == expected_check_order
 
 
 # ── augment._resolve_raw_dir branch coverage (cycle 43 AC11 fold) ─
