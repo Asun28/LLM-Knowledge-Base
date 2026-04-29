@@ -64,3 +64,5 @@ feature-dev-Opus4.6.md
 
 # Per-cycle scratch directories (forward-looking — added cycle 34 AC17)
 cycle-*-scratch/
+
+tmp/
