@@ -137,7 +137,7 @@ After successful subscription, you can go to the **Subscription page** to obtain
 - **China Cluster:** `https://token-plan-cn.xiaomimimo.com/anthropic`
 - **Singapore Cluster:** `https://token-plan-sgp.xiaomimimo.com/anthropic`
 
-> **Wrapper default (project-specific):** Our `mimocoding` CLI uses the **Singapore Cluster** by default and the **China Cluster** as the explicit fallback (`--region cn`). Vendor docs do not designate a default; this is our project's choice.
+> **Wrapper default (project-specific):** Our `mimocoding` CLI hardcodes the **Singapore Cluster** as its only endpoint. The `--region` flag was removed on 2026-05-02 after a smoke test confirmed that Singapore-issued Token Plan keys do not authenticate against the China cluster (region-lock; see Notes #8 below). To support both regions, the user would need separate subscriptions per region; at that point the flag could be reintroduced.
 
 ---
 

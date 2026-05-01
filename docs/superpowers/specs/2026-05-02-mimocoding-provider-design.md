@@ -22,8 +22,8 @@ Xiaomi's Token Plan offers a flat-rate subscription for high-volume coding workl
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | Default endpoint Singapore (`token-plan-sgp.xiaomimimo.com/anthropic/v1/messages`) | User's explicit preference; the vendor docs do not designate a default |
-| D2 | China cluster as `--region cn` (manual fallback) | Same protocol; backup region for Singapore unavailability or geo-restriction |
+| D1 | Endpoint hardcoded to Singapore (`token-plan-sgp.xiaomimimo.com/anthropic/v1/messages`) | User's subscription is Singapore-region; smoke testing on 2026-05-02 confirmed Token Plan keys are region-locked at issue time. Removed the earlier `--region` flag after verification |
+| D2 | (removed 2026-05-02) `--region cn` flag dropped | Original design exposed `--region {sgp,cn}` for manual fallback. Smoke test 4 returned `401 Invalid API Key` against the China cluster using the Singapore-issued key — confirming region-lock. Flag was decorative, removed for clarity. China support can be reintroduced if/when the user holds a separate cn-region subscription |
 | D3 | Expose only 4 chat-completion models | TTS variants need different protocol; `mimo-v2-flash` is not a Token Plan model. Choices: `mimo-v2.5-pro`, `mimo-v2.5`, `mimo-v2-pro`, `mimo-v2-omni` |
 | D4 | Default model `mimo-v2.5-pro` | Highest quality; coding tasks justify the 2x credit cost. User can pass `--model mimo-v2.5` for 1x cost |
 | D5 | Identity anchor: `"You are MiMo Coding, supporting AI Agent and Programming Tools developed by Xiaomi."` | Verbatim from user-supplied vendor branding; prepended to `--system` unless `--no-anchor` |
@@ -49,12 +49,12 @@ Four new files; one new env var (with backward-compat fallback to `MIMO_API_KEY`
 
 The two CLIs are structurally identical; differences are scoped to:
 
-1. **`_REGIONS` map** with `sgp` (default) and `cn` URLs. Selected via `--region`.
+1. **`_ENDPOINT` constant** hardcoded to the Singapore cluster URL. No `--region` flag (see D2).
 2. **`_MODELS` list shrunk from 5 to 4** — drop `mimo-v2-flash` (not a Token Plan model); TTS models excluded by default.
 3. **`_CREDIT_MULTIPLIER` table** documenting per-model credit cost (1x for V2.5 / V2-Omni, 2x for V2.5-Pro / V2-Pro). Informational; the platform meters the actual deduction.
 4. **Identity anchor text** — Coding-flavored, single sentence (no defensive add-ons; vendor docs already prescribe this exact wording).
 5. **`tp-` prefix check** — emits stderr WARN if the resolved key does not start with `tp-`. Does not abort; the call may still succeed (e.g., if Xiaomi changes the key format) but the user gets early notice that something is off.
-6. **401 error path** appends a hint string covering the three most-common causes: AUP suspension, quota exhaustion, wrong region.
+6. **401 error path** appends a hint string covering the three most-common causes: AUP suspension, quota exhaustion, region/key mismatch.
 7. **Argparse description** explicitly warns about programming-tool-only AUP.
 
 Everything else (UTF-8 reconfigure, payload shape, response parsing, `--think`/`--no-think`, `--no-anchor`, error paths) is byte-for-byte equivalent to `mimochat-cli.py`.
@@ -66,7 +66,6 @@ Mirrors `mimochat-rescue.md` with these specific differences:
 - **Description** explicitly limits use to coding-domain tasks and routes non-coding tasks to `mimochat-rescue`.
 - **"Important — Acceptable Use" section** lists prohibited use cases (general chat, automated bulk scripts, custom backends) and mentions that violations may trigger key suspension.
 - **Model selection table** shows credit multipliers (1x vs 2x) so the orchestrator can pick a cheaper tier for routine coding Q&A.
-- **Region selection** documented as part of the dispatch step.
 - **Budget section** expresses limits in subscription terms (Credits per month, off-peak 0.8x, exhaustion → service stop) instead of per-token.
 
 ## Verification plan
@@ -90,24 +89,18 @@ The same 3 smoke tests as `mimochat`, against `mimocoding`:
    ```
    Expected: model self-identifies as Xiaomi MiMo with some coding-context phrasing. Document any deviation.
 
-4. **Region fallback (after smoke 1 passes):**
-   ```
-   echo "Reply: cn-region-ok" | mimocoding --region cn --model mimo-v2.5 --no-think --max-tokens 100
-   ```
-   Expected: same shape as smoke 1, just routed through the China cluster.
-
 **Status (2026-05-02, after `setx MIMOCODING_API_KEY "tp-..."`):**
-- Smoke 1 (`mimo-v2.5 --no-think`, Singapore): ✅ PASS — returned `"mimocoding-ok"` verbatim.
-- Smoke 2 (`mimo-v2.5-pro` thinking, Singapore): ✅ PASS — `=== reasoning ===` block present, answer contained `391` in a formatted breakdown.
-- Smoke 3 (raw identity probe, `--no-anchor`, Singapore): ✅ PASS — `"I'm MiMo, built by Xiaomi's LLM Core Team to help with information and assist you in daily tasks."` Note: model self-identifies as `MiMo` (not `MiMo Coding`); the wrapper-level rebrand is product/file-level only, mirroring the same finding observed for MiMo Chat.
-- Smoke 4 (`--region cn`, same key): ❌ 401 `Invalid API Key`. The Token Plan key issued for the Singapore subscription does **not** authenticate against the China cluster — region selection is tied to the subscription's issued region, not a free-floating routing preference.
+- Smoke 1 (`mimo-v2.5 --no-think`): ✅ PASS — returned `"mimocoding-ok"` verbatim.
+- Smoke 2 (`mimo-v2.5-pro` thinking): ✅ PASS — `=== reasoning ===` block present, answer contained `391` in a formatted breakdown.
+- Smoke 3 (raw identity probe, `--no-anchor`): ✅ PASS — `"I'm MiMo, built by Xiaomi's LLM Core Team to help with information and assist you in daily tasks."` Note: model self-identifies as `MiMo` (not `MiMo Coding`); the wrapper-level rebrand is product/file-level only, mirroring the same finding observed for MiMo Chat.
+- Smoke 4 (now retired): originally tested `--region cn` and returned `401 Invalid API Key`. The Token Plan key issued for the Singapore subscription does **not** authenticate against the China cluster — region selection is tied to the subscription's issued region. The `--region` flag was removed in the post-test cleanup; if a China-region subscription is ever held, reintroduce the flag.
 
 ## Open issues / follow-ups
 
-1. **Region-locked keys (finding 2026-05-02).** A Token Plan key issued for the Singapore subscription returns `401 Invalid API Key` against the China cluster. Treat `--region cn` as "useful only if the user also has a separate China-region subscription" — not as a free fallback. The CLI's 401 hint already mentions trying the other region; consider downgrading that to a parenthetical since region-swap rarely helps for a key from a single-region subscription.
+1. **Region-locked keys (finding 2026-05-02; resolved by code change).** A Token Plan key issued for the Singapore subscription returns `401 Invalid API Key` against the China cluster. The original `--region {sgp,cn}` flag was decorative for single-region subscribers; it was dropped after verification, and the wrapper now hardcodes Singapore. To re-enable the flag, restore the `_REGIONS` dict and `--region` argparse argument (git history at the pre-cleanup commit shows the previous implementation).
 2. **Project integration (separate plan, fresh context window).** Wire `mimocoding-rescue` into `dev-ds` / `dev-codexds` skills as the preferred subagent for Coding-domain second-opinion calls. Decision points: which steps default to MiMo Coding, which retain the existing DeepSeek/Codex/Opus routing, and whether the routing rule keys on user's available keys (`tp-` present → prefer MiMo Coding) or on the explicit task domain.
 3. **TTS wrapper (open follow-up; rare use).** The 4 TTS variants in the Token Plan lineup require a different protocol (audio output) and a different CLI shape. Defer until the user has a concrete TTS use case.
-4. **Auto-failover between regions.** Currently manual via `--region cn`. If Singapore proves regularly unreliable, add a one-shot retry against `cn` on connection error.
+4. **Auto-failover between regions.** Not applicable for a single-region subscription. If the user later holds both Singapore and China subscriptions, restore the `--region` flag and consider one-shot retry between the two on connection error.
 5. **Credit-usage meter command.** `mimocoding usage` could query the Subscription Management endpoint to report remaining Credits. Vendor docs do not document a public usage endpoint at capture time; defer until they publish one or the user requests it.
 
 ## References
