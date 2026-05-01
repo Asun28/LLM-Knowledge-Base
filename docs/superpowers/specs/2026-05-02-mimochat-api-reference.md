@@ -1,10 +1,10 @@
-# MiMo (Xiaomi) API Spec — Captured Reference (2026-05-02)
+# MiMo Chat (Xiaomi) API Spec — Captured Reference (2026-05-02)
 
-**Captured:** 2026-05-02 from user-supplied API documentation
-**Source:** User prompt to Claude Code session on 2026-05-02 (no public URL provided by vendor at capture time)
-**Purpose:** Frozen copy of the MiMo Anthropic-compatible API spec used to design the encapsulation in `2026-05-02-mimo-provider-design.md`. Use this for future troubleshooting — if the live API changes, diff against this reference to identify what shifted.
+**Captured:** 2026-05-02 from user-supplied API documentation (initial spec + later "Quick Start" update)
+**Source:** User prompts to Claude Code session on 2026-05-02 (no public URL provided by vendor at capture time)
+**Purpose:** Frozen copy of the MiMo Chat Anthropic-compatible API spec used to design the encapsulation in [`2026-05-02-mimochat-provider-design.md`](2026-05-02-mimochat-provider-design.md). Use this for future troubleshooting — if the live API changes, diff against this reference to identify what shifted.
 
-> **Note:** The text below is a verbatim copy of what the user pasted into the brainstorming session. Headers, fields, and examples are preserved exactly. Do not edit unless the user re-supplies updated docs (in which case create a new dated reference file rather than overwriting this one).
+> **Note:** The vendor-verbatim sections below preserve the vendor's own conventions — they refer to the product as "MiMo" and the env var as `MIMO_API_KEY` because that's what the vendor's own docs and code examples use. Our wrapper is renamed to "MiMo Chat" / `MIMOCHAT_API_KEY` to disambiguate from a separate Xiaomi MiMO Coding product, but the wrapper accepts either env-var name. Do not edit vendor verbatim text unless the user re-supplies updated docs (in which case append a dated update section rather than overwriting earlier capture).
 
 ---
 
@@ -430,9 +430,246 @@ Final non-streaming-equivalent response (vendor-shown):
 
 ---
 
+## Quick Start (Vendor Docs — Captured 2026-05-02 update)
+
+> **Note:** Section added 2026-05-02 from a second user-supplied vendor docs paste. Verbatim vendor text retains the vendor's own naming conventions (`MIMO_API_KEY`, "MiMo"). The platform name is reportedly **Xiaomi MiMo API Open Platform**. Our wrapper supports both `MIMOCHAT_API_KEY` (preferred) and `MIMO_API_KEY` (vendor-compat fallback).
+
+### Supported API Types
+
+Xiaomi MiMo API Open Platform is compatible with OpenAI API and Anthropic API formats. You can use existing SDKs to access model inference services.
+
+### Preparation Before Calling
+
+**Log in to Xiaomi MiMo API Open Platform** — currently the platform only provides personal account login. You need to use a Xiaomi account to log in. If you already have one, log in directly. Otherwise, register at the Console or in advance at `id.mi.com`.
+
+**Get API Key** — create an API Key in **Console → API Keys**. Keep your API Key safe to avoid leakage that may result in quota theft. The vendor recommends configuring the API Key as an environment variable.
+
+### Recommended System Prompts
+
+The following system prompts are HIGHLY recommended (vendor's own emphasis); choose between English and Chinese versions.
+
+**Chinese version:**
+```
+你是MiMo（中文名称也是MiMo），是小米公司研发的AI智能助手。
+今天的日期：{date} {week}，你的知识截止日期是2024年12月。
+```
+
+**English version:**
+```
+You are MiMo, an AI assistant developed by Xiaomi.
+Today's date: {date} {week}. Your knowledge cutoff date is December 2024.
+```
+
+### Python SDK Examples
+
+#### OpenAI API Format Example
+
+Install the OpenAI Python SDK:
+```
+# If the run fails, you can replace pip with pip3 and run again
+pip install -U openai
+```
+
+Call the API:
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ.get("MIMO_API_KEY"),
+    base_url="https://api.xiaomimimo.com/v1"
+)
+
+completion = client.chat.completions.create(
+    model="mimo-v2.5-pro",
+    messages=[
+        {
+            "role": "system",
+            "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."
+        },
+        {
+            "role": "user",
+            "content": "please introduce yourself"
+        }
+    ],
+    max_completion_tokens=1024,
+    temperature=1.0,
+    top_p=0.95,
+    stream=False,
+    stop=None,
+    frequency_penalty=0,
+    presence_penalty=0
+)
+
+print(completion.model_dump_json())
+```
+
+#### Anthropic API Format Example
+
+Install the Anthropic Python SDK:
+```
+# If the run fails, you can replace pip with pip3 and run again
+pip install -U anthropic
+```
+
+Call the API:
+```python
+import os
+from anthropic import Anthropic
+
+client = Anthropic(
+    api_key=os.environ.get("MIMO_API_KEY"),
+    base_url="https://api.xiaomimimo.com/anthropic"
+)
+
+message = client.messages.create(
+    model="mimo-v2.5-pro",
+    max_tokens=1024,
+    system="You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024.",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "please introduce yourself"
+                }
+            ]
+        }
+    ],
+    top_p=0.95,
+    stream=False,
+    temperature=1.0,
+    stop_sequences=None
+)
+
+print(message.content)
+```
+
+### Curl Examples
+
+#### OpenAI API Format Example
+
+```
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "model": "mimo-v2.5-pro",
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."
+        },
+        {
+            "role": "user",
+            "content": "please introduce yourself"
+        }
+    ],
+    "max_completion_tokens": 1024,
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "stream": false,
+    "stop": null,
+    "frequency_penalty": 0,
+    "presence_penalty": 0
+}'
+```
+
+#### Anthropic API Format Example
+
+```
+curl --location --request POST 'https://api.xiaomimimo.com/anthropic/v1/messages' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "model": "mimo-v2.5-pro",
+    "max_tokens": 1024,
+    "system": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024.",
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "please introduce yourself"
+                }
+            ]
+        }
+    ],
+    "top_p": 0.95,
+    "stream": false,
+    "temperature": 1.0,
+    "stop_sequences": null
+}'
+```
+
+### Multi-turn Tool Calls in Thinking Mode
+
+During the multi-turn tool calls process in thinking mode, the model returns a `reasoning_content` field alongside `tool_calls`. To continue the conversation, it is recommended to keep all previous `reasoning_content` in the messages array for each subsequent request to achieve the best performance.
+
+```
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "messages": [
+        {
+            "role": "assistant",
+            "content": "Hello! I am MiMo.",
+            "reasoning_content": "Okay, the user just asked me to introduce myself. That is a pretty straightforward request, but I should think about why they are asking this."
+        },
+        {
+            "role": "user",
+            "content": "What is the weather like in Hebei?"
+        }
+    ],
+    "model": "mimo-v2.5-pro",
+    "max_completion_tokens": 1024,
+    "temperature": 1.0,
+    "stream": false,
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_weather",
+                "description": "Get the current weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA"
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": [
+                                "celsius",
+                                "fahrenheit"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "location"
+                    ]
+                }
+            }
+        }
+    ],
+    "tool_choice": "auto"
+}'
+```
+
+### Other Benefits (vendor)
+
+- **Off-peak discount:** 0.8x credit consumption during off-peak hours (16:00–24:00 UTC).
+- **TTS free trial:** TTS-family models (`MiMo-V2.5-TTS-VoiceClone`, `MiMo-V2.5-TTS-VoiceDesign`, `MiMo-V2.5-TTS`, `MiMo-V2-TTS`) available for free use for a limited time. Out of scope for our chat-completion CLI; pricing/access details from console.
+
+---
+
 ## Notes for Future Troubleshooting
 
-1. **No `anthropic-version` header in any vendor example.** This is why our CLI omits it. If MiMo later requires one, the symptom will be a 4xx with a missing-header error message.
+1. **No `anthropic-version` header in any vendor example.** This is why our CLI omits it. If the vendor later requires one, the symptom will be a 4xx with a missing-header error message.
 2. **Vendor SDK path uses `base_url="https://api.xiaomimimo.com/anthropic"`** (no trailing `/v1/messages`). Direct HTTP calls (which our CLI makes) hit `https://api.xiaomimimo.com/anthropic/v1/messages`.
 3. **Identity bias in vendor examples.** Every system prompt in vendor examples explicitly anchors MiMo's identity ("You are MiMo, an AI assistant developed by Xiaomi…"). This signals that, like DeepSeek, the model may default-claim a different identity if no anchor is provided. Our `--no-anchor` flag exists to verify that empirically.
 4. **Thinking content uses `signature: ""` in vendor examples.** Unlike Anthropic's spec (which uses `signature` for verifiable thinking blocks in cache replay), MiMo returns an empty signature. Treat as informational only.
