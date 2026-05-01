@@ -5,9 +5,49 @@
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-04-28
+## Active-unreleased archive — 2026-04-16 to 2026-05-02
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-05-02 — cycle 55 — First MiMo trial cycle: freeze-and-fold continuation + dep-CVE re-confirm
+
+**Theme:** First real-cycle exercise of the project-scoped `dev-mimo-opus` skill (May 2026 trial). Continues the freeze-and-fold cadence from cycles 47-52 (Phase 4.5 HIGH #4) with 4 small fold targets running PARALLEL to in-flight worktree-cycle-53 (4/4 folds done, no PR yet) and worktree-cycle-54 (mid-cycle src/kb fixes + 4 different fold picks). All cycle-55 receivers (test_graph.py, test_evolve.py, test_ingest.py, test_review.py) verified disjoint from cycle-53/54 receivers. AC1 included a C11-L1 vacuous-test upgrade. Step 15 attempted but reverted on python-dotenv pin trade-off discovery.
+
+**Parallel-cycle picked-items marker (AC10):**
+- Design + plan markdown landed in `docs/superpowers/decisions/2026-05-02-cycle-55-batch-{design,plan}.md` and pushed to `origin/cycle-55-batch` immediately after the marker commit (c11b7dc) so cycles 56+ see the picks via `git branch -r --list 'origin/cycle-*'`.
+- 4 picks: `test_v01003_graph_fixes` (53 LoC / 3 tests) → test_graph.py; `test_v01007_evolve_fixes` (78 LoC / 3 tests) → test_evolve.py; `test_v01009_ingest_aux_fixes` (58 LoC / 3 tests) → test_ingest.py; `test_v01011_review_feedback_fixes` (63 LoC / 3 tests) → test_review.py. All 4 sources had function-local imports per C19-L2 — preserved verbatim during fold.
+
+**ACs shipped (10 total, primary-session per C37-L5 + cycle-13 L2 sizing):**
+- **AC1** — Fold `tests/test_v01003_graph_fixes.py` (53 LoC, 3 tests) into `tests/test_graph.py` under new EOF section `# ── Phase 4 graph fixes (cycle 55 fold) ─`. Per Step-5 Q1 decision, the source's `test_graph_stats_uses_precomputed_out_degrees` was UPGRADED via C11-L1 (no source-file string reads as test assertions): `inspect.getsource(graph_stats); assert "out_degrees" in src; assert "graph.degree(n)" not in src` HALF DROPPED, behavioral half preserved. Test renamed to `test_graph_stats_orphans_includes_isolated_node` to match what it actually asserts (`stats["orphans"] == ["d"]` for an isolated node). Existing `test_graph_stats_orphan_detection` at test_graph.py:109 covers `no_inbound` via `build_graph` + `_create_wiki_page` helper — DIFFERENT field, DIFFERENT graph-construction approach; both tests have value. `test_export_mermaid_deterministic_edge_order` and `test_graph_init_does_not_export_scan_wiki_pages` folded verbatim. Source file deleted in same commit (3ac38b4).
+- **AC2** — Fold `tests/test_v01007_evolve_fixes.py` (78 LoC, 3 tests) into `tests/test_evolve.py` under new EOF section `# ── Phase 4 evolve fixes (cycle 55 fold) ─` (after the cycle-48 fold section ending at line 179 pre-edit). All 3 tests folded verbatim with multi-attr `for attr in ("scan_wiki_pages", "_scan_wiki_pages", "load_all_pages"): if hasattr(_a, attr): monkeypatch.setattr(...); break` resilience pattern preserved. Function-local imports per C19-L2. Source file deleted in same commit (d6e1d0a).
+- **AC3** — Fold `tests/test_v01009_ingest_aux_fixes.py` (58 LoC, 3 tests) into `tests/test_ingest.py` under new EOF section `# ── Phase 4 ingest aux fixes (cycle 55 fold) ─` (after `test_kb_ingest_content_rejects_page_types_without_raw_file` ending at line 808 pre-edit). All 3 tests folded verbatim. Function-name pre-check confirmed `test_load_template` at test_ingest.py:24 is a DIFFERENT test (no `_returns_deep_copy` suffix) — no collision. `test_contradiction_truncation_logged` had module-top `import logging`; source moved that import function-local for receiver host-shape preservation. Source file deleted in same commit (e701a6a).
+- **AC4** — Fold `tests/test_v01011_review_feedback_fixes.py` (63 LoC, 3 tests) into `tests/test_review.py` under new EOF section `# ── Phase 4 review/feedback/config fixes (cycle 55 fold) ─` (after `test_append_wiki_log_concurrent` ending at line 367 pre-edit). Per Step-5 Q2 decision, `test_embedding_dim_resolved` joins despite touching `kb.config` + `kb.query.embeddings` rather than `kb.review.refiner` — host-shape preservation per C40-L5 (the source file groups all 3 under "Phase 4 review/feedback/config fixes", and splitting to test_query.py would create a merge surface with parallel cycle-53 test_query.py edits). Section docstring documents the host-shape rationale. Note: `test_embedding_dim_resolved` uses `inspect.getsource(VectorIndex)` which is normally vacuous per C11-L1, but here it's a "must-be-deleted-or-used" SENTINEL for the EMBEDDING_DIM config flag — there is no behavioral surface to assert against. Preserved verbatim per cycle-15 L2 / cycle-44 L4 DROP-with-test-anchor class. Source file deleted in same commit (384bbb4).
+- **AC5** — Per-fold revert-verify per C40-L3: `assert False, "revert-verify C40-L3"` injected before the moved test's primary assertion → `pytest -x` confirms FAIL on the moved test → assertion restored. Performed on one method per fold (consistent with cycle 49-52 convention "the moved method"). All 4 folds verified.
+- **AC6** — Per-fold ISOLATION pytest per C51-L1: `pytest tests/test_<receiver>.py -q` after each fold's source-delete + receiver-edit. Results: test_graph.py 8 → 11 passed (post-fold AC1); test_evolve.py 12 → 15 passed (post-fold AC2); test_ingest.py 37 → 40 passed (post-fold AC3); test_review.py 18 → 21 passed (post-fold AC4). No latent test-ordering dependencies surfaced — no C41-L1 in-fold upgrade fired this cycle.
+- **AC7** — Test count: `pytest --collect-only -q | tail -1` reports `3025 tests collected` at branch HEAD (preserved — folds move 3+3+3+3 = 12 tests across 4 receivers; net 0). Full-suite local pytest: 3014 passed + 11 skipped + 48 warnings in 148.67s on Windows.
+- **AC8** — File count: `find tests -maxdepth 1 -name '*.py' -type f | wc -l` returns 221 at branch HEAD (was 225 at cycle-52 ship; -4 net from 4 source-file deletes). **Subject to Step 21 rebase** if cycle 53 (also -4) or cycle 54 (also -4) merge to main first; final landed count depends on merge ordering.
+- **AC9** — dep-CVE re-confirm: pip-audit live env baseline (`.venv/Scripts/pip-audit.exe --format json`, NOT `-r requirements.txt` per C34-L1) at cycle start showed 4 vulns matching cycle-52 baseline (diskcache CVE-2025-69872 no fix; litellm GHSA-xqmj-j6mv-4862 fix=1.83.7; pip CVE-2026-3219 no fix; ragas CVE-2026-6587 no fix). Branch HEAD pip-audit identical (Class B PR-introduced empty). Step 15 attempted opportunistic litellm 1.83.0 → 1.83.7 patch: `pip install --upgrade "litellm==1.83.7"` resolved by silent-downgrading click 8.3.2 → 8.1.8, importlib-metadata 8.7.1 → 8.5.0, jsonschema 4.26.0 → 4.23.0, AND python-dotenv 1.2.2 → 1.0.1 — INTRODUCING CVE-2026-28684 / GHSA-mf9w-mj56-hr94 (HIGH symlink attack on `set_key()` / `unset_key()`, fix_versions=['1.2.2']). Explicit `--upgrade "litellm==1.83.7" "python-dotenv==1.2.2"` returned `ResolutionImpossible: litellm 1.83.7 depends on python-dotenv==1.0.1`. Patch reverted; venv restored to baseline state (`pip install --upgrade "litellm==1.83.0" "python-dotenv==1.2.2" "click==8.3.2" "importlib-metadata==8.7.1" "jsonschema==4.26.0"`). `grep -rn "set_key\|unset_key" src/` returns empty so the python-dotenv CVE would have been theoretical-only against our codebase, but Step 14 default REJECTs PR-introduced advisories — defer remains correct. BACKLOG litellm entry updated cycle-52 → cycle-55 with the new python-dotenv pin discovery.
+- **AC10** — Marker artifact (parallel-cycle coordination): design + plan markdown committed in c11b7dc (lines 1-228 + 1-187) and pushed to `origin/cycle-55-batch` so cycles 56+ see the picks. Receivers verified disjoint from cycle-53 (test_compile.py / test_config.py / test_query.py) and cycle-54 (test_lint.py / test_mcp_browse_health.py / test_models.py / test_utils_io.py / test_compile.py + src/kb/{compile/compiler,utils/io}.py).
+
+**First MiMo trial data points (for 2026-05-31 writeup):**
+- `mimocoding-rescue` and `mimochat-rescue` NOT registered in active subagent set this Claude Code session. Per the skill's trial fallback chain, Step 8 plan-gate dispatched via `codex:codex-rescue` instead. Substitution noted at top of agent reply.
+- Step 8 plan-gate via Codex returned REJECT with 5 gaps (4 doc clarifications + 1 PLAN-AMENDS-DESIGN on pip-audit baseline command). All 5 closed inline per C21-L1 (no re-dispatch needed; gaps were doc-only). Total time-to-verdict: ~106 sec.
+- Steps 7 (plan), 9 (4 folds), 17 (this doc update) all ran in primary session per cycle-13 L2 + C37-L5 sizing heuristic (small mechanical work, dispatch overhead would dominate).
+- Step 20 R1+R2 will retain DeepSeek+Codex+Sonnet diversity per skill spec — that gate is independent of MiMo availability.
+- Per-step trial data captured at Step 24 self-review.
+
+**Commits (`+TBD` per C30-L1):**
+- c11b7dc — docs(cycle 55): design + plan for 4-fold batch (parallel-safe with 53/54)
+- 5e966ad — docs(cycle 55): plan-gate REJECT pass — 5 gaps closed inline
+- 3ac38b4 — test(cycle 55): fold test_v01003_graph_fixes into test_graph.py (1/4)
+- d6e1d0a — test(cycle 55): fold test_v01007_evolve_fixes into test_evolve.py (2/4)
+- e701a6a — test(cycle 55): fold test_v01009_ingest_aux_fixes into test_ingest.py (3/4)
+- 384bbb4 — test(cycle 55): fold test_v01011_review_feedback_fixes into test_review.py (4/4)
+- TBD — docs(cycle 55): doc-sync (BACKLOG/CHANGELOG/CLAUDE.md/docs/reference) for 4-fold batch + Step 15 deferred-patch finding
+
+**Total: 7 commits + R1/R2 fix commits + self-review (final count backfilled per C30-L1 once landed on main).**
+
+---
 
 ### 2026-04-28 — cycle 52 — Backlog hygiene + freeze-and-fold continuation + dep-CVE re-confirm
 
