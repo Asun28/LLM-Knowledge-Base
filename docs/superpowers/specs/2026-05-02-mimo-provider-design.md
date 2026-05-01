@@ -223,4 +223,4 @@ These are explicitly NOT part of the initial encapsulation. Each requires empiri
 
 - DeepSeek encapsulation precedent: `~/.claude/bin/deepseek-cli.py`, `~/.claude/agents/deepseek-rescue.md`
 - DeepSeek identity-anchor finding: cycle 42, 2026-04-27
-- MiMo API spec: provided in user prompt 2026-05-02 (no public URL captured at design time)
+- **MiMo API spec (verbatim, captured 2026-05-02):** [`2026-05-02-mimo-api-reference.md`](2026-05-02-mimo-api-reference.md) — full vendor docs including endpoint, headers, all request/response fields, all four code examples, and notes for future troubleshooting (no public URL captured; user-supplied)
