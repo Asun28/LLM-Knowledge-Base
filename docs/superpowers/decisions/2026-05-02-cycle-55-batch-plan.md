@@ -22,6 +22,10 @@ Save summary to `.data/cycle-55/baseline-summary.txt` for Step 14 + 15 cross-che
 - `tests/test_graph.py` (receiver, +50 LoC under new EOF section)
 - `tests/test_v01003_graph_fixes.py` (delete)
 
+**Pre-checks (CONDITION 5 — function-name disambiguation):**
+- `grep -E "^def (test_graph_stats_avoids_per_node_degree_calls|test_graph_stats_orphan_detection_with_isolated_node|test_export_mermaid_deterministic_edge_order|test_graph_init_does_not_export_scan_wiki_pages)\(" tests/test_graph.py` → expect zero hits before fold.
+- All moved tests use **function-local imports** per C19-L2 (no module-top `from kb.*` lines).
+
 **Changes:**
 1. Append new section to `test_graph.py`:
    ```python
@@ -54,6 +58,10 @@ pytest tests/test_graph.py -q   # full file isolation per C51-L1
 - `tests/test_evolve.py` (receiver, +75 LoC under new EOF section)
 - `tests/test_v01007_evolve_fixes.py` (delete)
 
+**Pre-checks (CONDITION 5):**
+- `grep -E "^def (test_find_connection_opportunities_caps_pairs|test_generate_evolution_report_scans_once|test_generate_evolution_report_handles_oserror)\(" tests/test_evolve.py` → expect zero hits before fold.
+- All moved tests use **function-local imports** per C19-L2.
+
 **Changes:**
 1. Append new section after the existing cycle-48 fold section:
    ```python
@@ -81,12 +89,16 @@ pytest tests/test_evolve.py -q   # isolation per C51-L1
 - `tests/test_ingest.py` (receiver, +55 LoC under new EOF section)
 - `tests/test_v01009_ingest_aux_fixes.py` (delete)
 
+**Pre-checks (CONDITION 5):**
+- `grep -E "^def (test_load_template_returns_deep_copy|test_evidence_trail_crlf_header|test_contradiction_truncation_logged)\(" tests/test_ingest.py` → expect zero hits before fold. Note: `test_load_template` (no `_returns_deep_copy` suffix) already exists at `test_ingest.py:24` and is a DIFFERENT test — keep moved name distinct.
+- All moved tests use **function-local imports** per C19-L2.
+
 **Changes:**
 1. Append at EOF:
    ```python
    # ── Phase 4 ingest aux fixes (cycle 55 fold) ──────────────────────────
    ```
-2. Move 3 tests verbatim. **Function-name pre-check:** `test_load_template` already exists at `test_ingest.py:24`. Source file's `test_load_template_returns_deep_copy` is distinct — keep its name as-is (no rename). Other 2 names (`test_evidence_trail_crlf_header`, `test_contradiction_truncation_logged`) — grep test_ingest.py to confirm no collision.
+2. Move 3 tests verbatim.
 3. Delete `tests/test_v01009_ingest_aux_fixes.py`.
 
 **Test:**
@@ -108,6 +120,10 @@ pytest tests/test_ingest.py -q   # isolation per C51-L1
 - `tests/test_review.py` (receiver, +60 LoC under new EOF section)
 - `tests/test_v01011_review_feedback_fixes.py` (delete)
 
+**Pre-checks (CONDITION 5):**
+- `grep -E "^def (test_refine_page_rejects_multiline_frontmatter_body|test_refine_page_updated_regex_anchored|test_embedding_dim_resolved)\(" tests/test_review.py` → expect zero hits before fold.
+- All moved tests use **function-local imports** per C19-L2.
+
 **Changes:**
 1. Append at EOF:
    ```python
@@ -117,8 +133,7 @@ pytest tests/test_ingest.py -q   # isolation per C51-L1
    - `test_refine_page_rejects_multiline_frontmatter_body`
    - `test_refine_page_updated_regex_anchored`
    - `test_embedding_dim_resolved` (config + embeddings — joins under host-shape preservation despite touching different territory)
-3. Function-name pre-check: grep test_review.py — none of the 3 names collide.
-4. Delete `tests/test_v01011_review_feedback_fixes.py`.
+3. Delete `tests/test_v01011_review_feedback_fixes.py`.
 
 **Test:**
 ```bash
@@ -138,12 +153,14 @@ pytest tests/test_review.py -q   # isolation per C51-L1
 ```bash
 python -m pytest -q                               # full suite, expect 3014 passed + 11 skipped
 python -m pytest --collect-only -q | tail -1      # confirms 3025 tests collected
+find tests -maxdepth 1 -name 'test_*.py' | wc -l  # confirms 221 files (was 225)
 ruff check src/ tests/
 ruff format --check src/ tests/
-pip-audit -r requirements.txt --format json > .data/cycle-55/cve-branch.json 2>/dev/null || true
+# Live-env audit per C34-L1 (NOT `-r requirements.txt` — see design doc)
+.venv/Scripts/pip-audit.exe --format json > .data/cycle-55/cve-branch.json 2>.data/cycle-55/cve-branch.stderr.txt || true
 ```
 
-**Criteria:** AC7
+**Criteria:** AC7 (3025 tests + 221 files)
 
 ### Step 14 — PR-introduced CVE diff
 
@@ -248,6 +265,11 @@ Scorecard for steps 01-23. Skill patches under `## Cycle 55 skill patches (2026-
 - `python -m ruff format --check src/ tests/`
 - `python -m pytest -q`
 - `find tests -maxdepth 1 -name 'test_*.py' | wc -l` → `221`
+- `.venv/Scripts/pip-audit.exe --format json > .data/cycle-55/cve-branch.json` then diff vs baseline → empty (AC9)
+
+## Plan-gate trail
+
+- 2026-05-02 — first dispatch via `codex:codex-rescue` (MiMo Coding fallback per skill trial-fallback chain; `mimocoding-rescue` unavailable in active subagent registry). REJECT with 5 gaps; addressed: Step 09a/b/c/d explicit function-local-import + CONDITION 5 pre-check rows; Step 12 file-count verification added; design doc updated to live-env pip-audit per C34-L1. Re-running plan-gate on revised docs.
 
 ## Scope Controls
 

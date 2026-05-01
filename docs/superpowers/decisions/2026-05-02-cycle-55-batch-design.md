@@ -53,7 +53,11 @@ mkdir -p .data/cycle-55
 gh api "repos/Asun28/llm-wiki-flywheel/dependabot/alerts" --paginate \
   --jq '[.[] | select(.state=="open") | {id:.number, severity:.security_vulnerability.severity, package:.dependency.package.name, ghsa:.security_advisory.ghsa_id, first_patched:.security_vulnerability.first_patched_version.identifier}]' \
   > .data/cycle-55/alerts-baseline.json
-pip-audit -r requirements.txt --format json > .data/cycle-55/cve-baseline.json 2>/dev/null || true
+# Per C34-L1: audit the LIVE venv (pip-audit without -r) to avoid silent
+# ResolutionImpossible failures that produce empty baselines. Project has a
+# diskcache pin tied to crawl4ai that would trip pip-audit -r requirements.txt.
+.venv/Scripts/pip-audit.exe --format json \
+  > .data/cycle-55/cve-baseline.json 2>.data/cycle-55/cve-baseline.stderr.txt || true
 ```
 
 To run as Step 2 first action of the cycle. Capture summary in CHANGELOG-history.md.
