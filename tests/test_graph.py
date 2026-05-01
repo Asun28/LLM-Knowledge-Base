@@ -118,3 +118,52 @@ def test_graph_stats_orphan_detection(tmp_wiki):
     graph = build_graph(tmp_wiki)
     stats = graph_stats(graph)
     assert "summaries/orphan" in stats["no_inbound"]
+
+
+# ── Phase 4 graph fixes (cycle 55 fold) ───────────────────────────────
+
+
+def test_graph_stats_orphans_includes_isolated_node():
+    """graph_stats reports a degree-zero node in the 'orphans' alias.
+
+    Folded from test_v01003_graph_fixes (cycle 55). The original test also
+    asserted 'out_degrees' substring presence via inspect.getsource; that
+    grep was vacuous per C11-L1 and was dropped during the fold. The
+    behavioral half (orphan-classification of an isolated node) survives —
+    reverting graph_stats's no_inbound/isolated logic still fails this test.
+    """
+    import networkx as nx
+
+    from kb.graph.builder import graph_stats
+
+    g = nx.DiGraph()
+    g.add_edge("a", "b")
+    g.add_edge("b", "c")
+    g.add_node("d")  # orphan: no in or out edges
+
+    stats = graph_stats(g)
+    assert stats["orphans"] == ["d"], f"Expected ['d'] orphan, got {stats['orphans']}"
+
+
+def test_export_mermaid_deterministic_edge_order(tmp_wiki):
+    """Two exports of the same graph must produce byte-identical output."""
+    from kb.graph.builder import build_graph
+    from kb.graph.export import export_mermaid
+
+    (tmp_wiki / "concepts").mkdir(parents=True, exist_ok=True)
+    for name in ("alpha", "beta", "gamma"):
+        (tmp_wiki / "concepts" / f"{name}.md").write_text(
+            f"---\ntitle: {name}\ntype: concept\nconfidence: stated\n---\n"
+            f"Links: [[concepts/alpha]] [[concepts/beta]] [[concepts/gamma]]\n",
+            encoding="utf-8",
+        )
+    g = build_graph(tmp_wiki)
+    a = export_mermaid(g, wiki_dir=tmp_wiki, max_nodes=10)
+    b = export_mermaid(g, wiki_dir=tmp_wiki, max_nodes=10)
+    assert a == b
+
+
+def test_graph_init_does_not_export_scan_wiki_pages():
+    import kb.graph as _g
+
+    assert "scan_wiki_pages" not in _g.__all__
