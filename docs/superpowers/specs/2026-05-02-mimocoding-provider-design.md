@@ -96,11 +96,15 @@ The same 3 smoke tests as `mimochat`, against `mimocoding`:
    ```
    Expected: same shape as smoke 1, just routed through the China cluster.
 
-**Status (2026-05-02):** all 4 tests blocked because the active registry key is an `sk-`-prefixed MiMo Chat key, not a `tp-`-prefixed Token Plan key. Once the user `setx MIMOCODING_API_KEY "tp-..."`, run the suite.
+**Status (2026-05-02, after `setx MIMOCODING_API_KEY "tp-..."`):**
+- Smoke 1 (`mimo-v2.5 --no-think`, Singapore): ✅ PASS — returned `"mimocoding-ok"` verbatim.
+- Smoke 2 (`mimo-v2.5-pro` thinking, Singapore): ✅ PASS — `=== reasoning ===` block present, answer contained `391` in a formatted breakdown.
+- Smoke 3 (raw identity probe, `--no-anchor`, Singapore): ✅ PASS — `"I'm MiMo, built by Xiaomi's LLM Core Team to help with information and assist you in daily tasks."` Note: model self-identifies as `MiMo` (not `MiMo Coding`); the wrapper-level rebrand is product/file-level only, mirroring the same finding observed for MiMo Chat.
+- Smoke 4 (`--region cn`, same key): ❌ 401 `Invalid API Key`. The Token Plan key issued for the Singapore subscription does **not** authenticate against the China cluster — region selection is tied to the subscription's issued region, not a free-floating routing preference.
 
 ## Open issues / follow-ups
 
-1. **Smoke tests blocked on Token Plan key.** User must subscribe (or unsuspend the prior `tp-ss05t…qs3p` key) and `setx MIMOCODING_API_KEY "tp-..."` before verification.
+1. **Region-locked keys (finding 2026-05-02).** A Token Plan key issued for the Singapore subscription returns `401 Invalid API Key` against the China cluster. Treat `--region cn` as "useful only if the user also has a separate China-region subscription" — not as a free fallback. The CLI's 401 hint already mentions trying the other region; consider downgrading that to a parenthetical since region-swap rarely helps for a key from a single-region subscription.
 2. **Project integration (separate plan, fresh context window).** Wire `mimocoding-rescue` into `dev-ds` / `dev-codexds` skills as the preferred subagent for Coding-domain second-opinion calls. Decision points: which steps default to MiMo Coding, which retain the existing DeepSeek/Codex/Opus routing, and whether the routing rule keys on user's available keys (`tp-` present → prefer MiMo Coding) or on the explicit task domain.
 3. **TTS wrapper (open follow-up; rare use).** The 4 TTS variants in the Token Plan lineup require a different protocol (audio output) and a different CLI shape. Defer until the user has a concrete TTS use case.
 4. **Auto-failover between regions.** Currently manual via `--region cn`. If Singapore proves regularly unreliable, add a one-shot retry against `cn` on connection error.
