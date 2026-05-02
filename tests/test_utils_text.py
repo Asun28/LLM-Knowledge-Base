@@ -1,5 +1,6 @@
 """Regression tests for kb.utils.text — slugify and related helpers."""
 
+from kb.utils.sanitize import _ABS_PATH_PATTERNS, sanitize_error_text, sanitize_text
 from tests.fixtures.injection_payloads import (
     BENIGN_KEY_CLAIM_WITH_CODE,
     BENIGN_SUMMARY_WITH_DASHES,
@@ -203,3 +204,109 @@ def test_truncate_cuts_long_messages():
     assert result.startswith("x"), "head preserved"
     assert result.endswith("x"), "tail preserved"
     assert "elided" in result, "smart-truncate marker must appear"
+
+
+# ── kb.utils.sanitize path redaction (cycle 58 fold) ──────────────
+# Folded from `tests/test_cycle18_sanitize.py` — class wraps the 16
+# path-redaction tests for namespace clarity (yaml_sanitize tests above
+# share `test_sanitize_*` prefix). Cross-feature hosting analogue per
+# cycle-50 precedent.
+
+
+class TestSanitizePathRedaction:
+    """Cycle 18 AC13 — sanitize_text string helper + UNC path coverage.
+
+    Threat T1: absolute filesystem paths (Windows drive-letter, UNC, POSIX) must
+    be redacted from any free-text field written to `.data/ingest_log.jsonl`.
+    Ordinary UNC (\\\\server\\share\\path) was missing from cycle-17 coverage.
+    """
+
+    def test_sanitize_text_windows_backslash(self) -> None:
+        """Windows drive-letter with backslash."""
+        assert sanitize_text("error at C:\\Users\\Admin\\file.md end") == "error at <path> end"
+
+    def test_sanitize_text_windows_forward_slash(self) -> None:
+        """Windows drive-letter with forward slash."""
+        assert sanitize_text("error at C:/Users/Admin/file.md end") == "error at <path> end"
+
+    def test_sanitize_text_unc_long_path(self) -> None:
+        """Windows UNC long-path prefix (\\\\?\\C:\\foo)."""
+        out = sanitize_text("error at \\\\?\\C:\\foo\\bar end")
+        assert out == "error at <path> end", f"Got: {out!r}"
+
+    def test_sanitize_text_unc_ordinary(self) -> None:
+        """Ordinary UNC (\\\\server\\share\\path) — NEW coverage for cycle 18 AC13."""
+        out = sanitize_text("error at \\\\server\\share\\file.md end")
+        assert out == "error at <path> end", f"Got: {out!r}"
+
+    def test_sanitize_text_unc_ordinary_minimal(self) -> None:
+        """Ordinary UNC without trailing path."""
+        out = sanitize_text("error at \\\\server\\share end")
+        assert out == "error at <path> end", f"Got: {out!r}"
+
+    def test_sanitize_text_posix_home(self) -> None:
+        assert sanitize_text("error at /home/user/file end") == "error at <path> end"
+
+    def test_sanitize_text_posix_opt(self) -> None:
+        assert sanitize_text("error at /opt/tool/x end") == "error at <path> end"
+
+    def test_sanitize_text_posix_users(self) -> None:
+        assert sanitize_text("error at /Users/alice/file end") == "error at <path> end"
+
+    def test_sanitize_text_posix_root(self) -> None:
+        assert sanitize_text("error at /root/secret end") == "error at <path> end"
+
+    def test_sanitize_text_no_path_preserved(self) -> None:
+        """Strings without a path shape pass through verbatim."""
+        assert sanitize_text("just a plain error message") == "just a plain error message"
+
+    def test_sanitize_text_multiple_paths_all_redacted(self) -> None:
+        """All matches in a single string are replaced."""
+        out = sanitize_text("failed at C:\\foo and /home/x and \\\\srv\\share")
+        assert out == "failed at <path> and <path> and <path>", f"Got: {out!r}"
+
+    def test_sanitize_text_unc_does_not_shadow_long_path(self) -> None:
+        """Ordinary UNC pattern must not match the long-path `\\\\?\\` form's `?`.
+
+        The long-path alternative is listed before the ordinary UNC alternative
+        in `_ABS_PATH_PATTERNS`, and the ordinary-UNC regex excludes `?` from
+        the server segment. Both forms should redact to `<path>`.
+        """
+        long_out = sanitize_text("at \\\\?\\C:\\foo end")
+        ord_out = sanitize_text("at \\\\srv\\share end")
+        assert long_out == "at <path> end"
+        assert ord_out == "at <path> end"
+
+    def test_sanitize_error_text_delegates_to_sanitize_text(self) -> None:
+        """`sanitize_error_text` pipes str(exc) through `sanitize_text` at the tail."""
+
+        exc = FileNotFoundError("Could not find /home/user/missing.txt")
+        out = sanitize_error_text(exc)
+        assert "<path>" in out, f"Expected <path> substitution; got {out!r}"
+        assert "/home/user/missing.txt" not in out
+
+    def test_sanitize_error_text_order_preserved(self) -> None:
+        """Caller-supplied Path wins over the regex `<path>` mask (cycle-10 L2)."""
+        from pathlib import Path  # noqa: PLC0415
+
+        # Build an exception whose message mentions a path that is ALSO a registered
+        # caller path. The caller-path substitution runs first and should produce
+        # the project-relative form; the regex sweep should then no-op on that.
+        p = Path("/home/user/project_file.md")
+        exc = RuntimeError(f"failed at {p}")
+        out = sanitize_error_text(exc, p)
+        # The caller-path substitution produces a project-relative form via _rel,
+        # not <path>. On non-project paths _rel falls through and returns the
+        # forward-slash string which then gets regex-masked.
+        # Most important: the raw posix path is GONE.
+        assert str(p) not in out, f"Raw path leaked: {out!r}"
+
+    def test_abs_path_patterns_regex_compiled(self) -> None:
+        """`_ABS_PATH_PATTERNS` is a compiled regex (smoke test)."""
+        import re  # noqa: PLC0415
+
+        assert isinstance(_ABS_PATH_PATTERNS, re.Pattern)
+
+    def test_sanitize_text_empty_string(self) -> None:
+        """Empty input returns empty output."""
+        assert sanitize_text("") == ""
