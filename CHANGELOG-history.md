@@ -36,6 +36,15 @@
 - Step 20 R1+R2 will retain DeepSeek+Codex+Sonnet diversity per skill spec — that gate is independent of MiMo availability.
 - Per-step trial data captured at Step 24 self-review.
 
+**R1 review trail (Step 20):**
+
+- 2026-05-02 R1 DeepSeek (`deepseek-rescue` @ deepseek-v4-pro, ~169s): **REQUEST-CHANGES on AC1**, APPROVE on AC2/3/4/5/6/7/8/9. The folded `test_graph_stats_orphans_includes_isolated_node` only dropped the `inspect.getsource` grep half + renamed; the design.md Q1 decision (b) explicitly required a behavioral spy on `nx.DiGraph.degree` named `test_graph_stats_avoids_per_node_degree_calls` AND a separate orphan test named `test_graph_stats_orphan_detection_with_isolated_node`. Neither was implemented. Verdict: design-deviance MAJOR. AC1 docstring falsely claimed the upgrade happened. Other ACs all clean: function-local imports verified, collision audit passed, doc count drift consistent, CVE analysis sound.
+- 2026-05-02 R1 Sonnet (`everything-claude-code:code-reviewer`, ~167s): **MAJOR on AC1** (concurs with DeepSeek — design Q1 spy upgrade not implemented), **MINOR on AC4** (`test_embedding_dim_resolved` triple-escape-hatch sentinel: (a) `hasattr(config, "EMBEDDING_DIM")` early-return PASS, (b) `try/except ImportError pass`, (c) `inspect.getsource` grep — combine to pass regardless of production state in most likely future scenarios; recommend cycle-56+ BACKLOG upgrade entry similar to existing cycle-52 → cycle-53+ `test_prune_base_uses_canonical_rel_path_at_both_sites` candidate), **NIT** (5 other `inspect.getsource` patterns in unchanged versioned files (`test_lint_query_fixes_v092.py`, `test_v0911_phase392.py`, `test_v0915_task01.py`, `test_v0915_task08.py`) lack BACKLOG C11-L1 entries — recommend cycle-56+ filing). All other focus areas clean.
+
+**R1 fix (Step 20 — landed BEFORE R2 dispatch):**
+
+- TBD — fix(cycle 55): R1 — implement Q1 behavioral spy + rename orphan test + file AC4 sentinel BACKLOG entry. tests/test_graph.py +1 test (3025 → 3026; AC1 section now 4 tests instead of 3). `test_graph_stats_avoids_per_node_degree_calls` spies on `InDegreeView.__call__` + `OutDegreeView.__call__` to count invocations with `nbunch != None` (per-node path); current bulk implementation `dict(graph.in_degree()) + dict(graph.out_degree())` keeps `counts["in_per_node"] == 0` and `counts["out_per_node"] == 0`; reverting to `{n: graph.in_degree(n) for n in graph.nodes()}` would fire the spy O(N) times and FAIL. Test renamed `test_graph_stats_orphans_includes_isolated_node` → `test_graph_stats_orphan_detection_with_isolated_node` per design Q1. Updated docstrings to reflect both tests. Networkx class names in this version are `InDegreeView` / `OutDegreeView` (not `DiInDegreeView` / `DiOutDegreeView` — first import attempt failed; corrected). Revert-verify per C40-L3: `assert False` proof showed pytest -x FAIL on `test_graph_stats_avoids_per_node_degree_calls`; restored. AC4 MINOR addressed via new BACKLOG entry naming the triple-escape-hatch upgrade options. AC4 NIT (5 cycle-56+ candidates) NOT addressed in cycle 55 — out of scope per skill rule (NIT routes to PR comment + merge per cycle-13 L3 cosmetic-post-hoc-preference bucket; 5 candidates filed at cycle-56+ filing time).
+
 **Commits (`+TBD` per C30-L1):**
 - c11b7dc — docs(cycle 55): design + plan for 4-fold batch (parallel-safe with 53/54)
 - 5e966ad — docs(cycle 55): plan-gate REJECT pass — 5 gaps closed inline
@@ -43,9 +52,10 @@
 - d6e1d0a — test(cycle 55): fold test_v01007_evolve_fixes into test_evolve.py (2/4)
 - e701a6a — test(cycle 55): fold test_v01009_ingest_aux_fixes into test_ingest.py (3/4)
 - 384bbb4 — test(cycle 55): fold test_v01011_review_feedback_fixes into test_review.py (4/4)
-- TBD — docs(cycle 55): doc-sync (BACKLOG/CHANGELOG/CLAUDE.md/docs/reference) for 4-fold batch + Step 15 deferred-patch finding
+- 17f241e — docs(cycle 55): doc-sync for 4-fold batch + Step 15 deferred-patch finding
+- TBD — fix(cycle 55): R1 — implement Q1 behavioral spy + rename orphan test + file AC4 sentinel BACKLOG entry
 
-**Total: 7 commits + R1/R2 fix commits + self-review (final count backfilled per C30-L1 once landed on main).**
+**Total: 8 commits + R2 fix commits + self-review (final count backfilled per C30-L1 once landed on main).**
 
 ---
 

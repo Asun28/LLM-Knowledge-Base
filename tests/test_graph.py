@@ -123,14 +123,86 @@ def test_graph_stats_orphan_detection(tmp_wiki):
 # ── Phase 4 graph fixes (cycle 55 fold) ───────────────────────────────
 
 
-def test_graph_stats_orphans_includes_isolated_node():
+def test_graph_stats_avoids_per_node_degree_calls():
+    """graph_stats must use bulk in_degree() / out_degree() — never per-node calls.
+
+    Folded from test_v01003_graph_fixes (cycle 55) Q1 design upgrade. The
+    source's `test_graph_stats_uses_precomputed_out_degrees` had two halves:
+    (a) `inspect.getsource(graph_stats); assert "out_degrees" in src` —
+    vacuous per C11-L1, and (b) behavioral assertion on the orphans alias.
+
+    Per Step-5 Q1 decision (b), the design specified a behavioral SPY
+    upgrade: replace the source-grep with a spy on `InDegreeView.__call__`
+    and `OutDegreeView.__call__` that fires only when nbunch != None
+    (per-node call path). The orphan-count half lands as a separate test
+    (`test_graph_stats_orphan_detection_with_isolated_node` below).
+
+    Reverting graph_stats from `dict(graph.in_degree())` to a per-node loop
+    `{n: graph.in_degree(n) for n in graph.nodes()}` would fire the spy
+    with nbunch=specific-node N times — failing this test. The current
+    bulk implementation invokes `__call__` only with nbunch=None (or via
+    iteration of the view), so per-node counts stay at 0.
+
+    Cycle-55 R1 DeepSeek + Sonnet flagged the original fold as a
+    design-deviance MAJOR (Q1 spy upgrade not implemented). This test
+    closes that gap.
+    """
+    import networkx as nx
+    from networkx.classes.reportviews import InDegreeView, OutDegreeView
+
+    from kb.graph.builder import graph_stats
+
+    g = nx.DiGraph()
+    for i in range(20):
+        g.add_node(f"n{i}")
+    g.add_edge("n0", "n1")
+    g.add_edge("n1", "n2")
+
+    in_call_orig = InDegreeView.__call__
+    out_call_orig = OutDegreeView.__call__
+    counts = {"in_per_node": 0, "out_per_node": 0}
+
+    def in_spy(self, nbunch=None, weight=None):
+        if nbunch is not None:
+            counts["in_per_node"] += 1
+        return in_call_orig(self, nbunch, weight)
+
+    def out_spy(self, nbunch=None, weight=None):
+        if nbunch is not None:
+            counts["out_per_node"] += 1
+        return out_call_orig(self, nbunch, weight)
+
+    try:
+        InDegreeView.__call__ = in_spy
+        OutDegreeView.__call__ = out_spy
+        graph_stats(g)
+    finally:
+        InDegreeView.__call__ = in_call_orig
+        OutDegreeView.__call__ = out_call_orig
+
+    assert counts["in_per_node"] == 0, (
+        f"graph_stats called in_degree(n) per-node {counts['in_per_node']}x; "
+        "use dict(g.in_degree()) instead"
+    )
+    assert counts["out_per_node"] == 0, (
+        f"graph_stats called out_degree(n) per-node {counts['out_per_node']}x; "
+        "use dict(g.out_degree()) instead"
+    )
+
+
+def test_graph_stats_orphan_detection_with_isolated_node():
     """graph_stats reports a degree-zero node in the 'orphans' alias.
 
-    Folded from test_v01003_graph_fixes (cycle 55). The original test also
-    asserted 'out_degrees' substring presence via inspect.getsource; that
-    grep was vacuous per C11-L1 and was dropped during the fold. The
-    behavioral half (orphan-classification of an isolated node) survives —
-    reverting graph_stats's no_inbound/isolated logic still fails this test.
+    Folded from test_v01003_graph_fixes (cycle 55) — orphan-count half of
+    the source's `test_graph_stats_uses_precomputed_out_degrees`. The
+    `inspect.getsource` grep half was dropped per C11-L1; behavioral
+    upgrade lives in `test_graph_stats_avoids_per_node_degree_calls`
+    above. This test pairs with that one to cover both intents of the
+    original (no per-node degree calls + isolated-node classification).
+
+    Existing `test_graph_stats_orphan_detection` at line 109 covers the
+    `no_inbound` field via build_graph + wiki pages — DIFFERENT field,
+    DIFFERENT graph-construction approach; both tests have value.
     """
     import networkx as nx
 
