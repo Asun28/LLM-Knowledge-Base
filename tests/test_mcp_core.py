@@ -795,13 +795,19 @@ class TestMcpInputValidation:
         result = kb_lint_consistency(ids)
         assert isinstance(result, str) and result.startswith("Error:") and "50" in result
 
-    def test_kb_graph_viz_zero_nodes_uses_default(self):
+    def test_kb_graph_viz_zero_nodes_rejected(self):
         from kb.mcp.health import kb_graph_viz
 
+        # Production contract: max_nodes range 1-500 (per docstring); 0 rejects
+        # with "Error:" prefix. (Cycle-56 fold originally named "uses_default"
+        # when production accepted 0 → max_nodes=30 fallback; production was
+        # tightened to reject 0 since, but the cycle-56 assertion was weak
+        # (`isinstance(result, str)`) so the rename to align with current
+        # contract is purely a naming + assertion-strengthening fix per
+        # C58-R1 Sonnet BLOCKER on contradictory zero-nodes contracts.)
         result = kb_graph_viz(max_nodes=0)
-        # Must not produce unbounded output — should work like max_nodes=30
-        assert result is not None
         assert isinstance(result, str)
+        assert result.startswith("Error:")
 
     def test_kb_list_pages_rejects_invalid_type(self):
         from kb.mcp.browse import kb_list_pages
