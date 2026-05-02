@@ -799,12 +799,14 @@ class TestMcpInputValidation:
         from kb.mcp.health import kb_graph_viz
 
         # Production contract: max_nodes range 1-500 (per docstring); 0 rejects
-        # with "Error:" prefix. (Cycle-56 fold originally named "uses_default"
-        # when production accepted 0 → max_nodes=30 fallback; production was
-        # tightened to reject 0 since, but the cycle-56 assertion was weak
-        # (`isinstance(result, str)`) so the rename to align with current
-        # contract is purely a naming + assertion-strengthening fix per
-        # C58-R1 Sonnet BLOCKER on contradictory zero-nodes contracts.)
+        # with "Error:" prefix since cycle-3 M16 (commit `dfb5351`). The
+        # cycle-56 fold of `test_v01012_mcp_validation.py` carried a weak
+        # `isinstance(result, str)` assertion + "uses_default" name that did
+        # NOT match the production contract at fold time — the assertion was
+        # weak enough to survive but the name was misleading. Tightened to
+        # match the always-current "rejects with Error:" contract per C58-R1
+        # Sonnet BLOCKER + R2 Sonnet MAJOR on fabricated provenance (no
+        # "production accepted 0" period existed at cycle-56 fold time).
         result = kb_graph_viz(max_nodes=0)
         assert isinstance(result, str)
         assert result.startswith("Error:")
