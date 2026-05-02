@@ -52,6 +52,71 @@ _LOCK_WAITERS_LOCK: threading.Lock = threading.Lock()
 _FAIR_QUEUE_STAGGER_MS: float = 2.0
 
 
+def _pid_exists(pid: int) -> bool:
+    """Return whether ``pid`` appears to identify a live process.
+
+    POSIX supports ``os.kill(pid, 0)`` as a non-destructive liveness probe.
+    Windows does not provide the same contract for ``os.kill``, so use the
+    process-query API there instead.
+    """
+    if pid <= 0:
+        return False
+    if _IS_WINDOWS:
+        return _windows_pid_exists(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # EPERM and similar errors mean the process exists but cannot be
+        # signalled by this user. Treat it as live; do not steal the lock.
+        return True
+    return True
+
+
+def _windows_pid_exists(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    # PROCESS_QUERY_LIMITED_INFORMATION is enough for GetExitCodeProcess on
+    # Vista+; SYNCHRONIZE keeps compatibility with older process handle rules.
+    process_query_limited_information = 0x1000
+    synchronize = 0x00100000
+    still_active = 259
+    error_invalid_parameter = 87
+    error_access_denied = 5
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(
+        process_query_limited_information | synchronize,
+        False,
+        pid,
+    )
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == error_invalid_parameter:
+            return False
+        if error == error_access_denied:
+            return True
+        # Unknown query failure is not proof of death; avoid lock stealing.
+        return True
+
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _take_waiter_slot() -> int:
     """Increment ``_LOCK_WAITERS`` and return 0-based position BEFORE increment.
 
@@ -438,38 +503,16 @@ def file_lock(path: Path, timeout: float | None = None):
                             f"Lock {lock_path} content is not an integer PID: "
                             f"{content!r}. Investigate manually."
                         ) from exc
-                    try:
-                        os.kill(stale_pid, 0)
-                    except ProcessLookupError:
+                    if not _pid_exists(stale_pid):
                         # Unambiguous: PID doesn't exist — safe to steal.
                         lock_path.unlink(missing_ok=True)
                         time.sleep(_backoff_sleep_interval(attempt_count))
                         attempt_count += 1
                         continue
-                    except OSError:
-                        # Cycle 2 PR review R1: on POSIX a non-ProcessLookupError
-                        # `OSError` from `os.kill(pid, 0)` (typically EPERM /
-                        # PermissionError) means the process IS alive but owned
-                        # by a different user — stealing would double-hold the
-                        # lock. Raise TimeoutError instead. On Windows `os.kill`
-                        # on a nonexistent PID raises generic `OSError`
-                        # ([WinError 87]); treat as "unreachable → steal" since
-                        # the lock file is a single-user artifact on that
-                        # platform.
-                        if _IS_WINDOWS:
-                            lock_path.unlink(missing_ok=True)
-                            time.sleep(_backoff_sleep_interval(attempt_count))
-                            attempt_count += 1
-                            continue
-                        raise TimeoutError(
-                            f"Lock {lock_path} held by running PID {stale_pid}. "
-                            "Stop that process or delete the lock file."
-                        ) from None
-                    else:
-                        raise TimeoutError(
-                            f"Lock {lock_path} held by running PID {stale_pid}. "
-                            "Stop that process or delete the lock file."
-                        )
+                    raise TimeoutError(
+                        f"Lock {lock_path} held by running PID {stale_pid}. "
+                        "Stop that process or delete the lock file."
+                    )
                 time.sleep(_backoff_sleep_interval(attempt_count))
                 attempt_count += 1
         yield

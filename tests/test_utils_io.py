@@ -3,6 +3,8 @@
 import os
 import time
 
+import pytest
+
 from kb.utils import io as io_mod
 from kb.utils.io import atomic_text_write, file_lock, sweep_orphan_tmp
 
@@ -321,3 +323,20 @@ class TestFileLockConcurrency:
         verdicts_path = tmp_path / "verdicts.json"
         verd_mod.add_verdict("concepts/test", "review", "pass", path=verdicts_path)
         assert verdicts_path.exists()
+
+
+def test_file_lock_timeout_does_not_steal_live_pid_lock(tmp_path, monkeypatch):
+    """A live PID holder must stay authoritative after the waiter's timeout."""
+    target = tmp_path / "target.json"
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    live_pid = 12345
+    lock_path.write_text(str(live_pid), encoding="ascii")
+
+    monkeypatch.setattr(io_mod, "_pid_exists", lambda pid: pid == live_pid)
+
+    with pytest.raises(TimeoutError, match=str(live_pid)):
+        with file_lock(target, timeout=0.01):
+            pass
+
+    assert lock_path.exists()
+    assert lock_path.read_text(encoding="ascii").strip() == str(live_pid)
