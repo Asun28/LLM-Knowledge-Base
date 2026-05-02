@@ -768,3 +768,102 @@ class TestKbCreatePageHintErrors:
         )
         assert "kb_create_page" in result
         assert "synthesis" in result
+
+
+# ── Input validation across MCP tools (cycle 56 fold from test_v01012_mcp_validation) ─
+
+
+class TestMcpInputValidation:
+    """Phase 4 MCP input validation contracts across kb_query / kb_query_feedback /
+    kb_lint_consistency / kb_graph_viz / kb_list_pages / kb_save_lint_verdict /
+    kb_detect_drift. Cross-module hosting precedent: TestKbCaptureWrapper above.
+    """
+
+    def test_kb_query_feedback_rejects_long_question(self):
+        from kb.config import MAX_QUESTION_LEN
+        from kb.mcp.quality import kb_query_feedback
+
+        result = kb_query_feedback("x" * (MAX_QUESTION_LEN + 1), rating="helpful", cited_pages="")
+        assert isinstance(result, str) and result.startswith("Error:")
+
+    def test_kb_lint_consistency_caps_page_ids(self):
+        from kb.mcp.quality import kb_lint_consistency
+
+        ids = ",".join(f"concepts/p{i}" for i in range(60))
+        result = kb_lint_consistency(ids)
+        assert isinstance(result, str) and result.startswith("Error:") and "50" in result
+
+    def test_kb_graph_viz_zero_nodes_uses_default(self):
+        from kb.mcp.health import kb_graph_viz
+
+        result = kb_graph_viz(max_nodes=0)
+        # Must not produce unbounded output — should work like max_nodes=30
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_kb_list_pages_rejects_invalid_type(self):
+        from kb.mcp.browse import kb_list_pages
+
+        result = kb_list_pages(page_type="bogus_type_that_doesnt_exist")
+        assert isinstance(result, str) and result.startswith("Error:")
+
+    def test_kb_save_lint_verdict_caps_issues(self):
+        # 200 issues — should be capped; pass as JSON array
+        import json
+
+        from kb.mcp.quality import kb_save_lint_verdict
+
+        issues_list = [{"severity": "low", "description": f"issue{i}"} for i in range(200)]
+        issues_str = json.dumps(issues_list)
+        result = kb_save_lint_verdict(
+            page_id="concepts/test",
+            verdict_type="fidelity",
+            verdict="pass",
+            issues=issues_str,
+        )
+        assert isinstance(result, str) and result.startswith("Error:") and "100" in result
+
+    def test_kb_query_rejects_overlong_question(self):
+        from kb.config import MAX_QUESTION_LEN
+        from kb.mcp.core import kb_query
+
+        result = kb_query("x" * (MAX_QUESTION_LEN + 1))
+        assert isinstance(result, str) and result.startswith("Error:")
+
+    def test_kb_detect_drift_none_changed_sources(self, monkeypatch):
+        """Regression: None changed_sources on a per-page entry must not raise TypeError.
+
+        R1 Sonnet (cycle 56) flagged the prior version as vacuous because it patched
+        `kb.mcp.health.detect_source_drift` (the consumer side), but that name only
+        exists as a function-local import inside `kb_detect_drift`. With raising=False
+        the patch silently no-op'd and the live `detect_source_drift` ran against the
+        real wiki dir; the None-handling path under test was never exercised.
+
+        Fix: patch the owner module (`kb.compile.compiler.detect_source_drift`) per
+        CLAUDE.md "Patch the owner module" rule, and add a call-verification spy so
+        the test FAILS loudly against any future re-introduction of the consumer-
+        side patch pattern.
+        """
+        calls = []
+
+        def fake_detect(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {
+                "summary": "1 source changed",
+                "changed_sources": ["raw/articles/foo.md"],
+                "affected_pages": [{"page_id": "concepts/p1", "changed_sources": None}],
+            }
+
+        monkeypatch.setattr("kb.compile.compiler.detect_source_drift", fake_detect)
+
+        from kb.mcp import health as _h
+
+        result = _h.kb_detect_drift()
+
+        # The owner-module patch must actually fire — otherwise the test is vacuous.
+        assert calls, (
+            "Stub was never invoked — patch target probably drifted from the "
+            "owner module again. See CLAUDE.md 'Patch the owner module' rule."
+        )
+        assert isinstance(result, str)
+        assert "Traceback" not in result

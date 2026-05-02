@@ -178,3 +178,28 @@ def test_slugify_falls_back_on_pure_emoji():
     result = slugify("😀")
     assert result != "", "pure-emoji title produced empty slug"
     assert result.startswith("untitled-") or len(result) > 0
+
+
+# ── truncate (cycle 56 fold from test_v01013_cli_error_truncation) ─
+
+
+def test_truncate_preserves_short_messages():
+    from kb.utils.text import truncate
+
+    short = "error"
+    assert truncate(short) == short
+
+
+def test_truncate_cuts_long_messages():
+    from kb.utils.text import truncate
+
+    long = "x" * 1000
+    result = truncate(long)
+    # Cycle 3 M17: smart head+tail truncation with `...N chars elided...`
+    # marker. Result fits within ~2×half + marker + elided-count digits;
+    # the precise length depends on the marker. Contract: shorter than
+    # input, starts with x, ends with x, contains 'elided' marker.
+    assert len(result) < len(long), "truncated result must be shorter than input"
+    assert result.startswith("x"), "head preserved"
+    assert result.endswith("x"), "tail preserved"
+    assert "elided" in result, "smart-truncate marker must appear"

@@ -9,6 +9,59 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-02 — cycle 56 — Freeze-and-fold continuation (5-fold batch) + dep-CVE re-confirm + Windows pyreadline3 BACKLOG entry
+
+**Theme:** Continue the freeze-and-fold cadence from cycles 47-55 (Phase 4.5 HIGH #4) with **5 small fold targets — one extra over the cycle 53/54/55 four-pick cadence per user direction**. All cycle-56 receivers (test_mcp_core.py, test_v070.py, test_cli.py, test_utils_text.py, test_utils.py, test_utils_io.py) verified disjoint from cycle 55's receivers. Each fold revert-verified per C40-L3 and isolation pytest passed per C51-L1. Picks-marker convention (AC8) carried forward from cycle 55. Pre-existing Windows pyreadline3 access violation surfaced during pytest collection on `test_sanitize_strips_control_chars` (test_utils_text.py) and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error` (test_utils_io.py); reproduces on `main` branch as well, NOT cycle-56-introduced; filed as cycle-57+ BACKLOG entry.
+
+**ACs shipped (5 folds + 1 chore commit + AC8 picks-marker):**
+
+- **AC1 — Fold `tests/test_v01012_mcp_validation.py` (2701 B / 7 tests) → `tests/test_mcp_core.py`** as new class `TestMcpInputValidation`. Source file deleted in same commit (030ae40). Each fold revert-verified per C40-L3 (assert False proof → pytest -x FAIL on the moved method; restored). Per-fold isolation pytest passed per C51-L1.
+- **AC2 — Fold `tests/test_v0916_task09.py` (2011 B / 3 tests) → `tests/test_v070.py`** preserving 3 host classes (host-shape preservation per C40-L5 — source file already grouped into 3 classes; flat-fold would lose the documented test groupings). Source file deleted in same commit (f4d901b). Each fold revert-verified per C40-L3, per-fold isolation pytest passed per C51-L1.
+- **AC3a — Fold `tests/test_v01013_cli_error_truncation.py` CLI half (5 tests) → `tests/test_cli.py`** as new class `TestCliErrorTruncation`. Source file PRESERVED (the truncate-helper half lands at AC3b). Commit bed5ffd. Each fold revert-verified per C40-L3, per-fold isolation pytest passed per C51-L1.
+- **AC3b — Fold remaining truncate-helper half (2 bare functions) → `tests/test_utils_text.py`** + DELETE source file. The split was driven by host-shape preservation per C40-L5: CLI tests belong with `test_cli.py` infrastructure, but `kb.utils.text._truncate_for_log` helper tests belong as bare functions in `test_utils_text.py` (the receiver is purely bare-function shaped). Commit 576e426. Source file deleted in this commit (3a/5 + 3b/5 = single fold split across 2 commits per AC3a-then-AC3b convention).
+- **AC4 — Fold `tests/test_v01001_utils_fixes.py` (2754 B / 5 tests) → `tests/test_utils.py`** as new class `TestUtilsFixes` with helper renamed `_write_page` → `_write_phase4_concept_page` per C52-L4 (cycle-52 already used `_write_concept_page` for the `# ── load_all_pages ─` section; phase4-prefix scopes the new helper to avoid same-name collision). Source file deleted in same commit (162faee). Each fold revert-verified per C40-L3, per-fold isolation pytest passed per C51-L1.
+- **AC5 — Fold `tests/test_phase4_audit_concurrency.py` (3099 B / 4 tests) → `tests/test_utils_io.py`** as new class `TestFileLockConcurrency`. Source file deleted in same commit (2e2f305). Each fold revert-verified per C40-L3, per-fold isolation pytest passed per C51-L1.
+- **AC8 — Picks-marker convention** (carried forward from cycle 55 AC10): design + plan markdown landed in `docs/superpowers/decisions/2026-05-02-cycle56-folds-{design,plan}.md` and pushed via the picks-marker commit (29d3e35) so cycles 57+ see the picks via `git branch -r --list 'origin/cycle-*'`.
+- **Chore commit (92d5d5b)** — ruff format + shorten section-comment headers across the 6 receivers; pure cosmetic, no semantic change.
+
+**Test count preserved at 3026** — folds move 7+3+5+2+5+4 = 26 tests across 6 receivers; net 0 because moves preserve names. Verified post-fold via `pytest --collect-only -q -p no:capture -p no:debugging` → "3026 tests collected".
+
+**File count: 219 → 214 (-5 source files, no new test files)** — verified via `Get-ChildItem tests -Filter test_*.py | Measure-Object` → 214.
+
+**C40-L3 revert-verify discipline cited and applied per fold.** **C51-L1 isolation pytest cited and applied per fold.** **AC8 picks-marker convention cited (carried from cycle-55 AC10).**
+
+**MiMo trial telemetry (for 2026-05-31 writeup):**
+- AC3b/AC4/AC5 dispatched via `mimocoding-rescue` (mimo-v2.5-pro), latencies ~9-14s — first successful sub-agent dispatch series for the trial.
+- AC1/AC2/AC3a were primary-session (pre-user-correction) — logged as Step-24 lesson candidate: "small mechanical folds default to primary-session per cycle-13 L2; user-direction-to-dispatch must precede the first AC, not arrive mid-batch."
+- This Step-17 doc-sync dispatched via `mimochat` (sk- key, mimo-v2-flash) per dev-mimo-opus skill routing — Token-Plan TOS routes docs-for-code work to `mimocoding`, but pure mechanical doc edits use the cheaper `mimochat` (this run's MiMo Chat proofread latency: ~3.3s).
+
+**Dep-CVE re-confirm (Step 11):**
+- Same 4 unresolved as cycle 55 (`.data/cycle-56/cve-baseline.json`): diskcache GHSA-w8v5-vhqr-4h9v (no fix), ragas GHSA-95ww-475f-pr4f (no fix), litellm GHSA-xqmj-j6mv-4862 (fix=1.83.7 BLOCKED by click+python-dotenv pin trade-off discovered cycle-55), pip CVE-2026-3219 (no fix).
+- 2 Dependabot drift entries unchanged (litellm GHSA-r75f-5x8p-qvmc + GHSA-v4p8-mg3p-g94g).
+- Class B PR-introduced CVE diff = empty set (cycle 56 changes 0 dependencies).
+
+**Pre-existing Windows pyreadline3 access violation (NOT cycle-56-caused):**
+- Symptom: pytest crashes with `STATUS_ACCESS_VIOLATION (-1073741819)` during/after `test_sanitize_strips_control_chars` (test_utils_text.py) and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error` (test_utils_io.py).
+- Reproduces on `main` branch as well as cycle-56 worktree → NOT a cycle-56 regression.
+- Workaround: `pytest -p no:capture -p no:debugging` (pyreadline3 import-time interference suspected via pytest's debug/capture machinery).
+- ubuntu-latest CI unaffected (per cycle-36 ubuntu-latest single-OS strict-gate).
+- Filed as cycle-57+ BACKLOG MEDIUM entry under Phase 4.5 (see BACKLOG.md).
+
+**Commits (`+TBD` per C30-L1):**
+- 29d3e35 — docs(cycle 56): design + plan for 5-fold batch (parallel-safe with 53/54)
+- 030ae40 — test(cycle 56): fold test_v01012_mcp_validation into test_mcp_core.py (1/5)
+- f4d901b — test(cycle 56): fold test_v0916_task09 into test_v070.py (2/5)
+- bed5ffd — test(cycle 56): fold test_v01013_cli_error_truncation CLI tests into test_cli.py (3a/5)
+- 576e426 — test(cycle 56): fold test_v01013_cli_error_truncation truncate tests into test_utils_text.py (3b/5)
+- 162faee — test(cycle 56): fold test_v01001_utils_fixes into test_utils.py (4/5)
+- 2e2f305 — test(cycle 56): fold test_phase4_audit_concurrency into test_utils_io.py (5/5)
+- 92d5d5b — chore(cycle 56): ruff format + shorten section-comment headers
+- TBD — docs(cycle 56): doc-sync for 5-fold batch + dep-CVE re-confirm + Windows pyreadline3 BACKLOG entry
+
+**Total: 9 commits + self-review (final count backfilled per C30-L1 once landed on main).**
+
+---
+
 ### 2026-05-02 — cycle 55 — First MiMo trial cycle: freeze-and-fold continuation + dep-CVE re-confirm
 
 **Theme:** First real-cycle exercise of the project-scoped `dev-mimo-opus` skill (May 2026 trial). Continues the freeze-and-fold cadence from cycles 47-52 (Phase 4.5 HIGH #4) with 4 small fold targets running PARALLEL to in-flight worktree-cycle-53 (4/4 folds done, no PR yet) and worktree-cycle-54 (mid-cycle src/kb fixes + 4 different fold picks). All cycle-55 receivers (test_graph.py, test_evolve.py, test_ingest.py, test_review.py) verified disjoint from cycle-53/54 receivers. AC1 included a C11-L1 vacuous-test upgrade. Step 15 attempted but reverted on python-dotenv pin trade-off discovery.
