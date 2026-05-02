@@ -144,6 +144,26 @@ class TestCheckDuplicateSlugs:
         issues = check_duplicate_slugs(tmp_wiki)
         assert len(issues) == 1
 
+    def test_known_distinct_near_slug_pairs_are_allowlisted(self, tmp_wiki) -> None:
+        """Domain-distinct near-slug pairs are not duplicate warnings."""
+        for page in (
+            "concepts/bot",
+            "concepts/llm",
+            "entities/openai",
+            "entities/openclaw",
+            "entities/logql",
+            "entities/promql",
+        ):
+            _write_page(tmp_wiki, page)
+
+        pairs = {
+            frozenset((issue["page_a"], issue["page_b"]))
+            for issue in check_duplicate_slugs(tmp_wiki)
+        }
+        assert frozenset(("concepts/bot", "concepts/llm")) not in pairs
+        assert frozenset(("entities/openai", "entities/openclaw")) not in pairs
+        assert frozenset(("entities/logql", "entities/promql")) not in pairs
+
 
 class TestPagesKwargThreading:
     def test_preloaded_pages_not_rescanned(self, tmp_wiki) -> None:

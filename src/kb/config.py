@@ -676,6 +676,17 @@ QUERY_REPHRASING_MAX: int = 3
 # abs(len(a) - len(b)) <= distance dictates bucket iteration radius.
 DUPLICATE_SLUG_DISTANCE_THRESHOLD: int = 3
 
+# Near-slug pairs that are domain-distinct despite small edit distance.
+# Values use the same canonical full page-id form as check_duplicate_slugs:
+# lowercase, subdir retained, underscores normalized to hyphens.
+DUPLICATE_SLUG_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
+    {
+        frozenset(("concepts/bot", "concepts/llm")),
+        frozenset(("entities/openai", "entities/openclaw")),
+        frozenset(("entities/logql", "entities/promql")),
+    }
+)
+
 # CALLOUT_MARKERS: recognised Obsidian-style inline callout marker names.
 # Consumed by kb.lint.checks.parse_inline_callouts (regex-escaped per entry
 # before alternation — future additions with metachars cannot corrupt
