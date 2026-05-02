@@ -410,28 +410,174 @@ def test_refine_page_updated_regex_anchored(tmp_wiki):
     assert "last_updated: 2022-12-31" in final
 
 
-def test_embedding_dim_resolved():
-    """EMBEDDING_DIM must be either deleted from config or validated in VectorIndex.
+# Cycle 57 AC6 — `test_embedding_dim_resolved` DELETED (per BACKLOG cycle-56+).
+#
+# The test was a "deleted-or-used" sentinel (cycle-15 L2 / cycle-44 L4
+# DROP-with-test-anchor pattern) folded from test_v01011_review_feedback_fixes
+# in cycle 55. Its first escape hatch was `if not hasattr(config, "EMBEDDING_DIM"):
+# return  # Deleted — PASS`. EMBEDDING_DIM has now been removed from kb.config
+# AND from kb.query.embeddings.VectorIndex (confirmed via
+# `grep -rnE "EMBEDDING_DIM" src/kb` returning zero hits at cycle 57).
+# The sentinel has done its job — deletion was always one of its two acceptable
+# resolutions. No replacement test is added because the now-removed config
+# constant has no surviving production contract to pin.
+#
+# Original cycle-55 R1 Sonnet MINOR upgrade-candidate (BACKLOG cycle-56+) listed
+# three escape hatches; with EMBEDDING_DIM gone, all three are moot.
 
-    Q2 host-shape preservation: this test joins test_review.py despite touching
-    config + embeddings, because the source file groups it under "Phase 4
-    review/feedback/config fixes" and splitting would create a merge surface
-    with the parallel cycle-53 test_query.py edits.
-    """
-    from kb import config
 
-    if not hasattr(config, "EMBEDDING_DIM"):
-        return  # Deleted — PASS
+# ── Phase 3.97 Task 08 — Feedback store fixes (cycle 57 fold) ───────────────
+#
+# Folded from tests/test_v0916_task08.py per cycle-55 review/feedback receiver
+# precedent. All 4 classes folded verbatim. No helper extraction.
 
-    # If it still exists, it must be used somewhere (VectorIndex.build)
-    import inspect
 
-    try:
-        from kb.query.embeddings import VectorIndex
+class TestLoadFeedbackNullTypes:
+    """load_feedback must reject entries/page_scores with None values."""
 
-        src = inspect.getsource(VectorIndex)
-        assert "EMBEDDING_DIM" in src, (
-            "EMBEDDING_DIM defined in config but not validated in VectorIndex"
+    def test_null_entries_returns_default(self, tmp_path):
+        import json
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(
+            json.dumps({"entries": None, "page_scores": {}}),
+            encoding="utf-8",
         )
-    except ImportError:
-        pass
+
+        from kb.feedback.store import load_feedback
+
+        result = load_feedback(fb_file)
+        assert isinstance(result["entries"], list)
+        assert result["entries"] == []
+
+    def test_null_page_scores_returns_default(self, tmp_path):
+        import json
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(
+            json.dumps({"entries": [], "page_scores": None}),
+            encoding="utf-8",
+        )
+
+        from kb.feedback.store import load_feedback
+
+        result = load_feedback(fb_file)
+        assert isinstance(result["page_scores"], dict)
+        assert result["page_scores"] == {}
+
+    def test_both_null_returns_default(self, tmp_path):
+        import json
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(
+            json.dumps({"entries": None, "page_scores": None}),
+            encoding="utf-8",
+        )
+
+        from kb.feedback.store import load_feedback
+
+        result = load_feedback(fb_file)
+        assert result["entries"] == []
+        assert result["page_scores"] == {}
+
+
+class TestAddFeedbackEntryKeyError:
+    """add_feedback_entry must handle missing keys in page_scores."""
+
+    def test_missing_wrong_key_no_crash(self, tmp_path):
+        import json
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(
+            json.dumps(
+                {
+                    "entries": [],
+                    "page_scores": {
+                        "concepts/test": {"useful": 5, "trust": 0.7}
+                        # missing "wrong" and "incomplete"
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        from kb.feedback.store import add_feedback_entry
+
+        # Should not raise KeyError
+        entry = add_feedback_entry(
+            question="test question",
+            rating="useful",
+            cited_pages=["concepts/test"],
+            path=fb_file,
+        )
+        assert entry["rating"] == "useful"
+
+
+class TestFeedbackLockSleep:
+    """_feedback_lock must sleep after evicting a stale lock."""
+
+    def test_lock_eviction_sleeps(self, tmp_path):
+        """After evicting a stale lock, the loop should sleep before retry."""
+        import json
+        import time
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(json.dumps({"entries": [], "page_scores": {}}), encoding="utf-8")
+
+        lock_file = fb_file.with_suffix(".json.lock")
+        # Cycle 2 item 2: valid ASCII int for dead PID (empty content now raises).
+        lock_file.write_text("999999999", encoding="ascii")
+
+        from kb.feedback.store import _feedback_lock
+
+        start = time.monotonic()
+        with _feedback_lock(fb_file, timeout=0.3):
+            elapsed = time.monotonic() - start
+            # Should have waited at least a little (the sleep after eviction)
+            assert elapsed >= 0.01
+
+
+class TestGetCoverageGapsDedup:
+    """get_coverage_gaps must deduplicate repeated questions."""
+
+    def test_duplicate_questions_deduplicated(self, tmp_path):
+        import json
+
+        fb_file = tmp_path / "feedback.json"
+        fb_file.write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "missing context",
+                        },
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "still incomplete",
+                        },
+                        {
+                            "question": "What is RAG?",
+                            "rating": "incomplete",
+                            "notes": "again",
+                        },
+                        {
+                            "question": "What is LLM?",
+                            "rating": "incomplete",
+                            "notes": "need more",
+                        },
+                    ],
+                    "page_scores": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        from kb.feedback.reliability import get_coverage_gaps
+
+        gaps = get_coverage_gaps(fb_file)
+        questions = [g["question"] for g in gaps]
+        assert questions.count("What is RAG?") == 1
+        assert questions.count("What is LLM?") == 1
