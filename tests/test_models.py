@@ -391,3 +391,117 @@ class TestSaveFrontmatterAtomicWrite:
         text = target.read_text(encoding="utf-8")
         assert "new body" in text
         assert "old content" not in text
+
+
+# === Cycle 54 — folded from tests/test_cycle8_models_validation.py ===
+# Cycle 8 WikiPage / RawSource validation coverage; canonical home is
+# tests/test_models.py for the data-model invariants.
+import json as _json_cycle54  # noqa: E402  — fold-site imports per receiver convention
+from pathlib import Path as _Path_cycle54  # noqa: E402
+from types import SimpleNamespace as _SimpleNamespace_cycle54  # noqa: E402
+
+import pytest as _pytest_cycle54  # noqa: E402
+
+from kb.models import RawSource as _RawSource_cycle54  # noqa: E402
+from kb.models import WikiPage as _WikiPage_cycle54  # noqa: E402
+
+
+def _page_cycle54(**overrides):
+    kwargs = {
+        "path": _Path_cycle54("wiki/concepts/rag.md"),
+        "title": "Retrieval Augmented Generation",
+        "page_type": "concept",
+        "sources": ["raw/articles/rag.md"],
+        "confidence": "stated",
+        "created": date(2026, 4, 1),
+        "updated": date(2026, 4, 2),
+        "wikilinks": ["concepts/llm"],
+        "content_hash": "abc123",
+    }
+    kwargs.update(overrides)
+    return _WikiPage_cycle54(**kwargs)
+
+
+def test_wiki_page_rejects_invalid_page_type():
+    with _pytest_cycle54.raises(ValueError, match="page_type"):
+        _page_cycle54(page_type="bogus")
+
+
+def test_wiki_page_rejects_invalid_confidence():
+    with _pytest_cycle54.raises(ValueError, match="confidence"):
+        _page_cycle54(confidence="certain")
+
+
+def test_raw_source_rejects_invalid_source_type():
+    with _pytest_cycle54.raises(ValueError, match="source_type"):
+        _RawSource_cycle54(path=_Path_cycle54("raw/unknown/input.md"), source_type="unknown")
+
+
+def test_wiki_page_to_dict_is_json_wire_shape():
+    payload = _page_cycle54().to_dict()
+
+    assert payload == {
+        "path": str(_Path_cycle54("wiki/concepts/rag.md")),
+        "title": "Retrieval Augmented Generation",
+        "type": "concept",
+        "sources": ["raw/articles/rag.md"],
+        "confidence": "stated",
+        "created": "2026-04-01",
+        "updated": "2026-04-02",
+        "wikilinks": ["concepts/llm"],
+        "content_hash": "abc123",
+    }
+    _json_cycle54.dumps(payload)
+
+
+def test_from_post_roundtrips_known_frontmatter_fields():
+    post = _SimpleNamespace_cycle54(
+        metadata={
+            "title": "RAG",
+            "type": "concept",
+            "source": ["raw/articles/rag.md"],
+            "confidence": "inferred",
+            "created": "2026-04-03",
+            "updated": date(2026, 4, 4),
+            "wikilinks": ["concepts/retrieval"],
+            "content_hash": "def456",
+            "ignored": "metadata",
+        }
+    )
+
+    page = _WikiPage_cycle54.from_post(post, _Path_cycle54("wiki/concepts/rag.md"))
+
+    assert page.to_dict() == {
+        "path": str(_Path_cycle54("wiki/concepts/rag.md")),
+        "title": "RAG",
+        "type": "concept",
+        "sources": ["raw/articles/rag.md"],
+        "confidence": "inferred",
+        "created": "2026-04-03",
+        "updated": "2026-04-04",
+        "wikilinks": ["concepts/retrieval"],
+        "content_hash": "def456",
+    }
+
+
+def test_from_post_requires_core_metadata():
+    post = _SimpleNamespace_cycle54(metadata={"title": "RAG", "type": "concept"})
+
+    with _pytest_cycle54.raises(ValueError, match="missing required metadata"):
+        _WikiPage_cycle54.from_post(post, _Path_cycle54("wiki/concepts/rag.md"))
+
+
+def test_from_post_strips_title_controls_and_traversal_sources():
+    post = _SimpleNamespace_cycle54(
+        metadata={
+            "title": "‮RAG\x00 Notes⁩",
+            "type": "concept",
+            "source": ["../../../etc/passwd", "/tmp/secret.md", "raw/articles/rag.md"],
+            "confidence": "stated",
+        }
+    )
+
+    page = _WikiPage_cycle54.from_post(post, _Path_cycle54("wiki/concepts/rag.md"))
+
+    assert page.title == "RAG Notes"
+    assert page.sources == ["raw/articles/rag.md"]
