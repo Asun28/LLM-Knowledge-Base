@@ -120,17 +120,7 @@ source .venv/bin/activate     # Unix
 pip install -r requirements.txt && pip install -e .
 kb --version
 
-# OR — lean install (cycle 37, runtime-only, no extras):
-#   pip install -r requirements-runtime.txt && pip install -e .
-#
-# OR — per-feature install (cycle 37, layered requirements files):
-#   pip install -r requirements-runtime.txt -r requirements-hybrid.txt && pip install -e .
-#   pip install -r requirements-runtime.txt -r requirements-augment.txt && pip install -e .
-#   pip install -r requirements-runtime.txt -r requirements-formats.txt && pip install -e .
-#   pip install -r requirements-runtime.txt -r requirements-eval.txt    && pip install -e .
-#   pip install -r requirements-runtime.txt -r requirements-dev.txt     && pip install -e .
-#
-# OR — canonical extras (pyproject.toml, equivalent to layered requirements):
+# OR — install via pyproject extras (lean / per-feature):
 #   pip install -e .                # runtime only (no extras)
 #   pip install -e '.[hybrid]'      # vector search via model2vec + sqlite-vec
 #   pip install -e '.[augment]'     # kb_lint --augment fetcher (httpx + trafilatura)
@@ -138,9 +128,7 @@ kb --version
 #   pip install -e '.[eval]'        # ragas / litellm evaluation harness
 #   pip install -e '.[dev]'         # pytest + ruff + pytest-httpx + build + twine
 #
-# Use requirements.txt for full reproducibility (frozen transitive pins);
-# use requirements-runtime.txt + per-extra files when you want a leaner install
-# without the full snapshot's dev tooling.
+# Use requirements.txt for full reproducibility (frozen transitive pins).
 ```
 
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
@@ -165,6 +153,25 @@ Place source files under the matching `raw/` subdirectory, then run `kb ingest <
 > **PDF files:** convert with [`markitdown`](https://github.com/microsoft/markitdown) or [`docling`](https://github.com/DS4SD/docling) first, then place the `.md` output in `raw/papers/`. Direct `.pdf` ingest is not supported (the binary content can't be parsed without a real PDF extractor — cycle 34 removed `.pdf` from the supported-extensions list to surface this earlier with a clear error).
 
 For Office documents such as `.docx`, `.pptx`, or `.xlsx`, convert them to Markdown or CSV first, then place the converted file in `raw/`.
+
+### Conversion Commands
+
+KB ingest only supports `.md`, `.txt`, `.json`, `.yaml`, `.yml`, `.rst`, and `.csv`. Convert other formats before running `kb ingest`.
+
+| Input | Convert command | KB output |
+|-------|-----------------|-----------|
+| Web article | `.\.venv\Scripts\python.exe -m trafilatura.cli -u URL > raw\articles\name.md` | `.md` |
+| JS-heavy web page | `.\.venv\Scripts\python.exe -m crawl4ai.cli crawl URL -o markdown > raw\articles\name.md` | `.md` |
+| PDF / DOCX / PPTX / XLSX | `.\.venv\Scripts\python.exe -m markitdown input.pdf -o raw\papers\name.md` | `.md` |
+| Complex PDF / Office / image / VTT | `.\.venv\Scripts\python.exe -m docling.cli.main input.pdf --to md --output raw\papers` | `.md` |
+| YouTube | `.\.venv\Scripts\python.exe -m yt_dlp --write-auto-sub --skip-download URL -o raw\videos\name`, then convert the `.vtt` file | `.md` / `.txt` |
+
+For transcript files produced by `yt-dlp`, convert the generated `.vtt` before ingesting:
+
+```powershell
+.\.venv\Scripts\python.exe -m docling.cli.main raw\videos\video-name.en.vtt --from vtt --to md --output raw\videos
+.\.venv\Scripts\python.exe -m kb.cli ingest raw\videos\video-name.en.md --type video
+```
 
 ## Five Operations
 
@@ -334,6 +341,8 @@ Unset `KB_LLM_BACKEND` (or set it to `anthropic`) to return to the default Claud
 | Dataset | Schema documentation |
 | Conversation | Chat/interview transcript |
 
+Use the conversion commands above when the captured source is not already one of the supported text formats.
+
 <details>
 <summary><b>Project structure</b></summary>
 
@@ -359,7 +368,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 3026 tests across 214 files
+  tests/                   # 3022 tests across 213 files
 ```
 
 </details>
@@ -372,7 +381,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 3015 passed, 11 skipped
+python -m pytest                # 3011 passed, 11 skipped
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```

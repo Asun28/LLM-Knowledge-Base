@@ -149,9 +149,29 @@ kb --version
 | 纯文本 | `.txt` | 适合转录文本、笔记和简单导出 |
 | reStructuredText | `.rst` | 适合 Python/项目文档 |
 | 结构化数据 | `.json`, `.yaml`, `.yml`, `.csv` | 适合数据集、元数据和导出记录 |
-| PDF | `.pdf` | 编译流水线支持；如通过 MCP 直接摄入，建议先转换为 Markdown |
+
+> **PDF 文件：** 请先用 [`markitdown`](https://github.com/microsoft/markitdown) 或 [`docling`](https://github.com/DS4SD/docling) 转换为 Markdown，再将 `.md` 输出放入 `raw/papers/`。当前不支持直接摄入 `.pdf` 二进制文件。
 
 对于 `.docx`、`.pptx` 或 `.xlsx` 等 Office 文档，请先转换为 Markdown 或 CSV，再放入 `raw/`。
+
+### 转换命令
+
+KB ingest 仅支持 `.md`、`.txt`、`.json`、`.yaml`、`.yml`、`.rst` 和 `.csv`。其他格式请先转换，再运行 `kb ingest`。
+
+| 输入 | 转换命令 | KB 输出 |
+|---|---|---|
+| 网页文章 | `.\.venv\Scripts\python.exe -m trafilatura.cli -u URL > raw\articles\name.md` | `.md` |
+| JavaScript 较重的网页 | `.\.venv\Scripts\python.exe -m crawl4ai.cli crawl URL -o markdown > raw\articles\name.md` | `.md` |
+| PDF / DOCX / PPTX / XLSX | `.\.venv\Scripts\python.exe -m markitdown input.pdf -o raw\papers\name.md` | `.md` |
+| 复杂 PDF / Office / 图片 / VTT | `.\.venv\Scripts\python.exe -m docling.cli.main input.pdf --to md --output raw\papers` | `.md` |
+| YouTube | `.\.venv\Scripts\python.exe -m yt_dlp --write-auto-sub --skip-download URL -o raw\videos\name`，然后转换生成的 `.vtt` 文件 | `.md` / `.txt` |
+
+对于 `yt-dlp` 生成的字幕文件，先将 `.vtt` 转为 Markdown，再摄入：
+
+```powershell
+.\.venv\Scripts\python.exe -m docling.cli.main raw\videos\video-name.en.vtt --from vtt --to md --output raw\videos
+.\.venv\Scripts\python.exe -m kb.cli ingest raw\videos\video-name.en.md --type video
+```
 
 ---
 
@@ -331,6 +351,8 @@ export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
 | 书籍 (Book) | 手动笔记或 `markitdown` |
 | 数据集 (Dataset) | Schema 文档说明 |
 | 对话 (Conversation) | 聊天/访谈转录文本 |
+
+如果捕获到的资料不是受支持的文本格式，请先使用上面的转换命令。
 
 ---
 
