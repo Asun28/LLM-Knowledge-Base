@@ -427,3 +427,85 @@ def test_cycle11_ac4_detect_source_drift_function_local_imports_resolve(tmp_path
     )
     assert isinstance(report, dict)
     assert "changed_sources" in report or "summary" in report
+
+
+# ── Phase 4 utils fixes (cycle 56 fold) ───────────────────────────
+
+
+class TestUtilsFixes:
+    """Phase 4 MEDIUM/LOW fixes in utils/ — folded from test_v01001_utils_fixes.py.
+
+    Helper renamed `_write_page` -> `_write_phase4_concept_page` per C52-L4
+    uniqueness rule (cycle-52's `_write_concept_page` already lives at line ~190
+    of this module).
+    """
+
+    @staticmethod
+    def _write_phase4_concept_page(dirpath: Path, name: str, body: str) -> None:
+        dirpath.mkdir(parents=True, exist_ok=True)
+        (dirpath / f"{name}.md").write_text(body, encoding="utf-8")
+
+    def test_load_all_pages_extracts_date_from_datetime(self, tmp_wiki):
+        """Page with a full datetime in `updated:` must yield an ISO-8601 date string."""
+        import datetime as _dt
+
+        from kb.utils.pages import load_all_pages
+
+        body = (
+            "---\n"
+            'title: "Foo"\n'
+            "type: concept\n"
+            "confidence: stated\n"
+            "source:\n  - raw/articles/foo.md\n"
+            "updated: 2024-01-01 12:00:00\n"
+            "---\n"
+            "body\n"
+        )
+        self._write_phase4_concept_page(tmp_wiki / "concepts", "foo", body)
+        pages = load_all_pages(tmp_wiki)
+        assert len(pages) == 1
+        # Must be parseable by date.fromisoformat — no time portion.
+        _dt.date.fromisoformat(pages[0]["updated"])
+        assert pages[0]["updated"] == "2024-01-01"
+
+    def test_slugify_preserves_version_numbers(self):
+        """`v1.0` and `v10` must NOT collide."""
+        from kb.utils.text import slugify
+
+        assert slugify("v1.0") != slugify("v10")
+        assert slugify("python 3.12") == "python-3-12"
+        assert slugify("v1.0") == "v1-0"
+
+    def test_atomic_json_write_cleanup_no_ebadf(self, tmp_path, monkeypatch):
+        """When json.dump raises, cleanup must not double-close the fd."""
+        import json as _json
+
+        from kb.utils.io import atomic_json_write
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(_json, "dump", _boom)
+        with pytest.raises(RuntimeError):
+            atomic_json_write({"a": 1}, tmp_path / "out.json")
+        # Temp file must be cleaned up.
+        assert not any(p.suffix == ".tmp" for p in tmp_path.iterdir())
+
+    def test_extract_wikilinks_strips_embedded_newlines(self):
+        """Wikilink targets containing newlines must not produce broken page IDs."""
+        from kb.utils.markdown import extract_wikilinks
+
+        text = "See [[foo\nbar]] and [[baz]]."
+        links = extract_wikilinks(text)
+        for link in links:
+            assert "\n" not in link
+            assert "\r" not in link
+
+    def test_append_wiki_log_strips_tabs(self, tmp_path):
+        """Tab characters in log message must be replaced with spaces."""
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Log\n", encoding="utf-8")
+        append_wiki_log("ingest", "added\ttabbed\tentry", log_path=log_path)
+        content = log_path.read_text(encoding="utf-8")
+        # The final line (the log entry) must not contain a literal tab character.
+        assert "\t" not in content.splitlines()[-1]
