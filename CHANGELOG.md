@@ -29,6 +29,8 @@ before push.
 
 Newest first. `CHANGELOG.md` is the compact index; full detail lives in [CHANGELOG-history.md](CHANGELOG-history.md).
 
+- **Cycle 56 (folds, dep-CVE re-confirm)** — Items: 5 fold sources → 6 receivers; 26 tests folded; ruff fix + chore commit | Tests: 3026 (preserved) | Files: 219 → 214 (-5) | Detail: see CHANGELOG-history.md cycle-56 + docs/superpowers/decisions/2026-05-02-cycle56-folds-{design,plan}.md
+
 #### 2026-05-02 — cycle 55 (First MiMo trial cycle: freeze-and-fold continuation + dep-CVE re-confirm)
 
 - Items: 10 ACs / 0 src files modified / 4 test files DELETED via fold (`test_v01003_graph_fixes.py`, `test_v01007_evolve_fixes.py`, `test_v01009_ingest_aux_fixes.py`, `test_v01011_review_feedback_fixes.py`) + 4 receivers EDITED (`test_graph.py`, `test_evolve.py`, `test_ingest.py`, `test_review.py`) + BACKLOG.md (Phase 4.5 HIGH #4 progress note appended + litellm CVE block re-confirmed cycle-52 → cycle-55 with new python-dotenv==1.0.1 transitive-pin discovery) + CLAUDE.md / docs/reference/{testing,implementation-status}.md narrative + 2 cycle-55 decision docs / 4 fold commits + 1 doc-sync `+TBD` per C30-L1 + self-review.
