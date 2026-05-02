@@ -123,7 +123,7 @@ def test_graph_stats_orphan_detection(tmp_wiki):
 # ── Phase 4 graph fixes (cycle 55 fold) ───────────────────────────────
 
 
-def test_graph_stats_avoids_per_node_degree_calls():
+def test_graph_stats_avoids_per_node_degree_calls(monkeypatch):
     """graph_stats must use bulk in_degree() / out_degree() — never per-node calls.
 
     Folded from test_v01003_graph_fixes (cycle 55) Q1 design upgrade. The
@@ -144,8 +144,11 @@ def test_graph_stats_avoids_per_node_degree_calls():
     iteration of the view), so per-node counts stay at 0.
 
     Cycle-55 R1 DeepSeek + Sonnet flagged the original fold as a
-    design-deviance MAJOR (Q1 spy upgrade not implemented). This test
-    closes that gap.
+    design-deviance MAJOR (Q1 spy upgrade not implemented). Cycle-55 R2
+    Codex flagged the original spy's try/finally restoration as a
+    leak-risk if assignment raised mid-statement; this version uses
+    pytest's `monkeypatch` fixture which guarantees automatic restoration
+    even on test-collection abort or KeyboardInterrupt.
     """
     import networkx as nx
     from networkx.classes.reportviews import InDegreeView, OutDegreeView
@@ -172,13 +175,10 @@ def test_graph_stats_avoids_per_node_degree_calls():
             counts["out_per_node"] += 1
         return out_call_orig(self, nbunch, weight)
 
-    try:
-        InDegreeView.__call__ = in_spy
-        OutDegreeView.__call__ = out_spy
-        graph_stats(g)
-    finally:
-        InDegreeView.__call__ = in_call_orig
-        OutDegreeView.__call__ = out_call_orig
+    monkeypatch.setattr(InDegreeView, "__call__", in_spy)
+    monkeypatch.setattr(OutDegreeView, "__call__", out_spy)
+
+    graph_stats(g)
 
     assert counts["in_per_node"] == 0, (
         f"graph_stats called in_degree(n) per-node {counts['in_per_node']}x; "
