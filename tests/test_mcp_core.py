@@ -831,18 +831,39 @@ class TestMcpInputValidation:
         assert isinstance(result, str) and result.startswith("Error:")
 
     def test_kb_detect_drift_none_changed_sources(self, monkeypatch):
-        """None changed_sources must not raise TypeError."""
-        from kb.mcp import health as _h
+        """Regression: None changed_sources on a per-page entry must not raise TypeError.
+
+        R1 Sonnet (cycle 56) flagged the prior version as vacuous because it patched
+        `kb.mcp.health.detect_source_drift` (the consumer side), but that name only
+        exists as a function-local import inside `kb_detect_drift`. With raising=False
+        the patch silently no-op'd and the live `detect_source_drift` ran against the
+        real wiki dir; the None-handling path under test was never exercised.
+
+        Fix: patch the owner module (`kb.compile.compiler.detect_source_drift`) per
+        CLAUDE.md "Patch the owner module" rule, and add a call-verification spy so
+        the test FAILS loudly against any future re-introduction of the consumer-
+        side patch pattern.
+        """
+        calls = []
 
         def fake_detect(*args, **kwargs):
+            calls.append((args, kwargs))
             return {
                 "summary": "1 source changed",
                 "changed_sources": ["raw/articles/foo.md"],
                 "affected_pages": [{"page_id": "concepts/p1", "changed_sources": None}],
             }
 
-        monkeypatch.setattr(_h, "detect_source_drift", fake_detect, raising=False)
+        monkeypatch.setattr("kb.compile.compiler.detect_source_drift", fake_detect)
+
+        from kb.mcp import health as _h
+
         result = _h.kb_detect_drift()
-        assert result is not None
-        assert not (isinstance(result, str) and "Traceback" in result)
+
+        # The owner-module patch must actually fire — otherwise the test is vacuous.
+        assert calls, (
+            "Stub was never invoked — patch target probably drifted from the "
+            "owner module again. See CLAUDE.md 'Patch the owner module' rule."
+        )
         assert isinstance(result, str)
+        assert "Traceback" not in result
