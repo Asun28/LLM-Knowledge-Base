@@ -225,7 +225,7 @@ def test_file_lock_reaps_stale_lock_with_dead_pid(tmp_path, monkeypatch):
         assert lock_path.read_text(encoding="utf-8").strip() != str(fake_dead_pid)
 
 
-# ── file_lock concurrency + verdicts threading.Lock removal (cycle 56 fold from test_phase4_audit_concurrency) ─
+# ── file_lock concurrency + verdicts threading.Lock removal (cycle 56 fold) ─
 
 
 class TestFileLockConcurrency:

@@ -361,7 +361,7 @@ class TestCliBootSweep:
         )
 
 
-# ── Long-error truncation across CLI commands (cycle 56 fold from test_v01013_cli_error_truncation) ─
+# ── Long-error truncation across CLI commands (cycle 56 fold) ─
 
 
 class TestCliErrorTruncation:

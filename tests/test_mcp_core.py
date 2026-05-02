@@ -783,9 +783,7 @@ class TestMcpInputValidation:
         from kb.config import MAX_QUESTION_LEN
         from kb.mcp.quality import kb_query_feedback
 
-        result = kb_query_feedback(
-            "x" * (MAX_QUESTION_LEN + 1), rating="helpful", cited_pages=""
-        )
+        result = kb_query_feedback("x" * (MAX_QUESTION_LEN + 1), rating="helpful", cited_pages="")
         assert isinstance(result, str) and result.startswith("Error:")
 
     def test_kb_lint_consistency_caps_page_ids(self):
@@ -815,9 +813,7 @@ class TestMcpInputValidation:
 
         from kb.mcp.quality import kb_save_lint_verdict
 
-        issues_list = [
-            {"severity": "low", "description": f"issue{i}"} for i in range(200)
-        ]
+        issues_list = [{"severity": "low", "description": f"issue{i}"} for i in range(200)]
         issues_str = json.dumps(issues_list)
         result = kb_save_lint_verdict(
             page_id="concepts/test",
@@ -842,9 +838,7 @@ class TestMcpInputValidation:
             return {
                 "summary": "1 source changed",
                 "changed_sources": ["raw/articles/foo.md"],
-                "affected_pages": [
-                    {"page_id": "concepts/p1", "changed_sources": None}
-                ],
+                "affected_pages": [{"page_id": "concepts/p1", "changed_sources": None}],
             }
 
         monkeypatch.setattr(_h, "detect_source_drift", fake_detect, raising=False)
