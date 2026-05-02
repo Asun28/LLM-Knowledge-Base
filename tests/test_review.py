@@ -410,31 +410,20 @@ def test_refine_page_updated_regex_anchored(tmp_wiki):
     assert "last_updated: 2022-12-31" in final
 
 
-def test_embedding_dim_resolved():
-    """EMBEDDING_DIM must be either deleted from config or validated in VectorIndex.
-
-    Q2 host-shape preservation: this test joins test_review.py despite touching
-    config + embeddings, because the source file groups it under "Phase 4
-    review/feedback/config fixes" and splitting would create a merge surface
-    with the parallel cycle-53 test_query.py edits.
-    """
-    from kb import config
-
-    if not hasattr(config, "EMBEDDING_DIM"):
-        return  # Deleted — PASS
-
-    # If it still exists, it must be used somewhere (VectorIndex.build)
-    import inspect
-
-    try:
-        from kb.query.embeddings import VectorIndex
-
-        src = inspect.getsource(VectorIndex)
-        assert "EMBEDDING_DIM" in src, (
-            "EMBEDDING_DIM defined in config but not validated in VectorIndex"
-        )
-    except ImportError:
-        pass
+# Cycle 57 AC6 — `test_embedding_dim_resolved` DELETED (per BACKLOG cycle-56+).
+#
+# The test was a "deleted-or-used" sentinel (cycle-15 L2 / cycle-44 L4
+# DROP-with-test-anchor pattern) folded from test_v01011_review_feedback_fixes
+# in cycle 55. Its first escape hatch was `if not hasattr(config, "EMBEDDING_DIM"):
+# return  # Deleted — PASS`. EMBEDDING_DIM has now been removed from kb.config
+# AND from kb.query.embeddings.VectorIndex (confirmed via
+# `grep -rnE "EMBEDDING_DIM" src/kb` returning zero hits at cycle 57).
+# The sentinel has done its job — deletion was always one of its two acceptable
+# resolutions. No replacement test is added because the now-removed config
+# constant has no surviving production contract to pin.
+#
+# Original cycle-55 R1 Sonnet MINOR upgrade-candidate (BACKLOG cycle-56+) listed
+# three escape hatches; with EMBEDDING_DIM gone, all three are moot.
 
 
 # ── Phase 3.97 Task 08 — Feedback store fixes (cycle 57 fold) ───────────────
