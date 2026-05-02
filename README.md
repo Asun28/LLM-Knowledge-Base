@@ -368,7 +368,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 3022 tests across 213 files
+  tests/                   # 3021 tests across 208 files
 ```
 
 </details>
@@ -381,7 +381,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 3011 passed, 11 skipped
+python -m pytest                # 3010 passed, 11 skipped
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```

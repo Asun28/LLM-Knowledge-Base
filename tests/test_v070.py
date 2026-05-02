@@ -829,9 +829,9 @@ class TestVersionBump:
 # under pytest's shared-process model — once any sibling test loads kb.mcp,
 # FastMCP @mcp.tool() decorators register + cache.
 
-import ast as _cycle17_ast
-import sys as _cycle17_sys
-from pathlib import Path as _Cycle17Path
+import ast as _cycle17_ast  # noqa: E402 — appended fold section per cycle-49+50+51 host-shape
+import sys as _cycle17_sys  # noqa: E402
+from pathlib import Path as _Cycle17Path  # noqa: E402
 
 _CYCLE17_REPO_ROOT = _Cycle17Path(__file__).resolve().parent.parent
 _CYCLE17_SRC_KB_MCP = _CYCLE17_REPO_ROOT / "src" / "kb" / "mcp"

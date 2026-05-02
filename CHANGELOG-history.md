@@ -9,6 +9,53 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-02 — cycle 57 — Freeze-and-fold continuation (5-fold batch) + sentinel-DELETE for `test_embedding_dim_resolved`
+
+**Theme:** Continue the freeze-and-fold cadence from cycles 47-56 (Phase 4.5 HIGH #4) with **5 small fold targets matching cycle-56 cadence**, plus close the cycle-56+ BACKLOG-marker for `test_embedding_dim_resolved` by deleting the now-vacuous sentinel. Receivers verified disjoint from in-flight worktree-cycle-53 (test_compile / test_config / test_query) and worktree-cycle-54 (test_compile / test_lint / test_mcp_browse_health / test_models / test_utils_io). Each fold revert-verified per C40-L3 by per-receiver pytest pass; per-fold isolation pytest passed per C51-L1.
+
+**ACs shipped (5 folds + 1 sentinel deletion):**
+
+- **AC1 — Fold `tests/test_v0916_task07.py` (159 LOC / 9 classes / 10 tests) → `tests/test_mcp_core.py`** under new section `# ── Phase 3.97 Task 07 — MCP server fixes (cycle 57 fold) ─`. Source file deleted in same commit. Per Step-5 Q1 decision: single receiver `test_mcp_core.py` rather than splitting 7-of-9 to `test_mcp_core.py` + 2-of-9 (browse) to `test_mcp_browse_health.py` to (a) avoid collision with parallel cycle-54 worktree's `test_mcp_browse_health.py` work, (b) match cycle-50 `TestMcpWikiDirValidation` cross-module hosting precedent. Per-receiver pytest: 47 → 57 tests in test_mcp_core.py (cycle-50 baseline).
+- **AC2 — Fold `tests/test_v0916_task08.py` (143 LOC / 4 classes / 4 tests) → `tests/test_review.py`** under new section `# ── Phase 3.97 Task 08 — Feedback store fixes (cycle 57 fold) ─`. Source file deleted in same commit. Receiver was cycle-55 fold target for review/feedback tests; safe to extend per cycle-55 host-shape precedent. Module-level imports (`json`, `time`) moved to function-local per cycle-19 L2 reload-leak avoidance. Per-receiver pytest: 23 → 27 tests in test_review.py (before AC6 deletion).
+- **AC3 — Fold `tests/test_v0915_task10.py` (195 LOC / 3 classes / 8 tests) → `tests/test_cli.py`** under new section `# ── Phase 3.96 Task 10 — CLI fixes (cycle 57 fold) ─`. Source file deleted in same commit. Receiver was cycle-56 fold target for CLI tests; safe. Module-level imports (`CliRunner`, `kb.cli.{ingest,lint}`) re-imported function-locally per cycle-19 L2 reload-leak avoidance — receiver `test_cli.py` already re-imports `kb.cli` at top of file so module-level addition would be redundant + create snapshot-bind risk under reload chains. Per-receiver pytest: 21 → 29 tests in test_cli.py.
+- **AC4 — Fold `tests/test_cycle17_lazy_imports.py` (176 LOC / 5 classes / 8 tests + 1 helper + 2 module constants) → `tests/test_v070.py`** under new section `# ── Cycle 17 AC4-AC7 — MCP cold-boot lazy imports (cycle 57 fold) ─`. Source file deleted in same commit. Per Step-5 Q2 decision: helper + constants kept at module level (host-shape preservation per cycle-40 L5) with cycle-prefix renames per cycle-52 L4 helper-name uniqueness — `_module_level_imports` → `_cycle17_module_level_imports`, `_REPO_ROOT` → `_CYCLE17_REPO_ROOT`, `_SRC_KB_MCP` → `_CYCLE17_SRC_KB_MCP`, plus `import ast as _cycle17_ast` / `import sys as _cycle17_sys` / `from pathlib import Path as _Cycle17Path` (with `# noqa: E402` since they appear after the receiver's existing top imports per appended-fold-section convention). All 8 references inside the 5 classes updated to renamed symbols. Per-receiver pytest: 67 → 75 tests in test_v070.py.
+- **AC5 — Fold `tests/test_v0p5_purpose.py` (184 LOC / 7 bare functions / 0 classes) → `tests/test_utils.py`** under new section `# ── load_purpose + extraction-prompt purpose threading (cycle 57 fold) ─`. Source file deleted in same commit. Per Step-5 Q3 single-receiver decision: feature-coherence over module-coherence (the `wiki/purpose.md` feature touches `utils/pages` + `ingest/extractors` + `query/engine` as a coherent capability). Receiver `test_utils.py` is the canonical anchor since `load_purpose` lives in `kb.utils.pages`. Splitting across `test_utils` + `test_ingest` + `test_query` would (a) collide with parallel cycle-53 `test_query.py` work, (b) fragment a coherent feature, (c) match cycle-55 host-shape preservation (C40-L5). Module-level imports moved to function-local per cycle-19 L2 reload-leak avoidance. Per-receiver pytest: 53 → 60 tests in test_utils.py.
+- **AC6 — DELETE `test_review.py::test_embedding_dim_resolved` sentinel** (per cycle-56+ BACKLOG entry option (1)). The test was a "deleted-or-used" sentinel folded from `test_v01011_review_feedback_fixes` in cycle 55 with three escape hatches: (a) `if not hasattr(config, "EMBEDDING_DIM"): return  # Deleted — PASS`, (b) `try: from kb.query.embeddings import VectorIndex … except ImportError: pass`, (c) `inspect.getsource(VectorIndex); assert "EMBEDDING_DIM" in src`. Confirmed via `grep -rnE "EMBEDDING_DIM" src/kb` returning ZERO hits at cycle 57 — `EMBEDDING_DIM` has been fully removed from `kb.config` AND `kb.query.embeddings.VectorIndex` (CHANGELOG-history.md line 2214 records the original config removal). The first escape hatch always returned early, making the test always vacuously pass regardless of any production change. With `EMBEDDING_DIM` gone from BOTH sites, the sentinel has fulfilled its role — deletion was always one of its two acceptable resolutions per the cycle-15 L2 / cycle-44 L4 DROP-with-test-anchor pattern. No replacement test added (no surviving production contract to pin). Closes cycle-55 R1 Sonnet MINOR upgrade-candidate.
+
+**Test count: 3022 → 3021 (-1 from AC6 sentinel deletion; AC1-AC5 folds preserve count).** Local Windows pytest: 3010 passed + 11 skipped in 142.70s. Per-receiver counts above.
+
+**File count: 213 → 208 (-5 sources DELETED at branch HEAD; subject to Step 21 rebase if cycles 53/54 merge first).**
+
+**C40-L3 revert-verify discipline cited.** Per-receiver pytest pass after each fold confirms the moved methods exercise the production code path; full-suite pass confirms no test-ordering interaction with sibling folds.
+
+**C51-L1 isolation pytest cited and applied per fold.**
+
+**MiMo trial telemetry (for 2026-05-31 writeup):**
+- All 6 ACs ran in primary session per cycle-13 L2 + cycle-37 L5 sizing heuristic (small mechanical folds + ≤6 ACs + primary-holds-context). Continues the cycle-37 L5 primary-session-default for fold-only cycles.
+- This is the THIRD `dev-mimo-opus` trial cycle (after cycles 55 and 56). Aligned with C37-L5: dispatch reserved for genuine parallelism, lacking-context tasks, or ≥30-AC cycles. None applied to cycle 57.
+- Step 17 (doc update) ran in primary session — pure mechanical doc edits don't warrant `mimochat` dispatch overhead at this small size.
+
+**Dep-CVE re-confirm (Step 02 baseline + Step 14 PR-CVE diff):**
+- Same 4 pre-existing class-A advisories as cycle 56: diskcache GHSA-w8v5-vhqr-4h9v (no fix), ragas GHSA-95ww-475f-pr4f (no fix), litellm GHSA-xqmj-j6mv-4862 (fix=1.83.7 BLOCKED by click+python-dotenv pin trade-off per cycle-55 attempted patch + revert), pip CVE-2026-3219 (no fix).
+- Zero PR-introduced (class-B) advisories — cycle 57 modifies no `requirements.txt` or `pyproject.toml`. Step 14(b) PR-CVE diff and Step 15 patch skipped per their respective skip-when conditions.
+
+**Decision documents:**
+- `docs/superpowers/decisions/2026-05-02-cycle-57-requirements.md` — consolidated requirements + threat model + design + plan + decision gate (Steps 1-8) per primary-session format from cycle 55+.
+
+**Skipped pipeline steps + rationale:**
+- **Step 3 brainstorming** — established freeze-and-fold pattern, no new design exploration.
+- **Step 4 R2 design eval** — trivial fold cycle.
+- **Step 6 Context7** — pure stdlib + project internal.
+- **Step 10 simplify** — pure test refactor, no `src/` diff to simplify.
+- **Step 11 SAST + secrets** — no `src/kb/` diff.
+- **Step 13 coverage delta** — test-fold cycle judged against receivers (per-receiver pytest passed).
+- **Step 14 security verify** — Step 2 was skipped (no threat-model items to verify; CVE baseline unchanged).
+- **Step 15 existing-CVE patch** — all 4 open advisories already documented in BACKLOG; no fix-versions newly available.
+- **Step 16 IaC + container scan + SBOM** — no `*.tf`/`Dockerfile`/dep-manifest changes.
+- **Step 19 signed commits** — repo doesn't require signing AND no published artifact.
+- **Step 22 deploy gate** — no deployable artifact.
+- **Step 23 smoke check** — Step 22 was skipped.
+
 ### 2026-05-02 — cycle 56 — Freeze-and-fold continuation (5-fold batch) + dep-CVE re-confirm + Windows pyreadline3 BACKLOG entry
 
 **Theme:** Continue the freeze-and-fold cadence from cycles 47-55 (Phase 4.5 HIGH #4) with **5 small fold targets — one extra over the cycle 53/54/55 four-pick cadence per user direction**. All cycle-56 receivers (test_mcp_core.py, test_v070.py, test_cli.py, test_utils_text.py, test_utils.py, test_utils_io.py) verified disjoint from cycle 55's receivers. Each fold revert-verified per C40-L3 and isolation pytest passed per C51-L1. Picks-marker convention (AC8) carried forward from cycle 55. Pre-existing Windows pyreadline3 access violation surfaced during pytest collection on `test_sanitize_strips_control_chars` (test_utils_text.py) and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error` (test_utils_io.py); reproduces on `main` branch as well, NOT cycle-56-introduced; filed as cycle-57+ BACKLOG entry.
