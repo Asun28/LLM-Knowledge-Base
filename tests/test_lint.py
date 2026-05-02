@@ -467,3 +467,221 @@ def test_no_redundant_hash_manifest_patch_inside_tmp_kb_env_method() -> None:
         "kb.compile.compiler.HASH_MANIFEST; the fixture (cycle-18 D6) already "
         f"redirects it. Offenders: {offenders}"
     )
+
+
+# === Cycle 54 — folded from tests/test_cycle15_lint_status_mature.py ===
+# Cycle 15 AC5/AC24 — check_status_mature_stale flags mature pages >90d stale.
+from kb.lint.checks import check_status_mature_stale  # noqa: E402  — fold-site
+
+
+def _write_status_mature_page(
+    wiki_dir: Path,
+    pid: str,
+    updated_days_ago: int,
+    status: str | None,
+    page_type: str = "concept",
+) -> Path:
+    updated = (date.today() - timedelta(days=updated_days_ago)).isoformat()
+    subdir = {
+        "summary": "summaries",
+        "concept": "concepts",
+        "entity": "entities",
+    }[page_type]
+    path = wiki_dir / subdir / f"{pid}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    status_line = f"status: {status}\n" if status is not None else ""
+    path.write_text(
+        f"""---
+title: {pid}
+source:
+  - raw/articles/{pid}.md
+created: 2026-01-01
+updated: {updated}
+type: {page_type}
+confidence: stated
+{status_line}---
+body
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+class TestMatureStale:
+    def test_mature_91d_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "cap-theorem", 91, status="mature")
+        issues = check_status_mature_stale(wiki_dir=tmp_path)
+        assert len(issues) == 1
+        assert issues[0]["check"] == "status_mature_stale"
+        assert issues[0]["severity"] == "warning"
+        assert "cap-theorem" in issues[0]["page"]
+
+    def test_mature_89d_not_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "rag", 89, status="mature")
+        issues = check_status_mature_stale(wiki_dir=tmp_path)
+        assert issues == []
+
+    def test_mature_365d_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "very-old", 365, status="mature")
+        issues = check_status_mature_stale(wiki_dir=tmp_path)
+        assert len(issues) == 1
+        assert "365" in issues[0]["message"]
+
+
+class TestStatusMatureStaleOtherStatusesIgnored:
+    """AC24 — only status=mature fires this check."""
+
+    def test_seed_91d_not_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "seedling", 91, status="seed")
+        assert check_status_mature_stale(wiki_dir=tmp_path) == []
+
+    def test_developing_91d_not_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "developing", 91, status="developing")
+        assert check_status_mature_stale(wiki_dir=tmp_path) == []
+
+    def test_evergreen_91d_not_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "evergreen", 91, status="evergreen")
+        assert check_status_mature_stale(wiki_dir=tmp_path) == []
+
+    def test_missing_status_not_flagged(self, tmp_path):
+        _write_status_mature_page(tmp_path, "no-status", 91, status=None)
+        assert check_status_mature_stale(wiki_dir=tmp_path) == []
+
+
+class TestStatusMatureStaleTodayOverride:
+    """AC24 — deterministic testing via `today` kwarg."""
+
+    def test_today_kwarg_controls_cutoff(self, tmp_path):
+        # Page updated 2026-01-01; today forced to 2026-04-30 → 119d delta.
+        p = tmp_path / "concepts" / "fixed.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            """---
+title: fixed
+source:
+  - raw/articles/x.md
+created: 2026-01-01
+updated: 2026-01-01
+type: concept
+confidence: stated
+status: mature
+---
+body
+""",
+            encoding="utf-8",
+        )
+        issues = check_status_mature_stale(wiki_dir=tmp_path, today=date(2026, 4, 30))
+        assert len(issues) == 1
+        # 2026-04-30 - 2026-01-01 = 119 days
+        assert "119" in issues[0]["message"]
+
+
+# === Cycle 54 — folded from tests/test_cycle45_package_constants_propagate_to_submodules.py ===
+# Cycle 45 AC33 — package-level checks monkeypatches reach split submodules.
+
+
+def _write_pkg_const_fold_page(path: Path, body: str = "body") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\ntitle: Test\nupdated: 2026-01-01\n---\n{body}\n", encoding="utf-8")
+
+
+def test_wiki_dir_patch_reaches_frontmatter_submodule(monkeypatch, tmp_path):
+    import kb.lint.checks as _checks_mod
+    from kb.lint.checks.frontmatter import check_frontmatter as _check_frontmatter
+
+    wiki_dir = tmp_path / "patched-wiki"
+    bad_page = wiki_dir / "concepts" / "bad.md"
+    bad_page.parent.mkdir(parents=True, exist_ok=True)
+    bad_page.write_text("---\ntitle: [unterminated\n---\nBody\n", encoding="utf-8")
+
+    monkeypatch.setattr(_checks_mod, "WIKI_DIR", wiki_dir)
+
+    issues = _check_frontmatter()
+
+    assert issues
+    assert issues[0]["page"] == "concepts/bad"
+
+
+def test_raw_dir_and_source_type_dirs_patch_reaches_source_coverage(monkeypatch, tmp_path):
+    from kb.lint import checks as _checks_mod
+    from kb.lint.checks.consistency import check_source_coverage as _check_source_coverage
+
+    wiki_dir = tmp_path / "wiki"
+    (wiki_dir / "concepts").mkdir(parents=True)
+    raw_dir = tmp_path / "raw"
+    article_dir = raw_dir / "articles"
+    article_dir.mkdir(parents=True)
+    (article_dir / "dangling.md").write_text("raw", encoding="utf-8")
+
+    monkeypatch.setattr(_checks_mod, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(_checks_mod, "RAW_DIR", raw_dir)
+    monkeypatch.setattr(_checks_mod, "SOURCE_TYPE_DIRS", {"article": article_dir})
+
+    issues = _check_source_coverage()
+
+    assert [issue["source"] for issue in issues] == ["raw/articles/dangling.md"]
+
+
+def test_resolve_wikilinks_patch_reaches_dead_links_submodule(monkeypatch, tmp_path):
+    import kb.lint.checks as _checks_mod
+    from kb.lint.checks.dead_links import check_dead_links as _check_dead_links
+
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+
+    monkeypatch.setattr(_checks_mod, "WIKI_DIR", wiki_dir)
+    monkeypatch.setattr(
+        _checks_mod,
+        "resolve_wikilinks",
+        lambda _wiki_dir: {"broken": [{"source": "concepts/a", "target": "missing"}]},
+    )
+
+    issues = _check_dead_links()
+
+    assert issues[0]["target"] == "missing"
+
+
+def test_atomic_text_write_patch_reaches_dead_link_fix_submodule(monkeypatch, tmp_path):
+    import kb.lint.checks as _checks_mod
+    from kb.lint.checks.dead_links import fix_dead_links as _fix_dead_links
+
+    wiki_dir = tmp_path / "wiki"
+    page = wiki_dir / "concepts" / "a.md"
+    _write_pkg_const_fold_page(page, "See [[missing]].")
+    writes: list[tuple[str, Path]] = []
+
+    def fake_write(content: str, path: Path) -> None:
+        writes.append((content, path))
+
+    monkeypatch.setattr(_checks_mod, "atomic_text_write", fake_write)
+
+    fixes = _fix_dead_links(wiki_dir, broken_links=[{"source": "concepts/a", "target": "missing"}])
+
+    assert fixes
+    assert writes == [(page.read_text(encoding="utf-8").replace("[[missing]]", "missing"), page)]
+
+
+def test_parse_inline_callouts_patch_reaches_inline_submodule(monkeypatch, tmp_path):
+    import kb.lint.checks as _checks_mod
+    from kb.lint.checks.inline_callouts import check_inline_callouts as _check_inline_callouts
+
+    wiki_dir = tmp_path / "wiki"
+    page = wiki_dir / "concepts" / "a.md"
+    _write_pkg_const_fold_page(page, "plain body")
+
+    monkeypatch.setattr(
+        _checks_mod,
+        "parse_inline_callouts",
+        lambda _content: [{"marker": "gap", "line": 7, "text": "> [!gap] patched"}],
+    )
+
+    out = _check_inline_callouts(wiki_dir, pages=[page])
+
+    assert out == [
+        {
+            "page_id": "concepts/a",
+            "marker": "gap",
+            "line": 7,
+            "text": "> [!gap] patched",
+        }
+    ]
