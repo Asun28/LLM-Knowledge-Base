@@ -27,6 +27,7 @@ from kb.config import (
     WIKI_DIR,
     decay_days_for,
     tier1_budget_for,
+    _kb_disable_vectors,
 )
 from kb.errors import KBError, QueryError
 from kb.graph.builder import build_graph
@@ -201,16 +202,20 @@ def search_pages(
         )
         bm25_results = []
 
-    try:
-        vector_results = vector_search(question, candidate_limit)
-    except Exception as exc:
-        logger.warning(
-            "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
-            exc.__class__.__name__,
-            exc,
-            query_tokens_count,
-        )
+    if _kb_disable_vectors():
         vector_results = []
+        logger.info("hybrid_search: KB_DISABLE_VECTORS=1 — vector layer skipped")
+    else:
+        try:
+            vector_results = vector_search(question, candidate_limit)
+        except Exception as exc:
+            logger.warning(
+                "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
+                exc.__class__.__name__,
+                exc,
+                query_tokens_count,
+            )
+            vector_results = []
 
     rank_lists = [bm25_results]
     if vector_results:

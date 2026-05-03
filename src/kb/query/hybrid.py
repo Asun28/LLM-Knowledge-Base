@@ -7,6 +7,7 @@ from kb.config import (
     MAX_QUERY_EXPANSIONS,
     RRF_K,
     VECTOR_SEARCH_LIMIT_MULTIPLIER,
+    _kb_disable_vectors,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,10 @@ def hybrid_search(
         expand_fn: Optional callable(query) -> list[str] — returns alternative phrasings.
         limit: Maximum results to return.
     """
+    if _kb_disable_vectors():
+        logger.info("hybrid_search: KB_DISABLE_VECTORS=1 — vector layer skipped")
+        return bm25_fn(question, limit * BM25_SEARCH_LIMIT_MULTIPLIER)
+
     vector_limit = limit * VECTOR_SEARCH_LIMIT_MULTIPLIER
 
     # Determine query variants
