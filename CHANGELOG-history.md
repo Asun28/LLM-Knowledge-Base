@@ -9,6 +9,34 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-03 — cycle 59 — Backlog hygiene + freeze-and-fold continuation (20-fold batch)
+
+**Theme:** Continue Phase 4.5 HIGH #4 freeze-and-fold with a larger 20-item batch selected from versioned backlog tests. User explicitly requested the `dev-codex-gate` workflow, all available CLI/subagent lanes, a git worktree, and step-by-step commits. The literal requested branch `feat(cycle 59)` is not a valid Git ref, so the worktree uses branch `feat/cycle-59` at `.claude/worktrees/cycle-59`. Production-code changes: zero. Dependency changes: zero.
+
+**ACs shipped (20 folds):**
+
+- **AC1-AC10 — Fold query/search/versioned output coverage into `tests/test_query.py`.** Sources deleted in the same test commit: `tests/test_v0917_rewriter.py`, `tests/test_v0917_raw_fallback.py`, `tests/test_v0917_layered_context.py`, `tests/test_v0917_hybrid.py`, `tests/test_v0917_embeddings.py`, `tests/test_v01004_query_correctness.py`, `tests/test_v01005_query_perf_docs.py`, `tests/test_v0917_stale_query.py`, `tests/test_v0917_dedup.py`, `tests/test_v4_11_markdown.py`. Receiver sections keep source markers, cycle-59 section names, and function-local imports where that matched existing receiver style.
+
+- **AC11-AC12 — Fold config/constants coverage into `tests/test_config.py`.** Sources deleted: `tests/test_v5_augment_config.py`, `tests/test_v01002_consolidated_constants.py`.
+
+- **AC13-AC15 — Fold lint/augment regression coverage into `tests/test_lint.py`.** Sources deleted: `tests/test_v5_verdict_augment_type.py`, `tests/test_v5_autogen_prefixes.py`, `tests/test_v01010_lint_fixes.py`.
+
+- **AC16-AC17 — Fold ingest contradiction + evidence-trail coverage into `tests/test_ingest.py`.** Sources deleted: `tests/test_v0917_contradiction.py`, `tests/test_v0917_evidence_trail.py`. Reviewer correction: the evidence-trail fold was moved out of `test_utils.py` and into `test_ingest.py` because the production owner is `kb.ingest.evidence`.
+
+- **AC18 — Fold compile coverage into `tests/test_compile.py`.** Source deleted: `tests/test_v01006_compile_fixes.py`. A subagent accidentally folded `tests/test_cycle20_windows_tilde_path.py`; that source was not selected and was restored before commit.
+
+- **AC19 — Fold CLI coverage into `tests/test_cli.py`.** Source deleted: `tests/test_v4_11_cli.py`.
+
+- **AC20 — Fold MCP tool coverage into `tests/test_mcp_core.py`.** Source deleted: `tests/test_v4_11_mcp.py`.
+
+**TDD / test-backed path:** The selected source tests passed before folding (`97 passed in 5.17s`). After folding, the consolidated receiver set passed (`384 passed in 11.22s`). Full local Windows gate passed after removing root planning scratch files forbidden by `tests/test_cycle34_release_hygiene.py`: `3009 passed, 12 skipped, 48 warnings in 137.50s`; `pytest --collect-only -q` collected 3021 tests. `ruff check src tests` passed.
+
+**Test count: 3021 (preserved).** File count: 200 → 180 (-20 `tests/test_*.py` files). The fold commit is `154e41c` (`test(cycle 59): fold 20 versioned tests`); cleanup commit `5471336` removes a stray receiver blank line so `test_utils.py` is not part of the final cycle-59 receiver set.
+
+**Step-execution telemetry:** Subagents Laplace and Hypatia implemented bounded receiver groups; Avicenna reviewed the aggregate diff and caught the unselected source drift, receiver mismatch, and import-order/lint issues. Direct MiMo CLI produced an initial generic/unsupported review that failed the `dev-codex-gate` quality bar. Direct DeepSeek CLI returned conditional-pass gates focused on collision scan, count preservation, full tests, and doc sync. Primary Codex retained final gate authority, applied the reviewer fixes, and kept the cycle pure tests/docs.
+
+**Security / dependency verdict:** No `src/kb/` files changed, no dependency manifests changed, and no new runtime surface was introduced. PR-introduced dependency risk is empty by diff. Root `task_plan.md`, `findings.md`, and `progress.md` were removed before the full test gate because cycle-34 release hygiene forbids root scratch files.
+
 ### 2026-05-03 — cycle 58 — Backlog hygiene + freeze-and-fold continuation (4-fold batch, 1 AC dropped at rebase)
 
 **Theme:** Continue the freeze-and-fold cadence from cycles 47-57 (Phase 4.5 HIGH #4) with **5 small fold targets** picked at Step 1. Cycle-54-pickup landed during cycle-58 and folded one of cycle-58's planned sources (`test_cycle15_lint_status_mature.py`, AC4) — the rebase onto origin/main used `git rebase --skip` to drop the now-redundant AC4 commit; cycle-58 ships **4 folds** instead of 5. Production-code changes: zero. Fourth `dev-mimo-opus` trial cycle (after cycles 55, 56, 57). Receivers verified disjoint from in-flight `worktree-cycle-53` and from the just-merged cycle-54-pickup folds.
