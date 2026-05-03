@@ -425,3 +425,109 @@ def test_tier1_budget_for_is_called(monkeypatch):
     assert "wiki_pages" in spy_calls, (
         f"expected tier1_budget_for('wiki_pages') call; got {spy_calls}"
     )
+
+
+# ── KB_DISABLE_VECTORS short-circuit (cycle 61) ─
+
+
+class TestKBDisableVectors:
+    """Test KB_DISABLE_VECTORS short-circuit at production and test-only API."""
+
+    def test_search_pages_skips_vector_when_KB_DISABLE_VECTORS_set(
+        self, monkeypatch, tmp_wiki, caplog
+    ):
+        """When KB_DISABLE_VECTORS=1, vector layer is not called; INFO log emitted."""
+        import logging
+        from unittest.mock import MagicMock
+
+        from kb.query.engine import search_pages
+        import kb.query.embeddings
+
+        # Set env var
+        monkeypatch.setenv("KB_DISABLE_VECTORS", "1")
+
+        # Spy on the vector index closure entry point
+        original_get_vec = kb.query.embeddings.get_vector_index
+        spy = MagicMock(side_effect=original_get_vec)
+        monkeypatch.setattr(kb.query.embeddings, "get_vector_index", spy)
+
+        # Create a test wiki
+        from pathlib import Path
+
+        concepts_dir = tmp_wiki / "concepts"
+        concepts_dir.mkdir(parents=True, exist_ok=True)
+        page = concepts_dir / "test.md"
+        page.write_text(
+            "---\ntitle: Test\nsource:\n  - raw/test.md\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nContent"
+        )
+
+        # Call search_pages with caplog capturing INFO
+        with caplog.at_level(logging.INFO):
+            results = search_pages("test", wiki_dir=tmp_wiki, max_results=5)
+
+        # Assert vector index was NOT called
+        assert spy.call_count == 0, (
+            f"vector index should not be called when KB_DISABLE_VECTORS=1; "
+            f"got {spy.call_count} calls"
+        )
+
+        # Assert exactly one INFO record matching the skip message
+        matching_records = [
+            r
+            for r in caplog.records
+            if "KB_DISABLE_VECTORS=1" in r.getMessage()
+        ]
+        assert len(matching_records) == 1, (
+            f"expected 1 INFO record with 'KB_DISABLE_VECTORS=1'; got {len(matching_records)}"
+        )
+
+    def test_search_pages_calls_vector_when_KB_DISABLE_VECTORS_unset(
+        self, monkeypatch, tmp_wiki, caplog
+    ):
+        """When KB_DISABLE_VECTORS unset, vector layer IS called; no skip log."""
+        import logging
+        from unittest.mock import MagicMock
+
+        from kb.query.engine import search_pages
+        import kb.query.embeddings
+
+        # Ensure env var is unset
+        monkeypatch.delenv("KB_DISABLE_VECTORS", raising=False)
+
+        # Spy on the vector index closure entry point
+        original_get_vec = kb.query.embeddings.get_vector_index
+        spy = MagicMock(side_effect=original_get_vec)
+        monkeypatch.setattr(kb.query.embeddings, "get_vector_index", spy)
+
+        # Create a test wiki
+        from pathlib import Path
+
+        concepts_dir = tmp_wiki / "concepts"
+        concepts_dir.mkdir(parents=True, exist_ok=True)
+        page = concepts_dir / "test.md"
+        page.write_text(
+            "---\ntitle: Test\nsource:\n  - raw/test.md\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nContent"
+        )
+
+        # Call search_pages with caplog capturing INFO
+        with caplog.at_level(logging.INFO):
+            results = search_pages("test", wiki_dir=tmp_wiki, max_results=5)
+
+        # Assert vector index WAS called at least once
+        assert spy.call_count >= 1, (
+            f"vector index should be called when KB_DISABLE_VECTORS unset; "
+            f"got {spy.call_count} calls"
+        )
+
+        # Assert NO INFO records matching the skip message
+        matching_records = [
+            r
+            for r in caplog.records
+            if "KB_DISABLE_VECTORS=1" in r.getMessage()
+        ]
+        assert len(matching_records) == 0, (
+            f"should have zero skip-log records when KB_DISABLE_VECTORS unset; "
+            f"got {len(matching_records)}"
+        )
