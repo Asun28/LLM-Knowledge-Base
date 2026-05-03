@@ -114,6 +114,9 @@ def test_call_cli_codex_exec_jsonl_path(monkeypatch):
     assert "gpt-5.4-mini" in captured["cmd"]
     assert captured["input"] == b"Reply exactly KB_CODEX_BACKEND_OK."
     assert captured["shell"] is False
+    # T2 sandbox-flag pin (cycle 61 D5 / threat-model T2)
+    assert "--sandbox" in captured["cmd"] and captured["cmd"][captured["cmd"].index("--sandbox") + 1] == "read-only"
+    assert "--skip-git-repo-check" in captured["cmd"]
 
 
 # ── AC20: LLMError(kind="not_installed") when binary missing ─────────────────

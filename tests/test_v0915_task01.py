@@ -310,28 +310,48 @@ class TestWikiSubdirsFromConfig:
 
         assert set(WIKI_SUBDIRS) == set(WIKI_SUBDIR_TO_TYPE.keys())
 
-    def test_graph_builder_uses_shared_subdirs(self):
-        """graph/builder.py imports WIKI_SUBDIRS from utils.pages."""
-        import inspect
-
+    def test_graph_builder_uses_shared_subdirs(self, tmp_path, monkeypatch):
+        """graph/builder.py consumes WIKI_SUBDIRS from utils.pages."""
         from kb.graph import builder
+        from kb.utils import pages
 
-        # Should NOT contain a hardcoded tuple of subdirs
-        assert "WIKI_SUBDIRS" in inspect.getsource(builder), (
-            "graph/builder.py should import WIKI_SUBDIRS"
+        # Behavioral test: monkeypatch WIKI_SUBDIRS and verify build_graph respects it
+        monkeypatch.setattr(pages, "WIKI_SUBDIRS", ("custom_dir",))
+
+        wiki_dir = tmp_path / "wiki"
+        wiki_dir.mkdir()
+        custom_dir = wiki_dir / "custom_dir"
+        custom_dir.mkdir()
+
+        page = custom_dir / "test_page.md"
+        page.write_text(
+            "---
+title: Test
+source:
+  - raw/test.md
+"
+            "created: 2026-01-01
+updated: 2026-01-01
+"
+            "type: concept
+confidence: stated
+---
+
+Content"
+        )
+
+        g = builder.build_graph(wiki_dir=wiki_dir)
+        assert any("custom_dir/test_page" in str(n) for n in g.nodes), (
+            "build_graph should respect monkeypatched WIKI_SUBDIRS"
         )
 
     def test_evolve_analyzer_uses_shared_subdirs(self):
-        """evolve/analyzer.py imports WIKI_SUBDIRS from utils.pages."""
-        import inspect
-
+        """evolve/analyzer.py imports WIKI_SUBDIRS from config."""
         from kb.evolve import analyzer
+        from kb import config
 
-        # The hardcoded dict should reference WIKI_SUBDIRS or WIKI_SUBDIR_TO_TYPE
-        analyzer_src = inspect.getsource(analyzer)
-        assert "WIKI_SUBDIRS" in analyzer_src or "WIKI_SUBDIR_TO_TYPE" in analyzer_src, (
-            "evolve/analyzer.py should use WIKI_SUBDIRS from config"
-        )
+        # Identity check: analyzer module imports WIKI_SUBDIRS from config
+        assert analyzer.WIKI_SUBDIRS is config.WIKI_SUBDIRS
 
 
 # ── Fix 1.8: _page_id lowercase ─────────────────────────────────

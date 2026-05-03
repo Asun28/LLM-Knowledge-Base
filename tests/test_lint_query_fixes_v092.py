@@ -274,15 +274,57 @@ def test_read_page_case_insensitive_valid_path(tmp_wiki, monkeypatch):
 # ── Fix 6: health.py uses logger.error, not logger.exception ────
 
 
-def test_health_lint_uses_logger_error():
-    """Verify kb_lint error handler uses logger.error, not logger.exception."""
-    source = inspect.getsource(kb_lint)
-    assert "logger.error" in source
-    assert "logger.exception" not in source
+def test_health_lint_uses_logger_error(monkeypatch, tmp_wiki):
+    """Verify kb_lint error handler uses logger.error on exception."""
+    import kb.lint.runner
+    from unittest.mock import MagicMock
+
+    _setup_wiki_dir(tmp_wiki, monkeypatch)
+
+    # Monkeypatch run_all_checks to raise
+    monkeypatch.setattr(
+        kb.lint.runner, "run_all_checks",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("forced"))
+    )
+
+    # Spy on logger.error and logger.exception
+    import kb.mcp.health
+    error_spy = MagicMock(wraps=kb.mcp.health.logger.error)
+    exception_spy = MagicMock(wraps=kb.mcp.health.logger.exception)
+    monkeypatch.setattr(kb.mcp.health.logger, "error", error_spy)
+    monkeypatch.setattr(kb.mcp.health.logger, "exception", exception_spy)
+
+    # Call kb_lint; should catch and call logger.error
+    result = kb_lint(wiki_dir=str(tmp_wiki))
+
+    assert error_spy.call_count == 1
+    assert exception_spy.call_count == 0
+    assert isinstance(result, str) and result.startswith("Error:")
 
 
-def test_health_evolve_uses_logger_error():
-    """Verify kb_evolve error handler uses logger.error, not logger.exception."""
-    source = inspect.getsource(kb_evolve)
-    assert "logger.error" in source
-    assert "logger.exception" not in source
+def test_health_evolve_uses_logger_error(monkeypatch, tmp_wiki):
+    """Verify kb_evolve error handler uses logger.error on exception."""
+    import kb.evolve.analyzer
+    from unittest.mock import MagicMock
+
+    _setup_wiki_dir(tmp_wiki, monkeypatch)
+
+    # Monkeypatch generate_evolution_report to raise
+    monkeypatch.setattr(
+        kb.evolve.analyzer, "generate_evolution_report",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("forced"))
+    )
+
+    # Spy on logger.error and logger.exception
+    import kb.mcp.health
+    error_spy = MagicMock(wraps=kb.mcp.health.logger.error)
+    exception_spy = MagicMock(wraps=kb.mcp.health.logger.exception)
+    monkeypatch.setattr(kb.mcp.health.logger, "error", error_spy)
+    monkeypatch.setattr(kb.mcp.health.logger, "exception", exception_spy)
+
+    # Call kb_evolve; should catch and call logger.error
+    result = kb_evolve(wiki_dir=str(tmp_wiki))
+
+    assert error_spy.call_count == 1
+    assert exception_spy.call_count == 0
+    assert isinstance(result, str) and result.startswith("Error:")

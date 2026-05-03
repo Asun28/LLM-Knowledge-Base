@@ -214,28 +214,86 @@ def test_detect_source_drift_does_not_mutate_manifest_when_sources_deleted(tmp_p
 # BACKLOG candidate (see Phase 4.5 HIGH `tests/` carry-over).
 
 
-def test_prune_base_uses_canonical_rel_path_at_both_sites() -> None:
-    """Both prune sites use the canonical helper or raw_dir.resolve().parent."""
-    from kb.compile import compiler
+def test_prune_base_uses_canonical_rel_path_at_both_sites(tmp_path, monkeypatch) -> None:
+    """Both prune sites use _canonical_rel_path (not hardcoded paths).
 
-    src = inspect.getsource(compiler)
+    C41-L1 behavioral upgrade: instead of linting source code, verify that
+    both prune sites actually call the helper and respect its return value.
+    """
+    import json
+    from unittest.mock import MagicMock
+    from kb.compile.compiler import compile_wiki, detect_source_drift, _canonical_rel_path
 
-    # Site 1 — `detect_source_drift` near line 270 uses the canonical helper.
-    site1_present = (
-        "_canonical_rel_path(s, raw_dir)" in src or "_canonical_rel_path(source, raw_dir)" in src
+    # Set up fixture: tmp_path/raw, tmp_path/wiki, tmp_path/.data/hashes.json
+    raw_dir = tmp_path / "raw" / "articles"
+    raw_dir.mkdir(parents=True)
+    
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True)
+
+    manifest_path = tmp_path / ".data" / "hashes.json"
+    manifest_path.parent.mkdir(parents=True)
+
+    # Fixture 1 (reuse test_detect_source_drift_does_not_mutate_manifest_when_sources_deleted):
+    # Manifest has stale entry "articles/x.md" with no on-disk file
+    manifest_before = {"articles/x.md": "stale_hash"}
+    manifest_path.write_text(json.dumps(manifest_before), encoding="utf-8")
+
+    # Spy on _canonical_rel_path to count calls and verify it's invoked
+    original_canonical = _canonical_rel_path
+    spy = MagicMock(side_effect=original_canonical)
+    monkeypatch.setattr("kb.compile.compiler._canonical_rel_path", spy)
+
+    # Site 1: detect_source_drift
+    detect_source_drift(raw_dir=tmp_path / "raw", wiki_dir=wiki_dir, manifest_path=manifest_path)
+    site1_calls = spy.call_count
+
+    # Reset spy for site 2
+    spy.reset_mock()
+
+    # Fixture 2 (new): compile_wiki(mode="full") with stale manifest entry
+    manifest_path.write_text(json.dumps({"articles/x.md": "stale_hash"}), encoding="utf-8")
+    
+    # Monkeypatch to isolate full-mode prune (avoid file I/O side effects)
+    def fake_build(*args, **kwargs):
+        return {}
+
+    import kb.compile.compiler as compiler_mod
+    monkeypatch.setattr(compiler_mod, "build_graph", fake_build)
+
+    compile_wiki(
+        incremental=False,
+        raw_dir=tmp_path / "raw",
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
     )
-    assert site1_present, (
-        "Site 1 (detect_source_drift) must use _canonical_rel_path. If this "
-        "assertion fails, the cycle-17 AC1 fix has been regressed. See "
-        "docs/superpowers/decisions/2026-04-21-cycle19-design.md AC14 DROP rationale."
+    site2_calls = spy.call_count
+
+    # Assert both sites called the helper
+    assert site1_calls >= 1, f"Site 1 (detect_source_drift) should call _canonical_rel_path; got {site1_calls}"
+    assert site2_calls >= 1, f"Site 2 (compile_wiki full-mode) should call _canonical_rel_path; got {site2_calls}"
+
+    # Divergent-fail twin: monkeypatch _canonical_rel_path to a no-op that returns "FROZEN"
+    # If the prune logic bypasses the helper, the stale entry will NOT be pruned
+    def frozen_canonical(*args, **kwargs):
+        return "FROZEN"
+
+    monkeypatch.setattr("kb.compile.compiler._canonical_rel_path", frozen_canonical)
+    
+    manifest_path.write_text(json.dumps({"articles/x.md": "stale_hash"}), encoding="utf-8")
+    compile_wiki(
+        incremental=False,
+        raw_dir=tmp_path / "raw",
+        wiki_dir=wiki_dir,
+        manifest_path=manifest_path,
     )
 
-    # Site 2 — `compile_wiki` full-mode tail prune near line 452 uses
-    # `raw_dir.resolve().parent` to match the canonical helper's anchor.
-    assert "raw_dir.resolve().parent" in src, (
-        "Site 2 (compile_wiki full-mode prune base) must derive from "
-        "raw_dir.resolve().parent. Cycle-17 AC1 shipped this fix; cycle-19 "
-        "AC14 anchored it. Regression: see design.md AC14 DROP rationale."
+    # Manifest should still contain the stale entry (no-op helper = prune miss)
+    manifest_after = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "articles/x.md" in manifest_after, (
+        "Divergent-fail: if _canonical_rel_path is bypassed, stale entry should NOT be pruned. "
+        "If this assertion fails, the prune logic is not using the helper as expected."
     )
 
 

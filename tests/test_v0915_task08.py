@@ -354,23 +354,34 @@ class TestFrontmatterRegex:
         """The regex in find_connection_opportunities uses shared FRONTMATTER_RE.
 
         Phase 4.5 HIGH P3: consolidated to use shared regex import instead of
-        inlined pattern.
+        inlined pattern. The new shared regex requires `---` at column 0 (no leading
+        whitespace), whereas old inlined regex accepted ANY leading whitespace.
         """
-        import inspect
+        from kb.evolve.analyzer import _FRONTMATTER_RE
 
-        from kb.evolve import analyzer
+        # Divergence reproducer: old regex would match this (greedy whitespace)
+        # New shared regex requires `---` at column 0
+        leading_ws_input = "
+---
+foo: bar
+---
+body"
 
-        source = inspect.getsource(analyzer)
-        # Should NOT contain the old inlined regex
-        assert r"\A\s*---" not in source, (
-            "Frontmatter regex still has \\A\\s*--- prefix; should use shared FRONTMATTER_RE"
+        # New shared regex: does NOT match (leading 
+ violates \A---)
+        assert _FRONTMATTER_RE.match(leading_ws_input) is None, (
+            "FRONTMATTER_RE should reject leading whitespace. If this fails, "
+            "Phase 4.5 HIGH P3 consolidation has been regressed."
         )
-        # Should use shared FRONTMATTER_RE (imported, not inlined)
-        assert "FRONTMATTER_RE" in source, "analyzer should import and use shared FRONTMATTER_RE"
 
-
-# ── Fix 8.9 — analyze_coverage threshold < 3 ─────────────────────────────────
-
+        # Verify shared regex works on canonical input (no leading whitespace)
+        canonical = "---
+foo: bar
+---
+body"
+        assert _FRONTMATTER_RE.match(canonical) is not None, (
+            "FRONTMATTER_RE should match canonical frontmatter"
+        )
 
 class TestAnalyzeCoverageThreshold:
     """Fix 8.9: under_covered_types should include types with fewer than 3 pages."""
