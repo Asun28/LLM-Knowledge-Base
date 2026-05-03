@@ -102,8 +102,7 @@ def append_wiki_log(operation: str, message: str, log_path: Path, *, caller: str
     safe_op = _escape_markdown_prefix(operation)
     safe_msg = _escape_markdown_prefix(message)
     caller_tag = f"{caller} | " if caller != "cli" else ""
-    entry = f"- {date.today().isoformat()} | {caller_tag}{safe_op} | {safe_msg}
-"
+    entry = f"- {date.today().isoformat()} | {caller_tag}{safe_op} | {safe_msg}\n"
 
     # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
     # On Windows, log_path.open("a") on a directory raises PermissionError
