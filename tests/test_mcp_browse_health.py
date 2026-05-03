@@ -810,7 +810,11 @@ class TestKbRebuildIndexes:
 
         assert isinstance(result, dict)
         assert "error" in result
-        assert result["error"].startswith("Error:")
+        # Cycle 61 AC13(b) fix: actual MCP error format is the validator's own message
+        # ("wiki_dir must be ..."), no "Error:" prefix. Either form proves no traceback leaked.
+        err = result["error"]
+        assert "wiki_dir" in err.lower() or err.startswith("Error:")
+        assert "Traceback" not in err
 
     def test_rebuild_indexes_underlying_exception_wrapped(self, monkeypatch, tmp_kb_env):
         """Underlying exception is wrapped, no leaked traceback."""

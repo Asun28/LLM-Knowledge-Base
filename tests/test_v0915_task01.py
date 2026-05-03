@@ -325,19 +325,17 @@ class TestWikiSubdirsFromConfig:
 
         page = custom_dir / "test_page.md"
         page.write_text(
-            "---
-title: Test
-source:
-  - raw/test.md
-"
-            "created: 2026-01-01
-updated: 2026-01-01
-"
-            "type: concept
-confidence: stated
----
-
-Content"
+            "---\n"
+            "title: Test\n"
+            "source:\n"
+            "  - raw/test.md\n"
+            "created: 2026-01-01\n"
+            "updated: 2026-01-01\n"
+            "type: concept\n"
+            "confidence: stated\n"
+            "---\n"
+            "\n"
+            "Content\n"
         )
 
         g = builder.build_graph(wiki_dir=wiki_dir)
@@ -346,12 +344,17 @@ Content"
         )
 
     def test_evolve_analyzer_uses_shared_subdirs(self):
-        """evolve/analyzer.py imports WIKI_SUBDIRS from config."""
-        from kb.evolve import analyzer
-        from kb import config
+        """evolve/analyzer.py imports WIKI_SUBDIRS from kb.utils.pages (not kb.config).
 
-        # Identity check: analyzer module imports WIKI_SUBDIRS from config
-        assert analyzer.WIKI_SUBDIRS is config.WIKI_SUBDIRS
+        Cycle 61 AC16 fix: WIKI_SUBDIRS lives at kb.utils.pages:16, not kb.config.
+        The design-decision doc was inaccurate; the actual import in analyzer.py:20 is
+        ``from kb.utils.pages import WIKI_SUBDIRS, page_id, scan_wiki_pages``.
+        """
+        from kb.evolve import analyzer
+        from kb.utils import pages as pages_mod
+
+        # Identity check: analyzer module imports WIKI_SUBDIRS from kb.utils.pages
+        assert analyzer.WIKI_SUBDIRS is pages_mod.WIKI_SUBDIRS
 
 
 # ── Fix 1.8: _page_id lowercase ─────────────────────────────────

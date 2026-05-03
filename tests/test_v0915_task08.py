@@ -359,26 +359,18 @@ class TestFrontmatterRegex:
         """
         from kb.evolve.analyzer import _FRONTMATTER_RE
 
-        # Divergence reproducer: old regex would match this (greedy whitespace)
-        # New shared regex requires `---` at column 0
-        leading_ws_input = "
----
-foo: bar
----
-body"
+        # Divergence reproducer: old regex `\A\s*---` would match this (greedy whitespace);
+        # new shared regex requires `---` at column 0 (no leading whitespace).
+        leading_ws_input = "\n---\nfoo: bar\n---\nbody"
 
-        # New shared regex: does NOT match (leading 
- violates \A---)
+        # New shared regex: does NOT match (leading newline violates \A---)
         assert _FRONTMATTER_RE.match(leading_ws_input) is None, (
             "FRONTMATTER_RE should reject leading whitespace. If this fails, "
             "Phase 4.5 HIGH P3 consolidation has been regressed."
         )
 
         # Verify shared regex works on canonical input (no leading whitespace)
-        canonical = "---
-foo: bar
----
-body"
+        canonical = "---\nfoo: bar\n---\nbody"
         assert _FRONTMATTER_RE.match(canonical) is not None, (
             "FRONTMATTER_RE should match canonical frontmatter"
         )
