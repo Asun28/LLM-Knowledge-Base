@@ -831,3 +831,4 @@ def test_rotate_if_oversized_ordinal_collision(tmp_path: Path) -> None:
     assert (tmp_path / f"{stem}.2.jsonl").exists(), (
         f"Expected ordinal .2 archive; got {list(tmp_path.iterdir())}"
     )
+

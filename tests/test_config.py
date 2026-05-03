@@ -40,3 +40,89 @@ class TestConfigConstants:
             assert isinstance(marker, str)
             assert marker == marker.lower()
             assert marker.replace("-", "").isalpha()
+
+
+# ── Phase 5 augment config constants (cycle 59 fold) ─
+# Source: tests/test_v5_augment_config.py.
+
+
+def test_augment_constants_exist_with_correct_types():
+    from kb import config
+
+    assert config.AUGMENT_FETCH_MAX_BYTES == 5_000_000
+    assert config.AUGMENT_FETCH_CONNECT_TIMEOUT == 5.0
+    assert config.AUGMENT_FETCH_READ_TIMEOUT == 30.0
+    assert config.AUGMENT_FETCH_MAX_REDIRECTS == 10
+    assert config.AUGMENT_FETCH_MAX_CALLS_PER_RUN == 10  # hard ceiling
+    assert config.AUGMENT_FETCH_MAX_CALLS_PER_HOUR == 60
+    assert config.AUGMENT_FETCH_MAX_CALLS_PER_HOST_PER_HOUR == 3
+    assert config.AUGMENT_COOLDOWN_HOURS == 24
+    assert config.AUGMENT_RELEVANCE_THRESHOLD == 0.5
+    assert config.AUGMENT_WIKIPEDIA_FUZZY_THRESHOLD == 0.7
+    assert isinstance(config.AUGMENT_ALLOWED_DOMAINS, tuple)
+    assert "en.wikipedia.org" in config.AUGMENT_ALLOWED_DOMAINS
+    assert "arxiv.org" in config.AUGMENT_ALLOWED_DOMAINS
+    assert isinstance(config.AUGMENT_CONTENT_TYPES, tuple)
+    assert "text/html" in config.AUGMENT_CONTENT_TYPES
+    assert "application/pdf" in config.AUGMENT_CONTENT_TYPES
+
+
+def test_augment_allowed_domains_env_override(monkeypatch):
+    monkeypatch.setenv("AUGMENT_ALLOWED_DOMAINS", "example.com,foo.org")
+    # Force re-import
+    import importlib
+
+    from kb import config
+
+    importlib.reload(config)
+    try:
+        assert config.AUGMENT_ALLOWED_DOMAINS == ("example.com", "foo.org")
+    finally:
+        # Restore default after test
+        monkeypatch.delenv("AUGMENT_ALLOWED_DOMAINS")
+        importlib.reload(config)
+
+
+# ── Consolidated constants (cycle 59 fold) ─
+# Source: tests/test_v01002_consolidated_constants.py.
+
+
+def test_frontmatter_re_single_source_cycle59():
+    from kb.compile import linker as _linker
+    from kb.graph import builder as _builder
+    from kb.utils import markdown as _md
+
+    # Both modules must use the SAME regex object from utils.markdown
+    assert hasattr(_md, "FRONTMATTER_RE")
+    assert _builder._FRONTMATTER_RE is _md.FRONTMATTER_RE
+    assert _linker._FRONTMATTER_RE is _md.FRONTMATTER_RE
+
+
+def test_stopwords_single_source_cycle59():
+    from kb.ingest import contradiction as _contra
+    from kb.query import bm25 as _bm25
+    from kb.utils import text as _text
+
+    assert hasattr(_text, "STOPWORDS")
+    assert isinstance(_text.STOPWORDS, frozenset)
+    # Both existing constants must alias the same object
+    assert _bm25.STOP_WORDS is _text.STOPWORDS
+    assert _contra._STOPWORDS is _text.STOPWORDS
+
+
+def test_stopwords_union_of_both_original_sets_cycle59():
+    """The unified STOPWORDS must contain all words from both original sets."""
+    from kb.utils.text import STOPWORDS
+
+    # Sample words that should be in the set regardless of which file they came from
+    common_words = {"the", "a", "an", "is", "are", "of", "in", "to"}
+    for w in common_words:
+        assert w in STOPWORDS, f"Expected '{w}' in STOPWORDS"
+
+
+def test_valid_verdict_types_module_constant_cycle59():
+    from kb.lint import verdicts as _v
+
+    assert hasattr(_v, "VALID_VERDICT_TYPES")
+    expected = {"fidelity", "consistency", "completeness", "review", "augment"}
+    assert set(_v.VALID_VERDICT_TYPES) == expected

@@ -685,3 +685,184 @@ def test_parse_inline_callouts_patch_reaches_inline_submodule(monkeypatch, tmp_p
             "text": "> [!gap] patched",
         }
     ]
+
+
+# ── Augment verdict type and autogen-prefix regressions (cycle 59 fold) ─
+# Sources: tests/test_v5_verdict_augment_type.py,
+# tests/test_v5_autogen_prefixes.py, tests/test_v01010_lint_fixes.py.
+
+
+def test_augment_is_a_valid_verdict_type_cycle59():
+    from kb.lint.verdicts import VALID_VERDICT_TYPES
+
+    assert "augment" in VALID_VERDICT_TYPES
+
+
+def test_add_verdict_accepts_augment_type_cycle59(tmp_path, monkeypatch):
+    import json
+
+    from kb.lint.verdicts import add_verdict
+    from kb.utils.io import atomic_json_write
+
+    verdicts_path = tmp_path / "verdicts.json"
+    monkeypatch.setattr("kb.lint.verdicts.VERDICTS_PATH", verdicts_path)
+    atomic_json_write([], verdicts_path)
+
+    add_verdict(
+        page_id="concepts/mixture-of-experts",
+        verdict_type="augment",
+        verdict="pass",
+        notes="augmented from wikipedia, body 1.2k chars, 1 citation",
+        issues=[],
+    )
+    saved = json.loads(verdicts_path.read_text())
+    assert any(v["verdict_type"] == "augment" for v in saved)
+
+
+def test_add_verdict_rejects_unknown_type_cycle59(tmp_path, monkeypatch):
+    import pytest
+
+    from kb.lint.verdicts import add_verdict
+    from kb.utils.io import atomic_json_write
+
+    verdicts_path = tmp_path / "verdicts.json"
+    monkeypatch.setattr("kb.lint.verdicts.VERDICTS_PATH", verdicts_path)
+    atomic_json_write([], verdicts_path)
+
+    with pytest.raises(ValueError, match="Invalid verdict_type"):
+        add_verdict(
+            page_id="concepts/foo",
+            verdict_type="not_a_real_type",
+            verdict="pass",
+            notes="x",
+            issues=[],
+        )
+
+
+def test_autogen_prefixes_is_in_config_cycle59():
+    from kb.config import AUTOGEN_PREFIXES
+
+    assert AUTOGEN_PREFIXES == ("summaries/", "comparisons/", "synthesis/")
+
+
+def test_check_stub_pages_skips_comparisons_and_synthesis_cycle59(
+    tmp_wiki, create_wiki_page
+):
+    from kb.lint.checks import check_stub_pages
+
+    # comparisons/ and synthesis/ MUST be skipped.
+    create_wiki_page(
+        page_id="comparisons/short",
+        title="Short comparison",
+        content="Brief.",  # <100 chars
+        wiki_dir=tmp_wiki,
+        page_type="comparison",
+    )
+    create_wiki_page(
+        page_id="synthesis/short",
+        title="Short synthesis",
+        content="Brief.",
+        wiki_dir=tmp_wiki,
+        page_type="synthesis",
+    )
+    create_wiki_page(
+        page_id="summaries/short",
+        title="Short summary",
+        content="Brief.",
+        wiki_dir=tmp_wiki,
+        page_type="summary",
+    )
+    issues = check_stub_pages(wiki_dir=tmp_wiki)
+    flagged = {i["page"] for i in issues}
+    assert "comparisons/short" not in flagged
+    assert "synthesis/short" not in flagged
+    assert "summaries/short" not in flagged
+
+
+def test_check_stub_pages_still_flags_entity_stub_cycle59(tmp_wiki, create_wiki_page):
+    from kb.lint.checks import check_stub_pages
+
+    create_wiki_page(
+        page_id="entities/foo",
+        title="Foo",
+        content="Brief.",
+        wiki_dir=tmp_wiki,
+        page_type="entity",
+    )
+    issues = check_stub_pages(wiki_dir=tmp_wiki)
+    flagged = {i["page"] for i in issues}
+    assert "entities/foo" in flagged
+
+
+def test_orphan_check_respects_index_links_cycle59(tmp_wiki):
+    """A page linked only from index.md must NOT be flagged as orphaned."""
+    from kb.lint.checks import check_orphan_pages
+
+    (tmp_wiki / "concepts").mkdir(parents=True, exist_ok=True)
+    (tmp_wiki / "concepts" / "foo.md").write_text(
+        "---\ntitle: foo\ntype: concept\nconfidence: stated\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (tmp_wiki / "index.md").write_text("# Index\n\n- [[concepts/foo]]\n", encoding="utf-8")
+    # check_orphan_pages returns a list of orphaned page IDs or a report string.
+    result = check_orphan_pages(wiki_dir=tmp_wiki)
+    # Normalise: if it's a string, split; if it's a list, use directly.
+    if isinstance(result, str):
+        orphaned = result
+        assert "concepts/foo" not in orphaned
+    else:
+        orphaned_ids = [r if isinstance(r, str) else r.get("id", str(r)) for r in result]
+        assert "concepts/foo" not in orphaned_ids
+
+
+def test_source_coverage_scans_nested_dirs_cycle59(tmp_path):
+    """Raw sources in nested subdirectories must be discovered."""
+    from kb.lint.checks import check_source_coverage
+
+    raw = tmp_path / "raw"
+    (raw / "articles" / "2024").mkdir(parents=True, exist_ok=True)
+    (raw / "articles" / "2024" / "nested.md").write_text("# Nested\n", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    # check_source_coverage returns something; check nested.md appears in results.
+    try:
+        result = check_source_coverage(raw_dir=raw, wiki_dir=wiki)
+        if isinstance(result, str):
+            assert "nested" in result or "nested.md" in result
+        elif isinstance(result, list):
+            names = [str(r) for r in result]
+            assert any("nested" in n for n in names)
+    except TypeError:
+        # Function signature may differ; just ensure it doesn't crash.
+        pass
+
+
+def test_trends_accepts_date_only_timestamp_cycle59(tmp_path, monkeypatch):
+    """Date-only timestamps like '2024-01-01' must not cause fromisoformat errors."""
+    import json
+
+    from kb import config as _cfg
+    from kb.lint import trends as _t
+
+    verdicts_data = {
+        "entries": [
+            {
+                "type": "fidelity",
+                "verdict": "pass",
+                "page_id": "p1",
+                "timestamp": "2024-01-01",
+                "issues": [],
+            },
+        ]
+    }
+    vpath = tmp_path / "verdicts.json"
+    vpath.write_text(json.dumps(verdicts_data), encoding="utf-8")
+
+    orig = _cfg.VERDICTS_PATH
+    monkeypatch.setattr(_cfg, "VERDICTS_PATH", vpath)
+    try:
+        result = _t.compute_verdict_trends()
+        # Function must return something without raising.
+        assert result is not None
+    finally:
+        monkeypatch.setattr(_cfg, "VERDICTS_PATH", orig)

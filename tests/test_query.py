@@ -425,3 +425,632 @@ def test_tier1_budget_for_is_called(monkeypatch):
     assert "wiki_pages" in spy_calls, (
         f"expected tier1_budget_for('wiki_pages') call; got {spy_calls}"
     )
+
+
+# ── Phase 4 query rewriter (cycle 59 fold) ─
+# Source: tests/test_v0917_rewriter.py.
+
+from kb.query.rewriter import rewrite_query as _cycle59_rewrite_query  # noqa: E402
+
+
+class TestRewriteQueryCycle59:
+    def test_standalone_query_unchanged(self):
+        result = _cycle59_rewrite_query("What is a transformer?", conversation_context="")
+        assert result == "What is a transformer?"
+
+    def test_returns_string(self):
+        # Mock call_llm so this test does not require a real API key.
+        # The question has a deictic word ("it") which triggers _should_rewrite.
+        with patch("kb.query.rewriter.call_llm", return_value="How does attention work?"):
+            result = _cycle59_rewrite_query(
+                "How does it work?",
+                conversation_context="User asked about attention mechanisms in transformers.",
+            )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_no_context_returns_original(self):
+        result = _cycle59_rewrite_query("Tell me more", conversation_context=None)
+        assert result == "Tell me more"
+
+    def test_empty_query(self):
+        result = _cycle59_rewrite_query("", conversation_context="some context")
+        assert result == ""
+
+
+# ── Raw-source fallback retrieval (cycle 59 fold) ─
+# Source: tests/test_v0917_raw_fallback.py.
+
+from kb.query.engine import search_raw_sources as _cycle59_search_raw_sources  # noqa: E402
+
+
+class TestSearchRawSourcesCycle59:
+    def test_finds_matching_raw_file(self, tmp_project, create_raw_source):
+        create_raw_source(
+            "raw/articles/attention.md", "The attention mechanism computes...", tmp_project
+        )
+        results = _cycle59_search_raw_sources(
+            "attention mechanism", raw_dir=tmp_project / "raw", max_results=5
+        )
+        assert len(results) >= 1
+        assert any("attention" in r["id"] for r in results)
+
+    def test_returns_empty_for_no_match(self, tmp_project, create_raw_source):
+        create_raw_source("raw/articles/unrelated.md", "Nothing relevant.", tmp_project)
+        results = _cycle59_search_raw_sources(
+            "quantum computing entanglement", raw_dir=tmp_project / "raw", max_results=5
+        )
+        assert len(results) == 0
+
+    def test_result_has_expected_keys(self, tmp_project, create_raw_source):
+        create_raw_source("raw/articles/test.md", "Test content about transformers.", tmp_project)
+        results = _cycle59_search_raw_sources(
+            "transformers", raw_dir=tmp_project / "raw", max_results=5
+        )
+        if results:
+            r = results[0]
+            assert "id" in r
+            assert "content" in r
+            assert "score" in r
+            assert r["id"].startswith("raw/")
+
+
+# ── Layered context assembly (cycle 59 fold) ─
+# Source: tests/test_v0917_layered_context.py.
+
+from kb.query.engine import _build_query_context as _cycle59_build_query_context  # noqa: E402
+
+
+def _cycle59_page(pid, content, ptype="concept"):
+    return {
+        "id": pid,
+        "title": pid.split("/")[-1].replace("-", " ").title(),
+        "type": ptype,
+        "confidence": "stated",
+        "content": content,
+    }
+
+
+class TestLayeredContextAssemblyCycle59:
+    def test_short_content_fits_entirely(self):
+        pages = [_cycle59_page("concepts/a", "Short content.")]
+        ctx = _cycle59_build_query_context(pages, max_chars=10000)
+        assert "concepts/a" in ctx["context"]
+        assert "Short content." in ctx["context"]
+
+    def test_summaries_prioritized_in_tier1(self):
+        pages = [
+            _cycle59_page("concepts/big", "x" * 5000, "concept"),
+            _cycle59_page("summaries/small", "summary text", "summary"),
+        ]
+        ctx = _cycle59_build_query_context(pages, max_chars=6000)
+        # Both should fit within 6000 chars
+        assert "summaries/small" in ctx["context_pages"]
+
+    def test_budget_respected(self):
+        pages = [_cycle59_page(f"concepts/p{i}", "x" * 2000) for i in range(20)]
+        ctx = _cycle59_build_query_context(pages, max_chars=5000)
+        assert len(ctx["context"]) <= 5500  # Allow small header overhead
+
+    def test_empty_pages(self):
+        ctx = _cycle59_build_query_context([], max_chars=10000)
+        assert ctx["context_pages"] == []
+
+    def test_returns_context_pages_list(self):
+        pages = [
+            _cycle59_page("concepts/a", "Content A"),
+            _cycle59_page("concepts/b", "Content B"),
+        ]
+        ctx = _cycle59_build_query_context(pages, max_chars=10000)
+        assert "concepts/a" in ctx["context_pages"]
+        assert "concepts/b" in ctx["context_pages"]
+
+
+# ── RRF fusion and hybrid search (cycle 59 fold) ─
+# Source: tests/test_v0917_hybrid.py.
+
+from kb.query.hybrid import rrf_fusion as _cycle59_rrf_fusion  # noqa: E402
+
+
+class TestRRFFusionCycle59:
+    def test_single_list(self):
+        results = [
+            {"id": "a", "score": 10.0},
+            {"id": "b", "score": 5.0},
+        ]
+        fused = _cycle59_rrf_fusion([results])
+        assert len(fused) == 2
+        assert fused[0]["id"] == "a"  # Rank 0 -> 1/(60+0) > 1/(60+1)
+
+    def test_two_lists_same_order(self):
+        list1 = [{"id": "a", "score": 10.0}, {"id": "b", "score": 5.0}]
+        list2 = [{"id": "a", "score": 0.9}, {"id": "b", "score": 0.5}]
+        fused = _cycle59_rrf_fusion([list1, list2])
+        assert fused[0]["id"] == "a"  # Appears rank 0 in both lists
+
+    def test_two_lists_disjoint(self):
+        list1 = [{"id": "a", "score": 10.0}]
+        list2 = [{"id": "b", "score": 0.9}]
+        fused = _cycle59_rrf_fusion([list1, list2])
+        assert len(fused) == 2
+        # Both at rank 0 in their list, so equal RRF score; either order OK.
+        ids = {r["id"] for r in fused}
+        assert ids == {"a", "b"}
+
+    def test_boosted_by_multiple_lists(self):
+        list1 = [{"id": "a", "score": 10.0}, {"id": "b", "score": 5.0}]
+        list2 = [{"id": "b", "score": 0.9}, {"id": "c", "score": 0.5}]
+        fused = _cycle59_rrf_fusion([list1, list2])
+        # b appears in both lists (rank 1 + rank 0) so gets boosted
+        b_score = next(r["score"] for r in fused if r["id"] == "b")
+        c_score = next(r["score"] for r in fused if r["id"] == "c")
+        assert b_score > c_score
+
+    def test_empty_lists(self):
+        assert _cycle59_rrf_fusion([]) == []
+        assert _cycle59_rrf_fusion([[], []]) == []
+
+    def test_rrf_scores_are_positive(self):
+        results = [{"id": "a", "score": 1.0}]
+        fused = _cycle59_rrf_fusion([results])
+        assert all(r["score"] > 0 for r in fused)
+
+
+# ── Embedding wrapper and vector index (cycle 59 fold) ─
+# Source: tests/test_v0917_embeddings.py.
+
+class TestEmbedTextsCycle59:
+    def test_returns_array_for_single_text(self):
+        from kb.query.embeddings import embed_texts
+
+        vecs = embed_texts(["hello world"])
+        assert len(vecs) == 1
+        assert len(vecs[0]) > 0
+
+    def test_returns_consistent_dims(self):
+        from kb.query.embeddings import embed_texts
+
+        vecs = embed_texts(["first text", "second text", "third text"])
+        assert len(vecs) == 3
+        dims = {len(v) for v in vecs}
+        assert len(dims) == 1  # All same dimension
+
+    def test_empty_input(self):
+        from kb.query.embeddings import embed_texts
+
+        vecs = embed_texts([])
+        assert vecs == []
+
+
+class TestVectorIndexCycle59:
+    def test_build_and_query(self, tmp_path):
+        from kb.query.embeddings import VectorIndex
+
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build(
+            [
+                ("concepts/a", [1.0, 0.0, 0.0]),
+                ("concepts/b", [0.0, 1.0, 0.0]),
+                ("concepts/c", [0.9, 0.1, 0.0]),
+            ]
+        )
+        results = idx.query([1.0, 0.0, 0.0], limit=2)
+        assert len(results) == 2
+        # Closest match first
+        assert results[0][0] == "concepts/a"
+        # Second should be concepts/c (most similar to [1,0,0])
+        assert results[1][0] == "concepts/c"
+
+    def test_query_returns_page_id_and_distance(self, tmp_path):
+        from kb.query.embeddings import VectorIndex
+
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build([("concepts/a", [1.0, 0.0])])
+        results = idx.query([1.0, 0.0], limit=1)
+        assert len(results) == 1
+        page_id, distance = results[0]
+        assert isinstance(page_id, str)
+        assert isinstance(distance, float)
+
+    def test_empty_index(self, tmp_path):
+        from kb.query.embeddings import VectorIndex
+
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build([])
+        results = idx.query([1.0, 0.0], limit=5)
+        assert results == []
+
+
+# ── Phase 4 query correctness fixes (cycle 59 fold) ─
+# Source: tests/test_v01004_query_correctness.py.
+
+
+def test_citation_rejects_double_dot_midcomponent_cycle59():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw/a..b/page]."
+    cites = extract_citations(text)
+    assert cites == [], f"Expected empty but got {cites}"
+
+
+def test_citation_rejects_empty_component_cycle59():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw//page]."
+    assert extract_citations(text) == []
+
+
+def test_citation_accepts_valid_path_cycle59():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw/articles/my-paper.md]."
+    cites = extract_citations(text)
+    assert len(cites) == 1
+
+
+def test_rewrite_query_falls_back_on_overlong_output_cycle59(monkeypatch):
+    """LLM preamble must trigger fallback to original question."""
+    from kb.query import rewriter as _rw
+
+    def _fake_llm(prompt, tier="scan", **kwargs):
+        return "The question asks about X. Standalone version: What is RAG?"
+
+    monkeypatch.setattr(_rw, "call_llm", _fake_llm)
+    out = _rw.rewrite_query("What is RAG?", conversation_context="user: earlier\nassistant: ok")
+    # Fallback: output is > 3x len of original, so use original
+    assert out == "What is RAG?"
+
+
+def test_rewrite_query_skip_heuristic_detects_deictic_cycle59():
+    """'Tell me more about that approach' must NOT be skipped."""
+    from kb.query import rewriter as _rw
+
+    assert _rw._should_rewrite("Tell me more about that approach") is True
+    assert _rw._should_rewrite("What is retrieval augmented generation system") is False
+
+
+def test_bm25_empty_corpus_logs_debug_not_warning_cycle59(caplog):
+    import logging
+
+    from kb.query.bm25 import BM25Index
+
+    # BM25Index takes list of token lists; pass one doc with no tokens -> avgdl=0
+    with caplog.at_level(logging.DEBUG, logger="kb.query.bm25"):
+        BM25Index(documents=[[]])
+
+    # Must have no WARNING records about avgdl
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    avgdl_warnings = [
+        r for r in warning_records if "avgdl" in r.message.lower() or "avg" in r.message.lower()
+    ]
+    assert avgdl_warnings == [], f"Unexpected avgdl warning: {avgdl_warnings}"
+
+
+# ── Phase 4 query perf and doc fixes (cycle 59 fold) ─
+# Source: tests/test_v01005_query_perf_docs.py.
+
+
+def test_get_vector_index_function_exists_cycle59():
+    from kb.query import embeddings as _em
+
+    assert callable(getattr(_em, "get_vector_index", None)), "get_vector_index must exist"
+
+
+def test_reset_model_function_exists_cycle59():
+    from kb.query import embeddings as _em
+
+    assert callable(getattr(_em, "_reset_model", None)), "_reset_model must exist"
+
+
+def test_get_vector_index_caches_instance_cycle59(monkeypatch, tmp_path):
+    """Two calls with the same path must return the same object."""
+    from kb.query import embeddings as _em
+
+    build_count = {"n": 0}
+
+    class _FakeIdx:
+        def __init__(self, path):
+            build_count["n"] += 1
+
+        def query(self, vec, top_k=10):
+            return []
+
+    monkeypatch.setattr(_em, "VectorIndex", _FakeIdx)
+    _em._reset_model()  # clear cache
+
+    vec_path = str(tmp_path / "fake.vec")
+    _em.get_vector_index(vec_path)
+    _em.get_vector_index(vec_path)
+    assert build_count["n"] == 1, f"Expected 1 VectorIndex build, got {build_count['n']}"
+
+
+def test_dedup_jaccard_strips_wikilinks_cycle59():
+    """Pages sharing only wikilink markup must not be incorrectly deduped."""
+    from kb.query.dedup import _dedup_by_text_similarity
+
+    # Both pages share wikilinks but have different actual content
+    pages = [
+        {
+            "id": "p1",
+            "content_lower": "[[entities/foo]] [[concepts/bar]] quantum computing entanglement",
+            "bm25_score": 10,
+        },
+        {
+            "id": "p2",
+            "content_lower": "[[entities/foo]] [[concepts/bar]] classical ml gradient descent",
+            "bm25_score": 9,
+        },
+    ]
+    out = _dedup_by_text_similarity(pages, threshold=0.85)
+    # After stripping wikilink tokens, content is different; both should be kept
+    assert len(out) == 2, f"Expected 2 pages, got {len(out)}: {[p['id'] for p in out]}"
+
+
+def test_mcp_core_logs_trust_merge_failure_cycle59(monkeypatch, caplog):
+    """Silent trust merge exception must now emit a debug log."""
+    from pathlib import Path
+
+    from kb.mcp import core as _core
+
+    src_text = Path(_core.__file__).read_text(encoding="utf-8")
+    # Verify there's a debug log call in the vicinity of the trust merge except block
+    assert "logger.debug" in src_text, "Expected logger.debug call in core.py"
+    # The specific trust-merge error path; verify it's present
+    assert "Trust score" in src_text or "trust" in src_text.lower()
+
+
+# ── Stale truth flagging at query time (cycle 59 fold) ─
+# Source: tests/test_v0917_stale_query.py.
+
+
+class TestFlagStaleResultsCycle59:
+    def test_flags_page_with_newer_source(self, tmp_project, create_wiki_page, create_raw_source):
+        from datetime import timedelta as _timedelta
+
+        old_date = (date.today() - _timedelta(days=30)).isoformat()
+        create_wiki_page(
+            page_id="concepts/stale-topic",
+            title="Stale Topic",
+            content="Old content.",
+            source_ref="raw/articles/new-source.md",
+            updated=old_date,
+            wiki_dir=tmp_project / "wiki",
+        )
+        # Create a raw source that is "newer" (mtime is now)
+        create_raw_source("raw/articles/new-source.md", "Updated content.", tmp_project)
+
+        results = [
+            {
+                "id": "concepts/stale-topic",
+                "sources": ["raw/articles/new-source.md"],
+                "updated": old_date,
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results, project_root=tmp_project)
+        assert flagged[0].get("stale") is True
+
+    def test_does_not_flag_fresh_page(self, tmp_project, create_wiki_page, create_raw_source):
+        import time as _time_module
+
+        today = date.today().isoformat()
+        create_wiki_page(
+            page_id="concepts/fresh-topic",
+            title="Fresh Topic",
+            content="Fresh content.",
+            source_ref="raw/articles/old-source.md",
+            updated=today,
+            wiki_dir=tmp_project / "wiki",
+        )
+        source_path = create_raw_source("raw/articles/old-source.md", "Source.", tmp_project)
+        # Backdate the source file mtime to before the page updated date
+        old_ts = _time_module.time() - 86400 * 60
+        os.utime(source_path, (old_ts, old_ts))
+
+        results = [
+            {
+                "id": "concepts/fresh-topic",
+                "sources": ["raw/articles/old-source.md"],
+                "updated": today,
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results, project_root=tmp_project)
+        assert flagged[0].get("stale") is False
+
+    def test_handles_missing_source_gracefully(self):
+        results = [
+            {
+                "id": "concepts/orphan",
+                "sources": ["raw/articles/nonexistent.md"],
+                "updated": date.today().isoformat(),
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results)
+        assert flagged[0].get("stale") is False
+
+    def test_handles_no_sources(self):
+        results = [{"id": "concepts/no-src", "sources": [], "updated": "2026-04-12", "score": 1.0}]
+        flagged = _flag_stale_results(results)
+        assert flagged[0].get("stale") is False
+
+
+# ── 4-layer search dedup pipeline (cycle 59 fold) ─
+# Source: tests/test_v0917_dedup.py.
+
+from kb.query.dedup import dedup_results as _cycle59_dedup_results  # noqa: E402
+
+
+def _cycle59_result(page_id, score, page_type="concept", text="some content here"):
+    return {"id": page_id, "score": score, "type": page_type, "content_lower": text}
+
+
+class TestDedupBySourceCycle59:
+    def test_keeps_highest_score_per_page(self):
+        results = [
+            _cycle59_result("concepts/a", 5.0),
+            _cycle59_result("concepts/a", 3.0),
+            _cycle59_result("concepts/b", 4.0),
+        ]
+        deduped = _cycle59_dedup_results(results)
+        ids = [r["id"] for r in deduped]
+        assert ids.count("concepts/a") == 1
+        assert deduped[0]["score"] == 5.0
+
+    def test_preserves_order_by_score(self):
+        results = [
+            _cycle59_result("concepts/a", 5.0),
+            _cycle59_result("concepts/b", 3.0),
+            _cycle59_result("concepts/c", 1.0),
+        ]
+        deduped = _cycle59_dedup_results(results)
+        scores = [r["score"] for r in deduped]
+        assert scores == sorted(scores, reverse=True)
+
+
+class TestDedupByTextSimilarityCycle59:
+    def test_removes_near_duplicate_text(self):
+        results = [
+            _cycle59_result(
+                "concepts/a", 5.0, text="the transformer architecture uses attention"
+            ),
+            _cycle59_result(
+                "concepts/b", 4.0, text="the transformer architecture uses attention mechanisms"
+            ),
+        ]
+        deduped = _cycle59_dedup_results(results, jaccard_threshold=0.7)
+        assert len(deduped) == 1
+        assert deduped[0]["id"] == "concepts/a"  # Higher score kept
+
+    def test_keeps_different_content(self):
+        results = [
+            _cycle59_result(
+                "concepts/a", 5.0, text="transformers use self-attention mechanisms"
+            ),
+            _cycle59_result(
+                "concepts/b", 4.0, text="recurrent neural networks process sequences"
+            ),
+        ]
+        deduped = _cycle59_dedup_results(results)
+        assert len(deduped) == 2
+
+
+class TestDedupByTypeDiversityCycle59:
+    def test_caps_single_type(self):
+        results = [_cycle59_result(f"entities/e{i}", 10 - i, "entity") for i in range(10)]
+        results.append(_cycle59_result("concepts/c1", 0.5, "concept"))
+        deduped = _cycle59_dedup_results(results, max_type_ratio=0.6)
+        entity_count = sum(1 for r in deduped if r["type"] == "entity")
+        total = len(deduped)
+        assert entity_count <= int(total * 0.6) + 1  # Allow rounding
+
+
+class TestDedupPerPageCapCycle59:
+    def test_caps_results_per_page(self):
+        results = [
+            _cycle59_result("concepts/a", 5.0, text="first chunk about topic"),
+            _cycle59_result("concepts/a", 4.5, text="second chunk about topic"),
+            _cycle59_result("concepts/a", 4.0, text="third chunk about topic"),
+        ]
+        deduped = _cycle59_dedup_results(results, max_per_page=2)
+        a_count = sum(1 for r in deduped if r["id"] == "concepts/a")
+        assert a_count <= 2
+
+
+class TestDedupEndToEndCycle59:
+    def test_empty_input(self):
+        assert _cycle59_dedup_results([]) == []
+
+    def test_single_result(self):
+        results = [_cycle59_result("concepts/a", 5.0)]
+        assert len(_cycle59_dedup_results(results)) == 1
+
+
+# ── Query markdown output adapter (cycle 59 fold) ─
+# Source: tests/test_v4_11_markdown.py.
+
+import yaml as _cycle59_yaml  # noqa: E402
+
+from kb.query.formats.markdown import render_markdown as _cycle59_render_markdown  # noqa: E402
+
+
+@pytest.fixture
+def cycle59_sample_result():
+    return {
+        "question": "What is compile-not-retrieve?",
+        "answer": "Compile-not-retrieve is a philosophy where...",
+        "citations": [
+            {"type": "wiki", "path": "concepts/compile-not-retrieve", "context": "..."},
+            {"type": "wiki", "path": "entities/karpathy", "context": "..."},
+        ],
+        "source_pages": ["concepts/compile-not-retrieve", "entities/karpathy"],
+        "context_pages": ["concepts/compile-not-retrieve"],
+    }
+
+
+def test_markdown_has_frontmatter_cycle59(cycle59_sample_result):
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    assert out.startswith("---\n")
+    parts = out.split("---\n", 2)
+    assert len(parts) >= 3
+    fm = _cycle59_yaml.safe_load(parts[1])
+    assert fm["type"] == "query_output"
+    assert fm["format"] == "markdown"
+    assert fm["query"] == "What is compile-not-retrieve?"
+    assert "generated_at" in fm
+
+
+def test_markdown_embeds_answer_cycle59(cycle59_sample_result):
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    assert "Compile-not-retrieve is a philosophy where..." in out
+
+
+def test_markdown_renders_wiki_sources_cycle59(cycle59_sample_result):
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    assert "[[concepts/compile-not-retrieve]]" in out
+    assert "[[entities/karpathy]]" in out
+
+
+def test_markdown_h1_is_question_cycle59(cycle59_sample_result):
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    assert "# What is compile-not-retrieve?" in out
+
+
+def test_markdown_no_citations_cycle59(cycle59_sample_result):
+    cycle59_sample_result["citations"] = []
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    assert "**Sources:**" not in out
+
+
+def test_markdown_kb_version_from_module_cycle59(cycle59_sample_result):
+    import kb
+
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    parts = out.split("---\n", 2)
+    fm = _cycle59_yaml.safe_load(parts[1])
+    assert fm["kb_version"] == kb.__version__
+
+
+def test_markdown_handles_quotes_in_question_cycle59(cycle59_sample_result):
+    cycle59_sample_result["question"] = 'What about "quoted" text?'
+    out = _cycle59_render_markdown(cycle59_sample_result)
+    parts = out.split("---\n", 2)
+    fm = _cycle59_yaml.safe_load(parts[1])
+    assert fm["query"] == 'What about "quoted" text?'
+
+
+def test_markdown_rejects_oversize_cycle59():
+    from kb.config import MAX_OUTPUT_CHARS
+
+    oversize = {
+        "question": "q",
+        "answer": "x" * (MAX_OUTPUT_CHARS + 1),
+        "citations": [],
+        "source_pages": [],
+    }
+    with pytest.raises(ValueError, match="MAX_OUTPUT_CHARS"):
+        _cycle59_render_markdown(oversize)
