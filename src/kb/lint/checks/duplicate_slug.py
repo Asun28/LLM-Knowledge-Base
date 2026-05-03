@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from kb.config import DUPLICATE_SLUG_ALLOWLIST, DUPLICATE_SLUG_DISTANCE_THRESHOLD
+from kb.config import DUPLICATE_SLUG_DISTANCE_THRESHOLD, _get_duplicate_slug_allowlist
 from kb.lint import checks
 from kb.utils.pages import page_id, scan_wiki_pages
 
@@ -58,7 +58,7 @@ def _slug_for_duplicate(page: Path, wiki_dir: Path) -> str:
 
 def _is_allowlisted_pair(slug_a: str, slug_b: str) -> bool:
     """Return True for near-slug pairs known to represent distinct concepts."""
-    return frozenset((slug_a, slug_b)) in DUPLICATE_SLUG_ALLOWLIST
+    return frozenset((slug_a, slug_b)) in _get_duplicate_slug_allowlist()
 
 
 def check_duplicate_slugs(
