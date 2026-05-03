@@ -644,6 +644,7 @@ def rebuild_indexes(
     *,
     hash_manifest: Path | None = None,
     vector_db: Path | None = None,
+    caller: str = "cli",
 ) -> dict:
     """Wipe derived indices so the next compile/query regenerates from source.
 
@@ -806,7 +807,7 @@ def rebuild_indexes(
         f"caches_cleared={len(result['caches_cleared'])}"
     )
     try:
-        append_wiki_log("rebuild-indexes", msg, log_path)
+        append_wiki_log("rebuild-indexes", msg, log_path, caller=caller)
         result["audit_written"] = True
     except OSError as e:
         logger.warning("rebuild_indexes: audit write to %s failed: %s", log_path, e)
