@@ -299,3 +299,31 @@ def kb_detect_drift(wiki_dir: str | None = None) -> str:
         )
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+def kb_rebuild_indexes(wiki_dir: str | None = None) -> dict:
+    """Wipe derived indices (manifest, vector DB, LRU caches) so next compile regenerates.
+
+    Calls compiler.rebuild_indexes with caller="mcp" for audit-trail traceability (AC22).
+
+    Args:
+        wiki_dir: Override wiki directory (default: kb.config.WIKI_DIR).
+
+    Returns:
+        Dict with keys: manifest, vector, caches_cleared, audit_written.
+        Each of manifest/vector has {cleared: bool, error: str|None}.
+        On invalid wiki_dir or exception, returns {"error": "..."}  (non-traceback).
+    """
+    from kb.compile.compiler import rebuild_indexes
+
+    wiki_path, err = _validate_health_wiki_dir(wiki_dir)
+    if err:
+        return {"error": err}
+
+    try:
+        result = rebuild_indexes(wiki_dir=wiki_path, caller="mcp")
+        return result
+    except Exception as e:
+        logger.exception("kb_rebuild_indexes failed")
+        return {"error": f"Error: kb_rebuild_indexes failed: {type(e).__name__}: {sanitize_error_text(e)}"}
