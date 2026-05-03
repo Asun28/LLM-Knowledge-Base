@@ -518,11 +518,16 @@ def test_tmp_kb_env_rebinds_preimported_config_consumers(request):
     assert _is_under(capture._project_resolved, project)
 
 
-def test_tmp_kb_env_is_not_autouse(tmp_project):
-    import kb.config as config
-
-    assert config.PROJECT_ROOT != tmp_project
-    assert config.PROJECT_ROOT == Path(__file__).resolve().parents[1]
+# Cycle 64 AC1/AC3: `test_tmp_kb_env_is_not_autouse` deleted — its contract
+# (tmp_kb_env path patches must NOT apply unless explicitly requested) was
+# deliberately reversed by cycle 64. The autouse `_autouse_kb_path_sandbox`
+# fixture now redirects `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` for
+# every test by default. Replacement coverage lives in
+# `tests/test_cycle64_conftest_leak.py::test_default_isolation_redirects_wiki_constants_to_tmp`
+# (asserts the FORWARD contract: config.PROJECT_ROOT != real_project_root
+# under default pytest invocation). Per cycle-15 L2 / cycle-44 L4 DROP-with-
+# test-anchor, the deletion is safe because replacement coverage is in
+# place.
 
 
 class TestKbMcpConsoleScript:

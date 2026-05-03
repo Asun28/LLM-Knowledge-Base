@@ -686,14 +686,27 @@ class TestBuildSlug:
 
 
 class TestPathWithinCaptures:
-    """Spec §5 path-traversal gate + §8 symlink guard prep."""
+    """Spec §5 path-traversal gate + §8 symlink guard prep.
+
+    Cycle 64 AC3 migration: under autouse tmp_kb_env (cycle 64 AC1) the
+    test-module-top `from kb.config import CAPTURES_DIR` symbol still
+    holds the REAL path while `kb.capture._CAPTURES_DIR_RESOLVED` is
+    patched to per-test tmp. Read CAPTURES_DIR at CALL TIME via the
+    `kb.config` module attribute so test paths align with the patched
+    capture-resolution sentinel. Behaviour preserved verbatim; only the
+    symbol-binding shape changed.
+    """
 
     def test_simple_path_inside_passes(self):
-        p = CAPTURES_DIR / "decision-foo.md"
+        import kb.config as kb_config  # noqa: PLC0415
+
+        p = kb_config.CAPTURES_DIR / "decision-foo.md"
         assert _is_path_within_captures(p) is True
 
     def test_parent_traversal_rejected(self):
-        p = CAPTURES_DIR / ".." / "secret.md"
+        import kb.config as kb_config  # noqa: PLC0415
+
+        p = kb_config.CAPTURES_DIR / ".." / "secret.md"
         assert _is_path_within_captures(p) is False
 
     def test_absolute_path_outside_rejected(self):
@@ -701,7 +714,9 @@ class TestPathWithinCaptures:
         assert _is_path_within_captures(p) is False
 
     def test_nested_inside_passes(self):
-        p = CAPTURES_DIR / "subdir" / "file.md"
+        import kb.config as kb_config  # noqa: PLC0415
+
+        p = kb_config.CAPTURES_DIR / "subdir" / "file.md"
         # subdir doesn't need to exist for this check
         assert _is_path_within_captures(p) is True
 

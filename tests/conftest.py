@@ -138,22 +138,31 @@ def real_project_root(request: pytest.FixtureRequest) -> Path:
 
 @pytest.fixture
 def tmp_wiki(tmp_path: Path) -> Path:
-    """Create a temporary wiki directory for isolated tests."""
+    """Create a temporary wiki directory for isolated tests.
+
+    Cycle 64 AC1: the autouse `tmp_kb_env` fixture also creates these
+    subdirs under the same tmp_path; mkdir uses ``exist_ok=True`` so
+    requesting both fixtures (or relying on autouse alone) is idempotent.
+    """
     wiki = tmp_path / "wiki"
     for subdir in WIKI_SUBDIRS:
-        (wiki / subdir).mkdir(parents=True)
+        (wiki / subdir).mkdir(parents=True, exist_ok=True)
     return wiki
 
 
 @pytest.fixture
 def tmp_project(tmp_path: Path) -> Path:
-    """Create a temporary project directory with wiki/, raw/, and log.md."""
+    """Create a temporary project directory with wiki/, raw/, and log.md.
+
+    Cycle 64 AC1: idempotent under autouse `tmp_kb_env` (which pre-creates
+    most of these subdirs).
+    """
     wiki = tmp_path / "wiki"
     raw = tmp_path / "raw"
     for subdir in WIKI_SUBDIRS:
-        (wiki / subdir).mkdir(parents=True)
+        (wiki / subdir).mkdir(parents=True, exist_ok=True)
     for subdir in RAW_SUBDIRS:
-        (raw / subdir).mkdir(parents=True)
+        (raw / subdir).mkdir(parents=True, exist_ok=True)
     (wiki / "index.md").write_text(
         "---\n"
         "title: Wiki Index\n"
@@ -183,48 +192,29 @@ def tmp_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture(autouse=True)
-def tmp_kb_env(tmp_path: Path, monkeypatch, request: pytest.FixtureRequest) -> Path:
-    """Patch KB paths into a temporary project.
+def _apply_kb_path_patches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mkdir: bool,
+) -> Path:
+    """Cycle 64 AC1 helper: patch kb.config WIKI_* / RAW_* / PROJECT_ROOT to
+    a per-test ``tmp_path`` sandbox.
 
-    Cycle 64 AC1: PROMOTED TO AUTOUSE — runs by default for every test so
-    `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` reads in production code
-    redirect to per-test `tmp_path` sandbox. Tests that genuinely need the
-    real repo paths request `real_project_root` and invoke pytest with
-    `--use-real-paths`; under that flag this fixture EARLY-RETURNS the real
-    PROJECT_ROOT without monkeypatching, preserving real-path semantics.
+    Two callers:
+    - The autouse `_autouse_kb_path_sandbox` fixture invokes with ``mkdir=False``
+      so tests that do their own `tmp_path/raw/articles.mkdir(parents=True)`
+      etc. don't collide with redundant directory creation.
+    - The explicit `tmp_kb_env` fixture (and `kb_sandbox` / `_kb_sandbox`
+      aliases) invokes with ``mkdir=True`` to preserve the cycle 12+ contract
+      that requesting `tmp_kb_env` produces a fully-built project tree —
+      230+ existing call sites depend on this.
 
-    Patched names: PROJECT_ROOT, RAW_DIR, WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR,
-    VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, HASH_MANIFEST,
-    WIKI_ENTITIES, WIKI_CONCEPTS, WIKI_COMPARISONS, WIKI_SUMMARIES,
-    WIKI_SYNTHESIS, WIKI_INDEX, WIKI_SOURCES, WIKI_LOG, WIKI_CONTRADICTIONS,
-    WIKI_PURPOSE, RAW_ARTICLES, RAW_PAPERS, RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS,
-    RAW_BOOKS, RAW_DATASETS, RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
-
-    Cycle 18 AC1/AC2 — HASH_MANIFEST lives on `kb.compile.compiler`, not
-    `kb.config`. It is patched separately after the config-attribute loop
-    because the config loop uses `getattr(config, name)` which would raise
-    for HASH_MANIFEST. Note: `tests.*` modules that import HASH_MANIFEST at
-    module top before `tmp_kb_env` runs are NOT covered by the mirror-rebind
-    loop; use `monkeypatch.setattr` in the test itself in that case.
-
-    Also patches kb.capture._CAPTURES_DIR_RESOLVED, kb.capture._captures_resolved,
-    and kb.capture._project_resolved when kb.capture is already imported.
-
-    DELIBERATELY EXCLUDED (read-only package data, never written by kb):
-    TEMPLATES_DIR (YAML extraction templates shipped in repo); RESEARCH_DIR
-    (human-authored analysis). Tests that need tmp templates/research must
-    monkeypatch those explicitly.
-
-    Update this fixture when new kb.config WRITE-TARGET path constants or
-    derived path caches are added.
+    The patching half is idempotent: running both fixtures for one test
+    (autouse + explicit request) just re-applies the same setattr to the
+    same paths, and the mirror-rebind loop's equality check skips the
+    second pass cleanly.
     """
-    # Cycle 64 AC1/AC2: opt-out path. Tests that requested --use-real-paths
-    # (typically combined with `real_project_root` fixture) genuinely need
-    # the live repo tree; skip ALL monkeypatching and return the real path.
-    if request.config.getoption("--use-real-paths"):
-        return _REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT
-
     import kb.compile.compiler as compiler  # noqa: PLC0415
     import kb.config as config  # noqa: PLC0415
 
@@ -273,28 +263,29 @@ def tmp_kb_env(tmp_path: Path, monkeypatch, request: pytest.FixtureRequest) -> P
     patched["SOURCE_TYPE_DIRS"] = patched_source_type_dirs
     original_values["SOURCE_TYPE_DIRS"] = original_source_type_dirs
 
-    for path in (
-        wiki,
-        raw,
-        data,
-        patched["OUTPUTS_DIR"],
-        captures,
-        patched["WIKI_ENTITIES"],
-        patched["WIKI_CONCEPTS"],
-        patched["WIKI_COMPARISONS"],
-        patched["WIKI_SUMMARIES"],
-        patched["WIKI_SYNTHESIS"],
-        patched["RAW_ARTICLES"],
-        patched["RAW_PAPERS"],
-        patched["RAW_REPOS"],
-        patched["RAW_VIDEOS"],
-        patched["RAW_PODCASTS"],
-        patched["RAW_BOOKS"],
-        patched["RAW_DATASETS"],
-        patched["RAW_CONVERSATIONS"],
-        patched["RAW_ASSETS"],
-    ):
-        path.mkdir(parents=True, exist_ok=True)
+    if mkdir:
+        for path in (
+            wiki,
+            raw,
+            data,
+            patched["OUTPUTS_DIR"],
+            captures,
+            patched["WIKI_ENTITIES"],
+            patched["WIKI_CONCEPTS"],
+            patched["WIKI_COMPARISONS"],
+            patched["WIKI_SUMMARIES"],
+            patched["WIKI_SYNTHESIS"],
+            patched["RAW_ARTICLES"],
+            patched["RAW_PAPERS"],
+            patched["RAW_REPOS"],
+            patched["RAW_VIDEOS"],
+            patched["RAW_PODCASTS"],
+            patched["RAW_BOOKS"],
+            patched["RAW_DATASETS"],
+            patched["RAW_CONVERSATIONS"],
+            patched["RAW_ASSETS"],
+        ):
+            path.mkdir(parents=True, exist_ok=True)
 
     for name, value in patched.items():
         monkeypatch.setattr(config, name, value)
@@ -355,6 +346,71 @@ def tmp_kb_env(tmp_path: Path, monkeypatch, request: pytest.FixtureRequest) -> P
             cache_clear()
 
     return project
+
+
+@pytest.fixture(autouse=True)
+def _autouse_kb_path_sandbox(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Cycle 64 AC1 — autouse sandbox: patch `kb.config.WIKI_*` / `RAW_*` /
+    `PROJECT_ROOT` to per-test ``tmp_path`` so production code reading those
+    constants does not see the developer's real wiki tree by default.
+
+    No mkdir — tests that need the project tree pre-built request the
+    explicit `tmp_kb_env` (or `kb_sandbox`) fixture, which adds mkdir on top.
+    Tests that build their own subtree under `tmp_path` are unaffected by
+    autouse mkdir collisions.
+
+    Opt out via `pytest --use-real-paths` (cycle 64 AC2). Under that flag,
+    the autouse fixture early-returns and `kb.config.*` is not monkeypatched.
+    """
+    if request.config.getoption("--use-real-paths"):
+        return
+    _apply_kb_path_patches(tmp_path, monkeypatch, mkdir=False)
+
+
+@pytest.fixture
+def tmp_kb_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Path:
+    """Patch KB paths into a temporary project AND build the directory tree.
+
+    Patched names (set by `_apply_kb_path_patches`): PROJECT_ROOT, RAW_DIR,
+    WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR, VERDICTS_PATH, FEEDBACK_PATH,
+    REVIEW_HISTORY_PATH, HASH_MANIFEST, WIKI_ENTITIES, WIKI_CONCEPTS,
+    WIKI_COMPARISONS, WIKI_SUMMARIES, WIKI_SYNTHESIS, WIKI_INDEX, WIKI_SOURCES,
+    WIKI_LOG, WIKI_CONTRADICTIONS, WIKI_PURPOSE, RAW_ARTICLES, RAW_PAPERS,
+    RAW_REPOS, RAW_VIDEOS, RAW_PODCASTS, RAW_BOOKS, RAW_DATASETS,
+    RAW_CONVERSATIONS, RAW_ASSETS, SOURCE_TYPE_DIRS.
+
+    Cycle 18 AC1/AC2 — HASH_MANIFEST lives on `kb.compile.compiler`, not
+    `kb.config`. Patched separately. `tests.*` modules that import
+    HASH_MANIFEST at module top before this fixture runs are NOT covered
+    by the mirror-rebind loop; use `monkeypatch.setattr` in the test itself.
+
+    Also patches `kb.capture._CAPTURES_DIR_RESOLVED`, `_captures_resolved`,
+    `_project_resolved` when `kb.capture` is already imported.
+
+    DELIBERATELY EXCLUDED (read-only package data, never written by kb):
+    TEMPLATES_DIR (YAML extraction templates shipped in repo); RESEARCH_DIR
+    (human-authored analysis). Tests that need tmp templates/research must
+    monkeypatch those explicitly.
+
+    Update `_apply_kb_path_patches` (above) when new `kb.config` write-target
+    path constants or derived path caches are added.
+
+    Cycle 64 AC1: behaviour preserved for explicit-fixture callers. Autouse
+    sandbox `_autouse_kb_path_sandbox` runs first (patch only); this fixture
+    re-applies the same patches AND mkdirs the project tree so existing
+    callers keep their pre-built directories.
+    """
+    if request.config.getoption("--use-real-paths"):
+        return _REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT
+    return _apply_kb_path_patches(tmp_path, monkeypatch, mkdir=True)
 
 
 # Cycle 17 AC16 — `_kb_sandbox` is an alias for `tmp_kb_env` kept for the
