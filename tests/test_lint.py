@@ -685,3 +685,79 @@ def test_parse_inline_callouts_patch_reaches_inline_submodule(monkeypatch, tmp_p
             "text": "> [!gap] patched",
         }
     ]
+
+
+# ── Duplicate-slug allowlist file load (cycle 61) ─
+
+
+class TestDuplicateSlugAllowlistFileLoad:
+    """Test _get_duplicate_slug_allowlist() loader with file-present, file-missing, and malformed cases."""
+
+    def test_file_present_custom_takes_precedence(self, monkeypatch, tmp_kb_env):
+        """Custom allowlist from file overrides in-code default."""
+        import json
+        import logging
+
+        from kb.config import _get_duplicate_slug_allowlist
+        from kb.lint.checks.duplicate_slug import check_duplicate_slugs
+
+        # Write a custom allowlist file
+        config_dir = tmp_kb_env / "config"
+        config_dir.mkdir(exist_ok=True)
+        allowlist_file = config_dir / "lint_allowlist.json"
+        allowlist_file.write_text(
+            json.dumps({
+                "version": 1,
+                "duplicate_slugs": [["a/x", "a/y"]],
+            }),
+            encoding="utf-8",
+        )
+
+        # Monkeypatch PROJECT_ROOT to use tmp_kb_env
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_kb_env)
+        # Clear the lru_cache so it re-reads
+        _get_duplicate_slug_allowlist.cache_clear()
+
+        # Create wiki pages with those slugs
+        wiki_dir = tmp_kb_env / "wiki"
+        _create_page(wiki_dir / "a" / "x.md", "X", "content")
+        _create_page(wiki_dir / "a" / "y.md", "Y", "content")
+
+        # Check that the pair is allowlisted (no duplicate-slug issue)
+        issues = check_duplicate_slugs(wiki_dir)
+        dup_issues = [i for i in issues if i.get("check") == "duplicate_slug"]
+        assert len(dup_issues) == 0, f"Pair should be allowlisted but got issues: {dup_issues}"
+
+    def test_file_missing_fallback(self, monkeypatch, tmp_kb_env):
+        """When file is missing, fallback to in-code default."""
+        from kb.config import DUPLICATE_SLUG_ALLOWLIST, _get_duplicate_slug_allowlist
+
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_kb_env)
+        _get_duplicate_slug_allowlist.cache_clear()
+
+        result = _get_duplicate_slug_allowlist()
+        assert result == DUPLICATE_SLUG_ALLOWLIST
+
+    def test_malformed_json_fallback(self, monkeypatch, tmp_kb_env, caplog):
+        """Malformed JSON falls back to in-code default and logs WARNING."""
+        import logging
+
+        from kb.config import DUPLICATE_SLUG_ALLOWLIST, _get_duplicate_slug_allowlist
+
+        # Write invalid JSON
+        config_dir = tmp_kb_env / "config"
+        config_dir.mkdir(exist_ok=True)
+        allowlist_file = config_dir / "lint_allowlist.json"
+        allowlist_file.write_text("{not valid json", encoding="utf-8")
+
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_kb_env)
+        _get_duplicate_slug_allowlist.cache_clear()
+
+        with caplog.at_level(logging.WARNING):
+            result = _get_duplicate_slug_allowlist()
+
+        # Should fall back to default
+        assert result == DUPLICATE_SLUG_ALLOWLIST
+
+        # Should have logged a warning
+        assert any("Could not load/parse allowlist file" in r.message for r in caplog.records)
