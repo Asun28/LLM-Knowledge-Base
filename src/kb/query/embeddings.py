@@ -51,6 +51,12 @@ _index_cache_lock = threading.Lock()
 # well within the diagnostic tolerance.
 _dim_mismatches_seen: int = 0
 
+# Cycle 64 AC7 — process-level observability counter for AUTOMATIC dim-mismatch
+# rebuilds triggered by `VectorIndex.query`. Increments AFTER `rebuild_vector_index`
+# returns successfully so a failed-or-skipped rebuild does NOT inflate the count.
+# Mirrors `_dim_mismatches_seen` lock-free posture per cycle-25 Q8.
+_dim_mismatch_auto_rebuilds_seen: int = 0
+
 # Cycle 26 AC3 — WARN threshold (seconds) for `_get_model` cold-load latency.
 # Module-level constant; env override deferred per requirements non-goals.
 VECTOR_COLD_LOAD_WARN_THRESHOLD_SECS: float = 0.3
@@ -94,6 +100,23 @@ def get_dim_mismatch_count() -> int:
     deltas by snapshotting before/after a call sequence.
     """
     return _dim_mismatches_seen
+
+
+def get_dim_mismatch_auto_rebuild_count() -> int:
+    """Cycle 64 AC7 — process-level count of AUTOMATIC dim-mismatch rebuilds
+    triggered by ``VectorIndex.query`` after detecting stored/query dim drift.
+
+    Increments AFTER ``rebuild_vector_index`` returns successfully so a failed
+    rebuild (validation reject, OSError, missing wiki_dir) does NOT inflate
+    the count. Mirrors :func:`get_dim_mismatch_count` lock-free posture per
+    cycle-25 Q8 — adequate for diagnostic observation, not billing-grade.
+
+    Disable via ``KB_DISABLE_VECTOR_AUTO_REBUILD=1`` env var, read at CALL
+    TIME inside ``VectorIndex.query`` per cycle-19 L2 reload-leak hazard
+    (env-binding-at-import would break the kill-switch under
+    ``monkeypatch.setenv`` in tests).
+    """
+    return _dim_mismatch_auto_rebuilds_seen
 
 
 def get_vector_model_cold_load_count() -> int:
@@ -465,6 +488,43 @@ class VectorIndex:
         self._disabled: bool = False
         self._ext_warned: bool = False
 
+    def _derive_wiki_dir(self) -> Path | None:
+        """Cycle 64 AC5 — return the canonical ``wiki_dir`` for AUTO-rebuild,
+        or ``None`` when ``self.db_path`` does not match the canonical layout.
+
+        Rejection conditions (literal name checks per cycle-64 R1-F17):
+        - ``self.db_path`` is ``None`` (uninstantiated).
+        - ``self.db_path.name.endswith('.tmp')`` — rebuild-in-progress sentinel
+          produced by :func:`rebuild_vector_index` (line ~320). Recursing from
+          a ``.tmp`` instance would be self-referential — cycle-64 T5 mitigation.
+        - ``self.db_path.parent.name != '.data'`` — not the canonical layout.
+        - ``self.db_path.name != 'vector_index.db'`` — not the canonical name.
+
+        Positive return: ``kb.config.WIKI_DIR`` looked up at CALL TIME so the
+        autouse `tmp_kb_env` sandbox in cycle-64 AC1 is honoured. Direct
+        derivation from ``db_path`` via ``parent.parent`` returns the project
+        root (NOT the wiki dir) per :func:`_vec_db_path`'s
+        ``wiki_dir.parent / ".data" / "vector_index.db"`` layout — so the
+        config lookup is the correct source for ``rebuild_vector_index``'s
+        first positional arg.
+
+        Callers SHOULD wrap the returned path in
+        ``_validate_path_under_project_root(wiki_dir, "vector_auto_rebuild_target")``
+        before invoking ``rebuild_vector_index`` to honour cycle-64 M4
+        (auto-rebuild path safety, dual-anchor) per CLAUDE.md path-safety.
+        """
+        if self.db_path is None:
+            return None
+        if self.db_path.name.endswith(".tmp"):
+            return None
+        if self.db_path.parent.name != ".data":
+            return None
+        if self.db_path.name != "vector_index.db":
+            return None
+        import kb.config as kb_config  # noqa: PLC0415
+
+        return kb_config.WIKI_DIR
+
     def _ensure_conn(self) -> sqlite3.Connection | None:
         """Lazy-load sqlite3 connection + sqlite_vec extension.
 
@@ -686,6 +746,44 @@ class VectorIndex:
                         wiki_dir_hint,
                     )
                     self._dim_warned = True
+                # Cycle 64 AC6 + AC8.5 — automatic rebuild on dim-mismatch.
+                # Env read at CALL TIME (not module-top constant) per cycle-19
+                # L2 reload-leak hazard: tests that monkeypatch.setenv
+                # ``KB_DISABLE_VECTOR_AUTO_REBUILD`` AFTER module import must
+                # observe the kill-switch. Module-top binding would ignore
+                # post-import env mutation (cycle-7 L24 / cycle-29 anchor).
+                if not os.environ.get("KB_DISABLE_VECTOR_AUTO_REBUILD"):
+                    auto_wiki_dir = self._derive_wiki_dir()
+                    if auto_wiki_dir is not None:
+                        # Cycle 64 AC6 + M4 mitigation — dual-anchor path
+                        # validation per CLAUDE.md. Symlink/malicious db_path
+                        # construction (T6) cannot escape PROJECT_ROOT here.
+                        # Validation failure logged + skipped, never raised
+                        # to the caller (preserves existing dim-mismatch
+                        # contract: query returns []).
+                        try:
+                            from kb.compile.compiler import (  # noqa: PLC0415
+                                _validate_path_under_project_root,
+                            )
+
+                            _validate_path_under_project_root(
+                                auto_wiki_dir, "vector_auto_rebuild_target"
+                            )
+                            rebuild_vector_index(auto_wiki_dir)
+                            # AC7 — increment AFTER rebuild returns so a
+                            # validation reject / OSError does NOT inflate
+                            # the count. Lock-free per cycle-25 Q8 posture.
+                            global _dim_mismatch_auto_rebuilds_seen
+                            _dim_mismatch_auto_rebuilds_seen += 1
+                        except Exception as auto_exc:  # noqa: BLE001
+                            logger.debug(
+                                "Cycle 64 auto-rebuild skipped: %s",
+                                auto_exc,
+                            )
+                # Behavioural contract preserved: this query returns [];
+                # the SECOND query (after rebuild commits) returns real
+                # results. Auto-rebuild is structurally fire-and-forget
+                # for the call that detected the mismatch.
                 return []
 
             rows = conn.execute(
