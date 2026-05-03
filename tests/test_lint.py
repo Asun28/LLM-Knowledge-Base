@@ -288,7 +288,14 @@ def test_lint_runner_enumeration_order_unchanged(monkeypatch, tmp_path):
     ]
 
     monkeypatch.setattr(runner, "scan_wiki_pages", lambda _wiki_dir: [])
-    monkeypatch.setattr(runner, "build_graph", lambda _wiki_dir: object())
+    # Cycle 64 AC10 migration: runner now reaches build_graph through
+    # `kb.graph.cache.get_graph` (attribute-lookup form per cycle-18 L1).
+    # Patch the OWNER module's symbol so the runner's call site sees the stub.
+    import kb.graph.cache as _graph_cache_for_test  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        _graph_cache_for_test, "get_graph", lambda _wiki_dir, *, pages=None: object()
+    )
     monkeypatch.setattr(runner, "get_verdict_summary", lambda _path=None: None)
 
     for name in (

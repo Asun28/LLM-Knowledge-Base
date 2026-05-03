@@ -583,6 +583,19 @@ def compile_wiki(
         effective_log_dir / "log.md",
     )
 
+    # Cycle 64 AC11.5 — coarse cache invalidation post-success. Per-ingest
+    # invalidation already fired inside each `ingest_source` (AC11), but a
+    # final post-loop drop ensures any auto-publish-time graph builder (cycle
+    # 64 AC14) sees the post-final-write state.
+    # CYCLE-64-HOOK — keep this comment for merge-conflict legibility per
+    # design-decision R2-F merge-resilience marker.
+    try:
+        import kb.graph.cache as _graph_cache  # noqa: PLC0415
+
+        _graph_cache.invalidate(effective_wiki_dir)
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("Cycle 64 graph-cache invalidate skipped at compile tail: %s", _exc)
+
     return results
 
 

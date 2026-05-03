@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from kb.config import RAW_DIR, WIKI_DIR
-from kb.graph.builder import build_graph
+import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.lint.checks import (
     check_authored_by_drift,
     check_cycles,
@@ -55,8 +55,10 @@ def run_all_checks(
     # Scan wiki pages once — shared by staleness, frontmatter, source_coverage, stub checks
     shared_pages = scan_wiki_pages(wiki_dir)
 
-    # Build the wikilink graph once — shared by orphan and cycle checks
-    shared_graph = build_graph(wiki_dir)
+    # Build the wikilink graph once — shared by orphan and cycle checks.
+    # Cycle 64 AC10 — process-shared cache via attribute lookup so test spies
+    # on kb.graph.cache.get_graph intercept correctly per cycle-18 L1.
+    shared_graph = graph_cache.get_graph(wiki_dir)
 
     all_issues = []
 
@@ -91,9 +93,13 @@ def run_all_checks(
             ]
 
     if fix and fixes_applied:
-        # Fix item 9: re-scan pages + rebuild graph so subsequent checks see post-fix state
+        # Fix item 9: re-scan pages + rebuild graph so subsequent checks see post-fix state.
+        # Cycle 64 AC10/AC11 — invalidate the cache so the rebuild reflects post-fix state
+        # rather than reusing the pre-fix cached graph (mtime would catch it on most systems
+        # but explicit invalidation is the documented contract).
         shared_pages = scan_wiki_pages(wiki_dir)
-        shared_graph = build_graph(wiki_dir)
+        graph_cache.invalidate(wiki_dir)
+        shared_graph = graph_cache.get_graph(wiki_dir)
 
     orphans = check_orphan_pages(wiki_dir, graph=shared_graph)
     all_issues.extend(orphans)

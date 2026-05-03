@@ -1730,4 +1730,15 @@ def _run_ingest_body(
     # wired at the same telemetry boundary (start/duplicate_skip/success/
     # failure). _run_ingest_body is now a pure body — its caller owns the
     # JSONL envelope.
+
+    # Cycle 64 AC11 — drop the graph cache entry for this wiki_dir so the
+    # next get_graph(wiki_dir) call rebuilds from post-ingest disk state.
+    # mtime-keying would also catch this on most systems, but explicit
+    # invalidation is the documented contract per docs/reference/architecture.md.
+    try:
+        import kb.graph.cache as _graph_cache  # noqa: PLC0415
+
+        _graph_cache.invalidate(effective_wiki_dir)
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("Cycle 64 graph-cache invalidate skipped at ingest tail: %s", _exc)
     return result

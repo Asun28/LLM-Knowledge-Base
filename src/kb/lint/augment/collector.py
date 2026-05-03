@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from kb import config
-from kb.graph.builder import build_graph
+import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.lint.checks import check_stub_pages
 from kb.utils.pages import load_page_frontmatter
 
@@ -46,7 +46,7 @@ def _collect_eligible_stubs(*, wiki_dir: Path | None = None) -> list[dict[str, A
     if not stub_issues:
         return []
 
-    graph = build_graph(wiki_dir)
+    graph = graph_cache.get_graph(wiki_dir)  # cycle-64 AC10
     eligible: list[dict[str, Any]] = []
 
     for issue in stub_issues:

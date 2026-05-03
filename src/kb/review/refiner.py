@@ -297,6 +297,16 @@ def refine_page(
     except OSError as e:
         logger.warning("Failed to append wiki log after successful refine: %s", e)
 
+    # Cycle 64 AC11 — drop the graph cache entry so subsequent get_graph(wiki_dir)
+    # rebuilds from post-refine disk state. mtime would catch most cases but
+    # explicit invalidation is the documented contract.
+    try:
+        import kb.graph.cache as _graph_cache  # noqa: PLC0415
+
+        _graph_cache.invalidate(wiki_dir)
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("Cycle 64 graph-cache invalidate skipped at refine tail: %s", _exc)
+
     return {
         "page_id": page_id,
         "updated": True,

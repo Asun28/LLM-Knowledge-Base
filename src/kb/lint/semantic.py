@@ -15,7 +15,7 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     WIKI_DIR,
 )
-from kb.graph.builder import build_graph
+import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
@@ -136,8 +136,10 @@ def _group_by_wikilinks(wiki_dir: Path, *, pages: list[dict] | None = None) -> l
     """Group pages connected by wikilinks (connected components in the undirected graph).
 
     Cycle 7 AC19: ``pages=`` threaded through to ``build_graph`` to skip scan.
+    Cycle 64 AC10 + R1-F5: ``get_graph`` BYPASSES the cache when ``pages=`` is
+    supplied (pages-snapshot caching would risk poisoning fresh-disk callers).
     """
-    graph = build_graph(wiki_dir, pages=pages)
+    graph = graph_cache.get_graph(wiki_dir, pages=pages)
     components = list(nx.connected_components(graph.to_undirected()))
     return [sorted(c) for c in components if len(c) >= 2]
 

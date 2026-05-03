@@ -5,7 +5,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from kb.graph.builder import build_graph
+import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.lint import checks
 
 
@@ -17,7 +17,9 @@ def check_cycles(wiki_dir: Path | None = None, graph: nx.DiGraph | None = None) 
     """
     wiki_dir = wiki_dir or checks.WIKI_DIR
     if graph is None:
-        graph = build_graph(wiki_dir)
+        # Cycle 64 AC10 — fallback path uses the process-shared graph cache.
+        # Owner-module attribute lookup so tests patching kb.graph.cache.get_graph succeed.
+        graph = graph_cache.get_graph(wiki_dir)
     issues = []
 
     # Phase 4.5 HIGH L1: bound cycle detection to 100 to prevent super-exponential
