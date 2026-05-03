@@ -2,10 +2,12 @@
 
 import logging
 import math
+import json
 import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
+from functools import lru_cache
 from types import MappingProxyType
 
 # ── Project paths ──────────────────────────────────────────────
@@ -332,6 +334,82 @@ def get_cli_model(tier: str) -> str:
     if backend == "anthropic":
         return ""
     return CLI_TOOL_MODELS[backend][tier]
+
+
+
+def _kb_disable_vectors() -> bool:
+    """Return True when KB_DISABLE_VECTORS env-var is truthy.
+
+    Runtime helper (no module-top snapshot) so tests can monkeypatch.setenv
+    and the change takes effect mid-test. Pattern: cli._is_debug_mode.
+    Reads: KB_DISABLE_VECTORS env-var; truthy values are "1", "true", "True", "yes".
+    """
+    return os.environ.get("KB_DISABLE_VECTORS", "").strip() in {"1", "true", "True", "yes"}
+
+
+@lru_cache(maxsize=1)
+def _get_duplicate_slug_allowlist() -> frozenset[frozenset[str]]:
+    """Load duplicate-slug allowlist from JSON file or return fallback.
+
+    Reads from PROJECT_ROOT / "config" / "lint_allowlist.json".
+    Returns frozenset[frozenset[str]] of allowed slug pairs.
+
+    Failure-open: on missing file, malformed JSON, or other error,
+    logs a warning and returns the in-code default (DUPLICATE_SLUG_ALLOWLIST).
+    Size cap: 64 KB; larger files are rejected with warning + fallback.
+
+    Tests can call .cache_clear() to reset between cases.
+    """
+    config_path = PROJECT_ROOT / "config" / "lint_allowlist.json"
+
+    # Check file existence
+    if not config_path.exists():
+        _LOG.debug("Allowlist file not found: %s; using in-code default", config_path)
+        return DUPLICATE_SLUG_ALLOWLIST
+
+    # Size cap (D6)
+    try:
+        stat = config_path.stat()
+        if stat.st_size > 64_000:
+            _LOG.warning(
+                "Allowlist file exceeds 64 KB: %s (%d bytes); using in-code default",
+                config_path,
+                stat.st_size,
+            )
+            return DUPLICATE_SLUG_ALLOWLIST
+    except OSError as e:
+        _LOG.warning("Could not stat allowlist file: %s; %s; using in-code default", config_path, e)
+        return DUPLICATE_SLUG_ALLOWLIST
+
+    # Parse JSON
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        _LOG.warning(
+            "Could not load/parse allowlist file: %s; %s; using in-code default",
+            config_path,
+            e,
+        )
+        return DUPLICATE_SLUG_ALLOWLIST
+
+    # Validate schema
+    if not isinstance(payload, dict):
+        _LOG.warning("Allowlist payload is not a dict; using in-code default")
+        return DUPLICATE_SLUG_ALLOWLIST
+
+    dup_slugs = payload.get("duplicate_slugs")
+    if not isinstance(dup_slugs, list):
+        _LOG.warning("allowlist['duplicate_slugs'] is not a list; using in-code default")
+        return DUPLICATE_SLUG_ALLOWLIST
+
+    # Build frozenset of frozensets
+    try:
+        result = frozenset(frozenset(pair) for pair in dup_slugs if isinstance(pair, (list, tuple)))
+        return result if result else DUPLICATE_SLUG_ALLOWLIST
+    except (TypeError, ValueError) as e:
+        _LOG.warning("Could not build frozenset from duplicate_slugs: %s; using in-code default", e)
+        return DUPLICATE_SLUG_ALLOWLIST
 
 
 # ── Phase 2: Quality thresholds ──────────────────────────────

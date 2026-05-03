@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "_meta": {
+    "description": "Duplicate-slug allowlist — pairs of slugs known to represent distinct concepts despite small edit distance. Failure-open: if this file is missing/malformed, kb lint falls back to the in-code default in src/kb/config.py."
+  },
+  "duplicate_slugs": [
+    ["concepts/bot", "concepts/llm"],
+    ["entities/openai", "entities/openclaw"],
+    ["entities/logql", "entities/promql"]
+  ]
+}
