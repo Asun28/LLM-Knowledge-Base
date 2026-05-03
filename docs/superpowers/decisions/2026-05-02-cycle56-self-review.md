@@ -152,3 +152,82 @@ Under "Accumulated rules index":
 - Suggested follow-ups (cycle-57+):
   - The Windows pyreadline3 BACKLOG entry (filed at Step 17).
   - Vacuous-test repair candidate: AC1's `test_kb_detect_drift_none_changed_sources` was the ONLY vacuous test discovered in cycle 56's 5 folds. Other cycle-56 folds were behaviorally clean. But the cycle-52+ KNOWN-WEAK upgrade list (in BACKLOG) should be re-scanned with the C56-L4 pre-flight rule.
+
+---
+
+## Audit-correction addendum (2026-05-03)
+
+The original scorecard above counted "14/24 clean rows + 4 surprises" but conflated two distinct outcomes: STEPS-EXECUTED-PER-SKIP-WHEN-RULE vs STEPS-EXECUTED-WITH-CORRECT-OWNER. A retroactive audit against the dev-mimo-opus skill's prescribed owner column gives a stricter accounting:
+
+### Stricter accounting
+
+| Bucket | Count | Steps |
+|---|---|---|
+| **FOLLOWED with right owner** | 8 | 1, 3, 15, 20-R1 (DeepSeek + Sonnet), 20-R1-fix (mimocoding-rescue), 20-R2 (Codex + Sonnet), 21, 24 |
+| **Legitimately SKIPPED per skip-when** | 8 | 6, 10, 11, 13, 16, 19, 22, 23 |
+| **DEVIATED from prescribed owner** | 5 confirmed + 1 partial | 4-R2 (skipped despite 5-fold cycle ≠ "trivial one-liner"), 5 (inline ≠ Opus subagent), 7 (primary ≠ mimocoding-rescue), 8 (primary ≠ mimocoding-rescue), 9-impl (3 of 5 ACs primary), 17 (mimochat-rescue ≠ deepseek-rescue — VENDOR SWAP) |
+| **UNCLEAR / likely deviated** | 3 | 2 (Opus subagent vs primary unclear), 9-bg-review (no telemetry row), 14 (no telemetry row), 18 (no telemetry row) |
+
+### Specific deviations not flagged in original scorecard
+
+1. **Step 4 R2 was illegitimately skipped.** The skill's skip-when row for Step 4 says "trivial one-liner". A 5-fold cycle is not a trivial one-liner. R2 should have fired DeepSeek for cross-vendor architecture coverage. The original scorecard's "R2 trivially-skipped per fold-cycle rule" is a fold-cycle-shaped justification that doesn't match the skill's actual skip-when language.
+
+2. **Step 5 inline ≠ Opus subagent.** "8 questions inline" means primary-session reasoning. The skill prescribes a dispatched Opus `Agent(model="opus", ...)` call with the formal `OPTIONS → ARGUE → DECIDE → RATIONALE → CONFIDENCE` template + `## Analysis` scaffold. Primary-session inline argument doesn't satisfy the dispatch contract.
+
+3. **Steps 7 + 8 stacked C14-L1 + C21-L1 sizing skips while simultaneously authoring C56-L1** — which itself says trial-skill dispatch is binding regardless of sizing heuristics. The cycle's own scorecard is internally inconsistent: C56-L1 was extracted from the deviation rather than enforced by it.
+
+4. **Step 17 vendor swap to mimochat-rescue.** The skill explicitly prescribes `deepseek-rescue` (deepseek-v4-pro) for Step 17. Cycle 56 used `mimochat-rescue` (mimo-v2-flash). The original scorecard treated this as fine; it's a binding-owner deviation.
+
+5. **Step 9 background reviewer (mimo-v2.5) absent from trial-telemetry table.** The skill's Step 9 row prescribes BOTH impl + bg-review dispatches. Only impl appears in the telemetry table for ACs 3b/4/5; the bg-review half was either skipped or undocumented for all 5 ACs.
+
+6. **Steps 14 + 18 owner contracts unverifiable.** Self-review says "yes" without a corresponding telemetry-table entry. Most likely primary-session inline given the pattern across Steps 7/8/14/18.
+
+### Net trial-data picture
+
+- **Confirmed MiMo / DeepSeek dispatches in cycle 56:** 8 (3 mimocoding-rescue impls + 1 mimocoding-rescue R1-fix + 1 mimochat-rescue Step-17 + 2 in Step 20 R1+R2 — plus 1 dispatch R2-Sonnet etc. that aren't on the trial-vendor build path).
+- **Prescribed dispatches that didn't fire (for the trial-vendor build path):** at least 7 (Step 4-R2 DeepSeek, Step 5 Opus, Step 7 mimocoding, Step 8 mimocoding, Step 9 ACs 1+2+3a, Step 9 bg-review for all 5 ACs, Step 14 mimocoding, Step 17 should have been DeepSeek not MiMo Chat, Step 18 mimocoding). Conservative count ≈ 7-10 missed dispatches.
+- **Trial-data ratio for cycle 56:** ~45-55% of the prescribed build-path dispatches actually fired. The cycle-56 self-review's "first MiMo trial cycle: telemetry captured" framing overstates the coverage.
+
+### Why this matters for the 2026-05-31 writeup
+
+The trial's purpose is to compare DeepSeek + MiMo vendors against the established Codex + Sonnet baseline across the full pipeline. If only 45-55% of binding-owner dispatches fire, the comparison data is biased toward "happy-path easy steps" (Step 9 small folds, Step 20 review) and underrepresents the harder steps (Step 4 design eval over a real spec, Step 5 decision gate with multiple open questions, Step 14 security verify). The writeup should flag this as a coverage gap when reading the cycle-55-58 telemetry.
+
+### Pattern across cycles 54-pickup, 55, 56, 57, 58
+
+Every cycle of the trial has shown the same justify-stacking shape: each individual deviation has a locally-plausible justification (sizing heuristic, skip-when match, "primary holds context"), but the cumulative effect is that 5-10 binding dispatches per cycle don't fire. The fix isn't more discipline at the per-step decision point — it's a structural change to the skip-when language so the trial-skill skip rules are tighter than the underlying `feature-dev` skill's. See C58-L4 lesson below for the skill-patch formulation.
+
+---
+
+## C58-L4 — Trial-skill skip-when language MUST be stricter than feature-dev's
+
+**Rule:** When a cycle is run under a trial-skill (`dev-mimo-opus`, `dev-codexds`, `dev-ds-codex-gate`, etc.), the skill's skip-when columns and sizing heuristics are tightened relative to the parent `feature-dev` skill. Specifically:
+
+1. **Step 4 R2 skip-when** — only "trivial one-liner" qualifies. Multi-AC fold cycles, multi-file refactors, dep-bumps, and salvage cycles do NOT match. Override the parent feature-dev's "trivial diff" wording.
+2. **Step 5 — never skip the dispatched Opus subagent.** "Inline reasoning" by the primary does not satisfy. The dispatch contract exists for cross-context independence; primary-session reasoning has the cycle's full context already and can't argue both sides cleanly.
+3. **Steps 7 + 8 — sizing heuristics C13-L2, C14-L1, C21-L1, C37-L5 are SUSPENDED for trial cycles.** All four say "primary session is fine for small/contextful work" — but trial cycles need the dispatch row populated for telemetry, regardless of work size. Default to dispatch; deviate only when the trial-vendor service is hard-down (401, 503, key-suspended).
+4. **Step 9 — both impl AND bg-review dispatches must fire per AC.** Skill's table row already lists both; the bg-review row is currently treated as optional and routinely skipped. C56-L1 only enforced the impl half. Extend to bg-review.
+5. **Step 14 — never skipped on trial cycles** unless the entire Step 2 was skipped per the explicit skip-when (pure internal refactor, no I/O or trust boundary changes). Test-only cycles still touch trust boundaries via the test fixtures and should run security-verify.
+6. **Step 17 vendor must match the skill's prescribed vendor exactly.** No vendor-swaps between mimochat-rescue and deepseek-rescue. The trial's purpose IS measuring per-vendor reliability; swaps poison the data.
+7. **Step 18 — never skipped on trial cycles.** Even when the primary could `git push && gh pr create` faster, the dispatch row exists for Token-Plan-burn telemetry on PR-finalize work.
+
+**Why:** Cycles 54-pickup, 55, 56, 57, 58 each saw 5-10 binding-owner deviations stacked behind locally-plausible justifications. The cumulative trial-data loss is roughly 50% of the prescribed dispatches. Skip-when language inherited from `feature-dev` was tuned for solo-developer cost reduction; trial skills serve a DIFFERENT purpose (telemetry collection) and need stricter language.
+
+**How to apply:** Step 24 self-review must include a STRICT-AUDIT row count: `dispatches-fired-with-prescribed-owner / total-binding-owner-rows-in-pipeline`. If the ratio is below 80% AND the cycle has any UNCLEAR rows in the scorecard, the cycle is a TRIAL-DATA-WEAK cycle and the writeup should treat its measurements as auxiliary rather than primary.
+
+**Self-check at every Skip-When match:** ask "is this a sizing/work-size match, or a hard-down match?" If sizing, the trial-skill override applies — DO NOT skip. If hard-down (vendor 401, network failure, key suspended), the skip is legitimate and should be DOCUMENTED with the failure mode in the trial-telemetry table, not silently skipped.
+
+**refines:** C56-L1 (Step 9 binding) + C58-L3 (multi-step binding) — generalises both into a structural skip-when override across all trial-relevant steps, plus introduces the strict-audit ratio at Step 24.
+
+---
+
+## C58-L4 audit applied to cycles 54-pickup through 58 (2026-05-03)
+
+| Cycle | Prescribed binding dispatches | Fired with right owner | Strict ratio |
+|---|---|---|---|
+| 54-pickup | ~12 | 5 (Step 9 bg-review, Step 17 attempted, Step 20 R1×2, R2 Codex; primary skipped 7) | ~42% |
+| 55 | ~12 | 5 (per cycle-55 self-review trial table) | ~42% |
+| 56 | ~14 | 8 (per audit-correction above) | ~57% |
+| 57 | ~14 | ~8 (per cycle-57 self-review) | ~57% |
+| 58 | ~14 | ~9 (per cycle-58 self-review) | ~64% |
+
+All 5 cycles fall below the 80% strict-audit threshold C58-L4 proposes. The trial's coverage so far should be treated as AUXILIARY rather than PRIMARY data for the 2026-05-31 writeup. Recommendation: cycle 59+ adopt C58-L4 explicitly, and the writeup should compute per-vendor latency/reliability ONLY across the dispatches that actually fired with the prescribed owner — not across the full step set.
