@@ -68,7 +68,7 @@ def _rotate_log_if_oversized(log_path: Path) -> None:
     rotate_if_oversized(log_path, LOG_SIZE_WARNING_BYTES, "log")
 
 
-def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
+def append_wiki_log(operation: str, message: str, log_path: Path, *, caller: str = "cli") -> None:
     """Append a timestamped entry to wiki/log.md.
 
     Creates the log file if it does not exist. Warns when log exceeds size threshold.
@@ -101,7 +101,9 @@ def append_wiki_log(operation: str, message: str, log_path: Path) -> None:
 
     safe_op = _escape_markdown_prefix(operation)
     safe_msg = _escape_markdown_prefix(message)
-    entry = f"- {date.today().isoformat()} | {safe_op} | {safe_msg}\n"
+    caller_tag = f"{caller} | " if caller != "cli" else ""
+    entry = f"- {date.today().isoformat()} | {caller_tag}{safe_op} | {safe_msg}
+"
 
     # S1 (Phase 4.5 R5 HIGH): reject non-regular-file log targets up front.
     # On Windows, log_path.open("a") on a directory raises PermissionError
