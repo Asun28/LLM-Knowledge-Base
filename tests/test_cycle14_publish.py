@@ -321,8 +321,12 @@ class TestOutDirContainment:
         from kb.cli import cli
 
         runner = CliRunner()
-        # A path far outside PROJECT_ROOT that does NOT exist.
-        far_away = tmp_path / "nonexistent-subdir" / "deeper"
+        # Cycle 64 AC3 migration: under autouse tmp_kb_env, kb.config.PROJECT_ROOT
+        # is patched to tmp_path, so `tmp_path/nonexistent-subdir` is INSIDE the
+        # sandbox PROJECT_ROOT and would no longer be rejected. Climb above
+        # tmp_path to land outside the patched PROJECT_ROOT.
+        far_away = tmp_path.parent.parent / "cycle64-far-outside-project-root" / "deeper"
+        assert not far_away.exists(), "test pre-condition: far_away must not exist"
         result = runner.invoke(cli, ["publish", "--out-dir", str(far_away), "--format", "llms"])
         assert result.exit_code != 0
         assert "does not pre-exist" in result.output or "Usage" in result.output

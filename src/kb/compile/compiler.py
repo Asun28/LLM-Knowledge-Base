@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 
 import yaml
@@ -595,6 +596,24 @@ def compile_wiki(
         _graph_cache.invalidate(effective_wiki_dir)
     except Exception as _exc:  # noqa: BLE001
         logger.debug("Cycle 64 graph-cache invalidate skipped at compile tail: %s", _exc)
+
+    # Cycle 64 AC14 — auto-publish hook. Env var read at CALL TIME per
+    # cycle-19 L2; KB_DISABLE_COMPILE_AUTO_PUBLISH=1 short-circuits without
+    # invoking any publish builder. try/except wraps the whole call so a
+    # publish failure does NOT fail the compile (a broken builder must not
+    # break the more fundamental compile output).
+    if not os.environ.get("KB_DISABLE_COMPILE_AUTO_PUBLISH"):
+        try:
+            from kb.compile.publish import (  # noqa: PLC0415
+                auto_publish_after_compile,
+            )
+
+            auto_publish_after_compile(
+                effective_wiki_dir,
+                incremental=(results.get("mode") != "full"),
+            )
+        except Exception as auto_exc:  # noqa: BLE001
+            logger.warning("Cycle 64 auto-publish skipped: %s", auto_exc)
 
     return results
 

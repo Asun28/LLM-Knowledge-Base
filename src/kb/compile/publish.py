@@ -426,6 +426,50 @@ def _is_contained(target: Path, base: Path) -> bool:
         return False
 
 
+def _publish_manifest_path(wiki_dir: Path) -> Path:
+    """Cycle 64 AC16 — canonical location for the publish-siblings manifest."""
+    return wiki_dir.parent / ".data" / "publish-siblings-manifest.json"
+
+
+def _load_publish_manifest(wiki_dir: Path) -> dict[str, list[str]]:
+    """Cycle 64 AC16 — load the previous-publish sibling manifest.
+
+    Returns a dict mapping ``page_id → [sibling_path, sibling_path]`` from
+    the LAST publish. Returns empty dict on first publish OR on JSON
+    corruption (per AC17 ``test_manifest_corrupted_falls_back_to_full_cleanup``).
+    """
+    manifest_path = _publish_manifest_path(wiki_dir)
+    if not manifest_path.exists():
+        return {}
+    try:
+        raw = manifest_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            logger.warning(
+                "publish-siblings-manifest at %s is not a dict; falling back to "
+                "cycle-16 unconditional cleanup",
+                manifest_path,
+            )
+            return {}
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "publish-siblings-manifest at %s unreadable (%s); falling back to "
+            "cycle-16 unconditional cleanup",
+            manifest_path,
+            exc,
+        )
+        return {}
+
+
+def _save_publish_manifest(wiki_dir: Path, page_id_to_siblings: dict[str, list[str]]) -> None:
+    """Cycle 64 AC16 — persist the current-publish sibling manifest atomically."""
+    manifest_path = _publish_manifest_path(wiki_dir)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(page_id_to_siblings, indent=2, sort_keys=True, ensure_ascii=False)
+    atomic_text_write(body + "\n", manifest_path)
+
+
 def build_per_page_siblings(
     wiki_dir: Path, out_dir: Path, *, incremental: bool = False
 ) -> list[Path]:
@@ -439,10 +483,12 @@ def build_per_page_siblings(
 
     Behaviour:
       - Retracted/contradicted/speculative pages EXCLUDED (T2/T10).
-      - Cleanup (unlink ``.txt`` + ``.json``) for currently-excluded pages
-        runs UNCONDITIONALLY on every call, BEFORE the incremental skip
-        check — ``incremental=True`` cannot leak stale siblings (cycle 16
-        Q2/C3 amendment).
+      - Cycle 64 AC16: cleanup uses the publish-siblings-manifest at
+        ``<wiki_dir>.parent/.data/publish-siblings-manifest.json``. Pages that
+        had siblings on the PREVIOUS publish but do NOT today (newly excluded
+        OR deleted) are unlinked. On manifest corruption / missing manifest,
+        falls back to cycle-16 unconditional unlink for currently-excluded
+        pages (preserves the original T10 contract).
       - Per-page target paths are resolve()-checked under ``{out_dir}/pages``
         before any write (T9). A page whose id escapes containment is
         skipped with a warning.
@@ -459,18 +505,37 @@ def build_per_page_siblings(
     pages_dir = (out_dir / "pages").resolve()
     pages_dir.mkdir(parents=True, exist_ok=True)
 
-    # T10 cycle 16 Q2/C3 — cleanup runs UNCONDITIONALLY (before skip).
-    for page in excluded:
-        page_id = str(page.get("id", "")).strip()
-        if not page_id:
-            continue
-        txt_path, json_path = _sibling_paths_for(page_id, pages_dir)
-        # Containment check: only unlink paths that LAND under pages_dir;
-        # refuse to follow a hostile page_id elsewhere on disk.
-        if _is_contained(txt_path, pages_dir):
-            txt_path.unlink(missing_ok=True)
-        if _is_contained(json_path, pages_dir):
-            json_path.unlink(missing_ok=True)
+    # Cycle 64 AC16 — manifest-based incremental cleanup. Load the previous
+    # publish's manifest; orphan = page_id present in PREVIOUS but NOT in
+    # CURRENT (kept ∪ excluded that we'll re-emit). Falls back to cycle-16
+    # unconditional cleanup on corruption.
+    previous_manifest = _load_publish_manifest(wiki_dir)
+    current_kept_ids: set[str] = {
+        str(p.get("id", "")).strip() for p in kept if str(p.get("id", "")).strip()
+    }
+
+    if previous_manifest:
+        # Manifest path: only unlink pages that WERE published previously but
+        # are no longer in the current kept set.
+        orphan_ids = set(previous_manifest.keys()) - current_kept_ids
+        for orphan_id in orphan_ids:
+            txt_path, json_path = _sibling_paths_for(orphan_id, pages_dir)
+            if _is_contained(txt_path, pages_dir):
+                txt_path.unlink(missing_ok=True)
+            if _is_contained(json_path, pages_dir):
+                json_path.unlink(missing_ok=True)
+            logger.info("Cycle 64 AC16 unlinked orphan siblings for page_id=%r", orphan_id)
+    else:
+        # Cycle-16 fallback path — unconditional cleanup of currently-excluded.
+        for page in excluded:
+            page_id = str(page.get("id", "")).strip()
+            if not page_id:
+                continue
+            txt_path, json_path = _sibling_paths_for(page_id, pages_dir)
+            if _is_contained(txt_path, pages_dir):
+                txt_path.unlink(missing_ok=True)
+            if _is_contained(json_path, pages_dir):
+                json_path.unlink(missing_ok=True)
 
     # Incremental short-circuit (cleanup already ran). R1 Sonnet Major 3:
     # _publish_skip_if_unchanged compares against a single file's mtime;
@@ -483,6 +548,12 @@ def build_per_page_siblings(
         return sorted(pages_dir.rglob("*.txt")) + sorted(pages_dir.rglob("*.json"))
 
     written: list[Path] = []
+    # Cycle 64 AC16 — track page_id → sibling-relative-paths during the write
+    # loop so the saved manifest keys are full page_ids (e.g.
+    # "concepts/page-a"), not just file stems ("page-a"). The orphan check on
+    # the next publish compares page_ids; using the full id avoids false-
+    # positive collisions when two subdirs share a stem.
+    current_manifest: dict[str, list[str]] = {}
     for page in _sort_pages(kept):
         page_id = str(page.get("id", "")).strip()
         if not page_id:
@@ -518,6 +589,19 @@ def build_per_page_siblings(
         json_body = json.dumps(meta, indent=2, sort_keys=True, ensure_ascii=False)
         atomic_text_write(json_body + "\n", json_path)
         written.append(json_path)
+
+        # Cycle 64 AC16 — record this page's sibling paths in the manifest.
+        # Keys are full page_ids; values are sibling filenames (relative to
+        # pages_dir) for diagnostic round-trip.
+        current_manifest[page_id] = [txt_path.name, json_path.name]
+
+    # Save the manifest reflecting THIS publish's sibling set. Next publish
+    # reads it and unlinks only the orphans (pages that were in this manifest
+    # but absent next time).
+    try:
+        _save_publish_manifest(wiki_dir, current_manifest)
+    except OSError as exc:
+        logger.warning("Cycle 64 AC16 manifest save failed (%s); next publish will fall back", exc)
 
     return sorted(written)
 
@@ -559,3 +643,77 @@ def build_sitemap_xml(wiki_dir: Path, out_path: Path, *, incremental: bool = Fal
     out_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_text_write(xml_body + "\n", out_path)
     return out_path
+
+
+# ── Cycle 64 AC13/AC14 — compile-time auto-publish hook ──────────────────
+
+
+def auto_publish_after_compile(
+    wiki_dir: Path,
+    *,
+    out_dir: Path | None = None,
+    incremental: bool = True,
+) -> dict[str, Path]:
+    """Cycle 64 AC13 — auto-emit Tier-1 + per-page sibling + sitemap outputs.
+
+    Invoked from ``kb.compile.compiler.compile_wiki`` after manifest save (AC14).
+    Operators can disable via ``KB_DISABLE_COMPILE_AUTO_PUBLISH=1`` env var
+    (read at CALL TIME by ``compile_wiki`` per cycle-19 L2 — see compile_wiki).
+
+    Per-builder errors are caught + logged at WARNING; the function continues
+    with remaining builders so a single broken format does NOT block the others.
+
+    Path safety (M4 / T10 mitigation): ``out_dir`` defaults to
+    ``wiki_dir.parent / "_publish"`` (sibling of wiki_dir, NOT inside it —
+    keeps publish artifacts out of the page-walk surface). The caller-supplied
+    or default ``out_dir`` is validated under PROJECT_ROOT via
+    ``_validate_path_under_project_root`` (CLAUDE.md dual-anchor convention).
+
+    Args:
+        wiki_dir: source wiki path (the same arg ``compile_wiki`` was given).
+        out_dir: target directory for publish artifacts. Defaults to
+            ``wiki_dir.parent / "_publish"``.
+        incremental: passed to each builder; ``False`` for full-mode compile,
+            ``True`` for incremental.
+
+    Returns:
+        ``{format_name: output_path}`` dict for successfully-emitted formats.
+        Failures are logged but absent from the return.
+    """
+    from kb.compile.compiler import (  # noqa: PLC0415
+        _validate_path_under_project_root,
+    )
+
+    if out_dir is None:
+        out_dir = wiki_dir.parent / "_publish"
+
+    # M4 / T10 mitigation — dual-anchor PROJECT_ROOT containment.
+    _validate_path_under_project_root(out_dir, "publish_out_dir")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results: dict[str, Path] = {}
+
+    # 4 single-file Tier-1 builders.
+    single_file_builders = [
+        ("llms_txt", build_llms_txt, out_dir / "llms.txt"),
+        ("llms_full_txt", build_llms_full_txt, out_dir / "llms-full.txt"),
+        ("graph_jsonld", build_graph_jsonld, out_dir / "graph.jsonld"),
+        ("sitemap_xml", build_sitemap_xml, out_dir / "sitemap.xml"),
+    ]
+    for fmt_name, builder, out_path in single_file_builders:
+        try:
+            result_path = builder(wiki_dir, out_path, incremental=incremental)
+            results[fmt_name] = result_path
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("auto-publish %s failed: %s", fmt_name, exc)
+
+    # 1 multi-file builder — per-page siblings dir.
+    try:
+        sibling_paths = build_per_page_siblings(wiki_dir, out_dir, incremental=incremental)
+        if sibling_paths:
+            # Surface the pages_dir as the canonical "siblings" output anchor.
+            results["per_page_siblings"] = (out_dir / "pages").resolve()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto-publish per_page_siblings failed: %s", exc)
+
+    return results
