@@ -1,0 +1,68 @@
+# serializer version: 1
+# name: test_evidence_trail_format_snapshot
+  '''
+  ---
+  title: RAG
+  source: []
+  type: concept
+  confidence: stated
+  ---
+  
+  # RAG
+  
+  Retrieval-augmented generation.
+  
+  ## Evidence Trail
+  <!-- evidence-trail:begin -->
+  - 2026-05-03 | raw/articles/cycle64-update.md | updated
+  - 2026-04-15 | raw/articles/lewis-2020.md | appended
+  - 2026-04-01 | raw/articles/karpathy-2026.md | appended
+  
+  '''
+# ---
+# name: test_lint_report_format_snapshot
+  dict({
+    'checks_run_names': list([
+      'dead_links',
+      'orphan_pages',
+      'staleness',
+      'frontmatter_staleness',
+      'status_mature_stale',
+      'authored_by_drift',
+      'frontmatter',
+      'source_coverage',
+      'wikilink_cycles',
+      'stub_pages',
+      'duplicate_slugs',
+      'inline_callouts',
+    ]),
+    'result_top_level_keys': list([
+      'checks_run',
+      'duplicate_slugs',
+      'fixes_applied',
+      'inline_callouts',
+      'issues',
+      'summary',
+      'total_issues',
+    ]),
+    'summary_keys': list([
+      'error',
+      'info',
+      'verdict_history',
+      'warning',
+    ]),
+  })
+# ---
+# name: test_mermaid_export_format_snapshot
+  '''
+  graph LR
+    subgraph "concepts"
+      concepts_rag["RAG"]
+    end
+    subgraph "entities"
+      entities_openai["OpenAI"]
+    end
+    concepts_rag --> entities_openai
+    entities_openai --> concepts_rag
+  '''
+# ---

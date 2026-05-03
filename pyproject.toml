@@ -52,6 +52,7 @@ dev = [
     "pip-audit>=2.10",
     "build>=1.2",
     "twine>=5.0",
+    "syrupy>=4.6.0",  # cycle 64 AC18 — snapshot infrastructure for AC19 evidence-trail / Mermaid / lint-report subjects
 ]
 
 [tool.ruff]
