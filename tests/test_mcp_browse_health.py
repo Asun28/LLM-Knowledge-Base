@@ -766,3 +766,122 @@ def test_kb_verdict_trends_rejects_traversal_wiki_dir(tmp_path, monkeypatch):
 
     assert kb_verdict_trends(wiki_dir="../..").startswith("Error: wiki_dir")
     assert kb_verdict_trends(wiki_dir=str(tmp_path.parent)).startswith("Error: wiki_dir")
+
+
+class TestKbRebuildIndexes:
+    """Test kb_rebuild_indexes MCP tool (AC12 + AC13 + AC22)."""
+
+    def test_rebuild_indexes_happy_path(self, monkeypatch, tmp_kb_env):
+        """Happy path: returns rebuild dict when wiki_dir is valid."""
+        from kb.mcp.health import kb_rebuild_indexes
+        from unittest.mock import MagicMock
+
+        wiki_dir = tmp_kb_env / "wiki"
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+
+        # Monkeypatch rebuild_indexes to return a mock dict
+        fake_result = {
+            "manifest": {"cleared": True, "error": None},
+            "vector": {"cleared": True, "error": None},
+            "caches_cleared": ["template_cache"],
+            "audit_written": True,
+        }
+
+        def fake_rebuild(wiki_dir=None, caller="cli"):
+            return fake_result
+
+        import kb.compile.compiler
+
+        monkeypatch.setattr(kb.compile.compiler, "rebuild_indexes", fake_rebuild)
+
+        result = kb_rebuild_indexes(wiki_dir=str(wiki_dir))
+
+        assert result == fake_result
+
+    def test_rebuild_indexes_invalid_wiki_dir(self, monkeypatch, tmp_kb_env):
+        """Invalid wiki_dir returns error dict without traceback."""
+        from kb.mcp.health import kb_rebuild_indexes
+        import kb.config
+
+        monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_kb_env)
+
+        # Path traversal attempt
+        result = kb_rebuild_indexes(wiki_dir="../../../etc")
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert result["error"].startswith("Error:")
+
+    def test_rebuild_indexes_underlying_exception_wrapped(self, monkeypatch, tmp_kb_env):
+        """Underlying exception is wrapped, no leaked traceback."""
+        from kb.mcp.health import kb_rebuild_indexes
+        from unittest.mock import MagicMock
+
+        wiki_dir = tmp_kb_env / "wiki"
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+
+        # Monkeypatch rebuild_indexes to raise
+        def fake_rebuild(wiki_dir=None, caller="cli"):
+            raise OSError("permission denied")
+
+        import kb.compile.compiler
+
+        monkeypatch.setattr(kb.compile.compiler, "rebuild_indexes", fake_rebuild)
+
+        result = kb_rebuild_indexes(wiki_dir=str(wiki_dir))
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "OSError" in result["error"]
+        assert "permission denied" in result["error"]
+        # Should not contain traceback frames
+        assert "\n  " not in result["error"]
+
+    def test_rebuild_indexes_caller_mcp_audit_tag(self, monkeypatch, tmp_kb_env):
+        """caller=mcp is threaded through to append_wiki_log; audit entry contains caller=mcp."""
+        from kb.mcp.health import kb_rebuild_indexes
+        from unittest.mock import MagicMock, patch
+        from pathlib import Path
+
+        wiki_dir = tmp_kb_env / "wiki"
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_kb_env / ".data").mkdir(exist_ok=True)
+
+        # Capture append_wiki_log calls
+        append_calls = []
+
+        def fake_append(operation, message, log_path, caller="cli"):
+            append_calls.append((operation, message, str(log_path), caller))
+
+        import kb.utils.wiki_log
+
+        monkeypatch.setattr(kb.utils.wiki_log, "append_wiki_log", fake_append)
+
+        # Also need to mock the file lock / cleaner operations in rebuild_indexes
+        def fake_rebuild(wiki_dir=None, caller="cli"):
+            # Simulate what rebuild_indexes does: call append_wiki_log
+            import kb.utils.wiki_log
+            kb.utils.wiki_log.append_wiki_log(
+                "rebuild-indexes",
+                "test message",
+                wiki_dir / "log.md" if wiki_dir else tmp_kb_env / "wiki" / "log.md",
+                caller=caller,
+            )
+            return {
+                "manifest": {"cleared": True, "error": None},
+                "vector": {"cleared": True, "error": None},
+                "caches_cleared": [],
+                "audit_written": True,
+            }
+
+        import kb.compile.compiler
+
+        monkeypatch.setattr(kb.compile.compiler, "rebuild_indexes", fake_rebuild)
+
+        result = kb_rebuild_indexes(wiki_dir=str(wiki_dir))
+
+        # Assert append_wiki_log was called with caller="mcp"
+        assert len(append_calls) == 1
+        op, msg, path, caller = append_calls[0]
+        assert op == "rebuild-indexes"
+        assert caller == "mcp", f"Expected caller='mcp' but got caller='{caller}'"
