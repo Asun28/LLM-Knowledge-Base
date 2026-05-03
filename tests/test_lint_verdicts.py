@@ -212,3 +212,49 @@ def test_get_verdict_summary_pages_with_failures(tmp_path):
     summary = get_verdict_summary(path)
     # Sorted alphabetically
     assert summary["pages_with_failures"] == ["concepts/rag", "entities/openai"]
+
+
+# -- Cycle 62 fold from test_v5_verdict_augment_type.py --
+"""Regression: VALID_VERDICT_TYPES includes 'augment' for kb_lint --augment verdicts."""
+
+import json  # noqa: E402,F401,F811
+
+from kb.lint.verdicts import VALID_VERDICT_TYPES, add_verdict  # noqa: E402,F401,F811
+from kb.utils.io import atomic_json_write  # noqa: E402,F401,F811
+
+
+def test_augment_is_a_valid_verdict_type():
+    assert "augment" in VALID_VERDICT_TYPES
+
+
+def test_add_verdict_accepts_augment_type(tmp_path, monkeypatch):
+    verdicts_path = tmp_path / "verdicts.json"
+    monkeypatch.setattr("kb.lint.verdicts.VERDICTS_PATH", verdicts_path)
+    atomic_json_write([], verdicts_path)
+
+    add_verdict(
+        page_id="concepts/mixture-of-experts",
+        verdict_type="augment",
+        verdict="pass",
+        notes="augmented from wikipedia, body 1.2k chars, 1 citation",
+        issues=[],
+    )
+    saved = json.loads(verdicts_path.read_text())
+    assert any(v["verdict_type"] == "augment" for v in saved)
+
+
+def test_add_verdict_rejects_unknown_type(tmp_path, monkeypatch):
+    import pytest
+
+    verdicts_path = tmp_path / "verdicts.json"
+    monkeypatch.setattr("kb.lint.verdicts.VERDICTS_PATH", verdicts_path)
+    atomic_json_write([], verdicts_path)
+
+    with pytest.raises(ValueError, match="Invalid verdict_type"):
+        add_verdict(
+            page_id="concepts/foo",
+            verdict_type="not_a_real_type",
+            verdict="pass",
+            notes="x",
+            issues=[],
+        )

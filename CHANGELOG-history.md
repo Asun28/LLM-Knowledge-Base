@@ -9,6 +9,26 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-03 — cycle 62 — Backlog hygiene + freeze-and-fold continuation (20-file batch)
+
+**Theme:** Continue the Phase 4.5 HIGH `tests/` coverage-visibility freeze-and-fold work in a dedicated cycle-62 worktree (`feat/cycle-62`). Production-code changes: zero. Dependency changes: zero. The cycle selected 20 green source-test files and folded their 97 tests into existing canonical receivers.
+
+**ACs shipped (20 folds):**
+
+- **Query receiver batch → `tests/test_query.py`**: folded `test_v0917_rewriter.py` (4), `test_v0917_raw_fallback.py` (3), `test_v0917_layered_context.py` (5), `test_v0917_hybrid.py` (6), `test_v0917_embeddings.py` (6), `test_v01004_query_correctness.py` (6), `test_v01005_query_perf_docs.py` (5), `test_v0917_stale_query.py` (4), `test_v0917_dedup.py` (8), and `test_v4_11_markdown.py` (8). The stale-query fold aliases the stdlib `time` module as `_cycle62_time` so the receiver's existing `datetime.time` import remains intact.
+- **Ingest receiver batch → `tests/test_ingest.py`**: folded `test_v0917_contradiction.py` (5) and `test_v0917_evidence_trail.py` (6).
+- **Lint/config/verdict/compile/CLI/MCP batches**: folded `test_v5_augment_config.py` + `test_v01002_consolidated_constants.py` → `tests/test_config.py` (6 total); `test_v5_verdict_augment_type.py` → `tests/test_lint_verdicts.py` (3); `test_v5_autogen_prefixes.py` + `test_v01010_lint_fixes.py` → `tests/test_lint.py` (6); `test_v01006_compile_fixes.py` → `tests/test_compile.py` (4); `test_v4_11_cli.py` → `tests/test_cli.py` (5); `test_v4_11_mcp.py` → `tests/test_mcp_core.py` (7).
+
+**Test count: 3022 (preserved).** Baseline collection in the worktree was `3022 tests collected`, revealing pre-existing drift from the cycle-58 `3021` doc count. Selected-source TDD baseline: `97 passed`. Post-fold collection remains `3022 tests collected`. Full Windows local: `3010 passed + 12 skipped + 48 warnings in 149.11s`.
+
+**File count: 200 → 180 (-20 sources).** Counts measured with `Get-ChildItem tests -Filter 'test_*.py' -File` per CLAUDE.md convention. All 20 source files were deleted after their tests landed in receivers.
+
+**Verification:** targeted receiver batches passed (`test_config.py` + `test_lint_verdicts.py`: 26 passed; `test_lint.py` + `test_compile.py`: 61 passed; `test_cli.py` + `test_mcp_core.py`: 111 passed; `test_ingest.py` + `test_query.py`: 133 passed). `ruff format --check src/ tests/` passed; `ruff check src/ tests/` passed. `pip-audit --format json` returned the same 4 known baseline advisories (`diskcache`, `ragas`, `litellm`, `pip`) and no dependency files changed, so Class B PR-introduced advisory delta is empty.
+
+**Subagents:** Three planning/test/docs subagents were used before implementation. One proposed a new `tests/test_query_formats.py` receiver; primary rejected that for this cycle because using existing receivers deletes the full 20 source files. Another proposed alternate lint-augment/rate folds; primary kept the locally green smallest-slice baseline. The docs-gate subagent identified the required count/changelog/reference updates and final PR gates.
+
+**Decision docs:** `docs/superpowers/decisions/2026-05-03-cycle-62-{requirements,design,plan}.md`.
+
 ### 2026-05-03 — cycle 58 — Backlog hygiene + freeze-and-fold continuation (4-fold batch, 1 AC dropped at rebase)
 
 **Theme:** Continue the freeze-and-fold cadence from cycles 47-57 (Phase 4.5 HIGH #4) with **5 small fold targets** picked at Step 1. Cycle-54-pickup landed during cycle-58 and folded one of cycle-58's planned sources (`test_cycle15_lint_status_mature.py`, AC4) — the rebase onto origin/main used `git rebase --skip` to drop the now-redundant AC4 commit; cycle-58 ships **4 folds** instead of 5. Production-code changes: zero. Fourth `dev-mimo-opus` trial cycle (after cycles 55, 56, 57). Receivers verified disjoint from in-flight `worktree-cycle-53` and from the just-merged cycle-54-pickup folds.

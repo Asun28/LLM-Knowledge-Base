@@ -865,3 +865,151 @@ def test_contradiction_truncation_logged(caplog):
         or "first" in m.lower()
     ]
     assert truncation_msgs, f"Expected truncation warning log, got: {msgs}"
+
+
+# -- Cycle 62 fold from test_v0917_contradiction.py --
+"""Tests for auto-contradiction detection on ingest (Phase 4)."""
+
+from kb.ingest.contradiction import detect_contradictions  # noqa: E402,F401,F811
+
+
+class TestDetectContradictions:
+    def test_no_contradictions_empty_wiki(self):
+        new_claims = ["Transformers use self-attention."]
+        result = detect_contradictions(new_claims, existing_pages=[])
+        assert result == []
+
+    def test_no_false_positives_on_unrelated(self):
+        # Use genuinely disjoint vocabularies to prevent heuristic false-positives.
+        new_claims = ["The Eiffel Tower stands in Paris."]
+        existing = [
+            {
+                "id": "concepts/qcd",
+                "content": "Quantum chromodynamics describes quark interactions.",
+                "title": "QCD",
+            }
+        ]
+        result = detect_contradictions(new_claims, existing_pages=existing)
+        assert result == []
+
+    def test_respects_max_claims(self):
+        claims = [f"Claim {i}" for i in range(20)]
+        result = detect_contradictions(claims, existing_pages=[], max_claims=5)
+        # Should not error even with many claims
+        assert isinstance(result, list)
+
+
+def test_returns_empty_list_when_no_contradiction(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (empty-path explicitly tested, no silent loop-skip)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    result = detect_contradictions(new_claims=["unrelated topic"], existing_pages=[])
+    assert result == []
+
+
+def test_returns_contradiction_dict_when_heuristic_fires(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (fired path: verify dict shape)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    existing_pages = [
+        {
+            "id": "concepts/latency",
+            "content": "Network latency is always high in mobile networks.",
+        }
+    ]
+    result = detect_contradictions(
+        new_claims=["Network latency is never high in mobile networks."],
+        existing_pages=existing_pages,
+    )
+    assert len(result) >= 1, "heuristic should catch 'always' vs 'never'"
+    item = result[0]
+    for key in ("new_claim", "existing_page", "existing_text", "reason"):
+        assert key in item
+
+
+# -- Cycle 62 fold from test_v0917_evidence_trail.py --
+"""Tests for evidence trail sections in wiki pages (Phase 4)."""
+
+from kb.ingest.evidence import append_evidence_trail, build_evidence_entry  # noqa: E402,F401,F811
+
+
+class TestBuildEvidenceEntry:
+    def test_basic_entry(self):
+        # Use fixed date to avoid midnight boundary flake (cycle 5 fix).
+        entry = build_evidence_entry(
+            source_ref="raw/articles/example.md",
+            action="Initial extraction: core concept definition",
+            entry_date="2026-01-01",
+        )
+        assert entry.startswith("- 2026-01-01")
+        assert "raw/articles/example.md" in entry
+        assert "Initial extraction" in entry
+
+    def test_custom_date(self):
+        entry = build_evidence_entry(
+            source_ref="raw/papers/paper.md",
+            action="Updated: added formulation",
+            entry_date="2026-01-15",
+        )
+        assert entry.startswith("- 2026-01-15")
+
+    def test_entry_is_single_line(self):
+        entry = build_evidence_entry(
+            source_ref="raw/articles/a.md",
+            action="Some action",
+        )
+        assert "\n" not in entry.strip()
+
+
+class TestAppendEvidenceTrail:
+    def test_adds_section_to_page_without_trail(self, tmp_path):
+        page = tmp_path / "test.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "# Test\n\nSome content.\n",
+            encoding="utf-8",
+        )
+        append_evidence_trail(page, "raw/articles/a.md", "Initial extraction: definition")
+        text = page.read_text(encoding="utf-8")
+        assert "## Evidence Trail" in text
+        assert "raw/articles/a.md" in text
+        assert "Initial extraction: definition" in text
+        # Content above trail is preserved
+        assert "# Test" in text
+        assert "Some content." in text
+
+    def test_appends_to_existing_trail(self, tmp_path):
+        page = tmp_path / "test.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "# Test\n\nContent.\n\n## Evidence Trail\n"
+            "- 2026-04-10 | raw/articles/a.md | First entry\n",
+            encoding="utf-8",
+        )
+        append_evidence_trail(page, "raw/articles/b.md", "Updated: new info")
+        text = page.read_text(encoding="utf-8")
+        # New entry at top (reverse chronological)
+        trail_idx = text.index("## Evidence Trail")
+        trail = text[trail_idx:]
+        lines = [line for line in trail.split("\n") if line.startswith("- ")]
+        assert len(lines) == 2
+        assert "raw/articles/b.md" in lines[0]  # Newest first
+        assert "raw/articles/a.md" in lines[1]
+
+    def test_preserves_frontmatter(self, tmp_path):
+        page = tmp_path / "test.md"
+        original = (
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "Body content.\n"
+        )
+        page.write_text(original, encoding="utf-8")
+        append_evidence_trail(page, "raw/articles/a.md", "action")
+        text = page.read_text(encoding="utf-8")
+        assert text.startswith("---\n")
+        assert 'title: "Test"' in text
