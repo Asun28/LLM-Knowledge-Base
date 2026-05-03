@@ -8,8 +8,32 @@ import pytest
 
 from kb.config import PROJECT_ROOT, SOURCE_TYPE_DIRS
 
+# Cycle 64 AC2 — captured at module import time, before any test or fixture
+# can monkeypatch kb.config. Used by `real_project_root` fixture to yield the
+# genuine repo path under `pytest --use-real-paths` opt-in.
+_REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT = Path(PROJECT_ROOT)
+
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
 RAW_SUBDIRS = tuple(sorted(d.name for d in SOURCE_TYPE_DIRS.values()))
+
+
+# Cycle 64 AC2 — pytest CLI option for opting OUT of the autouse sandbox.
+# Tests that genuinely need the real repo paths (rare; should be a small
+# minority) request the `real_project_root` fixture and the test author
+# invokes pytest with `--use-real-paths`.
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--use-real-paths",
+        action="store_true",
+        default=False,
+        help=(
+            "Cycle 64 AC2: opt out of conftest's autouse sandbox so the "
+            "`real_project_root` fixture yields the genuine repo PROJECT_ROOT. "
+            "Without this flag, `real_project_root` raises RuntimeError. "
+            "The autouse `tmp_kb_env` fixture still runs (sandbox is in effect "
+            "for tests that don't request `real_project_root`)."
+        ),
+    )
 
 _TMP_KB_ENV_PATCHED_NAMES = (
     "PROJECT_ROOT",
@@ -64,7 +88,19 @@ def _reset_embeddings_state():
 
 @pytest.fixture
 def project_root() -> Path:
-    return PROJECT_ROOT
+    """Return the ACTIVE kb.config.PROJECT_ROOT (sandbox-aware after cycle 64 AC1).
+
+    Under the autouse `tmp_kb_env` fixture, this returns the per-test tmp_path
+    sandbox. Tests that genuinely need the real repo path must request
+    `real_project_root` and run pytest with `--use-real-paths`.
+
+    Cycle 64 AC1: lookup is at CALL TIME via the kb.config module attribute,
+    not bound at conftest import time. This ensures the autouse monkeypatch
+    on `kb.config.PROJECT_ROOT` is visible through this fixture.
+    """
+    import kb.config as config  # noqa: PLC0415
+
+    return config.PROJECT_ROOT
 
 
 @pytest.fixture
@@ -75,6 +111,29 @@ def raw_dir(project_root: Path) -> Path:
 @pytest.fixture
 def wiki_dir(project_root: Path) -> Path:
     return project_root / "wiki"
+
+
+@pytest.fixture
+def real_project_root(request: pytest.FixtureRequest) -> Path:
+    """Cycle 64 AC2 — opt-in fixture yielding the genuine repo PROJECT_ROOT.
+
+    Raises RuntimeError if `pytest --use-real-paths` was NOT passed. This
+    enforces a single-CLI-flag global escape hatch so tests that read or
+    write to the live wiki tree are explicit about it (not silently leaked
+    via the default `project_root` / `wiki_dir` / `raw_dir` fixtures, which
+    are sandbox-aware after AC1).
+
+    Tests requesting this fixture should be exceedingly rare. Most tests
+    should use `tmp_wiki` / `tmp_project` / `tmp_kb_env` (autouse) for
+    sandboxed paths.
+    """
+    if not request.config.getoption("--use-real-paths"):
+        raise RuntimeError(
+            "real_project_root requires --use-real-paths to opt out of "
+            "conftest sandboxing; see tests/conftest.py "
+            "(cycle 64 AC2 / project_cycle61_mimo_failure context)"
+        )
+    return _REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT
 
 
 @pytest.fixture
@@ -124,9 +183,16 @@ def tmp_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture
-def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
+@pytest.fixture(autouse=True)
+def tmp_kb_env(tmp_path: Path, monkeypatch, request: pytest.FixtureRequest) -> Path:
     """Patch KB paths into a temporary project.
+
+    Cycle 64 AC1: PROMOTED TO AUTOUSE — runs by default for every test so
+    `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` reads in production code
+    redirect to per-test `tmp_path` sandbox. Tests that genuinely need the
+    real repo paths request `real_project_root` and invoke pytest with
+    `--use-real-paths`; under that flag this fixture EARLY-RETURNS the real
+    PROJECT_ROOT without monkeypatching, preserving real-path semantics.
 
     Patched names: PROJECT_ROOT, RAW_DIR, WIKI_DIR, CAPTURES_DIR, OUTPUTS_DIR,
     VERDICTS_PATH, FEEDBACK_PATH, REVIEW_HISTORY_PATH, HASH_MANIFEST,
@@ -153,6 +219,12 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
     Update this fixture when new kb.config WRITE-TARGET path constants or
     derived path caches are added.
     """
+    # Cycle 64 AC1/AC2: opt-out path. Tests that requested --use-real-paths
+    # (typically combined with `real_project_root` fixture) genuinely need
+    # the live repo tree; skip ALL monkeypatching and return the real path.
+    if request.config.getoption("--use-real-paths"):
+        return _REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT
+
     import kb.compile.compiler as compiler  # noqa: PLC0415
     import kb.config as config  # noqa: PLC0415
 
@@ -287,6 +359,9 @@ def tmp_kb_env(tmp_path: Path, monkeypatch) -> Path:
 
 # Cycle 17 AC16 — `_kb_sandbox` is an alias for `tmp_kb_env` kept for the
 # design-gate naming convention. New code should prefer `tmp_kb_env` (cycle 12).
+# Cycle 64 AC1: promoted to public `kb_sandbox` alias; `_kb_sandbox` kept for
+# backward-compat with any test still referencing the private name.
+kb_sandbox = tmp_kb_env
 _kb_sandbox = tmp_kb_env
 
 
