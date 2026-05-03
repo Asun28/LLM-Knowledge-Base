@@ -62,6 +62,9 @@ feature-dev-Opus4.6.md
 /progress.md
 /task_plan.md
 
+# Codex local config (except agent definitions which are tracked)
+.codex/
+
 # Per-cycle scratch directories (forward-looking — added cycle 34 AC17)
 cycle-*-scratch/
 

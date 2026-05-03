@@ -57,8 +57,16 @@ def _get_semaphore(backend: str) -> threading.Semaphore:
 
 def check_cli_available(backend: str) -> bool:
     """Return True if the CLI binary for ``backend`` is on PATH."""
-    binary = CLI_TOOL_COMMANDS[backend][0]
+    binary = _backend_executable(backend)
     return shutil.which(binary) is not None
+
+
+def _backend_executable(backend: str) -> str:
+    """Return the executable name to pass to ``subprocess.run``."""
+    binary = CLI_TOOL_COMMANDS[backend][0]
+    if backend == "codex" and os.name == "nt":
+        return "codex.cmd"
+    return binary
 
 
 def _build_cmd(backend: str, model: str) -> list[str]:
@@ -71,7 +79,32 @@ def _build_cmd(backend: str, model: str) -> list[str]:
             "only [A-Za-z0-9._:/-] chars are allowed (T1).",
             kind="invalid_request",
         )
-    return [tok.replace("{model}", model) for tok in CLI_TOOL_COMMANDS[backend]]
+    cmd = [tok.replace("{model}", model) for tok in CLI_TOOL_COMMANDS[backend]]
+    cmd[0] = _backend_executable(backend)
+    if backend == "codex" and model:
+        cmd.extend(["--model", model])
+    return cmd
+
+
+def _postprocess_stdout(backend: str, stdout_text: str) -> str:
+    """Extract model text from backend-specific structured output."""
+    if backend != "codex":
+        return stdout_text.strip()
+
+    last_agent_text = None
+    for line in stdout_text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "agent_message" and isinstance(item.get("text"), str):
+            last_agent_text = item["text"]
+    return last_agent_text.strip() if last_agent_text is not None else stdout_text.strip()
 
 
 def _scrub_env(backend: str) -> dict[str, str]:
@@ -191,7 +224,7 @@ def call_cli(
     # before the slice is the residual risk accepted in cycle-21 plan gate (gap 8).
     raw_stdout = result.stdout[:MAX_CLI_STDOUT_BYTES]
     stdout_text = raw_stdout.decode("utf-8", errors="replace")
-    return _redact_secrets(stdout_text).strip()
+    return _redact_secrets(_postprocess_stdout(backend, stdout_text)).strip()
 
 
 # ── JSON extraction ───────────────────────────────────────────────────────────

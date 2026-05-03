@@ -84,6 +84,38 @@ def test_call_cli_arg_path_gemini(monkeypatch):
     assert captured["input"] is None
 
 
+def test_call_cli_codex_exec_jsonl_path(monkeypatch):
+    """Codex CLI uses `codex exec --json` and returns only the agent message."""
+    monkeypatch.setenv("KB_LLM_BACKEND", "codex")
+    monkeypatch.setenv("KB_CLI_MODEL_WRITE", "gpt-5.4-mini")
+    monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/codex")
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        captured["shell"] = kwargs.get("shell")
+        stdout = (
+            b'{"type":"thread.started","thread_id":"t1"}\n'
+            b'{"type":"item.completed","item":{"type":"agent_message",'
+            b'"text":"KB_CODEX_BACKEND_OK"}}\n'
+            b"Reading additional input from stdin...\n"
+        )
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout=stdout, stderr=b"")
+
+    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+
+    result = call_llm("Reply exactly KB_CODEX_BACKEND_OK.", tier="write")
+    assert result == "KB_CODEX_BACKEND_OK"
+    assert captured["cmd"][1:4] == ["exec", "--json", "--ephemeral"]
+    assert "-q" not in captured["cmd"]
+    assert "--model" in captured["cmd"]
+    assert "gpt-5.4-mini" in captured["cmd"]
+    assert captured["input"] == b"Reply exactly KB_CODEX_BACKEND_OK."
+    assert captured["shell"] is False
+
+
 # ── AC20: LLMError(kind="not_installed") when binary missing ─────────────────
 
 

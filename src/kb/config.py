@@ -194,7 +194,15 @@ CLI_TOOL_COMMANDS: Mapping[str, list[str]] = MappingProxyType(
         "ollama": ["ollama", "run", "{model}", "--nowordwrap"],
         "gemini": ["gemini"],  # --prompt <prompt> appended dynamically
         "opencode": ["opencode", "ask"],
-        "codex": ["codex", "-q"],
+        "codex": [
+            "codex",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+        ],
         "kimi": ["kimi"],
         "qwen": ["qwen"],
         "deepseek": ["deepseek"],
