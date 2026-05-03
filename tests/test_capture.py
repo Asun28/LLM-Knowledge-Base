@@ -44,7 +44,6 @@ from kb.config import (
     CAPTURE_KINDS,
     CAPTURE_MAX_BYTES,
     CAPTURE_MAX_CALLS_PER_HOUR,
-    CAPTURES_DIR,
     PROJECT_ROOT,
     TEMPLATES_DIR,
 )

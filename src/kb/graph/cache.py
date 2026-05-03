@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 # Insertion-ordered dict (CPython 3.7+) keyed on
 # (wiki_dir.resolve().as_posix(), max_mtime_of_wiki_subdirs). FIFO eviction
 # by oldest insertion when size exceeds _MAX_CACHE_SIZE.
-_GLOBAL_CACHE: dict[tuple[str, float], "nx.DiGraph"] = {}
+_GLOBAL_CACHE: dict[tuple[str, float], nx.DiGraph] = {}
 
 # Re-entrant lock so test fixtures can invoke invalidate() from inside an
 # autouse fixture that's already inside another lock context (cycle-19 L2
@@ -106,7 +106,7 @@ def _max_mtime_of_wiki_subdirs(wiki_dir: Path) -> float:
     return max(mtimes, default=0.0)
 
 
-def get_graph(wiki_dir: Path, *, pages: list[dict] | None = None) -> "nx.DiGraph":
+def get_graph(wiki_dir: Path, *, pages: list[dict] | None = None) -> nx.DiGraph:
     """Return a graph for ``wiki_dir``, using the process-shared cache when
     no ``pages=`` snapshot is supplied.
 

@@ -3,8 +3,8 @@
 import logging
 from pathlib import Path
 
-from kb.config import RAW_DIR, WIKI_DIR
 import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+from kb.config import RAW_DIR, WIKI_DIR
 from kb.lint.checks import (
     check_authored_by_drift,
     check_cycles,

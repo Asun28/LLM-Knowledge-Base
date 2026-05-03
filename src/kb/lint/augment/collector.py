@@ -11,8 +11,8 @@ from typing import Any
 
 import yaml
 
-from kb import config
 import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+from kb import config
 from kb.lint.checks import check_stub_pages
 from kb.utils.pages import load_page_frontmatter
 

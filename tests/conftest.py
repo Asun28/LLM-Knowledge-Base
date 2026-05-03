@@ -35,6 +35,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         ),
     )
 
+
 _TMP_KB_ENV_PATCHED_NAMES = (
     "PROJECT_ROOT",
     "RAW_DIR",

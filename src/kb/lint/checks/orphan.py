@@ -6,8 +6,8 @@ from pathlib import Path
 import networkx as nx
 import yaml
 
-from kb.config import AUTOGEN_PREFIXES, STUB_MIN_CONTENT_CHARS
 import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+from kb.config import AUTOGEN_PREFIXES, STUB_MIN_CONTENT_CHARS
 from kb.graph.builder import graph_stats  # cycle-64 AC10 — graph_stats stays direct (not cached)
 from kb.lint import checks
 from kb.lint.checks.dead_links import _INDEX_FILES

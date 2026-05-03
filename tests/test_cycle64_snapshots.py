@@ -32,8 +32,6 @@ that's the POINT of snapshot testing.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from kb.graph.export import export_mermaid
 from kb.ingest.evidence import append_evidence_trail
 

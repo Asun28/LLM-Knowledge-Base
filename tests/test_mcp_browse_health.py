@@ -13,7 +13,6 @@ import kb.config
 import kb.mcp.app
 import kb.mcp.browse
 import kb.utils.pages
-from kb.config import PROJECT_ROOT
 from kb.lint._safe_call import _safe_call
 from kb.lint.runner import run_all_checks
 from kb.mcp import browse, health
@@ -476,9 +475,14 @@ class TestSanitizeErrorStrAtMCPBoundary:
 
 
 def test_validate_wiki_dir_rejects_absolute_outside_project_root(tmp_path):
-    outside = tmp_path / "outside_project_root_cycle10"
-    outside.mkdir()
-    assert not outside.resolve().is_relative_to(PROJECT_ROOT.resolve())
+    # Cycle 64 AC3 migration: under autouse tmp_kb_env (AC1), kb.config.PROJECT_ROOT
+    # is patched to tmp_path, so `tmp_path/outside_project_root_cycle10` is INSIDE
+    # the sandbox PROJECT_ROOT. Climb above tmp_path to land outside the sandbox.
+    outside = tmp_path.parent.parent / "cycle64-outside-sandbox-project-root-c10"
+    outside.mkdir(exist_ok=True)
+    import kb.config as _kb_config_for_cycle64
+
+    assert not outside.resolve().is_relative_to(_kb_config_for_cycle64.PROJECT_ROOT.resolve())
 
     path, err = _validate_wiki_dir(str(outside))
 

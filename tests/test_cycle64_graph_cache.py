@@ -15,7 +15,6 @@ AC9 cache logic → get_graph rebuilds every call → spy count != 1 in cache-hi
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 
 import pytest
@@ -86,8 +85,7 @@ def test_get_graph_invalidated_by_mtime_bump(tmp_path, monkeypatch):
 
     time.sleep(0.05)
     (tmp_path / "concepts" / "page-two.md").write_text(
-        "---\ntitle: Page Two\nsource: []\ntype: concept\nconfidence: stated\n---\n\n"
-        "# Page Two\n",
+        "---\ntitle: Page Two\nsource: []\ntype: concept\nconfidence: stated\n---\n\n# Page Two\n",
         encoding="utf-8",
     )
 

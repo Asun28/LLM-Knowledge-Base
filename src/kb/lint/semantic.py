@@ -7,6 +7,7 @@ import frontmatter
 import networkx as nx
 import yaml
 
+import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.config import (
     MAX_CONSISTENCY_GROUP_SIZE,
     MAX_CONSISTENCY_GROUPS,
@@ -15,7 +16,6 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     WIKI_DIR,
 )
-import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages

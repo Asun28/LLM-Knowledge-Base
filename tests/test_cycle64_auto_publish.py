@@ -84,9 +84,7 @@ def test_auto_publish_continues_after_per_builder_failure(tmp_path, monkeypatch,
     assert "graph_jsonld" in results
     assert "sitemap_xml" in results
     # WARNING was emitted.
-    assert any(
-        "auto-publish llms_full_txt failed" in record.message for record in caplog.records
-    )
+    assert any("auto-publish llms_full_txt failed" in record.message for record in caplog.records)
 
 
 def test_auto_publish_rejects_out_dir_outside_project_root(tmp_path):
@@ -149,7 +147,7 @@ def test_compile_wiki_invokes_auto_publish_by_default(tmp_path, monkeypatch):
     compile_wiki(wiki_dir=wiki, raw_dir=raw_dir, incremental=True)
 
     assert spy_called >= 1, (
-        f"auto_publish_after_compile NOT called; AC14 hook missing or kill-switch leaked"
+        "auto_publish_after_compile NOT called; AC14 hook missing or kill-switch leaked"
     )
 
 
@@ -215,9 +213,9 @@ def test_compile_wiki_succeeds_even_if_auto_publish_raises(tmp_path, monkeypatch
         result = compile_wiki(wiki_dir=wiki, raw_dir=raw_dir, incremental=True)
 
     assert result is not None
-    assert any(
-        "auto-publish skipped" in record.message for record in caplog.records
-    ), "Expected 'auto-publish skipped' WARNING in compile_wiki output"
+    assert any("auto-publish skipped" in record.message for record in caplog.records), (
+        "Expected 'auto-publish skipped' WARNING in compile_wiki output"
+    )
 
 
 def test_publish_artifacts_outside_wiki_dir_walk(tmp_path):
