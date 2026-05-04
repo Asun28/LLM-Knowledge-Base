@@ -580,7 +580,12 @@ class VectorIndex:
                 conn.enable_load_extension(True)
                 import sqlite_vec
 
-                sqlite_vec.load(conn)
+                try:
+                    sqlite_vec.load(conn)
+                except sqlite3.OperationalError as exc:
+                    raise RuntimeError(
+                        "sqlite-vec extension failed to load; reinstall the sqlite-vec wheel"
+                    ) from exc
                 conn.enable_load_extension(False)
             except Exception as e:
                 if not self._ext_warned:
