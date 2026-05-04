@@ -70,6 +70,28 @@ def _reset_project_root() -> None:
     """
     pass
 
+def get_allowed_domains() -> tuple[str, ...]:
+    """Return allowed domains for augment operations, reading env at call time.
+    
+    Cycle-19 L2 reload-leak hazard: env vars are read at EVERY call, not
+    cached at import time. This allows tests and long-lived processes to
+    observe env mutations after module import.
+    
+    Reads KB_AUGMENT_ALLOWED_DOMAINS first (KB_ prefix for namespace hygiene),
+    falls back to unprefixed AUGMENT_ALLOWED_DOMAINS for back-compat, then
+    defaults to "en.wikipedia.org,arxiv.org".
+    
+    Returns:
+        Tuple of allowed domain names (whitespace-stripped, deduplicated).
+    """
+    raw = (
+        os.getenv("KB_AUGMENT_ALLOWED_DOMAINS")
+        or os.getenv("AUGMENT_ALLOWED_DOMAINS")
+        or "en.wikipedia.org,arxiv.org"
+    )
+    return tuple(d.strip() for d in raw.split(",") if d.strip())
+
+
 
 PROJECT_ROOT = _resolve_project_root()
 RAW_DIR = PROJECT_ROOT / "raw"
@@ -501,11 +523,7 @@ AUGMENT_COOLDOWN_HOURS = 24
 AUGMENT_RELEVANCE_THRESHOLD = 0.5
 AUGMENT_WIKIPEDIA_FUZZY_THRESHOLD = 0.7
 
-AUGMENT_ALLOWED_DOMAINS: tuple[str, ...] = tuple(
-    d.strip()
-    for d in os.getenv("AUGMENT_ALLOWED_DOMAINS", "en.wikipedia.org,arxiv.org").split(",")
-    if d.strip()
-)
+# AUGMENT_ALLOWED_DOMAINS moved to get_allowed_domains() function
 AUGMENT_CONTENT_TYPES: tuple[str, ...] = (
     "text/html",
     "text/markdown",
