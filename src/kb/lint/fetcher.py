@@ -232,6 +232,19 @@ def _registered_domain(url: str) -> str | None:
         return None
 
 
+
+def _url_scheme_allowed(url: str) -> bool:
+    """Return True if URL uses http or https scheme.
+    
+    AC12 scheme gate: rejects non-HTTP(S) schemes (file, gopher, data,
+    javascript, ftp, etc.) to prevent protocol-specific attacks.
+    """
+    try:
+        return urlparse(url).scheme in {"http", "https"}
+    except (ValueError, AttributeError):
+        return False
+
+
 def _url_is_allowed(url: str, allowed_domains: tuple[str, ...]) -> bool:
     """Return True if URL's host matches ``allowed_domains``.
 
@@ -245,6 +258,8 @@ def _url_is_allowed(url: str, allowed_domains: tuple[str, ...]) -> bool:
     Shared between the fetcher's allowlist gate and the orchestrator's URL
     proposer filter so both make the same decision for a given URL.
     """
+    if not _url_scheme_allowed(url):
+        return False
     try:
         netloc = urlparse(url).netloc.lower()
     except (ValueError, AttributeError):
