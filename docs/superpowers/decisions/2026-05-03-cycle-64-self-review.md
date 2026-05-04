@@ -5,7 +5,7 @@
 **Tier:** 2 (standard feature batch)
 **Trial:** May 2026 MiMo trial — sixth `dev-mimo-opus` cycle
 **Author:** Opus 4.7 primary session
-**Outcome:** ✓ COMPLETE — 25 ACs landed (21 main + 4 sub-ACs); 30 new cycle-64 tests; 7 trial-skip-marks for AC3 migration debt; full pytest 3036 passed + 18 skipped + 0 failed. Codex landing review completed the deferred AC21 docs/reference + CHANGELOG-history sync and fixed pre-merge whitespace hygiene.
+**Outcome:** ✓ COMPLETE — 25 ACs landed (21 main + 4 sub-ACs); 33 new cycle-64 tests (30 initial + 3 from Step 20 R1 fix cascade); 7 trial-skip-marks for AC3 migration debt; full pytest 3039 passed + 18 skipped + 0 failed. Codex landing review completed the deferred AC21 docs/reference + CHANGELOG-history sync and fixed pre-merge whitespace hygiene; Step 20 R1 cross-family review (DeepSeek+Sonnet) caught 4 BLOCKERs post-landing — fixed in follow-on commit.
 
 ---
 
@@ -33,10 +33,10 @@ Cycle 64 is the **biggest cycle of the trial so far** (25 ACs across 6 file doma
 | 06 | Context7 lib/API verify | Sonnet | — | SKIP (syrupy basic fixture pattern well-established; pure stdlib + internal code otherwise) |
 | 07 | Implementation plan | mimo-v2.5-pro | mimo-v2.5-pro (~7m) | ⚠️ stub-with-summary (cycle-61 pattern reproduced) |
 | 08 | Plan gate | mimo-v2.5-pro | mimo-v2.5-pro (~5m) | ✓ APPROVE-WITH-NOTES (audit role works) |
-| 09 | Implementation TDD | mimo + DeepSeek bg | primary session | ✓ 5 clusters across 11 commits; 30 new tests |
+| 09 | Implementation TDD | mimo + DeepSeek bg | primary session | ✓ 5 clusters across 11 commits; 30 new tests (+3 from Step 20 R1 cascade = 33 final) |
 | 10 | Simplify pass | Opus (main) | — | SKIP (manual review during impl; no over-engineering surface) |
 | 11 | SAST + secrets | non-agent | — | SKIP (no new secrets surface; no eval/exec/shell=True; no untrusted deserialization) |
-| 12 | CI hard gate | non-agent | primary session | ✓ 3036 passed + 18 skipped + 0 failed (149.5s) |
+| 12 | CI hard gate | non-agent | primary session | ✓ 3036 passed + 18 skipped + 0 failed (149.5s) initial; **3039 passed + 18 skipped post-R1 cascade** |
 | 13 | Coverage delta | non-agent | — | DEFER (cycle-65+ — known partial-skipped tests prevent meaningful coverage assertion) |
 | 14 | Security verify | mimo-v2.5-pro | primary session | ✓ 9/9 mitigations (T2/T6/T7/T10/T15/T16/T18 + AC6/AC14 env) |
 | 15 | CVE patch | non-agent | — | N/A (no new advisories during cycle) |
@@ -136,7 +136,7 @@ The 3 categories are not equivalent for trial-purposes-of-evaluating-binding-own
 
 - **Largest cycle of trial so far** (25 ACs vs cycle-58's 5, cycle-57's 6, cycle-56's 5). Substantial refactor + new module + new test infrastructure.
 - **First successful DeepSeek V4 Pro design-eval** (Step 4 R2) — 8 findings, all factual precision fixes, NEEDS_REVISION verdict. Cross-vendor adversarial diversity confirmed working at design-eval surface.
-- **Recovery from cycle-61's MiMo failure-mode** confirmed via 11 commits + 30 new tests + 9/9 Step 14 verifier pass. Primary-session impl per project_cycle61_mimo_failure direction was the right call.
+- **Recovery from cycle-61's MiMo failure-mode** confirmed via 11 commits + 30 new tests + 9/9 Step 14 verifier pass (12 commits + 33 new tests after Step 20 R1 cascade). Primary-session impl per project_cycle61_mimo_failure direction was the right call.
 - **Three independent kill-switches** added (`KB_DISABLE_VECTOR_AUTO_REBUILD`, `KB_DISABLE_COMPILE_AUTO_PUBLISH`, `pytest --use-real-paths`) — operator escape hatches for the new behaviour-changing features.
 - **Snapshot infrastructure foundation** shipped (3 subjects via syrupy). Future cycles can extend coverage without rebuilding the foundation.
 - **Cycle-19 L2 reload-leak hazard** addressed in 3 places (env reads at call time for both kill-switches; RLock for graph cache).
