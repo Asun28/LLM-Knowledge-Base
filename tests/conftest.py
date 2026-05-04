@@ -330,21 +330,21 @@ def _apply_kb_path_patches(
     # could survive into this test if keys happen to collide (they shouldn't,
     # but the fixture's documented contract is "production sees tmp paths"
     # and a stale-cache leak would violate that contract silently).
-    for cached_callable_path in (
-        "kb.utils.pages.load_purpose",
-        "kb.ingest.extractors._load_template_cached",
-        "kb.ingest.extractors._build_schema_cached",
-    ):
-        module_name, _, attr = cached_callable_path.rpartition(".")
-        mod = sys.modules.get(module_name)
-        if mod is None:
-            continue
-        func = getattr(mod, attr, None)
-        if func is None:
-            continue
-        cache_clear = getattr(func, "cache_clear", None)
-        if callable(cache_clear):
-            cache_clear()
+    # AC5: walk sys.modules for any @lru_cache decorated functions
+    # in kb.* modules and clear their caches. This replaces the hardcoded
+    # list and catches cache-decorated functions added in future cycles.
+    for mod_name, mod in list(sys.modules.items()):
+        if mod_name.startswith("kb.") and mod is not None:
+            for attr_name, attr_value in vars(mod).items():
+                if callable(attr_value):
+                    cache_clear = getattr(attr_value, "cache_clear", None)
+                    if callable(cache_clear):
+                        try:
+                            cache_clear()
+                        except Exception:
+                            # Some exotic objects may have cache_clear
+                            # that raises; skip them silently.
+                            pass
 
     return project
 
