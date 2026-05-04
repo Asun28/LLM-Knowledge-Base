@@ -28,6 +28,9 @@ from urllib.robotparser import RobotFileParser
 
 import httpcore
 import httpx
+import os
+
+os.environ.setdefault("TRAFILATURA_DOWNLOAD_NO_CACHE", "1")
 import trafilatura
 from httpcore._backends.sync import SyncBackend
 
