@@ -160,7 +160,7 @@ def test_pages_kwarg_bypasses_cache(tmp_path, monkeypatch):
     assert get_cache_stats()["size"] == 0, "pages= path must NOT populate cache"
 
 
-def test_cache_size_bound_lru_eviction(tmp_path):
+def test_cache_size_bound_fifo_eviction(tmp_path):
     """AC9 / R1-F13: FIFO eviction at _MAX_CACHE_SIZE=4."""
     wikis = [tmp_path / f"wiki_{i}" for i in range(6)]
     for w in wikis:
@@ -195,24 +195,128 @@ def test_get_cache_stats_returns_counts_only(tmp_path):
 
 
 def test_ingest_source_invalidates_graph_cache(tmp_path, monkeypatch):
-    """AC11: ingest_source's tail calls invalidate on the wiki_dir.
+    """AC11: ingest_source's tail calls invalidate(wiki_dir).
 
-    We don't run a full ingest here (heavy). Instead we exercise the
-    invalidation contract: pre-populate cache, then trigger the tail's
-    invalidate call directly via the import-and-call-helper pattern that
-    ingest_source uses. This is a behavioural regression for the AC11 hook
-    (the actual ingest_source body wraps the invalidate call in try/except;
-    here we verify the contract symbol resolves correctly).
+    Per cycle-15 L4 + ``feedback_test_behavior_over_signature``: this drives
+    the actual ``ingest_source`` call path with heavy parts stubbed out, and
+    spies on ``kb.graph.cache.invalidate`` (the OWNER module). Reverting the
+    AC11 invalidation block in ``src/kb/ingest/pipeline.py::ingest_source``
+    causes ``spy_calls`` to be empty instead of [wiki_dir] — diverges
+    behaviour and thus the test fails.
     """
-    _make_minimal_wiki(tmp_path)
-    get_graph(tmp_path)
+    import kb.ingest.pipeline as pipeline_mod  # noqa: PLC0415
+
+    spy_calls: list = []
+    real_invalidate = graph_cache_mod.invalidate
+
+    def _spy(wiki_dir=None):
+        spy_calls.append(wiki_dir)
+        return real_invalidate(wiki_dir)
+
+    # Patch the OWNER module so ingest_source's function-local
+    # `import kb.graph.cache` picks up the spy (cycle-23 L1 / past-work
+    # "Local imports pick up monkeypatched module attributes").
+    monkeypatch.setattr(graph_cache_mod, "invalidate", _spy)
+
+    # Stub heavy ingest internals so we can drive ingest_source quickly
+    # without LLM extraction or page writes.
+    monkeypatch.setattr(
+        pipeline_mod,
+        "_check_and_reserve_manifest",
+        lambda hash_, ref: False,  # not duplicate → proceed to body
+    )
+    monkeypatch.setattr(pipeline_mod, "_emit_ingest_jsonl", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        pipeline_mod,
+        "_run_ingest_body",
+        lambda **kw: {
+            "source_path": str(kw["source_path"]),
+            "source_type": kw["source_type"],
+            "content_hash": kw["source_hash"],
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "affected_pages": [],
+            "wikilinks_injected": [],
+        },
+    )
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True)
+    src = raw_dir / "articles" / "test.md"
+    src.write_text("# Test\nContent\n", encoding="utf-8")
+
+    wiki_dir = tmp_path / "wiki"
+    _make_minimal_wiki(wiki_dir)
+
+    pipeline_mod.ingest_source(
+        source_path=src,
+        source_type="article",
+        extraction={"entities": [], "concepts": [], "summaries": []},
+        wiki_dir=wiki_dir,
+        raw_dir=raw_dir,
+        _skip_vector_rebuild=True,
+    )
+
+    assert len(spy_calls) >= 1, (
+        "ingest_source did NOT invalidate the graph cache "
+        "(AC11 invalidation block reverted or moved out of the success path?)"
+    )
+    assert spy_calls[-1] == wiki_dir, (
+        f"AC11 invalidate called with wrong wiki_dir: {spy_calls[-1]!r} vs {wiki_dir!r}"
+    )
+
+
+def test_compile_wiki_invalidates_graph_cache(tmp_path, monkeypatch):
+    """AC11.5: compile_wiki's tail calls invalidate(effective_wiki_dir).
+
+    Per cycle-15 L4 + ``feedback_test_behavior_over_signature``: drives the
+    actual ``compile_wiki`` call path with heavy parts stubbed. Reverting
+    the AC11.5 block in ``src/kb/compile/compiler.py`` removes the spy
+    invocation, so this test fails.
+    """
+    import kb.compile.compiler as compiler_mod  # noqa: PLC0415
+
+    spy_calls: list = []
+    real_invalidate = graph_cache_mod.invalidate
+
+    def _spy(wiki_dir=None):
+        spy_calls.append(wiki_dir)
+        return real_invalidate(wiki_dir)
+
+    monkeypatch.setattr(graph_cache_mod, "invalidate", _spy)
+
+    # No source changes → ingest loop is no-op → compile_wiki falls through
+    # to the AC11.5 tail (no early-return path exists in compile_wiki).
+    monkeypatch.setattr(
+        compiler_mod,
+        "find_changed_sources",
+        lambda raw_dir, manifest_path, save_hashes=False: ([], []),
+    )
+    monkeypatch.setattr(compiler_mod, "scan_raw_sources", lambda raw_dir: [])
+    monkeypatch.setattr(compiler_mod, "load_manifest", lambda manifest_path: {})
+
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    wiki_dir = tmp_path / "wiki"
+    _make_minimal_wiki(wiki_dir)
+
+    # Pre-populate cache so we can also assert post-call size == 0.
+    get_graph(wiki_dir)
     assert get_cache_stats()["size"] == 1
 
-    # Mirror the ingest_source tail's invalidation call exactly.
-    import kb.graph.cache as _graph_cache  # noqa: PLC0415
+    compiler_mod.compile_wiki(
+        incremental=True,
+        raw_dir=raw_dir,
+        manifest_path=tmp_path / "manifest.json",
+        wiki_dir=wiki_dir,
+    )
 
-    _graph_cache.invalidate(tmp_path)
-
+    assert len(spy_calls) >= 1, (
+        "compile_wiki did NOT invalidate the graph cache "
+        "(AC11.5 block reverted or moved out of the success path?)"
+    )
+    assert spy_calls[-1] == wiki_dir
     assert get_cache_stats()["size"] == 0
 
 

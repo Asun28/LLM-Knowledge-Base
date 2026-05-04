@@ -1377,6 +1377,16 @@ def ingest_source(
                 "pages_skipped": len(result.get("pages_skipped", [])),
             },
         )
+        # Cycle 64 AC11 — drop the graph cache entry for this wiki_dir so the
+        # next get_graph(wiki_dir) call rebuilds from post-ingest disk state.
+        # Per cycle-18 L2/L3, caller (ingest_source) owns the post-body envelope;
+        # _run_ingest_body must NOT do it (spec: "at end of ingest_source").
+        try:
+            import kb.graph.cache  # noqa: PLC0415
+
+            kb.graph.cache.invalidate(effective_wiki_dir)
+        except Exception as _exc:  # noqa: BLE001
+            logger.debug("Cycle 64 graph-cache invalidate skipped at ingest tail: %s", _exc)
         return result
     except BaseException as exc:
         err_summary = sanitize_text(str(exc))
@@ -1731,14 +1741,4 @@ def _run_ingest_body(
     # failure). _run_ingest_body is now a pure body — its caller owns the
     # JSONL envelope.
 
-    # Cycle 64 AC11 — drop the graph cache entry for this wiki_dir so the
-    # next get_graph(wiki_dir) call rebuilds from post-ingest disk state.
-    # mtime-keying would also catch this on most systems, but explicit
-    # invalidation is the documented contract per docs/reference/architecture.md.
-    try:
-        import kb.graph.cache as _graph_cache  # noqa: PLC0415
-
-        _graph_cache.invalidate(effective_wiki_dir)
-    except Exception as _exc:  # noqa: BLE001
-        logger.debug("Cycle 64 graph-cache invalidate skipped at ingest tail: %s", _exc)
     return result

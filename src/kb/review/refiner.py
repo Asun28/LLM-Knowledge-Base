@@ -301,9 +301,9 @@ def refine_page(
     # rebuilds from post-refine disk state. mtime would catch most cases but
     # explicit invalidation is the documented contract.
     try:
-        import kb.graph.cache as _graph_cache  # noqa: PLC0415
+        import kb.graph.cache  # noqa: PLC0415
 
-        _graph_cache.invalidate(wiki_dir)
+        kb.graph.cache.invalidate(wiki_dir)
     except Exception as _exc:  # noqa: BLE001
         logger.debug("Cycle 64 graph-cache invalidate skipped at refine tail: %s", _exc)
 
