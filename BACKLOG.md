@@ -1,33 +1,13 @@
 # Backlog
 
-<!-- FORMAT GUIDE — read before adding items
-Each phase section groups items by severity, then by module area.
-Resolved phases collapse to a one-liner; active phases list every item.
-
-## Severity Levels
-
-| Level      | Meaning                                                        |
-|------------|----------------------------------------------------------------|
-| CRITICAL   | Data loss, crash with no recovery, or security exploit — blocks release |
-| HIGH       | Silent wrong results, unhandled exceptions reaching users, reliability risk |
-| MEDIUM     | Quality gaps, missing test coverage, misleading APIs, dead code |
-| LOW        | Style, docs, naming, minor inconsistencies — fix opportunistically |
-
-## Item Format
-
-```
-- `module/file.py` `function_or_symbol` — description of the issue
-  (fix: suggested remedy if non-obvious)
-```
-
-Rules:
-- Lead with the file path (relative to `src/kb/`), then the function/symbol.
-- Include line numbers only when they add precision (e.g. `file.py:273`).
-- End with `(fix: ...)` when the remedy is non-obvious or involves a design choice.
+<!-- FORMAT GUIDE
+- BACKLOG = open work only, ranked by severity per phase.
+- Resolve lifecycle: delete the item here → brief entry in CHANGELOG.md `[Unreleased]` → full detail in CHANGELOG-history.md.
+- Severity: CRITICAL (data loss / security exploit) · HIGH (silent wrong results / unhandled exceptions) · MEDIUM (quality gaps, dead code, coverage) · LOW (style, docs, naming).
+- Item format: `- module/file.py symbol — short description (fix: optional remedy)`.
 - One bullet = one issue. Don't combine unrelated problems.
-- When resolving an item, delete it (don't strikethrough). Record a brief newest-first summary in CHANGELOG.md and put implementation detail in CHANGELOG-history.md.
-- Move resolved phases under "## Resolved Phases" with a one-line summary.
-- Changelog order rule: all changelog entries are newest first by date. CHANGELOG.md stays brief; CHANGELOG-history.md carries the detail.
+- When a phase empties out, collapse to a one-liner under "Resolved Phases".
+- Per-cycle running narrative does NOT belong here — it belongs in CHANGELOG-history.md.
 -->
 
 ---
@@ -36,179 +16,209 @@ Rules:
 
 | File | Role | Update rule |
 |------|------|-------------|
-| **BACKLOG.md** ← you are here | Open work only, ranked by severity | Add on discovery; **delete** on resolve |
-| [CHANGELOG.md](CHANGELOG.md) | Brief shipped-change index, newest first | Add compact Items / Tests / Scope / Detail entry for every shipped cycle |
-| [CHANGELOG-history.md](CHANGELOG-history.md) | Detailed shipped-change archive, newest first | Add or move full per-cycle details here; keep CHANGELOG.md brief |
+| **BACKLOG.md** ← you are here | Open work only | Add on discovery; **delete** on resolve |
+| [CHANGELOG.md](CHANGELOG.md) | Brief shipped-change index, newest first | Compact Items / Tests / Scope / Detail per cycle |
+| [CHANGELOG-history.md](CHANGELOG-history.md) | Detailed shipped-change archive, newest first | Full per-cycle bullet detail |
 
-**Resolve lifecycle:** Delete item here → add brief entry in `CHANGELOG.md [Unreleased]` → add detail in `CHANGELOG-history.md` → done.
-
-> **For all LLMs (Sonnet 4.6 · Opus 4.7 · Codex/GPT-5.4):** BACKLOG = open work; CHANGELOG = shipped fixes. If an item says _"see CHANGELOG"_, it is resolved and can be safely deleted from this file.
+If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted from this file.
 
 ---
 
-## Phase 4 (v0.10.0) — Post-release audit
+## Phase 6 R2 — Wider mimo-v2.5-pro audit (2026-05-04)
 
-_All items resolved — see `CHANGELOG.md` `[Unreleased]`._
+<!-- 6 parallel mimo-v2.5-pro CLI calls (arch / tests / docs / security-wide / env / deps).
+     Items already covered by SECURITY.md or earlier BACKLOG entries OMITTED.
+     Source tag: (mimo r{N}). -->
+
+### HIGH
+
+- `requirements.txt` `GitPython>=3.1.47` — only unpinned dependency in the file (every other line uses `==`); GitPython has carried RCE-class CVEs (2022-24439, 2023-40267, 2023-40590, 2024-22190), and a future 3.1.48+ release can pull in a regression with no PR-time signal. (mimo r6 Q1)
+  (fix: `GitPython==3.1.47` (or latest verified-safe) with explicit ceiling, e.g. `>=3.1.47,<3.2`.)
+
+- `ingest/pipeline.py` URL → external CLI — bare URL passed to `trafilatura` / `crawl4ai` / `yt-dlp` argv with no scheme allowlist (`file://`, `gopher://`, `data://` accepted) and no RFC1918 / loopback / link-local filter. Enables SSRF and local-file exfiltration via `file:///etc/passwd` or `http://169.254.169.254/...`. (mimo r4 B)
+  (fix: enforce `urlparse(url).scheme in {"http","https"}` + DNS-resolve hostname + reject when `ipaddress.ip_address(addr).is_private or .is_loopback or .is_link_local` BEFORE the subprocess spawn.)
+
+- `config.py:17` `KB_PROJECT_ROOT` — env var read at MODULE IMPORT TIME, inconsistent with the cycle-19 L2 call-time rule that the kill-switches and `KB_LLM_BACKEND` follow. Tests setting `KB_PROJECT_ROOT` after `import kb.config` get the stale resolved value. (mimo r5 Q1)
+  (fix: replace module-level `_PROJECT_ROOT = ...` with a `get_project_root()` accessor that re-reads `os.environ["KB_PROJECT_ROOT"]` at call time; expose `_reset_project_root()` for tests.)
+
+- `tests/conftest.py` `_autouse_kb_path_sandbox` no-drop guard — silent breakage if `autouse=True` is ever removed. Sandbox failure cascades into 200 test files writing to the real `wiki/` and `raw/` dirs. (mimo r2 Q1)
+  (fix: meta-test that `ast.parse`s `tests/conftest.py`, locates the `_autouse_kb_path_sandbox` `FunctionDef`, and asserts its decorator list includes `pytest.fixture(autouse=True)`.)
+
+- `tests/conftest.py` hardcoded lru_cache clear list — `load_purpose` + `_load_template_cached` + `_build_schema_cached` only. Production adding a 4th `@lru_cache` on a path-sensitive callable silently leaks across tests. (mimo r2 Q2)
+  (fix: at sandbox teardown, walk every `kb.*` module in `sys.modules`, introspect attributes for `cache_clear`, and call all of them; remove the hardcoded list.)
+
+- `SECURITY.md` known-advisory verification greps not CI-enforced — the 4 accepted-CVE rationales (`diskcache`, `litellm`, `pip`, `ragas`) each end with `grep -rnE "PKG_NAME" src/kb` returning zero hits. A refactor that imports any of those packages silently invalidates the rationale. (mimo r3 Q5)
+  (fix: `tests/test_security_cve_greps.py` runs each grep as a `subprocess` call and asserts zero hits; CI failure = "remove the package or reclassify the CVE in SECURITY.md.")
+
+### MEDIUM
+
+- `lint/fetcher.py:31` trafilatura + diskcache transitive RCE chain — project's own robots cache is in-memory `dict`, NOT diskcache, so direct attack path is mitigated. Trafilatura's internal `fetch_url` + extraction code paths NOT audited for diskcache pickle reads on attacker-supplied URLs. (mimo r6 Q5)
+  (fix: confirm `trafilatura.fetch_url(...)` is invoked with caching disabled (`TRAFILATURA_DOWNLOAD_NO_CACHE=1`); OR pin diskcache to a patched version once one ships.)
+
+- `config.py:161-163` `_DEFAULT_MODEL_TIERS` dual mechanism — captures `os.environ.get(CLAUDE_*_MODEL)` at IMPORT TIME, while the canonical `MODEL_TIERS` accessor re-reads at call time per cycle-7 AC24. Any caller referencing `_DEFAULT_MODEL_TIERS` directly bypasses the call-time fix. (mimo r5 Q1, Q2)
+  (fix: delete `_DEFAULT_MODEL_TIERS`; the accessor returns `os.environ.get(env_key, "").strip() or "<hardcoded-default>"` directly.)
+
+- `config.py:480` `AUGMENT_ALLOWED_DOMAINS` — read + comma-split at IMPORT TIME with default `"en.wikipedia.org,arxiv.org"`. Same hazard class as `KB_PROJECT_ROOT` above. (mimo r5 Q5)
+  (fix: replace with `get_allowed_domains()` accessor reading at call time.)
+
+- MCP tool error responses propagate raw tracebacks — exception handlers across `mcp/core.py`, `mcp/ingest.py`, `mcp/quality.py` surface absolute filesystem paths (`/home/<user>/...`, `D:\Projects\...`) and subprocess stderr to the MCP client. Information disclosure on a typically-trusted local boundary. (mimo r4 E)
+  (fix: wrap each MCP tool body with a boundary handler that catches `Exception`, logs the full traceback locally, and returns `f"Error: {sanitize_error_text(e)}"`.)
+
+- `utils/cli_backend.py` `_check_no_secrets_on_argv` self-DoS — token-shape regex match on full argv refuses to spawn if ANY element matches a token pattern. A user prompt that legitimately discusses API-key formats silently fails. (mimo r4 A)
+  (fix: replace generic regex with value-based scrub — only refuse if an argv element equals the literal value of a listed env-var key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...).)
+
+- `graph/cache.py` 6th-caller drift — cycle 64 added the cache with 5 known callers using attribute-lookup form per cycle-18 L1. No `__all__ = []`, no ruff rule, no AST guard prevents a 6th caller doing `from kb.graph.cache import get_graph` and silently bypassing the test-spy hook. (mimo r1 Q4)
+  (fix: set `__all__ = []` in `cache.py`, plus AST-grep test that asserts zero `from kb.graph.cache import get_graph` in `src/kb/**/*.py`.)
+
+- `kb/__init__.py` public API docstring audit — `__init__.py` is a 67-line lazy `__getattr__` shim; the real Args/Returns/Raises must live on the underlying functions in `kb/ingest/pipeline.py`, `kb/compile/__init__.py`, `kb/query/__init__.py`, `kb/graph/__init__.py`. Whether those four targets actually carry Google-style sections is unverified. (mimo r3 Q7)
+  (fix: `scripts/audit_docstrings.py` imports each `__all__` entry, parses `__doc__` via `docstring_parser`, fails CI if any lacks `Args:` + `Returns:` + (`Raises:` when applicable).)
+
+### LOW
+
+- `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
+  (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
+
+- `tests/test_cycle64_snapshots.py` tautology risk — syrupy snapshots were captured FROM the same code path under test. No committed proof that mutating an input field causes the snapshot to diverge. (mimo r2 Q4)
+  (fix: per snapshot, commit a paired negative-control test that mutates one input field and asserts the snapshot does NOT match; AND reject `--snapshot-update` in CI pytest invocation.)
+
+- CI `ANTHROPIC_API_KEY=sk-ant-dummy-key-for-ci-tests-only` — dummy key in `.github/workflows/ci.yml`. If any test mocks HTTP at the `httpx` layer but not the SDK client constructor, the dummy could leak into a recorded cassette / VCR / pytest snapshot file. (mimo r5 Q7)
+  (fix: CI grep step that fails if `sk-ant-dummy` appears anywhere in tracked files except `.github/workflows/ci.yml`.)
+
+- `docs/reference/` lacks an INDEX.md — directory holds 10+ files but no single manifest mapping each to its scope. CLAUDE.md's "Detailed Documentation" table partially serves this role but is hand-maintained. (mimo r3 NEW)
+  (fix: generate `docs/reference/INDEX.md` from each file's frontmatter / first H1 + CI script asserting every `*.md` appears in the index AND in CLAUDE.md's table.)
+
+---
+
+## Phase 6 — Cross-LLM cycle-64 audit (mimo-v2.5-pro, 2026-05-04)
+
+<!-- f-string-in-SQL concern was REJECTED by both runs (fully closed by integer
+     validation, query/embeddings.py:651). Underlying weights behind the
+     mimo-v2.5-pro endpoint self-identify as GLM-4 / Zhipu AI; Token Plan
+     billing is genuinely mimo-v2.5-pro at 2x credits. -->
+
+### HIGH
+
+- `mcp/app.py:230` `_validate_page_id` — Windows trailing-dot / trailing-space filename confusion. A page_id like `"secret."` or `"secret "` passes every check, but `Path.resolve()` on Windows silently strips trailing dots and spaces, opening a *different* file than requested. Containment is preserved, so this is filename-confusion / target-substitution, not directory traversal. (mimo r2)
+  (fix: before the reserved-name check, reject any segment where `segment != segment.rstrip(". ")`.)
+
+### MEDIUM
+
+- `mcp/app.py:230` `_validate_page_id` — `:` is not in the blocked character set; on Windows, `"page:hidden"` produces NTFS Alternate Data Stream syntax. POSIX accepts the literal filename, creating cross-platform divergence. (mimo r2)
+  (fix: extend `_CTRL_CHARS_RE` (or add `_WINDOWS_ILLEGAL_CHARS_RE`) to reject `:` plus `< > " | ? *` at the same gate as the control-char check.)
+
+- `compile/compiler.py:645` `_validate_path_under_project_root` + downstream `rebuild_indexes` unlink — TOCTOU window between containment validation and filesystem mutation. Local attacker with write access inside the project tree can replace the validated path with a junction/symlink. (mimo r1, r2)
+  (fix: re-resolve and re-validate immediately before `unlink`/write, OR open with `os.O_NOFOLLOW` (POSIX) / `FILE_FLAG_OPEN_REPARSE_POINT` (Windows) so symlink-following is rejected at the kernel.)
+
+- `mcp/app.py:121,230` + `compile/compiler.py:645` validator-contract drift — three sibling validators with three different contracts: `_validate_wiki_dir` (absolute + exists + dir + single resolved-anchor); `_validate_path_under_project_root` (no exists check, dual literal+resolved anchor); `_validate_page_id` (substring-based + resolved-anchor). A future fourth call site can quietly adopt the weakest contract. (mimo r1, r2)
+  (fix: extract one canonical `_assert_under_project_root(path, *, require_exists=False, dual_anchor=True)`, migrate all three current sites, document in `docs/reference/error-handling.md`.)
+
+### LOW
+
+- `mcp/app.py:254` `_validate_page_id` — `".." in page_id` is a substring match that rejects legitimate IDs like `"notes..draft"` or `"c++..faq"`. The final `resolve().relative_to()` is the actual safety net. Cosmetic. (mimo r1)
+  (fix: replace with `any(seg == ".." for seg in page_id.replace("\\", "/").split("/"))`.)
+
+- `query/embeddings.py:619` `VectorIndex.build` — multi-PROCESS race on the same `db_path`. Module-level `_rebuild_lock` is a `threading.Lock`, so it serialises threads within one process but does NOT block two concurrent `kb` invocations from running DROP → CREATE → bulk INSERT against the same DB. (mimo r1)
+  (fix: take a `file_lock(db_path.with_suffix(".db.lock"))` around the DROP → CREATE → INSERT → COMMIT block.)
+
+- `query/embeddings.py:660` `VectorIndex.build` — `sqlite_vec.load(conn)` raises `sqlite3.OperationalError` whose message includes the absolute filesystem path of the .so/.dll that failed to load; can leak into MCP error responses. (mimo r2)
+  (fix: wrap the `sqlite_vec.load(conn)` call in `try/except sqlite3.OperationalError` and re-raise `RuntimeError("sqlite-vec extension failed to load; reinstall the sqlite-vec wheel")` with no path detail.)
 
 ---
 
 ## Phase 4.5 — Multi-agent post-v0.10.0 audit (2026-04-13)
 
 <!-- Discovered by 5 specialist reviewers (Python, security, code-review, architecture, performance)
-     running 3 sequential rounds against v0.10.0 after the Phase 4 HIGH/MEDIUM/LOW audit shipped.
-     Items grouped by severity, keyed by file. Round tag in parens (R1/R2/R3). -->
-
-### CRITICAL
-
-_All items resolved — see CHANGELOG `[Unreleased]` Phase 4.5 cycle 1, cycle 1-docs-sync, and Backlog-by-file cycle 4._
-
-<!-- Cycle 4 closed (2026-04-17): #1 _rel() error-string sweep, #2 <prior_turn> sentinel +
-     fullwidth angle-bracket fold + control-char strip, #5 Error[partial] on post-create
-     OSError in kb_ingest_content/kb_save_source, #7 kb_read_page body cap with [Truncated:]
-     footer, #11 kb_affected_pages check_exists=True, #12 add_verdict per-issue cap,
-     #13 _validate_page_id Windows-reserved + 255-char cap, #14 kb_detect_drift source-deleted
-     category, #15 query/rewriter CJK short-query gate, #16+#18 BM25 cache-invalidation,
-     #17 type-diversity quota in dedup, #18 STOPWORDS prune, #19 yaml_sanitize BOM +
-     U+2028/9 strip, #20 wiki_log monthly rotation, #22 detect_contradictions_with_metadata
-     caller migration, #23 export_mermaid Path-shim, #24 BM25Index postings precompute,
-     #25 _template_hashes VALID_SOURCE_TYPES whitelist, #28 load_purpose(wiki_dir) required,
-     #29 inject_wikilinks caller-side sorted().
-     Deferred: #3 [source: X] → [[X]] citation migration (tracked as dedicated atomic migration). -->
+     running 3 sequential rounds against v0.10.0. Round tag in parens (R1/R2/R3/R5). -->
 
 ### HIGH
 
 - `compile/compiler.py` naming inversion (~16-17) — `compile_wiki` is a thin orchestration shell over `ingest_source` + a manifest; real compilation primitives (`linker.py`) live in `compile/` but are consumed by `ingest/`. Dependency arrows invert the directory names; every new feature placement becomes a coin-flip. (R1)
   (fix: rename to `pipeline/orchestrator.py` and treat `compile/` as wikilink primitives only; or collapse `compile/compiler.py` into `kb.ingest.batch`)
 
-- `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes across existing pages. Every step is independently atomic, none reversible. A crash between manifest-write (step 6) and log-append (step 7) leaves the manifest claiming "already ingested" while the log shows nothing; a mid-wikilink-injection failure leaves partial retroactive backlinks. (R2)
-  (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests; retries idempotent at step granularity)
+- `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes. Every step is independently atomic, none reversible. A crash between manifest-write and log-append leaves the manifest claiming "already ingested" while the log shows nothing. (R2)
+  (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests)
 
-_(Cycle 64 AC9-AC12 resolved the lint-pass portion of `graph/builder.py` no-shared-caching-policy: new `kb.graph.cache` module with mtime-keyed dict + RLock + FIFO LRU at `_MAX_CACHE_SIZE=4` + 5 lint caller migrations to attribute-lookup form per cycle-18 L1 + invalidation hooks at `ingest_source` / `refine_page` / `compile_wiki`. Remaining 5 build_graph callers in `evolve/analyzer.py` (3 sites) / `graph/export.py` / `mcp/browse.py` / `query/engine.py` deferred to cycle-65+ per Step-5 R1-F2 narrow-scope decision — those are NOT in the lint-pass surface that primarily motivated the BACKLOG entry.)_
+- `graph/builder.py` non-lint `build_graph` callers (cycle-65+) — cycle 64 shipped `kb.graph.cache` and migrated the 5 lint callers to attribute-lookup form per cycle-18 L1. The 5 remaining `build_graph` callers in `evolve/analyzer.py` (3 sites) / `graph/export.py` / `mcp/browse.py` / `query/engine.py` were narrow-scope deferred and still bypass the cache.
+  (fix: migrate each caller to `kb.graph.cache.get_graph(wiki_dir)`; emit invalidation hooks on any new mutator path.)
 
-- `tests/` coverage-visibility — ~50 of 94 files are named `test_v0NNN_taskNN.py` / `test_v0NNN_phaseNNN.py` / `test_phase4_audit_*.py`. To verify `evolve/analyzer.py` has tier-budget coverage you must grep ~50 versioned files because canonical `test_evolve.py` has only 11 tests (none touch numeric tokens, redundant scans, or three-level break — all open in Phase 4.5 MEDIUM). `_compute_pagerank_scores` is searched across 25 files. (R3)
-  (fix: freeze-and-fold rule — once a version ships, fold its tests INTO the canonical module file (`test_v0917_dedup.py` → `test_query.py::class TestDedup`); enable `coverage` in CI and surface per-module % in PR comments)
-  *(cycle-44 progress: 20 files folded total. Cycle 38-43 progress preserved in CHANGELOG-history.md. Cycle 44 closed AC10 deferral: cycle12_sanitize_context → test_mcp_core (parametrized + standalone preserved + 3 new behavioral tests for ≥6 sanitize cases per cycle-44 CONDITION 5); plus all 3 cycle-43 vacuous-test upgrade candidates (test_graph_builder_documents_case_sensitivity_caveat DELETED — covered by `test_page_id_*` in test_utils.py; test_load_page_frontmatter_docstring_documents_mtime_caveat REPLACED by behavioral cache-stability test pinning the documented stale-read contract; test_cycle12_io_doc_caveats_are_present atomic_*_write OneDrive portion DELETED, file_lock PID portion REPLACED by behavioral dead-PID-reaping test patching `kb.utils.io.os.kill`). tests/ now 241 files, was 240 at cycle-43 end (cycle 44 net +1: −1 cycle12_sanitize_context fold + 2 new test_lint_*_split.py regression files). Cycle 45 closed Phase 4.6 M3 mcp/core.py split (1149 → 447 LOC) + 3 cycle-45 regression files (file count 241 → 244); cycle 45 CI hotfix deleted test_cycle45_init_reexports_match_legacy_surface.py (244 → 243). Cycle 46 prioritised Phase 4.6 LOW shim deletion (no new fold this cycle); cycle 47 resumed fold cadence with 3 small folds — `test_cycle16_config_constants.py` → new `tests/test_config.py` as `TestConfigConstants` (5 tests, 38 LOC source), `test_cycle11_task6_mcp_ingest_type.py` → `tests/test_mcp_core.py` as `TestKbCreatePageHintErrors` with `@staticmethod _assert_create_page_error` (6 tests, 78 LOC source per cycle-11 L3 same-class peer rule), `test_cycle14_save_frontmatter.py` → `tests/test_models.py` as 5 classes incl. `TestSaveFrontmatterAtomicWrite` renamed from `TestAtomicWriteProof` (8 tests, 139 LOC source); file count 243 → 241 (net -2: -3 folded + 1 new test_config.py); test count preserved at 3025; cumulative ~190+ versioned files still to fold across future cycles. Cycle 48 continued cadence with 2 small folds: `test_cycle9_evolve.py` (20 LOC, 1 test) → `tests/test_evolve.py` and `test_cycle9_compiler.py` (28 LOC, 1 test) → `tests/test_compile.py`; file count 243 → 241 (note: cycle-47 doc said 241 but actual `find tests -maxdepth 1 -name '*.py' | wc -l` was 243 due to historical doc drift; cycle-48 brings actual into alignment); test count preserved at 3025. Cycle 48 also resolved both cycle-48+ test-quality upgrade candidates filed by cycle-47 R2 (AC1 forward-protection + AC2/AC3 contract upgrades with revert-verified divergent-fail per C40-L3 + C41-L1; full detail in CHANGELOG-history.md cycle-48). Cycle 49 continued cadence with 4 small folds: `test_cycle12_mcp_console_script.py` (24 LOC, 3 tests) → `tests/test_v070.py` as `TestKbMcpConsoleScript` class, `test_cycle9_capture_runtime_guard.py` (33 LOC, 1 test) → `tests/test_capture.py` as bare function, `test_cycle9_package_exports.py` (36 LOC, 1 test) → `tests/test_v070.py` as bare function (host-shape preservation per C40-L5 — AC3 amended at Step 5 from class to bare function), `test_cycle9_mcp_app.py` (37 LOC, 1 test + 1 helper) → `tests/test_v070.py` as `TestMcpAppInstructions` class with `@staticmethod _instruction_tool_groups`; file count 241 → 237 (-4); test count preserved at 3025; each fold revert-verified per C40-L3 (`assert False` proof showed pytest -x FAIL on the moved method; restored). Cycle 50 continued cadence with 4 small folds: `test_cycle9_lint_checks.py` (1506 B / 1 test) → `tests/test_lint.py` bare function inside existing `# ── Source coverage checks ─` section; `test_cycle45_lint_runner_order_invariant.py` (1358 B / 1 test) → `tests/test_lint.py` bare function inside existing `# ── Runner tests ─` section with `EXPECTED_CHECK_ORDER` kept function-local per AC5 host-shape preservation (no module-level constants in the receiver); `test_cycle8_llm_telemetry.py` (2300 B / 2 tests + 2 helpers) → `tests/test_llm.py` under new `# ── Telemetry: _make_api_call success path (cycle 50 fold) ─` section with helpers renamed `_FakeMessages`→`_TelemetryFakeMessages` and `_install_client`→`_install_telemetry_client` per Step-5 Q1 (R1 amendment 1); `test_cycle9_mcp_path_validation.py` (2226 B / 9 tests) → `tests/test_mcp_core.py` as new `TestMcpWikiDirValidation` class (single class, 9 methods + `@staticmethod _missing_abs_path`, cross-module hosting `kb.mcp.{core,health}` per existing TestKbCaptureWrapper precedent); file count 237 → 233 (-4); test count preserved at 3025; each fold revert-checked per C40-L3 (`assert False` proof showed pytest -x FAIL on the moved method; restored). Cycle 51 continued cadence with 4 small folds: `test_cycle12_conftest.py` (1676 B / 2 tests) → `tests/test_v070.py` as bare functions under new section `# ── 9. tmp_kb_env fixture coverage (cycle 51 fold) ─` with module-level `_is_under` helper; `test_cycle17_capture_prompt.py` (2544 B / 5 tests) → `tests/test_capture.py` as new class `TestCapturePromptFile` (renamed from `TestAC9PromptTemplate` to disambiguate from existing `TestCaptureTemplate`) with C41-L1 in-fold behavioral upgrade — 3 of 5 tests originally read `_PROMPT_TEMPLATE` directly which is `None` until the lazy accessor is called per cycle-19 L2; switched to canonical accessor `_get_prompt_template()` to make the tests order-independent; `test_cycle17_validators.py` (2631 B / 5 methods incl. parametrized expansion to 23 cases) → `tests/test_v070.py` as new class `TestValidateRunId` after `TestMcpAppInstructions`; `test_cycle8_package_exports.py` (2791 B / 6 bare functions + helper) → `tests/test_v070.py` under new section `# ── 10. Package export curation (cycle 51 fold) ─` with helper renamed `_run_import_probe` → `_run_export_import_probe` per Step-5 Q2 helper-name uniqueness rule; file count 233 → 229 (-4); test count preserved at 3025; each fold revert-checked per C40-L3 (`assert False` proof showed pytest -x FAIL on the moved method; restored). Cycle 52 continued cadence with 4 small folds: `test_cycle19_prune_base_consistency_anchor.py` (2762 B / 2 tests) → `tests/test_compile.py` § `# ── Compiler tests ─` as bare functions; `test_cycle19_lint_redundant_patches.py` (2843 B / 1 test + 2 helpers) → `tests/test_lint.py` under new section `# ── Test-suite lint guards (cycle 52 fold) ─` with R1-AMENDED self-exclusion guard `Path(__file__).resolve()` per Step-5 Q1 decision (b) — closes the post-fold false-positive risk where the original hardcoded source-filename string would no longer skip the receiver test_lint.py; `test_cycle15_load_all_pages_fields.py` (2975 B / 6 tests + 1 helper) → `tests/test_utils.py` § `# ── load_all_pages ─` with helper renamed `_write_page` → `_write_concept_page` per Step-5 Q4 hygiene rule; `test_cycle15_query_tier1_wiring.py` (3082 B / 2 tests + 1 helper) → `tests/test_query.py` under new section `# ── Tier-1 budget wiring (cycle 52 fold) ─` end-of-file with function-local imports per cycle-19 L2; file count 229 → 225 (-4); test count preserved at 3025; each fold revert-checked per C40-L3 (`assert False` proof showed pytest -x FAIL on the moved method; restored), per-fold isolation pytest passed per C51-L1. Cycle 55 (first dev-mimo-opus trial cycle, parallel to in-flight worktree-cycle-53 + worktree-cycle-54) continued cadence with 4 small folds: `test_v01003_graph_fixes.py` (53 LoC / 3 tests) → `tests/test_graph.py` under new EOF section `# ── Phase 4 graph fixes (cycle 55 fold) ─`, with C11-L1 vacuous-test upgrade applied to test 1 (`test_graph_stats_uses_precomputed_out_degrees` renamed to `test_graph_stats_orphans_includes_isolated_node`; `inspect.getsource` grep half dropped, behavioral half preserved); `test_v01007_evolve_fixes.py` (78 LoC / 3 tests) → `tests/test_evolve.py` under new EOF section `# ── Phase 4 evolve fixes (cycle 55 fold) ─` verbatim with multi-attr monkeypatch fallback pattern preserved; `test_v01009_ingest_aux_fixes.py` (58 LoC / 3 tests) → `tests/test_ingest.py` under new EOF section `# ── Phase 4 ingest aux fixes (cycle 55 fold) ─` verbatim, function-local imports; `test_v01011_review_feedback_fixes.py` (63 LoC / 3 tests) → `tests/test_review.py` under new EOF section `# ── Phase 4 review/feedback/config fixes (cycle 55 fold) ─` per Q2 host-shape preservation (C40-L5) — `test_embedding_dim_resolved` joins despite touching config + embeddings (split would create a merge surface with parallel cycle-53 test_query.py edits); file count 225 → 221 (-4) **at branch HEAD; subject to Step 21 rebase if cycle 53 (-4) or cycle 54 (-4) merge first — final landed count depends on merge ordering**; test count preserved at 3025; each fold revert-checked per C40-L3, per-fold isolation pytest passed per C51-L1. First MiMo trial data point captured: `mimocoding-rescue` and `mimochat-rescue` not registered in active subagent set; Step 8 plan-gate fell back to `codex:codex-rescue` (REJECT 5 gaps closed inline per C21-L1); Steps 7/9/17 ran in primary session per cycle-13 L2 sizing heuristic (small mechanical work, dispatch overhead dominates). Cycle 56 continued cadence with 5 small folds (one extra over c53/c54/c55 cadence per user direction): test_v01012_mcp_validation.py (2701 B / 7 tests) → test_mcp_core.py as TestMcpInputValidation; test_v0916_task09.py (2011 B / 3 tests) → test_v070.py preserving 3 host classes; test_v01013_cli_error_truncation.py (3444 B / 7 tests) split → test_cli.py as TestCliErrorTruncation (5) + test_utils_text.py (2 bare functions); test_v01001_utils_fixes.py (2754 B / 5 tests) → test_utils.py as TestUtilsFixes with helper renamed _write_page → _write_phase4_concept_page per C52-L4 (cycle-52 already used _write_concept_page); test_phase4_audit_concurrency.py (3099 B / 4 tests) → test_utils_io.py as TestFileLockConcurrency. file count 219 → 214 (-5 sources); test count preserved at 3026; each fold revert-verified per C40-L3, per-fold isolation pytest passed per C51-L1. Cycle 57 (third dev-mimo-opus trial cycle, parallel to in-flight worktree-cycle-53 + worktree-cycle-54) continued cadence with 5 small folds + 1 sentinel deletion: test_v0916_task07.py (159 LOC / 9 classes / 10 tests) → test_mcp_core.py per Step-5 Q1 single-receiver decision (cycle-50 cross-module hosting precedent + avoids cycle-54 collision); test_v0916_task08.py (143 LOC / 4 classes) → test_review.py per cycle-55 host-shape; test_v0915_task10.py (195 LOC / 3 classes / 8 tests) → test_cli.py per cycle-56 receiver precedent; test_cycle17_lazy_imports.py (176 LOC / 5 classes / 8 tests + 1 helper + 2 module constants) → test_v070.py with `_cycle17_module_level_imports` / `_CYCLE17_REPO_ROOT` / `_CYCLE17_SRC_KB_MCP` cycle-prefix renames per C52-L4 + `# noqa: E402` on appended-section imports; test_v0p5_purpose.py (184 LOC / 7 bare functions) → test_utils.py per Step-5 Q3 single-receiver feature-coherence decision (wiki/purpose.md feature touches utils/pages + ingest/extractors + query/engine as a coherent capability — split would (a) collide with parallel cycle-53 test_query.py work, (b) fragment the feature, (c) match cycle-55 host-shape preservation C40-L5); AC6 DELETE test_review.py::test_embedding_dim_resolved sentinel per cycle-56+ BACKLOG option (1) — `grep -rnE "EMBEDDING_DIM" src/kb` returns ZERO hits at cycle 57 (sentinel `if not hasattr(config, "EMBEDDING_DIM"): return  # Deleted — PASS` always returned early after the original config removal recorded in CHANGELOG-history.md line 2214; cycle-15 L2 / cycle-44 L4 DROP-with-test-anchor pattern fulfilled). file count 213 → 208 (-5 sources at branch HEAD; subject to Step 21 rebase if cycle-53/54 merge first); test count 3022 → 3021 (-1 from AC6 sentinel deletion; AC1-AC5 folds preserve count). All 6 ACs ran in primary session per C13-L2 + C37-L5 sizing heuristic. Cycle 54-pickup (salvage of abandoned worktree-cycle-54, parallel to in-flight worktree-cycle-53) folded 4 small cycle-8/cycle-15/cycle-45 files: test_cycle8_health_wiki_dir.py 4 tests → test_mcp_browse_health.py with `_write_health_fold_page` helper; test_cycle8_models_validation.py 7 tests → test_models.py with `_cycle54`-suffixed import aliases per C52-L4 helper-name uniqueness; test_cycle15_lint_status_mature.py 8 tests + 3 classes → test_lint.py with `_write_status_mature_page` helper + cycle-prefixed class renames `TestStatusMatureStaleOtherStatusesIgnored` / `TestStatusMatureStaleTodayOverride`; test_cycle45_package_constants_propagate_to_submodules.py 5 tests → test_lint.py with `_write_pkg_const_fold_page` helper + function-local `_checks_mod` alias to avoid receiver-import collisions. file count 208 → 204 (-4 sources at branch HEAD; subject to Step 21 rebase if cycle-53 still in flight); test count preserved at 3021. Production-code half of the original cycle-54 plan (compile prune-base + Windows PID-liveness) had already shipped on main via cycle 23 + commit ea4af42 — cycle-54-pickup deliberately scoped to test folds only. Step-9 background reviewer dispatch via `mimocoding-rescue` (mimo-v2.5) returned CLEAN on all 4 concerns (rename/alias correctness, fixture-discovery preservation, revert-coupling, reload isolation); Step-17 DeepSeek dispatch fabricated success-prose without applying edits (C58-L1 candidate refining cycle-12 L2 from Codex to DeepSeek). HIGH item remains open.)*
+- `tests/` coverage-visibility — ~50 test files are named `test_v0NNN_taskNN.py` / `test_v0NNN_phaseNNN.py` / `test_phase4_audit_*.py`. Verifying canonical-module coverage requires grepping versioned files. Freeze-and-fold cadence in progress; cumulative ~190+ versioned files still to fold across future cycles. Per-cycle progress is in CHANGELOG-history.md, not here. (R3)
+  (fix: freeze-and-fold rule — once a version ships, fold its tests INTO the canonical module file; enable `coverage` in CI and surface per-module % in PR comments)
 
-_(Cycle 64 AC1-AC4 RESOLVED: `tests/conftest.py` autouse `_autouse_kb_path_sandbox` redirects all `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` to per-test `tmp_path` by default. Opt-out via `pytest --use-real-paths` flag + `real_project_root` fixture. Split-fixture refactor preserves the explicit `tmp_kb_env` (alias `kb_sandbox`) patch+mkdir contract for 230+ existing call sites. 5 regression tests in `tests/test_cycle64_conftest_leak.py` pin the contract.)_
-
-- `mcp/core.py` + `browse.py` + `health.py` + `quality.py` — all 25 MCP tools are sync `def`. FastMCP runs them via `anyio.to_thread.run_sync` on a default 40-thread pool. A `kb_query(use_api=True)` (30s+), `kb_lint()` (multi-second disk walk), `kb_compile()` (minutes), or `kb_ingest_content(use_api=True)` (10+s) each hold a thread; under concurrent tool calls the pool saturates and subsequent calls queue. Claude Code often fires multiple tool calls in parallel; this turns invisible latency spikes into observed user-facing stalls. (R3; cycle 7 did not address)
+- `mcp/core.py` + `browse.py` + `health.py` + `quality.py` — all 25 MCP tools are sync `def`. FastMCP runs them via `anyio.to_thread.run_sync` on a default 40-thread pool. Long tools (`kb_query(use_api=True)` 30s+, `kb_lint()` multi-second, `kb_compile()` minutes, `kb_ingest_content(use_api=True)` 10+s) each hold a thread; under concurrent tool calls the pool saturates. (R3)
   (fix: make long-I/O tools `async def` and `await anyio.to_thread.run_sync(...)` around the SDK call; or document / tune `FastMCP(num_threads=N)`; at minimum surface the concurrency model in the `app.py` instructions block)
 
-
-- `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page (line 609) → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes some of the SAME pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Within ONE process this is OK. Under concurrent ingest A + B, the read-then-write windows in different stages of A overlap with different stages of B in non-deterministic order; debugging becomes impossible because each `kb_ingest` run shows different conflict patterns. R5 highlights the **systemic absence of any locking discipline across the entire 11-stage ingest pipeline** — a problem that compounds with every Phase 5 feature. (R5)
-  (fix: introduce a per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` and use consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, and `inject_wikilinks`; OR adopt a coarse wiki-wide ingest mutex)
-
-### HIGH — Deferred
-
-> HIGH-severity items either surfaced after cycle-2 shipped or explicitly deferred from Phase 4.5 HIGH cycle-1 for a dedicated follow-up cycle.
-
-- `query/embeddings.py` vector-index lifecycle — Phase 4.5 HIGH cycle 1 shipped H17 hybrid (mtime-gated rebuild + batch skip). Cycle-25 AC3/AC4/AC5 shipped the *observability* variant of sub-item (3 — dim-mismatch): `VectorIndex.query` logs operator-actionable remediation (`kb rebuild-indexes --wiki-dir <path>`) on mismatch + module-level `_dim_mismatches_seen` counter + `get_dim_mismatch_count()` getter. Cycle-26 AC1-AC5 shipped the *observability* variant of sub-item (2 — cold-load latency): `maybe_warm_load_vector_model(wiki_dir)` daemon-thread warm-load hook wired into `kb.mcp.__init__.main()`, `_get_model()` instrumented with `time.perf_counter` + INFO log on every load + WARNING above 0.3s threshold, and `get_vector_model_cold_load_count()` process-level counter. Cycle-28 AC1-AC5 shipped the *observability* variant of the remaining first-query latency sources: `VectorIndex._ensure_conn` sqlite-vec extension load instrumented with `time.perf_counter` + INFO + WARNING above `SQLITE_VEC_LOAD_WARN_THRESHOLD_SECS=0.3` + `_sqlite_vec_loads_seen` counter + `get_sqlite_vec_load_count()` getter (locked via `_conn_lock` for exact counts), AND `BM25Index.__init__` corpus-indexing instrumented with INFO log (no WARN threshold per Q1 — corpus-size variance defeats fixed threshold) + lock-free `_bm25_builds_seen` counter (approximate, cycle-25 Q8 precedent) + `get_bm25_build_count()` getter. Sub-item (1) atomic temp-DB-then-replace rebuild SHIPPED cycle 24 (AC5/AC6/AC8 — `os.replace` on `<vec_db>.tmp` with cache-pop+close before replace + crash-cleanup). Sub-item (4) `_index_cache` cross-thread lock symmetry shipped incrementally across cycles 3/6/24. Cycle 64 AC5-AC8.5 RESOLVED sub-item (a) dim-mismatch AUTO-rebuild: `VectorIndex._derive_wiki_dir` derivation + `KB_DISABLE_VECTOR_AUTO_REBUILD` kill-switch read at CALL TIME per cycle-19 L2 + dual-anchor `_validate_path_under_project_root("vector_auto_rebuild_target")` per CLAUDE.md M4 + `get_dim_mismatch_auto_rebuild_count()` telemetry getter. Concurrent-rebuild idempotency inherited from existing `rebuild_vector_index`'s double-checked `_rebuild_lock` (embeddings.py:302+307). 6 regression tests in `tests/test_cycle64_dim_mismatch_autorebuild.py`. **No remaining sub-items in this entry.**
+- `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Under concurrent ingest A + B, read-then-write windows in different stages overlap non-deterministically. (R5)
+  (fix: per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, `inject_wikilinks`; OR coarse wiki-wide ingest mutex)
 
 ### MEDIUM
-
-<!-- Cycle 1 closed (2026-04-17): D1 _build_schema_cached deepcopy, E1 ingest/contradiction.py
-     logger placement + tokens hoist + single-char language names, F1 kb_create_page O_EXCL,
-     G1 kb_list_sources cap, F2 kb_refine_page caps, C2 _TEXT_EXTENSIONS library enforcement,
-     J1 query/rewriter length guard, I2 search_raw_sources BM25 cache, I1 _flag_stale_results
-     UTC, K1 _dedup_by_text_similarity tokens, M1 lint/verdicts load_verdicts mtime cache. -->
 
 - `config.py` god-module — 35+ unrelated constants (paths, model IDs, BM25 hyperparameters, dedup thresholds, retries, ingest/evolve/lint limits, retention caps, query budgets, RRF, embeddings). Single-file churn invalidates import cache for the whole package in tests. (R1)
   (fix: split into `config/paths.py` / `config/models.py` / `config/limits.py` / `config/search.py` / `config/lint.py`; or a `Settings` dataclass with grouped subfields; keep `from kb.config import *` shim)
 
-- `lint/checks/duplicate_slug.py` `check_duplicate_slugs` — known-distinct near-slug pairs need an operator-managed allowlist instead of code edits. Current examples: `concepts/bot` vs `concepts/llm`, `entities/openai` vs `entities/openclaw`, and `entities/logql` vs `entities/promql` are intentionally unique despite edit distance ≤3.
-  (fix: move duplicate-slug allowlist to a repo-local data file such as `wiki/_lint.yml` or `.data/lint_allowlist.json`, document the format, and have `kb lint` load it before reporting duplicate-slug warnings)
+- `lint/checks/duplicate_slug.py` `check_duplicate_slugs` — known-distinct near-slug pairs need an operator-managed allowlist instead of code edits. Current examples: `concepts/bot` vs `concepts/llm`, `entities/openai` vs `entities/openclaw`, `entities/logql` vs `entities/promql`.
+  (fix: move duplicate-slug allowlist to `wiki/_lint.yml` or `.data/lint_allowlist.json`, document the format, have `kb lint` load it before reporting duplicate-slug warnings)
 
-- `compile/compiler.py` `compile_wiki` per-source rollback — Cycle-25 AC6/AC7/AC8 shipped the narrow observability variant: `in_progress:{pre_hash}` marker written before each `ingest_source`, overwritten on success (by ingest_source's own manifest write) or replaced with `failed:{pre_hash}` by the existing exception handler. AC7's entry-scan logs a warning for any stale `in_progress:` markers from prior hard-kills/power-loss. CONDITION 13 exempts `in_progress:` values from full-mode prune. Remaining deferred: (a) rollback of wiki writes on manifest-save failure (harder — requires receipt-file design or transaction-like helper), (b) escalating manifest-write failure to CRITICAL (cycle-25 keeps the `logger.warning` best-effort stance). (R1)
+- `compile/compiler.py` `compile_wiki` per-source rollback — observability variant shipped (cycle 25 AC6/AC7/AC8: `in_progress:{pre_hash}` marker + stale-marker warning + full-mode prune exemption). Remaining: (a) rollback of wiki writes on manifest-save failure (requires receipt-file design or transaction-like helper); (b) escalating manifest-write failure to CRITICAL. (R1)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests.)
 
-- `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write (acquire `.lock`, load full list, serialize, `mkstemp` + `fdopen` + `replace`, release). Cycle-24 AC9 added exponential backoff to `file_lock` (floor 10ms, cap 50ms), eliminating the fixed 50ms polling floor. The JSONL-migration part remains open. (R1)
+- `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write. Cycle 24 AC9 added exponential backoff to `file_lock`; the JSONL-migration part remains open. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
-- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in diskcache cache files. No patched upstream version as of 2026-04-28 (cycle-52 re-confirmed 2026-04-28: `pip index versions diskcache` shows 5.6.3 = LATEST INSTALLED; `pip-audit --format=json` reports empty `fix_versions` for the CVE; cycle-25 AC9 + cycle-32 + cycle-39..51 + cycle-52 all show same state).
-  (mitigation: diskcache is only used by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports in our code; track upstream for a patched release)
+- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE. No patched upstream as of last re-check.
+  (mitigation: diskcache used only by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports; track upstream for patched release)
 
-- `requirements.txt` `ragas==0.4.3` — CVE-2026-6587 (GHSA-95ww-475f-pr4f): server-side request forgery in `_try_process_local_file` / `_try_process_url` of `ragas.metrics.collections.multi_modal_faithfulness.util`. No patched upstream release as of 2026-04-28 (cycle-52 re-confirmed 2026-04-28: `pip-audit` still reports empty `fix_versions`; `pip index versions ragas` shows 0.4.3 = LATEST INSTALLED; vendor did not respond to disclosure — identical no-upstream-fix profile to diskcache). ragas is a dev-eval-only dep (used manually for evaluation harness work); `grep -rnE "ragas|Ragas" src/kb` confirms zero runtime imports. Re-check on the next cycle's Step-2 baseline.
-  (mitigation: confirmed zero `src/kb/` imports; dev-eval-only usage means an attacker would need local Python access to run `python -c "from ragas..."` themselves — no remote reach. Track for patched release.)
+- `requirements.txt` `ragas==0.4.3` — CVE-2026-6587 (GHSA-95ww-475f-pr4f): SSRF in `_try_process_local_file` / `_try_process_url`. No patched upstream as of last re-check.
+  (mitigation: dev-eval-only dep, used manually for evaluation harness; `grep -rnE "ragas|Ragas" src/kb` confirms zero runtime imports; track for patched release)
 
-- `requirements.txt` `litellm==1.83.0` — GHSA-xqmj-j6mv-4862 (high) + GHSA-r75f-5x8p-qvmc (critical) + GHSA-v4p8-mg3p-g94g (high): LiteLLM Proxy endpoints render user-supplied templates without sandboxing (arbitrary code execution inside proxy process) + authenticated MCP-stdio command execution. Fix available for all three at `litellm==1.83.7`, but every `litellm==1.83.7..1.83.14` release pins `click==8.1.8` as a hard transitive constraint which ResolutionImpossible conflicts with our `click==8.3.2` pin (required for cycle 31 + cycle 32 CLI wrappers). *(Surfaced 2026-04-25 cycle 32 Step 11 PR-CVE diff + Step 11.5 Dependabot alerts #13/#14; advisory landed between Step 2 baseline and Step 11 per cycle-22 L4. Cycle-52 re-confirmed 2026-04-28: 1.83.14 (the LATEST per `pip index versions litellm`) wheel METADATA continues to show `Requires-Dist: click==8.1.8` — upstream has not relaxed across 8+ patch releases since cycle 32 (no new litellm release since cycle 51); pip-audit baseline at `.data/cycle-52/cve-baseline.json` confirms `fix_versions=['1.83.7']` for GHSA-xqmj-j6mv-4862 (still blocked by click pin). Cycle-55 re-confirmed 2026-05-02: attempted Step-15 patch by setting `litellm==1.83.7` in requirements + `pip install --upgrade "litellm==1.83.7"`. Pip resolved by silent-downgrading click 8.3.2 → 8.1.8, importlib-metadata 8.7.1 → 8.5.0, jsonschema 4.26.0 → 4.23.0, **AND python-dotenv 1.2.2 → 1.0.1 — introducing PR-Class-B CVE-2026-28684 / GHSA-mf9w-mj56-hr94 (HIGH symlink attack on `set_key()` / `unset_key()`, fix_versions=['1.2.2'])**. Explicit `--upgrade "litellm==1.83.7" "python-dotenv==1.2.2"` returned `ResolutionImpossible: litellm 1.83.7 depends on python-dotenv==1.0.1`. Patch reverted within cycle 55; venv restored to baseline. Net trade-off would be 1 CRIT + 2 HIGH (litellm proxy, unreachable in our usage) → 1 HIGH (python-dotenv set_key/unset_key, NOT called per `grep -rn "set_key\|unset_key" src/` empty) — both theoretical-only against our code, but Step 14 default REJECTs PR-introduced advisories. Defer remains correct.)*
-  (mitigation: narrow-role exception per feature-dev Step 11 — LiteLLM is a dev-eval-only dep (ragas evaluation harness); `grep -rnE "import litellm|from litellm" src/kb` confirms zero runtime imports in kb; we never start LiteLLM Proxy mode, so the vulnerable proxy endpoints are unreachable. Unblock path: wait for litellm to relax the click<8.2 + python-dotenv==1.0.1 transitive pins, or vendor a narrower fork; re-check next cycle.)
+- `requirements.txt` `litellm==1.83.0` — GHSA-xqmj-j6mv-4862 (high) + GHSA-r75f-5x8p-qvmc (critical) + GHSA-v4p8-mg3p-g94g (high): LiteLLM Proxy template render without sandboxing + authenticated MCP-stdio command execution. Fix at `litellm==1.83.7`, BLOCKED by transitive `click==8.1.8` pin (we need `click==8.3.2` per cycle 31/32) and `python-dotenv==1.0.1` pin (introduces CVE-2026-28684 HIGH symlink on `set_key()` if accepted). Cycle 55 attempted patch + reverted.
+  (mitigation: dev-eval-only dep; `grep -rnE "import litellm|from litellm" src/kb` confirms zero runtime imports; we never start LiteLLM Proxy mode. Unblock path: wait for litellm to relax transitive pins, or vendor a fork.)
 
-- `.venv` `pip==26.0.1` (installer in live env; not a `requirements.txt` pin — pip is the installer itself) — CVE-2026-3219 (GHSA-58qw-9mgm-455v): pip handles concatenated tar+ZIP files as ZIP regardless of filename, enabling confusing installation behavior. No CONFIRMED patched upstream as of 2026-04-28 (`pip-audit` still reports empty `fix_versions`). *(Surfaced 2026-04-25 cycle 32 Step 11 PR-CVE diff; cross-cycle advisory arrival per cycle-22 L4. Cycle-52 re-confirmed 2026-04-28: pip 26.1 remains LATEST per `pip index versions pip` (no new pip release since cycle 51), advisory GHSA-58qw-9mgm-455v `first_patched_version` still null per pip-audit baseline `.data/cycle-52/cve-baseline.json` (`fix_versions=[]` for CVE-2026-3219). Per cycle-22 L4 conservative posture: do NOT upgrade the installer until the advisory or PyPA security disclosure confirms 26.1 patches the CVE; track for next cycle. Cycle-47 wording correction per Step-5 B1: pip is NOT pinned in `requirements.txt` — `grep -nE "^pip==" requirements.txt` returns no hit; entry locator stays at `.venv` installer to reflect ground truth.)*
-  (mitigation: narrow-role — pip is TOOLING, not runtime; advisory affects package installation (`pip install` of adversarial tar+zip payloads) which requires local shell access. Production kb runtime never shells out to pip. Track upstream for patched release.)
+- `.venv` `pip==26.0.1` — CVE-2026-3219 (GHSA-58qw-9mgm-455v): pip handles concatenated tar+ZIP files as ZIP regardless of filename. No confirmed patched upstream.
+  (mitigation: pip is TOOLING, not runtime; advisory affects `pip install` of adversarial payloads which requires local shell access. Production `kb` runtime never shells out to pip. Track upstream.)
 
-- `compile/linker.py` cross-reference auto-linking — deferred: when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` added to A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
+- `compile/linker.py` cross-reference auto-linking — when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` on A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
 
-_(Cycle 64 AC13-AC15.5 RESOLVED `compile/publish.py` compile-time auto-publish hook: new `auto_publish_after_compile(wiki_dir, *, out_dir, incremental)` function emits Tier-1 + per-page siblings + sitemap to `<wiki_dir>.parent/_publish` (sibling of wiki_dir per T10 walk-out constraint); `compile_wiki` post-success invokes it gated by `KB_DISABLE_COMPILE_AUTO_PUBLISH=1` env var read at CALL TIME per cycle-19 L2; dual-anchor `_validate_path_under_project_root("publish_out_dir")` per CLAUDE.md M4; `# CYCLE-64-HOOK` merge-resilience marker. 7 regression tests in `tests/test_cycle64_auto_publish.py`.)_
+- `ingest/pipeline.py` `IndexWriter` consolidation refactor — cycle 35 closed the immediate RMW concurrency hazard via `file_lock(target_path)`. Open: code-quality refactor — `IndexWriter` helper wrapping all four index-file writes (`_sources.md`, `index.md`, `_categories.md`, `log.md`) with documented lock-acquire order. Defer until a cycle adds a 4th caller.
 
-_(Cycle 64 AC16-AC17 RESOLVED `compile/publish.py` manifest-based incremental sibling cleanup: `<wiki_dir>.parent/.data/publish-siblings-manifest.json` tracks page_id → sibling-paths from prior publish; current publish unlinks only newly-orphaned (in-prior-manifest, not-in-current-kept). On JSON corruption, fallback to cycle-16 unconditional cleanup of currently-excluded. 3 regression tests in `tests/test_cycle64_publish_manifest.py`.)_
+- `ingest/pipeline.py` `_update_existing_page` body-write + evidence-append two-write consolidation — cycle 24 AC1 shipped single-atomic-write inline rendering for `_write_wiki_page` (new-page path). Update path remains: existing body must be preserved across ingests, so pre-rendering the trail with all historical entries is infeasible without a broader refactor.
+  (fix: `_update_existing_page` RMW could buffer existing trail bytes in memory, append the new entry, write both body and trail under a single lock — requires the cycle-19 `file_lock` discipline.)
 
-- `ingest/pipeline.py` `IndexWriter` consolidation refactor — cycle 35 closed the immediate RMW concurrency hazard by wrapping `_update_sources_mapping` + `_update_index_batch` in `file_lock(target_path)`. The remaining open item is the code-quality refactor: an `IndexWriter` helper wrapping all four index-file writes (`_sources.md`, `index.md`, `_categories.md`, `log.md`) with documented lock-acquire order. Defer until a cycle adds a 4th caller or until M9 (`compile/publish.py` compile-time auto-publish hook) lands. *(Cycle-35 narrowed from cycle-33's "RMW concurrency residual"; concurrency hazard is closed.)*
+- CLI ↔ MCP parity — `cli.py` exposes 24 commands; MCP exposes 28 tools. Remaining gap = 7 write-path tools deferred to a write-path input-validation cycle: `kb_review_page` / `kb_refine_page` / `kb_query_feedback` / `kb_save_source` / `kb_save_lint_verdict` / `kb_create_page` / `kb_capture`. Structured `--format=json` output across both surfaces also still open. (R2)
+  (fix: auto-generate CLI subcommands from the FastMCP tool registry; or collapse MCP + CLI onto a shared `kb.api` service module)
 
-- `ingest/pipeline.py` `_update_existing_page` body-write + evidence-append two-write consolidation — Cycle-24 AC1 shipped single-atomic-write inline rendering for `_write_wiki_page` (new-page path), eliminating the two-write race there. Cycle-24 AC2 shipped typed error surfacing for `_update_existing_page` failures (`StorageError(kind="evidence_trail_append_failure")`). Remaining deferred: true single-write consolidation for the update path — the existing body must be preserved across ingests, so pre-rendering the trail with all historical entries is infeasible without a broader evidence-trail refactor. *(Narrowed 2026-04-23 cycle 24: previously combined entry covered both paths; AC1 + AC2 closed the new-page + error-surfacing portions.)*
-  (fix: `_update_existing_page` RMW flow could buffer the existing trail bytes in memory, append the new entry, write both body and trail under a single lock — requires the cycle-19 `file_lock` discipline + sentinel-anchor search from AC14.)
+- `compile/compiler.py` `compile_wiki` (~279-393) — a 50-line `for source in changed: ingest_source(source)` loop + manifest save. CLAUDE.md describes compile as "LLM builds/updates interlinked wiki pages, proposes diffs, not full rewrites" — no second pass, no cross-source reconciliation, no diff proposal exists in code. (R2)
+  (fix: make `compile_wiki` a real two-phase pipeline (collect extractions → reconcile cross-source → write); or rename to `batch_ingest` and stop pretending compile is distinct)
 
-- CLI ↔ MCP parity — `cli.py` exposes 24 commands (cycle-27 shipped `search` / `stats` / `list-pages` / `list-sources`; cycle-30 AC2-AC6 shipped `graph-viz` / `verdict-trends` / `detect-drift` / `reliability-map` / `lint-consistency`; cycle-31 AC1-AC3 shipped `read-page` / `affected-pages` / `lint-deep` via the same function-local-import thin-wrapper pattern, plus a shared `_is_mcp_error_response` discriminator retrofitted into `stats` / `reliability-map` / `lint-consistency` for non-colon MCP error shapes; cycle-32 AC1/AC4 shipped `compile-scan` / `ingest-content` closing category (b) and widened the discriminator with `"Error["` for the `Error[partial]:` tagged-error emitter). MCP exposes 28 tools. Remaining gap = 7: (a) write-path tools `kb_review_page` / `kb_refine_page` / `kb_query_feedback` / `kb_save_source` / `kb_save_lint_verdict` / `kb_create_page` / `kb_capture` — deferred to a write-path input-validation cycle. Note: `kb_save_synthesis` is NOT an MCP tool — it's the `save_as=` parameter on `kb_query` (cycle 16). Structured `--format=json` output across both surfaces still open. (R2)
-  (fix: auto-generate CLI subcommands from the FastMCP tool registry; or collapse MCP + CLI onto a shared `kb.api` service module — also kills the function-local-import issue cleanly)
+- `tests/` snapshot tests — cycle 64 shipped foundation: `syrupy>=4.6.0` dev dep + 3 snapshot subjects (evidence-trail / Mermaid export / lint-report-structure). Remaining subjects deferred to cycle-65+: `_build_summary_content` page-rendering, `kb publish --format graph` JSON-LD output, `auto_publish_after_compile`'s `_publish/llms-full.txt` body, contradictions append, `build_extraction_prompt`, `_render_sources`. (R3)
+  (fix: add the deferred subjects incrementally; commit `tests/__snapshots__/` for each.)
 
-- `compile/compiler.py` `compile_wiki` (~279-393) — a 50-line `for source in changed: ingest_source(source)` loop + manifest save. CLAUDE.md describes compile as "LLM builds/updates interlinked wiki pages, proposes diffs, not full rewrites" — no second pass, no cross-source reconciliation, no diff proposal exists in code. MCP `kb_compile` and `kb compile` CLI are cosmetic wrappers. Phase 5's two-phase compile / pre-publish gate / cross-source merging would land in the wrong layer because `compile_wiki` has no batch context. (R2)
-  (fix: make `compile_wiki` a real two-phase pipeline (collect extractions → reconcile cross-source → write) and document the contract; or rename to `batch_ingest` and stop pretending compile is distinct)
+- `tests/` N=40 FastMCP-realistic dim-mismatch concurrency stress (cycle-65+) — cycle 64 AC8's `test_concurrent_query_during_rebuild_idempotent` exercises N=4 threads and proves idempotency via embeddings.py:302+307 double-checked locking. N=40 deferred per R2-F6 (test-harness infrastructure complexity without proportional cycle-64 win).
 
-- `tests/` no golden-file / snapshot tests (PARTIAL — cycle 64 AC18-AC20 shipped the foundation: `syrupy>=4.6.0` dev dep + `tests/test_cycle64_snapshots.py` with 3 snapshot subjects (evidence-trail / Mermaid export / lint-report-structure) + committed `tests/__snapshots__/test_cycle64_snapshots.ambr`. Remaining subjects deferred to cycle-65+: `_build_summary_content` page-rendering, `kb publish --format graph` JSON-LD output, `auto_publish_after_compile`'s `_publish/llms-full.txt` body, contradictions append, `build_extraction_prompt`, `_render_sources`. (R3)
-  (fix: add `pytest-snapshot` or `syrupy`; start with frontmatter rendering, evidence-trail format, Mermaid output, lint report format; commit `tests/__snapshots__/`)
+- `requirements.txt` resolver conflicts (cycle-34 AC52 follow-up) — `pip check` reports three known conflicts that CI accepts via `continue-on-error: true`: (a) `arxiv 2.4.1` requires `requests~=2.32.0` but installed `requests==2.33.0`; (b) `crawl4ai 0.8.6` requires `lxml~=5.3` but installed `lxml==6.1.0`; (c) `instructor 1.15.1` requires `rich<15.0.0,>=13.7.0` but installed `rich==15.0.0`. Each has a known runtime workaround (none of `arxiv`/`crawl4ai`/`instructor` is imported by `src/kb/`). When upstream packages relax these constraints, drop the `continue-on-error: true` directive.
 
-- `tests/` N=40 FastMCP-realistic dim-mismatch concurrency stress (cycle-65+) — cycle 64 AC8's existing `test_concurrent_query_during_rebuild_idempotent` exercises N=4 threads as a surrogate, matching the project's test-precedent pattern (test_compile.py + test_mcp_core.py both use N=4) and proving idempotency via `embeddings.py:302+307` double-checked locking. The threat model M2 documents the 40-thread storm scenario corresponding to FastMCP's default thread pool. Cycle-64 deferred N=40 per R2-F6 DEFER (test-harness infrastructure complexity without proportional cycle-64 win). The double-checked locking is structurally proven correct via N=4; N=40 would simply re-confirm at the FastMCP-realistic concurrency level. *(Cycle-64 spawn entry from Step-5 R2-F6 DEFER; cycle-65+ followup.)*
+- `ingest/pipeline.py` real PDF text extraction (cycle-N+1 if requested) — cycle 34 AC24 removed `.pdf` from `SUPPORTED_SOURCE_EXTENSIONS`; user-facing message points at `markitdown` / `docling` for conversion. If in-process extraction is requested: integrate `pypdf` or `pdfplumber` as a `[pdf]` extra with size + page caps; or add a `kb convert <pdf>` CLI subcommand wrapping markitdown.
 
-- `requirements.txt` resolver conflicts (cycle-34 AC52 follow-up) — `pip check` reports three known conflicts that cycle 34's CI gate accepts via `continue-on-error: true` on the `pip check` step ONLY: (a) `arxiv 2.4.1` requires `requests~=2.32.0` but installed `requests==2.33.0`; (b) `crawl4ai 0.8.6` requires `lxml~=5.3` but installed `lxml==6.1.0`; (c) `instructor 1.15.1` requires `rich<15.0.0,>=13.7.0` but installed `rich==15.0.0`. Each has a known runtime workaround (none of `arxiv`/`crawl4ai`/`instructor` is imported by `src/kb/`). When upstream packages relax these transitive constraints, drop the `continue-on-error: true` directive to make `pip check` strict in CI. *(Surfaced 2026-04-25 cycle 34 Step 9; tracked per design-gate Q9 + threat-model T5. Cycle-52 re-confirmed 2026-04-28: all three conflicts persist verbatim per `pip check` output.)*
+- `kb.query.hybrid` `KB_DISABLE_VECTORS=1` runtime kill-switch (cycle-N+1 if requested) — cycle 34 AC19 documented hybrid as opt-in via the `[hybrid]` extra. Add a runtime env var to disable hybrid search WITHOUT uninstalling the extras (per-environment toggle).
 
-- `ingest/pipeline.py` real PDF text extraction (cycle-N+1 follow-up if requested) — cycle 34 AC24 removed `.pdf` from `SUPPORTED_SOURCE_EXTENSIONS` (rejecting binary PDFs at the extension check rather than the UTF-8 decode) per comprehensive review Finding 7. The user-facing message points at `markitdown` / `docling` for conversion. If a future user requests in-process PDF text extraction, options: (a) integrate `pypdf` or `pdfplumber` as a `[pdf]` extra with size + page caps; (b) add a `kb convert <pdf>` CLI subcommand wrapping markitdown; (c) document the markitdown/docling workflow as the canonical path. *(Spawn entry from cycle 34 design-gate Q2; cycle-N+1 if requested.)*
+- `tests/` windows-latest CI matrix re-enable (cycle-53+) — local Windows full suite passes. GHA `windows-latest` runner hangs at `threading.py:355` after cycle-23 multiprocessing test was skipif'd (cycle 36 AC2). Top-3 candidate culprits (grep-ranked by Thread/multiprocessing usage): (1) `tests/test_cycle25_dim_mismatch.py:180-184` N-thread parallel sqlite write; (2) `tests/test_cycle23_rebuild_indexes.py:213-248` long-lock holder; (3) `tests/test_cycle24_lock_backoff.py:222-228` exponential-backoff thread. Cycle-53+ should reproduce on a self-hosted Windows runner, fix or skipif the culprit, then re-enable matrix `[ubuntu-latest, windows-latest]` with `strategy.fail-fast: false`.
 
-- `kb.query.hybrid` `KB_DISABLE_VECTORS=1` runtime kill-switch flag (cycle-N+1 follow-up if requested) — cycle 34 AC19 documented the hybrid layer as opt-in via the `[hybrid]` extra (don't install model2vec/sqlite-vec → no hybrid retrieval). If users need a runtime way to disable hybrid search WITHOUT uninstalling the extras (e.g., per-environment toggle), add a `KB_DISABLE_VECTORS=1` env var that short-circuits `kb.query.hybrid` to BM25-only. *(Spawn entry from cycle 34 design-gate Q5; cycle-N+1 if requested.)*
+- `tests/` GHA-Windows multiprocessing spawn investigation (cycle-53+) — cycle 23's `test_cross_process_file_lock_timeout_then_recovery` hangs on GHA `windows-latest` at `popen_spawn_win32.py:112` (parent's `child.start()` blocks waiting on the spawn-bootstrap pipe). Local Windows pass time is 1.03s. Cycle 36 AC2 skipif'd. Reproduce on a self-hosted Windows runner; instrument the child-spawn pipe; identify the divergence (likely editable-install pth resolution / `PYTHONNOUSERSITE` / `kb.config` PROJECT_ROOT heuristic in spawned child). Once fixed, narrow the skipif to `GITHUB_ACTIONS` only or remove.
 
-- `tests/` windows-latest CI matrix re-enable (cycle-53+) — cycle 36 closed the strict-gate on ubuntu-latest single-OS; windows-latest GHA runner exhibits a SECOND hang at `threading.py:355` after cycle-23 multiprocessing spawn-bootstrap test was skipif'd. Pytest reaches ~position 1168 in collection order (1157 passed + 11 skipped) before the threading interrupt fires. Cycle-47 frontier (grep-proven Thread/multiprocessing candidates, ranked by GHA-windows shutdown-hang likelihood; the previously-cited `test_cycle23_workflow_e2e.py` has ZERO Thread/multiprocessing hits per cycle-47 grep — REMOVED from candidate set): (1) `tests/test_cycle25_dim_mismatch.py:180-184` — N-thread parallel sqlite write; sqlite-on-Windows shutdown is a known cycle-25 hot zone; (2) `tests/test_cycle23_rebuild_indexes.py:213-248` (Thread at line 233) — single thread holding a long lock; rebuild-indexes path touches the manifest lock (slow Windows fs); (3) `tests/test_cycle24_lock_backoff.py:222-228` — exponential-backoff thread may overshoot CI shutdown. Lower-priority instrumentation order: `test_cycle32_cli_parity_and_fair_queue.py`, `test_cycle26_cold_load_observability.py`, `test_cycle16_duplicate_slugs.py`, `test_cycle20_write_wiki_page_exclusive.py`, `test_cycle36_ci_hardening.py`, `test_cycle8_contradictions_idempotent.py`. The cycle-23 file_lock_multiprocessing test is already skipif'd (cycle-36 AC2) — re-confirm the skipif still fires before the matrix re-enable. Cycle-53+ should: (1) reproduce on a self-hosted Windows runner using the top-3 candidates above; (2) apply targeted skipif marker OR fix the test root cause; (3) re-enable matrix `[ubuntu-latest, windows-latest]` with `strategy.fail-fast: false`. Local Windows full suite passes 3014 + 11 skipped post-cycle-52 — only the GHA Windows runner exhibits this hang. *(Cycle-36 spawn entry; cycle-37..51 deferred per cycle-36 L1 — separate cycle for the new CI dimension to avoid extending the failed-CI-run pattern. Cycle-52 re-confirmed N/A — no GHA-Windows reproducer; refined frontier list above unchanged from cycle 47. Tag stays at cycle-53+.)*
+- `tests/test_compile.py::test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1 behavioral upgrade (cycle-53+) — uses `inspect.getsource(compiler)` to lint that two prune sites use `_canonical_rel_path`. Cycle-52 R1 NIT proposed a positive behavioral test that stubs `_canonical_rel_path` and asserts both `compile_wiki(mode="full")` and `detect_source_drift` route through the helper.
 
-- `tests/` GHA-Windows multiprocessing spawn investigation (cycle-53+) — cycle 23's `test_cross_process_file_lock_timeout_then_recovery` hangs on the GHA `windows-latest` runner at `popen_spawn_win32.py:112` (parent's `child.start()` blocks waiting on the spawn-bootstrap pipe). Local Windows pass time is 1.03s. Cycle 36 AC2 skipped the test with `skipif(os.environ.get("CI") == "true")` to unblock the strict-gate. Cycle-53+ should reproduce on a self-hosted Windows runner, instrument the child-spawn pipe, and identify the divergence (likely editable-install pth resolution / `PYTHONNOUSERSITE` / `kb.config` PROJECT_ROOT heuristic in spawned child). Once fixed, narrow the skipif to `GITHUB_ACTIONS` only or remove it entirely. *(Cycle-36 spawn entry from AC2 / Step-5 Q1; cycle-37..51 deferred — investigation-heavy, requires self-hosted runner. Cycle-52 re-confirmed N/A — prerequisite missing: self-hosted Windows runner. Tag stays at cycle-53+.)*
+- `tests/` versioned-file `inspect.getsource` C11-L1 batch-filing (cycle-56+) — 5 `inspect.getsource` patterns in unchanged versioned files were flagged during cycle-55 same-class peer scan but not addressed (out of scope — files not being folded). Sites: `tests/test_lint_query_fixes_v092.py:279,286`; `tests/test_v0911_phase392.py:245`; `tests/test_v0915_task01.py:320,331`; `tests/test_v0915_task08.py:363`. These are vacuous source-string-read assertions that pass even when the production code path is reverted. Upgrade: behavioral assertion exercising the production call site, OR delete if covered elsewhere, OR in-fold C11-L1 upgrade when the host file's fold cycle arrives.
 
-- `tests/test_compile.py::test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1 behavioral upgrade candidate (cycle-53+) — cycle-52 R1 DeepSeek NIT observation: the existing test uses `inspect.getsource(compiler)` to lint that two distinct prune sites use `_canonical_rel_path`. The cycle-19 design.md AC14 DROP rationale (preserved in the moved test's docstring) claims a behavioural test would be vacuous because the divergence scenario is what the fix prevents — R1 challenged this, noting a positive behavioral test that stubs `_canonical_rel_path` and asserts both `compile_wiki(mode="full")` and `detect_source_drift` route through the helper would NOT be vacuous. Filed per cycle-52 Step-5 Q2 decision (a) — fold proceeded as-is per requirements doc charter; behavioral upgrade deferred to a dedicated cycle to construct the spy fixture (raw_dir with pre-stale manifest entries triggering both prune sites simultaneously) without scope-bleed into a hygiene cycle. *(Cycle-52 spawn entry from R1 NIT + Step-5 Q2; per C40-L3 KNOWN-WEAK fold migrations file BACKLOG upgrade candidate.)*
+- `tests/test_utils_text.py` `tests/test_utils_io.py` Windows pyreadline3 pytest crash (cycle-57+) — local Windows pytest crashes with STATUS_ACCESS_VIOLATION (-1073741819) during/after `test_sanitize_strips_control_chars` and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error`. Workaround: `pytest -p no:capture -p no:debugging`. CI on ubuntu-latest unaffected. Investigate `kb.utils.text.yaml_sanitize` and `kb.utils.io.sweep_orphan_tmp` logging paths — pyreadline3 import-time interference suspected.
 
-- `tests/` versioned-file `inspect.getsource` C11-L1 batch-filing (cycle-56+) — cycle-55 R1 Sonnet NIT + R2 Sonnet MINOR-2 observation: 5 `inspect.getsource` patterns in unchanged versioned files were flagged during cycle-55 same-class peer scan (C16-L1) but NOT addressed in this cycle (out of scope — these files are not being folded by cycle 55). Per the cycle-52 → cycle-53+ `test_prune_base` precedent, R1-flagged NIT candidates ARE filed in BACKLOG.md as upgrade markers even when deferred — omitting them creates a discovery gap if cycle-N+M does not explicitly re-run the same scan. Sites: `tests/test_lint_query_fixes_v092.py:279,286` (two bare `inspect.getsource(kb_lint)` / `inspect.getsource(kb_evolve)` substring checks); `tests/test_v0911_phase392.py:245` (`inspect.getsource(trends_module)`); `tests/test_v0915_task01.py:320,331` (`inspect.getsource(builder)` + `inspect.getsource(analyzer)`); `tests/test_v0915_task08.py:363` (`inspect.getsource(analyzer)`). Per C11-L1, these are vacuous source-string-read assertions that pass even when the production code path is reverted. Upgrade options: (1) replace each with a behavioral assertion exercising the production call site (preferred); (2) delete the assertion if the behavioral surface is already covered elsewhere in the suite; (3) when the cycle that folds the host file arrives, do an in-fold C11-L1 upgrade per the cycle-55 AC1 pattern (drop getsource, add behavioral spy). Filed per cycle-55 Step-20 R2 Sonnet MINOR-2 + cycle-52 BACKLOG-marker convention; batch-fileable (one BACKLOG entry per discovery cycle vs one per site).
+- `tests/test_capture.py::TestWriteItemFiles` POSIX off-by-one + creates_dir investigation (cycle-53+) — cycle 36 ubuntu-probe surfaced 2 test failures: `test_creates_dir_if_missing`, `test_pre_existing_file_collision`. The latter expected slug `decision-foo-2` becomes `decision-foo-3` on POSIX. Currently `@_WINDOWS_ONLY` skipif'd. Root cause needs direct POSIX shell access to instrument `_scan_existing_slugs` / `_build_slug` / `_reserve_hidden_temp`.
 
-- `tests/test_utils_text.py` `tests/test_utils_io.py` Windows pyreadline3 pytest crash (cycle-57+) — local Windows pytest crashes with STATUS_ACCESS_VIOLATION (-1073741819) during/after `test_sanitize_strips_control_chars` (test_utils_text.py) and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error` (test_utils_io.py). Reproduces on main as well as cycle-56 worktree. Workaround: `pytest -p no:capture -p no:debugging`. CI on ubuntu-latest is unaffected (per cycle-36 ubuntu-latest single-OS strict-gate). Investigate root cause in `kb.utils.text.yaml_sanitize` and `kb.utils.io.sweep_orphan_tmp` logging paths — pyreadline3 import-time interference suspected. *(Cycle-56 spawn entry from Step 12 CI gate observation; not cycle-56-introduced.)*
+- Dependabot pip-audit drift on litellm GHSA-r75f-5x8p-qvmc (cycle-52+) — Dependabot reports the critical advisory but `pip-audit` on the live CI install env still does not emit this ID. Workflow `--ignore-vuln` does NOT include this ID. Monitor for pip-audit data refresh; escalate if pip-audit catches up.
 
-- `tests/test_capture.py::TestWriteItemFiles` POSIX off-by-one + creates_dir investigation (cycle-53+) — cycle 36 ubuntu-probe surfaced 2 test failures: `test_creates_dir_if_missing`, `test_pre_existing_file_collision`. The latter expected slug `decision-foo-2` becomes `decision-foo-3` on POSIX (extra file collision); the former has unclear POSIX divergence in `_write_item_files` mkdir path. Cycle 38 AC7+AC8 attempted investigation but scope-cut to cycle-39 per design M1 standing pre-auth — root-cause investigation requires direct POSIX shell access to instrument `_scan_existing_slugs` / `_build_slug` / `_reserve_hidden_temp` and trace the divergence. Cycle 38 retains the `@_WINDOWS_ONLY` skipif on these 2 tests. The other 2 cleans_up tests in TestExclusiveAtomicWrite were resolved in cycle 38 AC6 (dual-site atomic_text_write patch). *(Cycle-36 spawn entry from AC11 probe; cycle-37..51 deferred — POSIX investigation needs deeper access. Cycle-52 re-confirmed N/A — prerequisite missing: POSIX shell. Tag stays at cycle-53+.)*
-
-- `Dependabot pip-audit drift on litellm GHSA-r75f-5x8p-qvmc` (cycle-52+) — Dependabot reports the critical advisory (LiteLLM Proxy code execution via vulnerable proxy endpoints; fix=1.83.7 BLOCKED by `click==8.1.8` transitive constraint in litellm 1.83.7..1.83.14 vs our `click==8.3.2` pin) but `pip-audit` on the live CI install env still does not emit this ID as of 2026-04-28 (cycle-52 re-checked). Workflow `--ignore-vuln` does NOT include this ID (intentionally — pip-audit doesn't see it). Monitor for pip-audit data refresh; escalate if pip-audit catches up (would force CI fail unless we add the ID to `--ignore-vuln`). *(Cycle-36 spawn entry from Step-5 Q17; cycle-37..51 + cycle-52 re-confirmed drift persists 2026-04-28; Dependabot alert ID #14 still open per `.data/cycle-52/alerts-baseline.json`.)*
-
-- `Dependabot pip-audit drift on litellm GHSA-v4p8-mg3p-g94g` (cycle-52+) — Dependabot reports the high-severity advisory (LiteLLM authenticated MCP-stdio command execution; created 2026-04-25T23:37Z; fix=1.83.7 BLOCKED by same `click==8.1.8` transitive). Pip-audit on live CI install env still does not emit the ID as of 2026-04-28 (cycle-52 re-checked). Same handling as `GHSA-r75f-5x8p-qvmc` above. *(Cycle-36 spawn entry from Step-5 Q17; cycle-37..51 + cycle-52 re-confirmed drift persists 2026-04-28; Dependabot alert ID #15 still open per `.data/cycle-52/alerts-baseline.json`.)*
-
+- Dependabot pip-audit drift on litellm GHSA-v4p8-mg3p-g94g (cycle-52+) — same handling as `GHSA-r75f-5x8p-qvmc` above.
 
 ### LOW
 
-- `tests/` mutmut mutation-coverage analysis on cycle-64 regression suite (cycle-65+ followup) — cycle-64 R2-F9 DEFER: run `mutmut` (or `cosmic-ray`) over the 6 new cycle-64 test files (`test_cycle64_conftest_leak.py`, `test_cycle64_dim_mismatch_autorebuild.py`, `test_cycle64_graph_cache.py`, `test_cycle64_auto_publish.py`, `test_cycle64_publish_manifest.py`, `test_cycle64_snapshots.py`) to identify any mutants that survive — i.e., production-code mutations that none of the 33 new tests catches. Such survivors flag spots where a behavioural assertion is missing or where the test stubs out the surface that the mutation would have changed. Cycle-64 deferred this per R2-F9 (post-Step-9 quality work, not Step-5 design-gate concern). *(Cycle-64 spawn entry from Step-5 R2-F9 DEFER; cycle-65+ followup.)*
-
-<!-- Cycle 13 closed: AC7 sweep_orphan_tmp on kb.cli:cli boot ({.data, WIKI_DIR}); AC8 +
-     _resolve_raw_dir helper derives run_augment raw_dir from wiki_dir.parent / "raw" when
-     wiki_dir is overridden and raw_dir omitted.
-     Cycle 28 closed (2026-04-24): CHANGELOG cycle-27 commit-tally rule documented
-     in CHANGELOG.md format-guide (self-referential +1 per cycle-26 L1); entry
-     deleted as resolved. -->
-
----
-
-## Phase 5 pre-merge (feat/kb-capture, 2026-04-14)
-
-<!-- Discovered by 6 specialist reviewers (security, logic, performance, reliability, maintainability, architecture)
-     running Rounds 1 and 2 against feat/kb-capture. Primary scope: new kb.capture module + supporting changes.
-     Items grouped by severity, keyed by file. Round tag in parens (R1/R2). -->
-
-<!-- 2026-04-17 cleanup pass verified R1/R2/R3 HIGH, MEDIUM, and LOW items fixed in capture.py;
-     remaining entries below are genuinely open. -->
-
-### CRITICAL
-
-- `capture.py:341-372, 428-460` two-pass write architecture needed — STRUCTURAL: `alongside_for[i]` is a frozen list built from Phase A slugs and never recomputed after a Phase C slug reassignment. Items 0..i-1 already written to disk retain `captured_alongside` entries pointing at item i's Phase A slug (which was never written) under cross-process collision. Only complete fix is two-pass: Pass 1 = `O_EXCL`-reserve all N slugs with retry; Pass 2 = compute `alongside_for` from finalized slugs, write all files. Documented as "v1 limitation" in `_write_item_files` docstring. (R3)
-  (fix: implement two-pass `_write_item_files`; OR keep TODO(v2) marker and document explicitly in `CaptureResult` docstring)
-
-### MEDIUM
+- `tests/` mutmut mutation-coverage analysis on cycle-64 regression suite (cycle-65+) — run `mutmut` (or `cosmic-ray`) over the 6 new cycle-64 test files (`test_cycle64_conftest_leak.py`, `test_cycle64_dim_mismatch_autorebuild.py`, `test_cycle64_graph_cache.py`, `test_cycle64_auto_publish.py`, `test_cycle64_publish_manifest.py`, `test_cycle64_snapshots.py`) to identify mutants that survive — i.e., production-code mutations no test catches.
 
 ---
 
@@ -219,396 +229,208 @@ _(Cycle 64 AC16-AC17 RESOLVED `compile/publish.py` manifest-based incremental si
      These are FEATURE items, not bugs — severity buckets here = LEVERAGE (High / Medium / Low).
      "effort" in the parenthetical replaces "fix" in the bug format. -->
 
-### RECOMMENDED NEXT SPRINT — Karpathy gist re-evaluation (2026-04-13)
+### RECOMMENDED NEXT SPRINT — Karpathy gist re-evaluation (2026-04-13, cycle-64 refresh)
 
-<!-- Ranked priority derived from re-reading Karpathy's gist against current state.
-     All items below already exist as entries in the leverage-grouped subsections — this block only SEQUENCES them.
-     Rationale: research/karpathy-community-followup-2026-04-12.md §Prioritized roadmap additions + 2026-04-13 ranking pass.
-     Ranking axes: (1) Karpathy-verbatim fidelity, (2) unsolved-gap coverage, (3) effort vs leverage. -->
+Ranked priority derived from re-reading Karpathy's gist against current state. Items below already exist as entries in the leverage-grouped subsections — this block only SEQUENCES them. Resolved entries removed: auto-publish `llms.txt`/`graph.jsonld` (cycle 64 AC14), `belief_state` frontmatter (cycle 14), `kb_query` coverage-confidence refusal (cycle 14 AC5).
 
 **Tier 1 — Karpathy-verbatim behaviors the project can't yet reproduce:**
-<!-- Tier 1 #1 (`kb_query --format=…` output adapters) SHIPPED in Phase 4.11 (2026-04-14). -->
-<!-- Tier 1 #2 (`kb_lint --augment`) SHIPPED in Phase 5.0 (2026-04-15). -->
-1. `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen — makes the wiki retrievable by other agents; renderers over existing frontmatter/graph. Cross-ref: HIGH LEVERAGE — Output-Format Polymorphism.
-2. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — Karpathy: *"schema is kept up to date in AGENTS.md"*; enables Codex / Cursor / Gemini CLI / Droid portability without forking schema per tool. Cross-ref: LOW LEVERAGE — Operational.
+1. `wiki/_schema.md` vendor-neutral schema + `AGENTS.md` thin shim — enables Codex / Cursor / Gemini CLI / Droid portability.
 
-**Tier 2 — Epistemic integrity (unsolved-gap closers every community voice flagged):**
-5. `belief_state: confirmed|uncertain|contradicted|stale|retracted` frontmatter — cross-source aggregate orthogonal to per-source `confidence`. Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
-6. `kb_merge <a> <b>` + duplicate-slug lint check — catches `attention` vs `attention-mechanism` drift; top-cited contamination failure mode in the thread. Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
-7. `kb_query` coverage-confidence refusal gate — refuses low-signal queries with rephrase suggestions instead of synthesizing mediocre answers. Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
-8. Inline `[EXTRACTED]` / `[INFERRED]` / `[AMBIGUOUS]` claim tags with `kb_lint_deep` sample verification — complements page-level `confidence` with claim-level provenance; directly answers "LLM stated this as sourced fact but it's not in the source." Cross-ref: HIGH LEVERAGE — Epistemic Integrity 2.0.
+**Tier 2 — Epistemic integrity (unsolved-gap closers):**
+2. `kb_merge <a> <b>` + duplicate-slug lint check — catches `attention` vs `attention-mechanism` drift.
+3. Inline `[EXTRACTED]` / `[INFERRED]` / `[AMBIGUOUS]` claim tags with `kb_lint_deep` sample verification.
 
-**Tier 3 — Ambient capture + security rail (distribution UX):**
-9. `.llmwikiignore` + pre-ingest secret/PII scanner — missing safety rail given every ingest currently sends full content to the API. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
-10. `SessionStart` hook + `raw/` file watcher + `_raw/` staging directory — ship as a three-item bundle that eliminates the "remember to ingest" step. Cross-ref: HIGH LEVERAGE — Ambient Capture & Session Integration.
+**Tier 3 — Ambient capture + security rail:**
+4. `.llmwikiignore` + pre-ingest secret/PII scanner — missing safety rail given every ingest sends full content to the API.
+5. `SessionStart` hook + `raw/` file watcher + `_raw/` staging directory — eliminates the "remember to ingest" step.
 
-**Recommended next target:** #1 (`/llms.txt` + `/llms-full.txt` + `/graph.jsonld` auto-gen). Reasons: with output adapters (Phase 4.11) and reactive gap-fill (Phase 5.0) shipped, the next-highest Karpathy-fidelity item is the machine-consumable publish format — renderers over existing frontmatter + graph, low effort, makes the wiki itself a retrievable source for other agents. Contained blast radius in `kb.compile.publish` (new module) + compile-pipeline hook.
-
-**Already in flight (excluded from ranking):** `kb_capture` MCP tool (spec landed 2026-04-13 in `docs/superpowers/specs/2026-04-13-kb-capture-design.md`), `wiki/purpose.md` KB focus document (shipped 2026-04-13, commit `d505dca`).
-
-**Explicit scope-out from this re-evaluation pass (keep deferred to Phase 6 or decline):**
-- `kb_consolidate` sleep-cycle pass — high effort; overlaps with existing lint/evolve; defer until lint is load-bearing.
-- Hermes-style independent cross-family supervisor — infra-heavy (second provider + fail-open policy); Phase 6.
-- `kb_drift_audit` cold re-ingest diff — defer until `kb_merge` + `belief_state` land (surface overlap).
-- `kb_synthesize [t1, t2, t3]` k-topic combinatorial synthesis — speculative; defer until everyday retrieval is saturated.
-- `kb_export_subset --format=voice` for mobile/voice LLMs — niche; defer until a second-device use case emerges.
-- Multi-agent swarm + YYYYMMDDNN naming + capability tokens (redmizt) — team-scale pattern; explicit single-user non-goal.
-- RDF/OWL/SPARQL native storage — markdown + frontmatter + wikilinks cover the semantic surface.
-- Ed25519-signed page receipts — git log is the audit log at single-user scale.
-- Full RBAC / compliance audit log — known and acknowledged ceiling; document as a README limitation rather than fix.
-- Hosted multiplayer KB over MCP HTTP/SSE — conflicts with local-first intent.
-- `qmd` CLI external dependency — in-process BM25 + vector + RRF already ships.
-- Artifact-only lightweight alternative (freakyfractal) — sacrifices the persistence that is the reason this project exists.
-- FUNGI 5-stage rigid runtime framework — same quality gain expected from already-deferred two-step CoT ingest.
-- Synthetic fine-tuning of a personal LLM on the compiled wiki — over the horizon.
+**Recommended next target:** #1 (`wiki/_schema.md` + `AGENTS.md` thin shim). Low effort, opens portability to non-Claude coding agents. Contained blast radius in `kb.schema.load()` + `kb_lint` integration.
 
 ### HIGH LEVERAGE — Epistemic Integrity 2.0
 
-<!-- `belief_state` vocabulary + validate_frontmatter integration SHIPPED in cycle 14 AC1/AC2 (2026-04-20). Cross-source propagation rules in lint/checks.py remain deferred. -->
+- `ingest/pipeline.py` subsection-level provenance — allow `source: raw/file.md#heading` or `raw/file.md:L42-L58` deep-links in frontmatter; ingest extractor captures heading context. Source: Agent-Wiki (kkollsga, gist).
+  (effort: Medium — extractor update + citation renderer + backlink resolver)
 
-- `ingest/pipeline.py` `source` subsection-level provenance — allow `source: raw/file.md#heading` or `raw/file.md:L42-L58` deep-links in frontmatter; ingest extractor captures heading context so citations point at the actual section that grounds the claim. Source: Agent-Wiki (kkollsga, gist — two-hop citation traceability).
-  (effort: Medium — extractor update + citation renderer + backlink resolver for the new form)
-
-- `lint/drift.py` `kb_drift_audit` — cold re-ingest a random sample of raw sources with no prior wiki context, diff against current wiki pages, surface divergence as "potential LLM drift" warnings. Different from existing `kb_detect_drift` which checks source mtime changes; this catches *wiki-side* drift where compilation has diverged from source truth. Source: Memory Drift Prevention (asakin, gist — cites ETH Zurich study: auto-generated context degraded 5/8 cases).
+- `lint/drift.py` `kb_drift_audit` — cold re-ingest a random sample of raw sources with no prior wiki context, diff against current wiki pages, surface divergence as "potential LLM drift". Different from existing `kb_detect_drift` (which checks source mtime). Source: Memory Drift Prevention (asakin, gist; ETH Zurich study).
   (effort: Medium — new module; reuse existing `ingest_source` with `wiki_dir=tmp` then diff)
 
-- `compile/merge.py` `kb_merge <a> <b>` — MCP tool merges two pages, updates all backlinks across `wiki/` and `wiki/outputs/`, archives absorbed page to `wiki/archive/` with a redirect stub, one git commit per merge. Source: Louis Wang.
-  (effort: Medium — duplicate-slug detection is tracked separately in Phase 4.5 MEDIUM)
+- `compile/merge.py` `kb_merge <a> <b>` — MCP tool merges two pages, updates all backlinks, archives absorbed page to `wiki/archive/` with a redirect stub, one git commit per merge. Source: Louis Wang.
+  (effort: Medium — duplicate-slug detection tracked separately in Phase 4.5 MEDIUM)
 
-<!-- `query/engine.py` coverage-confidence gate SHIPPED in cycle 14 AC5 (fixed refusal template). LLM-suggested rephrasings remain deferred — see "kb_query low-coverage advisory LLM-suggested rephrasings" above. -->
-
-<!-- `models/` `authored_by` frontmatter vocabulary + validate_frontmatter SHIPPED in cycle 14 AC1/AC2. Query-weight boost + lint human-auto-edited flag SHIPPED in cycle 15. -->
-
-- `ingest/pipeline.py` `lint/semantic.py` inline claim-level confidence tags — emit `[EXTRACTED]`, `[INFERRED]`, `[AMBIGUOUS]` inline markers in wiki page bodies during ingest; modify ingest LLM prompts to annotate individual claims at source; `kb_lint_deep` spot-verifies a random sample of EXTRACTED-tagged claims against the raw source file, flagging hallucinated attributions. Complements page-level `confidence` frontmatter without replacing it; directly answers "LLM stated this as sourced fact but it's not in the source." Source: llm-wiki-skill confidence annotation + lint verification model.
+- `ingest/pipeline.py` `lint/semantic.py` inline claim-level confidence tags — emit `[EXTRACTED]`, `[INFERRED]`, `[AMBIGUOUS]` markers in wiki page bodies during ingest; `kb_lint_deep` spot-verifies a random sample of EXTRACTED-tagged claims against the raw source file. Complements page-level `confidence` frontmatter.
   (effort: Medium — ingest prompt update + regex claim parser + lint spot-check against raw source text)
 
-- `lint/checks.py` `lint/semantic.py` claim-to-source grounding verification — after ingest, sample N claims from each wiki page and verify they have supporting text in the cited `raw/` source via BM25 search over the source file body. Pages where sampled claims score below a minimum BM25 match threshold get `belief_state: uncertain` written back and a lint warning emitted. Distinct from `kb_drift_audit` (which diffs wiki-side drift from re-ingest) and inline claim tags (which annotate at write time): this is a retroactive, probabilistic check that catches hallucinated citations in already-written pages. Addresses the central critique — an LLM can write plausible-sounding claims with valid source citations that never appear in the source. Source: cycle 21 epistemic hardening audit.
-  (effort: High — BM25 scorer over raw-source text; sample selector; frontmatter write-back via `save_page_frontmatter`; lint integration; tunable N and threshold in `config.py`)
+- `lint/checks.py` `lint/semantic.py` claim-to-source grounding verification — sample N claims from each wiki page and verify they have supporting text in the cited `raw/` source via BM25 search. Pages where sampled claims score below threshold get `belief_state: uncertain` written back.
+  (effort: High — BM25 scorer over raw-source text; sample selector; frontmatter write-back; tunable N and threshold)
 
-- `models/frontmatter.py` `lint/checks.py` multi-source confirmation gate — `belief_state: confirmed` currently requires no corroboration; a single source can produce `confidence: stated` which reviews to `confirmed`. Add a `source_count` field (auto-incremented by `ingest_source` each time an existing page gains a new source reference) and a lint rule that flags `belief_state: confirmed` on pages with `source_count < 2` as `belief_state: uncertain`. Makes "confirmed" mean "corroborated by ≥ 2 independent raw sources" — the minimum epistemic bar for high-confidence claims. Source: cycle 21 epistemic hardening audit.
-  (effort: Medium — `source_count` tracking in `_update_existing_page`; lint check in `lint/checks.py`; frontmatter validator update; migration: existing pages without the field treated as `source_count: 1`)
-
-### HIGH LEVERAGE — Output-Format Polymorphism
-
-<!-- `query/formats/` `kb_query --format=…` adapters SHIPPED in Phase 4.11 (2026-04-14). -->
-
-<!-- `compile/publish.py` `/llms.txt` + `/llms-full.txt` + `/graph.jsonld` SHIPPED in cycle 14 AC20-AC22 (2026-04-20) with `kb publish` CLI subcommand. Atomic writes + incremental publish SHIPPED in cycle 15. Auto-compile hook + per-page sibling `.txt`/`.json` files + `/sitemap.xml` remain deferred — see Phase 4.5 MEDIUM. -->
+- `models/frontmatter.py` `lint/checks.py` multi-source confirmation gate — `belief_state: confirmed` currently requires no corroboration. Add a `source_count` field (auto-incremented by `ingest_source`) and a lint rule that flags `belief_state: confirmed` on pages with `source_count < 2` as `belief_state: uncertain`.
+  (effort: Medium — `source_count` tracking + lint check + frontmatter validator update + migration)
 
 ### MEDIUM LEVERAGE — Synthesis & Exploration
 
-- `lint/consolidate.py` `kb_consolidate` — scheduled async background pass modeled on biological memory consolidation: NREM (new events → concepts, cross-event pattern extraction), REM (contradiction detection → mark old edges `superseded` rather than delete), Pre-Wake (graph health audit). Runs as nightly cron at scan tier. Source: Anda Hippocampus (ICPandaDAO).
-  (effort: High — three distinct sub-passes; overlaps with existing lint/evolve but with "superseded" edge state as new primitive)
+- `lint/consolidate.py` `kb_consolidate` — scheduled async background pass: NREM (new events → concepts), REM (contradiction detection → mark old edges `superseded`), Pre-Wake (graph health audit). Nightly cron at scan tier. Source: Anda Hippocampus (ICPandaDAO).
+  (effort: High — three sub-passes; "superseded" edge state as new primitive)
 
-- `query/synthesize.py` `kb_synthesize [t1, t2, t3]` — k-topic combinatorial synthesis: walks paths through the wiki graph across a k-tuple of topics to surface cross-domain connections. New query mode beyond retrieval. Source: Elvis Saravia reply (*"O(n^k) synthesis across k domains — stoic philosophy × saas pricing × viral content × parenting"*).
-  (effort: Medium — graph traversal + synthesis prompt; budget-gate k≥3 since path count explodes)
+- `query/synthesize.py` `kb_synthesize [t1, t2, t3]` — k-topic combinatorial synthesis: walks paths through the wiki graph across a k-tuple of topics. Source: Elvis Saravia.
+  (effort: Medium — graph traversal + synthesis prompt; budget-gate k≥3)
 
-- `export/subset.py` `kb_export_subset <topic> --format=voice` — emit a topic-scoped wiki slice (standalone blob) loadable into voice-mode LLMs or mobile clients. Addresses *"interactive podcast while running"* use case. Source: Lex-style reply.
+- `export/subset.py` `kb_export_subset <topic> --format=voice` — emit a topic-scoped wiki slice loadable into voice-mode LLMs or mobile clients.
   (effort: Low — topic-anchored BFS + single-file markdown bundle)
 
 ### HIGH LEVERAGE — Ambient Capture & Session Integration
 
-- `ingest/session.py` — auto-ingest Claude Code / Codex CLI / Cursor / Gemini CLI session JSONLs as raw sources. Distinct from `kb_capture` (user-triggered, any text) and deferred "conversation→KB promotion" (positive-rated query answers only): this is ambient, runs on every session. Source: Pratiyush/llm-wiki.
-  (effort: Medium — JSONL parsers per agent + dedup against existing raw/conversations/)
+- `ingest/session.py` — auto-ingest Claude Code / Codex CLI / Cursor / Gemini CLI session JSONLs as raw sources. Distinct from `kb_capture` (user-triggered) and deferred "conversation→KB promotion".
+  (effort: Medium — JSONL parsers per agent + dedup against existing `raw/conversations/`)
 
-- `hooks/` `SessionStart` hook + `raw/` file watcher — hooks auto-sync on every Claude Code launch; file watcher with debounce triggers ingestion on new files in `raw/` without explicit CLI invocation. Source: Pratiyush/llm-wiki + Memory-Toolkit (IlyaGorsky, gist).
+- `hooks/` `SessionStart` hook + `raw/` file watcher — auto-sync on every Claude Code launch; debounced file watcher triggers ingestion on new files in `raw/` without explicit CLI invocation.
   (effort: Low — Claude Code hook + `watchdog` file observer)
 
-- `ingest/filter.py` `.llmwikiignore` + secret scanner — pre-ingest regex-based secret/PII filter (API keys, tokens, passwords, paths on `.llmwikiignore`); rejects or redacts before content leaves local. Missing safety rail given every ingest currently sends full content to the API. Source: rohitg00 LLM Wiki v2 + Louis Wang security note.
+- `ingest/filter.py` `.llmwikiignore` + secret scanner — pre-ingest regex-based secret/PII filter; rejects or redacts before content leaves local. Missing safety rail. Source: rohitg00 LLM Wiki v2 + Louis Wang security note.
   (effort: Low — `detect-secrets`-style regex list + glob-pattern ignore)
 
-- `_raw/` staging directory — vault-internal drop-and-forget directory for clipboard pastes / rough notes; next `kb_ingest` promotes to `raw/` and removes originals. Distinct from `raw/` (sourced documents) and deferred `kb_capture` (explicit tool). Source: Ar9av/obsidian-wiki.
+- `_raw/` staging directory — vault-internal drop-and-forget directory for clipboard pastes; next `kb_ingest` promotes to `raw/`. Source: Ar9av/obsidian-wiki.
   (effort: Low — directory convention + promotion step in ingest)
-
-<!-- Per-subdir source_type inference already implemented as `detect_source_type` at src/kb/ingest/pipeline.py:288-301 (cycle 14 Step 5 confirmed: AC13-15 dropped as duplicates). -->
-
 
 ### MEDIUM LEVERAGE — Refinements to existing Phase 5 deferred items
 
-- Deferred "multi-signal graph retrieval" — use empirical weights 3 (direct link) / 4 (source-overlap) / 1.5 (Adamic-Adar) / 1 (type-affinity). Source: nashsu/llm_wiki (concrete ratios from production use).
-  (effort: N/A — parameter choice for the existing deferred item)
-
-- Deferred "community-aware retrieval boost" — Louvain intra-edge density <0.15 = "sparse/weak" threshold; surface sparse communities in `kb_evolve`. Source: nashsu.
-  (effort: N/A — threshold choice)
-
-<!-- Per-platform `SOURCE_DECAY_DAYS` dict + `decay_days_for` helper SHIPPED in cycle 14 AC10/AC11. Cycle 15 wired call sites into `_flag_stale_results` and lint staleness scan, and shipped the topic volatility multiplier. -->
-
-<!-- `CONTEXT_TIER1_SPLIT` 60/20/5/15 constants + `tier1_budget_for` helper SHIPPED in cycle 14 AC7/AC8. Cycle 15 wired `_build_query_context` to `tier1_budget_for("wiki_pages")`. -->
-
-- Deferred "graph topology gap analysis" — expose as card types: "Isolated (degree ≤ 1)", "Bridge (connects ≥ 3 clusters)", "Sparse community (cohesion < 0.15)" — each with one-click trigger that dispatches `kb_evolve --research` on the specific gap. Source: nashsu.
-  (effort: N/A — card-type taxonomy for existing deferred item)
+- Deferred "multi-signal graph retrieval" — empirical weights 3 (direct link) / 4 (source-overlap) / 1.5 (Adamic-Adar) / 1 (type-affinity). Source: nashsu/llm_wiki.
+- Deferred "community-aware retrieval boost" — Louvain intra-edge density <0.15 = "sparse/weak" threshold. Source: nashsu.
+- Deferred "graph topology gap analysis" — expose card types: "Isolated (degree ≤ 1)", "Bridge (connects ≥ 3 clusters)", "Sparse community (cohesion < 0.15)" — each with `kb_evolve --research` trigger.
 
 ### LOW LEVERAGE — Testing Infrastructure
 
-- `tests/test_e2e_demo_pipeline.py` hermetic end-to-end pipeline test — single test driving `ingest_source` → `query_wiki` → `run_all_checks` over the committed `demo/raw/karpathy-x-post.md` and `demo/raw/karpathy-llm-wiki-gist.md` sources with the synthesis LLM stubbed. Catches cross-module integration regressions (ingest ↔ compile manifest ↔ query engine ↔ lint runner) that single-module unit tests miss. Uses `ingest_source(..., extraction=dict)` to skip LLM extraction entirely; only monkeypatches the synthesis `call_llm` at `kb.query.engine.call_llm`, plus the module-level constants `RAW_DIR`/`PROJECT_ROOT`/`WIKI_CONTRADICTIONS`/`HASH_MANIFEST` at both `kb.config.X` and each consuming module. Deferred in favor of the active Phase 4.5 bug-fix backlog. Design spec content was drafted in-session but not committed; rewrite from this bullet when picked up. Source: Layer 1 of the three-layer e2e strategy (Layer 2 = MCP contract test via `fastmcp.Client` in-process; Layer 3 = gated `@pytest.mark.live` smoke test against real Anthropic API).
-  (effort: Low — ~100-line single test file, no new fixtures or dependencies; `tmp_project` in `tests/conftest.py` is sufficient. Asserts page IDs in `pages_created`/`pages_updated`, frontmatter source-list merge on shared entities, `wikilinks_injected` on second ingest, `[source: …]` citation round-trip, and `lint_report["summary"]["error"] == 0`. Run cadence: every CI, hermetic, ~1s.)
+- `tests/test_e2e_demo_pipeline.py` hermetic end-to-end pipeline test — single test driving `ingest_source` → `query_wiki` → `run_all_checks` over committed `demo/raw/karpathy-x-post.md` and `demo/raw/karpathy-llm-wiki-gist.md` sources. Catches cross-module integration regressions. Layer 1 of three-layer e2e strategy.
+  (effort: Low — ~100-line single test file, no new fixtures)
 
 ### DEFERRED — API-level LLM provider integration (Cycle 21 explicit deferral)
 
-> Cycle 21 delivered **CLI subprocess** integration for 8 backends (Ollama, Gemini CLI, OpenCode, Codex CLI, Kimi, QWEN, DeepSeek, ZAI). REST API / SDK integration for these providers is explicitly deferred to a later cycle.
+> Cycle 21 delivered **CLI subprocess** integration for 8 backends. REST API / SDK integration is explicitly deferred.
 
-- `utils/llm.py` `utils/api_backend.py` (new) — add API-level integration for alternative LLM providers via LiteLLM or per-provider SDK. Deferred from cycle 21 per explicit user direction ("I want to support CLI tool not the API support please add API support at late roadmap"). LiteLLM (`==1.83.0`) and `openai` SDK (`==2.30.0`) are already in `requirements.txt`. When picked up: route `KB_LLM_BACKEND=litellm` (or `KB_LLM_BACKEND=openai`) through a provider-agnostic `call_api(...)` in a new `src/kb/utils/api_backend.py` module; reuse the routing gate and `get_cli_backend()` helper from cycle 21 — `"anthropic"` stays on the existing SDK path, `"litellm"` / `"openai"` go through `api_backend.call_api(...)`, CLI tool backends remain on the subprocess path. Requires: (a) LiteLLM provider config in `config.py` (`LITELLM_MODEL`, base_url overrides), (b) structured JSON output via `response_format={"type": "json_object"}` (replaces tool_use for non-Anthropic APIs), (c) same retry + redaction + timeout contract as the Anthropic path.
+- `utils/api_backend.py` (new) — add API-level integration via LiteLLM or per-provider SDK. Route `KB_LLM_BACKEND=litellm` (or `openai`) through `call_api(...)`. `"anthropic"` stays on the existing SDK path; CLI tool backends remain on subprocess.
   (effort: Medium — new `api_backend.py` module + config additions + routing gate update + tests)
 
-- `utils/llm.py` `utils/api_backend.py` (new) — add first-class vLLM support through its OpenAI-compatible HTTP server. Route `KB_LLM_BACKEND=vllm` to the same API backend abstraction as the deferred LiteLLM/OpenAI work, with `KB_VLLM_BASE_URL` defaulting to `http://localhost:8000/v1`, `KB_VLLM_MODEL` required or auto-read from `/v1/models`, and `KB_VLLM_API_KEY` optional for deployments that front vLLM with auth. Must preserve the existing safety contract: no shell invocation, request timeout + retry policy, redacted errors, bounded response size, JSON schema validation for `call_llm_json`, and clear failure messages when the local vLLM server is down or the selected model lacks reliable JSON output.
-  (effort: Medium — config additions + `KB_LLM_BACKEND` routing + OpenAI-compatible client call path + mocked HTTP tests for text, JSON, timeout, auth header redaction, and unknown-model errors)
+- `utils/api_backend.py` (new) — first-class vLLM support through its OpenAI-compatible HTTP server. Route `KB_LLM_BACKEND=vllm` with `KB_VLLM_BASE_URL` defaulting to `http://localhost:8000/v1`. Preserve safety contract: timeout + retry, redacted errors, bounded response size, JSON schema validation.
+  (effort: Medium — config additions + routing + OpenAI-compatible client + mocked HTTP tests)
 
 ### LOW LEVERAGE — Operational
 
-- `wiki/_schema.md` vendor-neutral single source of truth — move project schema (page types, frontmatter fields, wikilink syntax, operation contracts) out of tool-convention files and into `wiki/_schema.md` co-located with the data it describes. Existing `CLAUDE.md` / future `AGENTS.md` / `GEMINI.md` stay as thin (~10-line) vendor shims that point at `_schema.md` for project rules. Schema is machine-parseable (fenced YAML blocks under markdown headers) and validated by lint on every ingest. Innovation vs. the common "symlink AGENTS.md → CLAUDE.md" pattern: the schema lives WITH the wiki, portable across agent frameworks (Codex, Cursor, Gemini CLI, shell scripts). Follows the existing `_sources.md` / `_categories.md` convention. Source: Karpathy tweet (schema portability prompt) + project design.
-  (effort: Medium — (a) write `wiki/_schema.md` starter as self-describing meta page; (b) `kb.schema.load()` parser; (c) `kb_lint` integration validates frontmatter against schema; (d) `schema_version` + `kb migrate` CLI; (e) optional multi-persona sections `### for ingest` / `### for query` / `### for review` so agents load scoped context. Defer vendor shim updates — keep `CLAUDE.md` unchanged until user chooses to slim it)
+- `wiki/_schema.md` vendor-neutral single source of truth — move project schema (page types, frontmatter fields, wikilink syntax, operation contracts) out of tool-convention files into `wiki/_schema.md`. `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` stay thin (~10-line) vendor shims pointing at `_schema.md`. Schema machine-parseable and validated by lint on every ingest.
+  (effort: Medium — `wiki/_schema.md` + `kb.schema.load()` + `kb_lint` integration + `schema_version` + `kb migrate` CLI)
 
-- `cli.py` `kb search <query>` subcommand — colorized terminal output over the existing hybrid search; `kb search --serve` exposes a minimal localhost web UI. Power-user CLI over the same engine the LLM already uses via MCP. Source: Karpathy tweet (*"small and naive search engine, web ui and CLI"*).
-  (effort: Low — Click command + Flask/FastAPI localhost UI)
+- `cli.py` `kb search --serve` localhost UI — `kb search <query>` subcommand already shipped (cli.py:622-624 — BM25 + optional vector fusion); remaining is `--serve` flag exposing a minimal localhost web UI. Source: Karpathy tweet.
+  (effort: Low — Flask/FastAPI localhost UI wrapping existing search command)
 
-- Git commit receipts on ingest — emit `"four new articles appeared: Amol Avasari, Capability Overhang, CASH Framework, Success Disasters"` style summary with commit hash and changed files per source. Source: Fabian Williams.
+- Git commit receipts on ingest — emit `"four new articles appeared: ..."` style summary with commit hash and changed files per source. Source: Fabian Williams.
   (effort: Low — wrap existing ingest return dict with a formatter)
 
 ### HIGH LEVERAGE — Ingest & Query Convenience
 
-- `mcp/core.py` `kb_ingest` URL-aware 5-state adapter — upgrade `kb_ingest`/`kb_ingest_content` to accept URLs alongside file paths; URL routing table in `kb.config` maps patterns to source type + `raw/` subdir + preferred adapter; before executing, checks 5 explicit states: `not_installed`, `env_unavailable`, `runtime_failed`, `empty_result`, `unsupported` — each emits a specific recovery hint and offers manual-paste fallback. Eliminates the "run crwl, save file, then kb_ingest file" three-step friction. Source: llm-wiki-skill adapter-state.sh 5-state model.
-  (effort: Medium — URL routing table in config + per-state error handling + adapter dispatcher)
+- `mcp/core.py` `kb_ingest` URL-aware 5-state adapter — accept URLs alongside file paths; URL routing table maps patterns to source type + `raw/` subdir + adapter; checks 5 states (`not_installed`, `env_unavailable`, `runtime_failed`, `empty_result`, `unsupported`) each with specific recovery hint.
+  (effort: Medium — URL routing table + per-state error handling + adapter dispatcher)
 
-- `mcp/core.py` `kb_delete_source` MCP tool — remove raw source file and cascade: delete source summary wiki page, strip source from `source:` field on shared entity/concept pages without deleting them, clean dead wikilinks from remaining wiki pages, update `index.md` and `_sources.md`. Fills the only major operational workflow gap not addressed by existing tooling.
-  (effort: Medium — cascade deletion logic + backlink cleanup + atomic index/sources update)
+- `mcp/core.py` `kb_delete_source` MCP tool — remove raw source file and cascade: delete source summary wiki page, strip source from `source:` field on shared entity/concept pages, clean dead wikilinks, update `index.md` and `_sources.md`.
+  (effort: Medium — cascade deletion + backlink cleanup + atomic index/sources update)
 
-- `mcp/health.py` `kb_rebuild_indexes` MCP tool — wrap `kb.compile.compiler.rebuild_indexes` so MCP clients can trigger the clean-slate rebuild without shelling out to the CLI. Scope-out from cycle 23 (threat T7): cycle 23 shipped the library helper + CLI subcommand only; MCP surface deferred so same-class peer review (cycle-16 L1) can confirm the I1 dual-anchor check also protects the MCP entry point. Prerequisite: reuse `_validate_wiki_dir` from `kb.mcp.app` for the `wiki_dir` argument; surface the return dict verbatim (already JSON-serialisable). Audit entry should tag the invoker (CLI vs MCP) per cycle-20 L3 MCP-projection peer scan.
+- `mcp/health.py` `kb_rebuild_indexes` MCP tool — wrap `kb.compile.compiler.rebuild_indexes` so MCP clients can trigger the clean-slate rebuild without shelling out to the CLI.
   (effort: Low — thin wrapper + regression test + same-class peer scan)
 
-<!-- `kb_query save_as` parameter remains deferred — see Phase 4.5 MEDIUM. -->
-
-- `evolve/analyzer.py` `kb_evolve mode=research` — for each identified coverage gap, decompose into 2–3 web search queries, fetch top results via fetch MCP, save to `raw/articles/` via `kb_save_source`, return file paths for subsequent `kb_ingest`; capped at 5 sources per gap, max 3 rounds (broad → sub-gaps → contradictions). Turns evolve from advisory gap report into actionable source acquisition pipeline. Source: claude-obsidian autoresearch skill.
-  (effort: Medium — gap decomposition prompt + fetch MCP integration + 3-round loop with source cap)
-
-- `wiki/purpose.md` KB focus document — lightweight file defining KB goals, key questions, and research scope; included in `kb_query` context and ingest system prompt so the LLM biases extraction toward the KB's current direction. Source: nashsu/llm_wiki purpose.md.
-  (effort: Low — one markdown file + read in query_wiki + prepend in ingest system prompt)
+- `evolve/analyzer.py` `kb_evolve mode=research` — for each gap, decompose into 2–3 web search queries, fetch top results, save to `raw/articles/`, return paths. Capped at 5 sources per gap, max 3 rounds. Source: claude-obsidian autoresearch skill.
+  (effort: Medium — gap decomposition prompt + fetch MCP integration + 3-round loop)
 
 ### MEDIUM LEVERAGE — Search & Indexing
 
-- `query/bm25.py` `query/embeddings.py` chunk-level sub-page indexing — split wiki pages into topically coherent chunks using Savitzky-Golay boundary detection (embed sentences with model2vec, compute adjacent cosine similarities, SG smoothing 5-window 3rd-order polynomial, find zero-crossings as topic boundaries); each chunk indexed as `<page_id>:c<n>`; query engine scores chunks, deduplicates to best chunk per page, loads full pages for synthesis. Resolves the weakness where relevant content is buried in long pages. Source: garrytan/gbrain semantic.ts + sage-wiki FTS5 chunking.
-  (effort: High — SG chunking module + BM25 index schema change + chunk-to-page dedup aggregation layer)
+- `query/bm25.py` `query/embeddings.py` chunk-level sub-page indexing — split pages into topically coherent chunks via Savitzky-Golay boundary detection; each chunk indexed as `<page_id>:c<n>`; query engine scores chunks then dedups to best chunk per page. Source: garrytan/gbrain semantic.ts + sage-wiki.
+  (effort: High — SG chunking module + BM25 index schema change + chunk-to-page dedup aggregation)
 
-<!-- Cross-reference auto-linking remains deferred — see Phase 4.5 MEDIUM. -->
-
-- `lint/checks.py` `query/engine.py` PageRank-prioritized semantic lint sampling — when `kb_lint_deep` must limit its page budget, select pages by PageRank descending rather than arbitrary order; high-authority pages with quality issues have outsized downstream impact on citing pages. Source: existing `graph_stats` PageRank scores.
-  (effort: Low — sort by graph_stats PageRank before sampling; zero new infrastructure required)
+- `lint/checks.py` `query/engine.py` PageRank-prioritized semantic lint sampling — when `kb_lint_deep` must limit its page budget, select pages by PageRank descending. High-authority pages with quality issues have outsized downstream impact.
+  (effort: Low — sort by graph_stats PageRank before sampling)
 
 ### MEDIUM LEVERAGE — Page Lifecycle & Quality Signals
 
-<!-- `models/` `status` frontmatter vocabulary + validate_frontmatter + query ranking boost SHIPPED in cycle 14 AC1/AC2/AC23. Cycle 15 shipped `kb_lint` mature-stale flagging; `kb_evolve` status-priority routing remains deferred — see Phase 4.5 MEDIUM AC8-carry. -->
-
-<!-- Inline quality callout markers remain deferred — see Phase 4.5 MEDIUM. -->
-
-- `wiki/hot.md` wake-up context snapshot — ~500-word compressed context updated at session end (recent facts, recent page changes, open questions); read at session start via `SessionStart` hook; survives context compaction and session boundaries; enables cross-session continuity without full wiki crawl. Source: MemPalace concept + claude-obsidian hot cache.
+- `wiki/hot.md` wake-up context snapshot — ~500-word compressed context updated at session end; read at session start via `SessionStart` hook; survives context compaction. Source: MemPalace + claude-obsidian hot cache.
   (effort: Low — append-on-ingest + SessionStart hook reads + one markdown file)
 
-- `wiki/overview.md` living overview page — auto-revised on every ingest as the final pipeline step; always-current executive summary across all sources; updated not replaced on each ingest. Source: llm-wiki-agent living overview.
+- `wiki/overview.md` living overview page — auto-revised on every ingest as final pipeline step; always-current executive summary. Source: llm-wiki-agent.
   (effort: Low — scan-tier LLM over index.md + top pages; one file auto-updated per ingest)
 
 ### MEDIUM LEVERAGE — Knowledge Promotion & Ingest Quality
 
-- `query/engine.py` `feedback/store.py` conversation→KB promotion — positively-rated query answers (rating ≥ 4) auto-promote to `wiki/synthesis/{slug}.md` pages with citations mapped to `source:` refs; coexists with `save_as` parameter (immediate, no gate) as the feedback-gated deferred path. Source: garrytan/gbrain maintain skill.
-  (effort: Medium — feedback store hook + synthesis page writer + conflict check against existing pages)
+- `query/engine.py` `feedback/store.py` conversation→KB promotion — positively-rated query answers (rating ≥ 4) auto-promote to `wiki/synthesis/{slug}.md` pages with citations. Source: garrytan/gbrain maintain skill.
+  (effort: Medium — feedback store hook + synthesis page writer + conflict check)
 
-- `ingest/pipeline.py` two-step CoT ingest analysis pass — split ingest into: (1) analysis call producing entity list + connections to existing wiki + contradictions + wiki structure recommendations; (2) generation call using analysis as context. Improves extraction quality and enables richer contradiction flagging; feeds Phase 4 auto-contradiction detection. Source: nashsu/llm_wiki two-step chain-of-thought.
-  (effort: Medium — split single ingest LLM call into two sequential calls with analysis-as-context)
+- `ingest/pipeline.py` two-step CoT ingest — split ingest into (1) analysis call (entities + connections + contradictions + structure recommendations); (2) generation call using analysis as context. Source: nashsu/llm_wiki.
+  (effort: Medium — split single ingest LLM call into two sequential calls)
 
 ### Phase 6 candidates (larger scope, not yet scheduled)
 
-- Hermes-style independent quality-gate supervisor — different-model-family validator (not same-family self-review) before page promotion. Source: Secondmate (@jumperz, via VentureBeat).
-  (effort: High — adds a second provider; challenges fail-open defaults)
-
-- Mesh sync for multi-agent writes — last-write-wins with timestamp conflict resolution; private-vs-shared scoping (personal preferences private, architecture decisions shared). Source: rohitg00.
-  (effort: High — assumes multi-writer concurrency model)
-
-- Hosted MCP HTTP/SSE variant — multi-device access (phone Claude app, ChatGPT, Cursor, Claude Code) reading/writing the same KB. Source: Hjarni/dev.to.
-  (effort: High — MCP transport + auth; currently stdio-only)
-
-- Personal-life-corpus templates — Google Takeout / Apple Health / AI session exports / bank statements as a domain starter kit. Privacy-aware ingest layered on `.llmwikiignore`. Source: anonymous personal-data-RAG reply.
-  (effort: Medium — per-source-type extractor templates; depends on `.llmwikiignore` landing first)
-
-- Multi-signal graph retrieval — BM25 seed → 4-signal graph expansion: direct wikilinks ×3 + source-overlap ×4 + Adamic-Adar shared-neighbor similarity ×1.5 + type-affinity ×1; nodes ranked by combined BM25 + graph score with budget-proportional context assembly. Prerequisite: typed semantic relations (below). Source: nashsu/llm_wiki relevance model.
-  (effort: High — graph score combination layer + per-signal weight tuning + typed relations as prerequisite)
-
-- Typed semantic relations on graph edges — extract 6 relation types via keyword matching: `implements`, `extends`, `optimizes`, `contradicts`, `prerequisite_of`, `trades_off`; stored as edge attribute in NetworkX + SQLite; enables typed graph traversal in `kb_query`. Prerequisite for multi-signal retrieval. Source: sage-wiki configurable ontology.
-  (effort: Medium — relation extractor pass + NetworkX/SQLite graph schema update)
-
-- Temporal claim tracking — `valid_from`/`ended` date windows on individual claims within pages; enables staleness/contradiction resolution at claim granularity rather than page granularity. Requires new SQLite KG schema. Source: MemPalace SQLite KG pattern.
-  (effort: High — claim-level SQLite schema + ingest extractor update + query-time filtering)
-
-- Semantic edge inference in graph — two-pass graph build: existing wikilink edges as EXTRACTED + LLM-inferred implicit relationships as INFERRED/AMBIGUOUS with confidence 0–1; re-infers only changed pages via content hash cache. Source: llm-wiki-agent.
-  (effort: High — 2-pass build logic + confidence-weighted edges + per-page change detection)
-
-- Answer trace enforcement — require synthesizer to tag every factual claim with `[wiki/page]` or `[raw/source]` citation at synthesis time; post-process strips or flags uncited claims as gaps. Source: epistemic integrity requirement.
-  (effort: High — synthesis prompt rewrite + citation parser + enforcement pass + graceful fallback)
-
-- Multi-mode search depth toggle (`depth=fast|deep`) — `depth=deep` uses Monte Carlo evidence sampling for complex multi-hop questions; `depth=fast` is current BM25 hybrid. Depends on MC sampling infrastructure. Source: Sirchmunk Monte Carlo evidence sampling.
-  (effort: High — MC sampler architecture + budget allocation + fast/deep routing logic)
-
-- **Hybrid RAG + Wiki compiler architecture** — two-tier retrieval: RAG layer (pgvector in Postgres) handles high-volume raw corpus at semantic search speed; compiled wiki layer holds curated authoritative pages. Query router scores wiki hits first (high trust), falls back to RAG chunks (flagged `[unverified]`). `kb_evolve` gap analysis scans RAG hit-frequency to surface topics ready for wiki promotion. Ingest pipeline gains an optional embedding step alongside existing BM25 indexing. Enables enterprise-scale corpora (100k+ docs) without sacrificing the auditability and contradiction-detection strengths of the wiki compiler. Source: internal architecture discussion 2026-04-21.
-  (effort: High — pgvector schema + embedding step in ingest + query router blending wiki+RAG citations + evolve promotion heuristic; prerequisite: multi-user storage migration)
-
-- Semantic deduplication pre-ingest — embedding similarity check before ingestion to catch same-topic-different-wording duplicates beyond content hash; flag if cosine similarity >0.85 to any existing raw source. Source: content deduplication research.
-  (effort: Medium — embed new source + nearest-neighbor check vs existing vector store)
-
-- Interactive knowledge graph HTML viewer — self-contained vis.js HTML export from `kb_graph_viz` with `format=html`; dark theme, search bar, click-to-inspect nodes, Louvain community clustering, edge type legend. Source: llm-wiki-agent graph.html.
-  (effort: Medium — vis.js template + Louvain community IDs per node + edge type legend)
-
-- Two-phase compile pipeline + pre-publish validation gate — phase 1: batch cross-source merging before writing; phase 2: validation gate rejects pages with unresolved contradictions or missing required citations. Architecture change to current single-pass compiler. Source: compilation best practices.
-  (effort: High — compiler refactor into two phases + validation gate + publish/reject state machine)
-
-- Actionable gap-fill source suggestions — enhance `kb_evolve` to suggest specific real-world sources for each gap ("no sources on MoE, consider the Mixtral paper"). Mostly superseded by `kb_evolve mode=research` (Phase 5) which fetches sources autonomously; keep as fallback for offline/no-fetch environments. Source: nashsu/llm_wiki.
-  (effort: Low delta on evolve — add one LLM call per gap; ship only if mode=research is blocked)
+- Hermes-style independent quality-gate supervisor — different-model-family validator before page promotion. Source: Secondmate (@jumperz).
+- Mesh sync for multi-agent writes — last-write-wins with timestamp resolution; private-vs-shared scoping. Source: rohitg00.
+- Hosted MCP HTTP/SSE variant — multi-device access (phone Claude app, ChatGPT, Cursor, Claude Code). Source: Hjarni/dev.to.
+- Personal-life-corpus templates — Google Takeout / Apple Health / AI session exports / bank statements. Privacy-aware ingest layered on `.llmwikiignore`.
+- Multi-signal graph retrieval — BM25 seed → 4-signal graph expansion (direct ×3 + source-overlap ×4 + Adamic-Adar ×1.5 + type-affinity ×1). Prerequisite: typed semantic relations. Source: nashsu.
+- Typed semantic relations on graph edges — 6 types (`implements`, `extends`, `optimizes`, `contradicts`, `prerequisite_of`, `trades_off`) stored as edge attributes. Source: sage-wiki.
+- Temporal claim tracking — `valid_from`/`ended` date windows on individual claims; staleness/contradiction at claim granularity. Requires SQLite KG schema. Source: MemPalace.
+- Semantic edge inference in graph — two-pass build: wikilink edges as EXTRACTED + LLM-inferred implicit relationships as INFERRED/AMBIGUOUS. Source: llm-wiki-agent.
+- Answer trace enforcement — synthesizer tags every factual claim with `[wiki/page]` or `[raw/source]` citation; post-process flags uncited claims as gaps.
+- Multi-mode search depth toggle (`depth=fast|deep`) — `depth=deep` uses Monte Carlo evidence sampling; `depth=fast` is current BM25 hybrid. Source: Sirchmunk.
+- **Hybrid RAG + Wiki compiler architecture** — two-tier retrieval: RAG layer (pgvector) for high-volume raw corpus; compiled wiki layer for curated authoritative pages. Query router scores wiki hits first, falls back to RAG chunks (flagged `[unverified]`). Enables enterprise-scale corpora (100k+ docs) without sacrificing auditability. Prerequisite: multi-user storage migration.
+- Semantic deduplication pre-ingest — embedding similarity check before ingestion; flag if cosine >0.85 to any existing raw source.
+- Interactive knowledge graph HTML viewer — vis.js HTML export from `kb_graph_viz` with `format=html`; dark theme, search, click-to-inspect, Louvain clustering, edge type legend.
+- Two-phase compile pipeline + pre-publish validation gate — phase 1: batch cross-source merging; phase 2: validation gate rejects pages with unresolved contradictions or missing citations.
+- Actionable gap-fill source suggestions — enhance `kb_evolve` to suggest specific real-world sources for each gap. Mostly superseded by `kb_evolve mode=research`; keep as offline fallback.
 
 ### Phase 7 candidates — Enterprise source integrations (not yet scheduled)
 
 > Prerequisite: Phase 6 multi-user storage migration + Hybrid RAG layer must land first.
-> Core design change: `raw/` becomes a logical namespace, not a single folder. Each source root
-> is registered with a connector type, credentials, and sync policy. The ingest pipeline treats
-> them identically once normalized to local markdown.
+> Core design change: `raw/` becomes a logical namespace, not a single folder. Each source root is registered with a connector type, credentials, and sync policy.
 
-- **Multi-root raw directory support** — allow `KB_RAW_ROOTS` env var (colon-separated paths) or a `sources.yaml` registry so a single wiki can compile from multiple raw directories (e.g. a personal folder + a shared team folder + a connector-synced cache). `ingest_source`, `compile_wiki`, and `kb_detect_drift` all scope to `raw_dir` today; the change threads an optional `raw_roots: list[Path]` through those APIs and merges hash manifests per-root. Prerequisite for all connector items below.
-  (effort: Medium — config + API threading; no connector logic yet)
-
-- **SharePoint / OneDrive connector** — poll or webhook-triggered sync of SharePoint document libraries and OneDrive shared folders into a designated `raw/sharepoint/<site>/` root. Uses Microsoft Graph API (`sites.read.all` scope). Supports `.docx`, `.pptx`, `.pdf`, `.xlsx` via `markitdown`. Delta-sync via Graph `$deltaToken` to avoid full re-crawl. Permission-aware: respects item-level read permissions so a user only ingests docs they can access.
-  (effort: High — OAuth2 PKCE flow + Graph delta sync + markitdown conversion + permission mapping)
-
-- **Google Drive / Google Shared Drives connector** — sync Google Drive folders and Shared Drives into `raw/gdrive/<drive-id>/`. Uses Drive API v3 `files.list` with `driveId` + `includeItemsFromAllDrives`. Exports Google Docs → markdown via Drive export API; native files (PDF, DOCX) via direct download + markitdown. Change-token polling (not full re-scan) for incremental sync.
-  (effort: High — OAuth2 + Drive export API + change-token polling + markitdown pipeline)
-
-- **Confluence connector** — crawl Confluence Cloud or Server spaces into `raw/confluence/<space-key>/`. Uses Confluence REST API v2 (`/wiki/api/v2/pages`). Exports page body as storage-format HTML → converts via `trafilatura` or `markitdown`. Respects space/page-level permissions via API token scoping. Attachments (PDF, DOCX) downloaded and ingested as sibling raw files.
-  (effort: High — REST API pagination + HTML→markdown conversion + attachment handling + space permission scoping)
-
-- **Notion connector** — sync Notion databases and pages into `raw/notion/<database-id>/`. Uses Notion API v1 (`/v1/blocks`, `/v1/databases/query`). Exports rich text blocks → markdown. Handles inline databases, toggles, callouts. Change detection via `last_edited_time` cursor.
-  (effort: Medium — Notion API pagination + block→markdown renderer + cursor-based incremental sync)
-
-- **GitHub / GitLab repo connector** — ingest markdown docs, READMEs, and wiki pages from repos directly into `raw/repos/<owner>/<repo>/`. Extends existing `repos/` source type. Uses GitHub Contents API or `git clone --depth 1`; respects `.llmwikiignore` patterns to skip source code and focus on docs. Auto-triggered on push webhook for live orgs.
-  (effort: Medium — GitHub API or shallow clone + .llmwikiignore filtering + webhook trigger)
-
-- **Credential & secret store integration** — connector OAuth tokens and API keys stored in system keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service) or a secrets manager (HashiCorp Vault, AWS Secrets Manager) rather than `.env`. `get_connector_creds(service)` abstraction; `.env` fallback for local dev. Required before any connector ships to production.
-  (effort: Medium — keychain adapter + secrets manager client + fallback chain; security prerequisite for all connectors)
-
-- **Sync policy & scheduling** — per-source-root sync schedule (`cron`-style or `on_change` webhook) with last-sync timestamp, retry backoff, and `dry_run` mode. Surfaces as `kb sync [--source <root>] [--dry-run]` CLI command and `kb_sync` MCP tool. Sync state persisted in `.data/sync_state.json`.
-  (effort: Medium — scheduler + state store + CLI/MCP surface; depends on multi-root support)
+- **Multi-root raw directory support** — `KB_RAW_ROOTS` env var (colon-separated paths) or `sources.yaml` registry so a single wiki can compile from multiple raw directories. Threads `raw_roots: list[Path]` through `ingest_source` / `compile_wiki` / `kb_detect_drift` and merges hash manifests per-root. Prerequisite for all connectors below.
+- **SharePoint / OneDrive connector** — Microsoft Graph API delta sync; markitdown for `.docx`/`.pptx`/`.pdf`/`.xlsx`; permission-aware.
+- **Google Drive / Google Shared Drives connector** — Drive API v3 with `driveId` + `includeItemsFromAllDrives`; Google Docs → markdown via export API; change-token polling.
+- **Confluence connector** — REST API v2 storage-format HTML → markdown; respects space/page permissions; attachments downloaded as sibling raw files.
+- **Notion connector** — Notion API v1 blocks/databases → markdown; handles inline databases, toggles, callouts; `last_edited_time` cursor.
+- **GitHub / GitLab repo connector** — markdown docs, READMEs, wiki pages from repos. Extends existing `repos/` source type. Webhook-triggered for live orgs.
+- **Credential & secret store integration** — connector tokens stored in system keychain (Windows Credential Manager / macOS Keychain / Linux Secret Service) or HashiCorp Vault / AWS Secrets Manager. `.env` fallback for dev. Prerequisite for any connector shipping to production.
+- **Sync policy & scheduling** — per-source-root sync schedule (cron-style or `on_change` webhook) with last-sync timestamp, retry backoff, `dry_run`. Surfaces as `kb sync` CLI and `kb_sync` MCP tool.
 
 ### Phase 8 candidates — Strategic rewrite / Rust core (not yet scheduled)
 
-> Trigger condition: Phase 6 (multi-user) + Phase 7 (connectors) are shipped and production load
-> reveals Python bottlenecks OR the codebase accumulates enough legacy decisions that greenfield
-> is cheaper than continued patching. This is a "revisit annually" decision, not a scheduled one.
+> Trigger: Phase 6 + Phase 7 are shipped and production load reveals bottlenecks, OR codebase legacy decisions block enterprise path. "Revisit annually" decision.
 
-**The honest rewrite question**
+**Recommended architecture (decided 2026-04-21):** TypeScript / Next.js view layer (Phase 8A) calls into Python AI brain (current stack) which optionally calls Rust hot-path extension (Phase 8B). Python orchestration layer unchanged.
 
-The current Python stack has real strengths: 2710+ tests, 20 cycles of hardened edge-case coverage,
-rapid LLM-call iteration, trafilatura/markitdown/playwright in the same ecosystem. A rewrite throws
-all of that away. The question is whether the *architecture* is sound enough to keep extending, or
-whether early single-user decisions (flat-file storage, single-process compile, synchronous LLM
-calls) are now load-bearing walls that block the enterprise path.
-
-- **Keep Python, refactor architecture** — most likely path. Swap storage (Postgres), add async
-  job queue (Celery/ARQ), keep BM25+vector hybrid. Preserves test suite and iteration speed.
-  Python is I/O-bound here — LLM calls dominate; Rust buys nothing for that workload.
-
-- **Rust core for hot paths** — compile BM25 indexer, wikilink injection regex engine, and file
-  scanner as a Rust extension (`PyO18` / `maturin`). Python orchestration layer unchanged.
-  Realistic 5–20× speedup on the scan tier for large corpora (100k+ pages). Feasible without
-  full rewrite — ship as optional `kb[fast]` extra.
-  (effort: Medium — Rust BM25 + regex engine + PyO3 bindings; Python layer untouched)
-
-- **Vibe-coding greenfield with AI agents** — use the current system as the *spec*
-  (CLAUDE.md + CHANGELOG.md + test suite as acceptance criteria) and drive a targeted rewrite
-  of performance-critical modules via Claude Code / Codex agents in parallel worktrees. Each
-  module gets its own agent, outputs integration-tested against Python golden outputs.
-  Worth a spike on one module (e.g. `kb.query.engine`) before committing to broader scope.
-  (effort: Unknown — spike first; scoped to hot-path modules only, not full rewrite)
-
-**Recommended architecture (decided 2026-04-21):**
-
-```
-┌─────────────────────────────────────────────┐
-│  TypeScript / Next.js  (view + API layer)   │  ← Phase 8A
-│  - Three-pane wiki browser                  │
-│  - Graph visualization                      │
-│  - Chat / query interface                   │
-│  - REST / tRPC API → Python KB process      │
-└────────────────────┬────────────────────────┘
-                     │ HTTP / stdio
-┌────────────────────▼────────────────────────┐
-│  Python  (AI brain — keep as-is)            │  ← current stack
-│  - All LLM calls (Anthropic SDK)            │
-│  - ingest / compile / query / lint / evolve │
-│  - MCP server (28 tools)                    │
-│  - connector pipeline (Phase 7)             │
-│  - AI ecosystem: trafilatura, markitdown,   │
-│    playwright, sentence-transformers, etc.  │
-└────────────────────┬────────────────────────┘
-                     │ PyO3 / maturin bindings
-┌────────────────────▼────────────────────────┐
-│  Rust  (hot paths only — optional ext)      │  ← Phase 8B
-│  - BM25 indexer (tantivy)                   │
-│  - Wikilink injection regex engine          │
-│  - File scanner / hash manifest             │
-│  Shipped as kb[fast] optional extra         │
-└─────────────────────────────────────────────┘
-```
-
-- **Phase 8A** — TypeScript view layer (Next.js). Ships as `kb serve` command that starts the
-  Next.js dev server pointed at the local wiki directory. No Python changes required — the UI
-  calls the existing MCP tools via a thin HTTP adapter. Effort: Medium.
-
-- **Phase 8B** — Rust hot-path extension via `maturin`/PyO3. Optional `pip install kb[fast]`
-  extra that replaces the Python BM25 indexer and file scanner with Rust equivalents. Python
-  orchestration layer unchanged. 5–20× throughput on scan tier for large corpora. Effort: Medium.
-
-- **Cloud wiki storage backends** — replace local `wiki/` filesystem with pluggable object storage
-  so the compiled wiki survives beyond a single machine and multiple users/services can read it.
-  Storage abstraction layer (`WikiStorage` protocol) wraps current `atomic_text_write` /
-  `file_lock` calls; local filesystem remains the default, cloud backends are opt-in via
-  `KB_WIKI_STORAGE=s3|azure|gcs` env var.
-
-  | Backend | Use case | SDK |
-  |---|---|---|
-  | **AWS S3 / S3-compatible** (MinIO, R2) | AWS orgs, self-hosted, Cloudflare R2 free tier | `boto3` |
-  | **Azure Blob Storage** | Microsoft 365 orgs (pairs with SharePoint connector) | `azure-storage-blob` |
-  | **Google Cloud Storage** | GCP / Google Workspace orgs | `google-cloud-storage` |
-  | **Local filesystem** | default, dev, Obsidian users | current impl |
-
-  Key design constraints:
-  - Object storage has no atomic rename — `atomic_text_write` must use conditional PUT
-    (`If-None-Match: *` for create, ETag check for update) to preserve crash safety
-  - `file_lock` becomes a distributed lock (Redis `SET NX PX`, DynamoDB conditional write,
-    or Azure Blob lease) — required before any cloud backend ships
-  - `wiki/` path references in MCP tools become storage-relative keys, not filesystem paths
-  - Read path: stream page content; no local cache needed for query (BM25 index cached locally)
-  - `kb publish` outputs (`/llms.txt`, `/graph.jsonld`, sitemap) write to a separate public
-    bucket/container with CDN fronting for the view layer
-  - Prerequisite: Phase 6 multi-user storage migration (distributed lock infra overlaps)
-
-  (effort: High — storage abstraction layer + distributed locking + conditional PUT semantics +
-  per-backend SDK integration; local filesystem fallback must stay zero-overhead)
+- **Phase 8A — TypeScript view layer (Next.js)** — ships as `kb serve` command. UI calls existing MCP tools via thin HTTP adapter. No Python changes. (effort: Medium)
+- **Phase 8B — Rust hot-path extension via maturin/PyO3** — optional `pip install kb[fast]` extra replacing Python BM25 indexer + file scanner with Rust equivalents (tantivy). 5–20× scan-tier throughput on large corpora. (effort: Medium)
+- **Cloud wiki storage backends** — `WikiStorage` protocol abstracting `atomic_text_write` / `file_lock`; opt-in via `KB_WIKI_STORAGE=s3|azure|gcs`. Object storage has no atomic rename — must use conditional PUT (`If-None-Match: *` for create, ETag for update). `file_lock` becomes distributed (Redis `SET NX PX`, DynamoDB conditional, Azure Blob lease). Prerequisite: Phase 6 multi-user storage migration. (effort: High)
 
 **Decision criteria (revisit when):**
-- Compile time for 10k sources exceeds 30 min → Phase 8B Rust hot-path spike
-- Concurrent users > 20 with write contention → async job queue refactor (Python, pre-Phase 8)
-- Deployment friction (Python env) blocks enterprise sales → Phase 8A Next.js wrapper first
+- Compile time for 10k sources exceeds 30 min → Phase 8B Rust spike
+- Concurrent users > 20 with write contention → async job queue (Python, pre-Phase 8)
+- Deployment friction blocks enterprise sales → Phase 8A Next.js wrapper first
 - Team spans multiple machines / cloud deploy needed → cloud wiki storage backend
 
 ### Design tensions to document in README (not items to implement)
 
-- **Container boundary / atomic notes tension (WenHao Yu)** — `kb_ingest` forces a "which page does this merge into?" decision, same failure mode as Evernote's "which folder" and Notion's "which tag". Document that our model merges aggressively and that atomic-note alternative exists.
-- **Model collapse (Shumailov 2024, Nature)** — cite in "known limitations": LLM-written pages feeding next LLM ingest degrade across generations; our counter is evidence-trail provenance plus two-vault promotion gate.
+- **Container boundary / atomic notes tension (WenHao Yu)** — `kb_ingest` forces a "which page does this merge into?" decision; document that our model merges aggressively and that atomic-note alternatives exist.
+- **Model collapse (Shumailov 2024, Nature)** — cite in "known limitations": LLM-written pages feeding next LLM ingest degrade across generations; counter is evidence-trail provenance + two-vault promotion gate.
 - **Enterprise ceiling (Epsilla)** — document explicit scope: personal-scale research KB, not multi-user enterprise; no RBAC, no compliance audit log, file-I/O limits at millions-of-docs scale.
-- **Vibe-thinking critique (HN)** — *"Deep writing means coming up with things through the process of producing"*; defend with mandatory human-review gates on promotion, not optional.
+- **Vibe-thinking critique (HN)** — *"Deep writing means coming up with things through the process of producing"*; defend with mandatory human-review gates on promotion.
+
+---
 
 ## Resolved Phases
 
 - **Phase 3.92** — all items resolved in v0.9.11
-- **Phase 3.93** — all items resolved in v0.9.12 (2 MEDIUM items deferred to Phase 3.94: extractors LRU cache, raw_content rename)
+- **Phase 3.93** — all items resolved in v0.9.12 (2 MEDIUM deferred to Phase 3.94: extractors LRU cache, raw_content rename)
 - **Phase 3.94** — all items resolved in v0.9.13
 - **Phase 3.95** — all items resolved in v0.9.14
 - **Phase 3.96** — all items resolved in v0.9.15
 - **Phase 3.97** — all items resolved in v0.9.16
-- **Phase 4 post-release audit** — all items resolved (23 HIGH + ~30 MEDIUM + ~30 LOW) in CHANGELOG.md [Unreleased]
-- **Phase 5 three-round code review (2026-04-17)** — all items resolved in CHANGELOG `[Unreleased]` Backlog-by-file cycle 1 (3 HIGH: raw_dir threading, ingest raw_dir parameter, manifest failed-state advance; 4 MEDIUM: data_dir threading, max_gaps lower bound, proposal URL re-validation, summary-count semantics)
-- **Phase 5 pre-merge lint augment (2026-04-15)** — all items resolved in CHANGELOG `[Unreleased]` Phase 4.5 cycle 17 (AC11/AC12/AC13)
-- **Cycle 21/22 candidates** — all open candidate items resolved in CHANGELOG `[Unreleased]` cycle 22 (wiki-path guard, extraction grounding clause, inspect-source test rewrite)
-- **Phase 4.6 (DeepSeek V4 Pro full-repo audit, 2026-04-27)** — all items resolved across cycles 42 + 44 + 45 + 46. Cycle 42: M1 `cli._truncate` + M2 `mcp.app._rel` + M3 `query/engine` cache-key dedup; L1 `lint/augment._load_purpose_text` + L2 `mcp.app._sanitize_error_str` passthrough + L4 query rephrasing relocation + L5 `feedback/__init__.py` + `review/__init__.py` docstrings. Cycle 44: M1 `lint/checks.py` 8-submodule split + M2 `lint/augment.py` 9-file package + M4 `atomic_text_write exclusive: bool = False`; L1 `lint/_augment_manifest.py` + `lint/_augment_rate.py` absorbed (kept as transition shims). Cycle 45: M3 `mcp/core.py` 1149 → 447 LOC + `mcp/ingest.py` 612 LOC + `mcp/compile.py` 148 LOC. Cycle 46: L1 `lint/_augment_manifest.py` + `lint/_augment_rate.py` compat shims DELETED + 36 test patch sites migrated to canonical `kb.lint.augment.{manifest,rate}` paths + `_sync_legacy_shim` removed.
+- **Phase 4 (v0.10.0) post-release audit** — all items resolved (23 HIGH + ~30 MEDIUM + ~30 LOW) per CHANGELOG.md `[Unreleased]`
+- **Phase 4.5 CRITICAL (cycle 1)** — 16+ items resolved (#1 _rel(), #2 sentinel, #5 Error[partial], #7 read-cap, #11 affected_pages, #12 verdict cap, #13 page_id Windows-reserved, #14 source-deleted drift, #15 query rewriter CJK, #16/18 BM25 cache, #17 dedup quota, #19 yaml_sanitize, #20 wiki_log rotation, #22 contradictions caller, #23 export_mermaid, #24 BM25 postings, #25 template hashes, #28 load_purpose, #29 inject_wikilinks) per CHANGELOG cycle-1, cycle-1-docs-sync, Backlog-by-file cycle-4. #3 [source: X] → [[X]] migration deferred as a dedicated atomic migration.
+- **Phase 4.5 HIGH-Deferred — `query/embeddings.py` vector-index lifecycle** — all sub-items resolved across cycles 24/25/26/28/64 (atomic temp-DB-then-replace, dim-mismatch observability, cold-load instrumentation, sqlite-vec instrumentation, BM25 build counter, `_index_cache` cross-thread lock, dim-mismatch AUTO-rebuild).
+- **Phase 4.6 (DeepSeek V4 Pro full-repo audit)** — all items resolved across cycles 42/44/45/46.
+- **Phase 5 three-round code review (2026-04-17)** — all items resolved per CHANGELOG `[Unreleased]` Backlog-by-file cycle 1.
+- **Phase 5 pre-merge lint augment (2026-04-15)** — all items resolved per CHANGELOG cycle 17 (AC11/AC12/AC13).
+- **Phase 5 pre-merge CRITICAL `feat/kb-capture` (2026-04-14)** — `capture.py` `_write_item_files` two-pass-write architecture shipped cycle 17 AC10 (Phase 1 `O_EXCL`-reserve → Phase 2 alongside-from-finalised-slugs → Phase 3 atomic-promote with all-or-nothing rollback). See `src/kb/capture.py:589-674` docstring.
+- **Cycle 21/22 candidates** — all open items resolved per CHANGELOG cycle 22.
