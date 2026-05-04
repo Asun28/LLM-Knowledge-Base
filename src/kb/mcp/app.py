@@ -258,16 +258,16 @@ def _validate_page_id(
     # Cycle 4 item #13 â€” length cap before filesystem resolve.
     if len(page_id) > MAX_PAGE_ID_LEN:
         return f"page_id too long ({len(page_id)} chars; max {MAX_PAGE_ID_LEN})."
-    # AC6 — Trailing dot/space rejection: Windows forbidden at segment level
+    # AC6 â€” Trailing dot/space rejection: Windows forbidden at segment level
     for seg in page_id.replace("\\", "/").split("/"):
         if seg and seg != ".." and seg != seg.rstrip(". "):
             return f"page_id segment {seg!r} has trailing dot or space (Windows forbidden)."
     
-    # AC7 — Windows illegal characters rejection
+    # AC7 â€” Windows illegal characters rejection
     if _WINDOWS_ILLEGAL_CHARS_RE.search(page_id):
         return "page_id contains Windows-illegal character (one of : < > \" | ? *)."
     
-    # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar")
+    # AC8 â€” Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar")
     if any(seg == ".." for seg in page_id.replace("\\", "/").split("/")):
         return "page_id contains parent-directory segment ('..')."
     
