@@ -14,9 +14,9 @@ from kb.config import (
     LLM_REQUEST_TIMEOUT,
     LLM_RETRY_BASE_DELAY,
     LLM_RETRY_MAX_DELAY,
-    MODEL_TIERS,
     get_cli_backend,
     get_cli_model,
+    get_model_tier,
 )
 from kb.errors import KBError
 from kb.utils.text import truncate
@@ -66,9 +66,10 @@ def get_client() -> anthropic.Anthropic:
 
 def _resolve_model(tier: str) -> str:
     """Validate tier and return the model ID."""
-    if tier not in MODEL_TIERS:
-        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {', '.join(MODEL_TIERS)}")
-    return MODEL_TIERS[tier]
+    try:
+        return get_model_tier(tier)
+    except ValueError as exc:
+        raise ValueError(f"Invalid tier '{tier}'. Valid tiers: scan, write, orchestrate") from exc
 
 
 def _backoff_delay(attempt: int) -> float:
