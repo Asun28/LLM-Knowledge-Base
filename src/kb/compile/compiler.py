@@ -588,20 +588,18 @@ def compile_wiki(
     # invalidation already fired inside each `ingest_source` (AC11), but a
     # final post-loop drop ensures any auto-publish-time graph builder (cycle
     # 64 AC14) sees the post-final-write state.
-    # CYCLE-64-HOOK — keep this comment for merge-conflict legibility per
-    # design-decision R2-F merge-resilience marker.
     try:
-        import kb.graph.cache as _graph_cache  # noqa: PLC0415
+        import kb.graph.cache  # noqa: PLC0415
 
-        _graph_cache.invalidate(effective_wiki_dir)
+        kb.graph.cache.invalidate(effective_wiki_dir)
     except Exception as _exc:  # noqa: BLE001
         logger.debug("Cycle 64 graph-cache invalidate skipped at compile tail: %s", _exc)
 
-    # Cycle 64 AC14 — auto-publish hook. Env var read at CALL TIME per
-    # cycle-19 L2; KB_DISABLE_COMPILE_AUTO_PUBLISH=1 short-circuits without
-    # invoking any publish builder. try/except wraps the whole call so a
-    # publish failure does NOT fail the compile (a broken builder must not
-    # break the more fundamental compile output).
+    # CYCLE-64-HOOK: auto-publish after successful compile (R2-F-merge marker).
+    # Env var read at CALL TIME per cycle-19 L2; KB_DISABLE_COMPILE_AUTO_PUBLISH=1
+    # short-circuits without invoking any publish builder. try/except wraps the
+    # whole call so a publish failure does NOT fail the compile (a broken
+    # builder must not break the more fundamental compile output).
     if not os.environ.get("KB_DISABLE_COMPILE_AUTO_PUBLISH"):
         try:
             from kb.compile.publish import (  # noqa: PLC0415
@@ -610,7 +608,7 @@ def compile_wiki(
 
             auto_publish_after_compile(
                 effective_wiki_dir,
-                incremental=(results.get("mode") != "full"),
+                incremental=incremental,
             )
         except Exception as auto_exc:  # noqa: BLE001
             logger.warning("Cycle 64 auto-publish skipped: %s", auto_exc)

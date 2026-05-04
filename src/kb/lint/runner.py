@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+import kb.graph.cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1; full path per CONDITION 2
 from kb.config import RAW_DIR, WIKI_DIR
 from kb.lint.checks import (
     check_authored_by_drift,
@@ -58,7 +58,7 @@ def run_all_checks(
     # Build the wikilink graph once — shared by orphan and cycle checks.
     # Cycle 64 AC10 — process-shared cache via attribute lookup so test spies
     # on kb.graph.cache.get_graph intercept correctly per cycle-18 L1.
-    shared_graph = graph_cache.get_graph(wiki_dir)
+    shared_graph = kb.graph.cache.get_graph(wiki_dir)
 
     all_issues = []
 
@@ -98,8 +98,8 @@ def run_all_checks(
         # rather than reusing the pre-fix cached graph (mtime would catch it on most systems
         # but explicit invalidation is the documented contract).
         shared_pages = scan_wiki_pages(wiki_dir)
-        graph_cache.invalidate(wiki_dir)
-        shared_graph = graph_cache.get_graph(wiki_dir)
+        kb.graph.cache.invalidate(wiki_dir)
+        shared_graph = kb.graph.cache.get_graph(wiki_dir)
 
     orphans = check_orphan_pages(wiki_dir, graph=shared_graph)
     all_issues.extend(orphans)

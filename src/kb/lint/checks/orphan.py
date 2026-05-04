@@ -6,7 +6,7 @@ from pathlib import Path
 import networkx as nx
 import yaml
 
-import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+import kb.graph.cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1; full path per CONDITION 2
 from kb.config import AUTOGEN_PREFIXES, STUB_MIN_CONTENT_CHARS
 from kb.graph.builder import graph_stats  # cycle-64 AC10 — graph_stats stays direct (not cached)
 from kb.lint import checks
@@ -26,7 +26,7 @@ def check_orphan_pages(wiki_dir: Path | None = None, graph: nx.DiGraph | None = 
     wiki_dir = wiki_dir or checks.WIKI_DIR
     if graph is None:
         # Cycle 64 AC10 — fallback uses cached graph; owner-module attribute lookup.
-        graph = graph_cache.get_graph(wiki_dir)
+        graph = kb.graph.cache.get_graph(wiki_dir)
     else:
         graph = graph.copy()  # fix item 8: don't mutate the caller's shared graph
 

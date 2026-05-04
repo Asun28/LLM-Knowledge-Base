@@ -7,7 +7,7 @@ import frontmatter
 import networkx as nx
 import yaml
 
-import kb.graph.cache as graph_cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1
+import kb.graph.cache  # cycle-64 AC10 — attribute lookup per cycle-18 L1; full path per CONDITION 2
 from kb.config import (
     MAX_CONSISTENCY_GROUP_SIZE,
     MAX_CONSISTENCY_GROUPS,
@@ -139,7 +139,7 @@ def _group_by_wikilinks(wiki_dir: Path, *, pages: list[dict] | None = None) -> l
     Cycle 64 AC10 + R1-F5: ``get_graph`` BYPASSES the cache when ``pages=`` is
     supplied (pages-snapshot caching would risk poisoning fresh-disk callers).
     """
-    graph = graph_cache.get_graph(wiki_dir, pages=pages)
+    graph = kb.graph.cache.get_graph(wiki_dir, pages=pages)
     components = list(nx.connected_components(graph.to_undirected()))
     return [sorted(c) for c in components if len(c) >= 2]
 
