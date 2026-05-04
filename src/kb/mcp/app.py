@@ -14,6 +14,7 @@ from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 # (`F401 unused-import`) will silently strip the line if the noqa is missing —
 # class-of-bug per cycle-22 L2 / feedback_ruff_unused_import_monkeypatch.
 from kb.utils.sanitize import _rel, sanitize_error_text  # noqa: F401
+from kb.utils.path_safety import _assert_under_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -135,12 +136,10 @@ def _validate_wiki_dir(
     if not path.is_dir():
         return None, f"wiki_dir is not a directory: {sanitize_error_text(str(path))}"
     path_resolved = path.resolve()
-    root = effective_project_root.resolve()
-    if path_resolved != root and not path_resolved.is_relative_to(root):
-        return (
-            None,
-            f"wiki_dir must be inside project root — got {sanitize_error_text(str(path_resolved))}",
-        )
+    try:
+        _assert_under_project_root(path, "wiki_dir", require_exists=True, require_dir=True)
+    except ValueError as e:
+        return None, f"wiki_dir validation failed: {sanitize_error_text(str(e))}"
     return path_resolved, None
 
 
@@ -288,7 +287,7 @@ def _validate_page_id(
     effective_wiki_dir = wiki_dir or WIKI_DIR
     page_path = effective_wiki_dir / f"{page_id}.md"
     try:
-        page_path.resolve().relative_to(effective_wiki_dir.resolve())
+        _assert_under_project_root(effective_wiki_dir / page_id, "page_id")
     except ValueError:
         return f"Invalid page_id: {page_id}. Path escapes wiki directory."
     if check_exists and not page_path.exists():

@@ -20,6 +20,7 @@ from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
 from kb.utils.wiki_log import append_wiki_log
+from kb.utils.path_safety import _assert_under_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -658,15 +659,7 @@ def _validate_path_under_project_root(path: Path, field_name: str) -> None:
     # is under PROJECT_ROOT. An outer `if hash_manifest is not None` / `if
     # vector_db is not None` guard in `rebuild_indexes` already skips the
     # helper for `None` defaults, so the helper never sees `None` here.
-    root_resolved = PROJECT_ROOT.resolve()
-    if path.is_absolute() and not (path == root_resolved or path.is_relative_to(root_resolved)):
-        raise ValidationError(f"{field_name} must be inside project root")
-    try:
-        resolved = path.resolve()
-    except OSError as e:
-        raise ValidationError(f"{field_name} cannot be resolved: {e}") from e
-    if not (resolved == root_resolved or resolved.is_relative_to(root_resolved)):
-        raise ValidationError(f"{field_name} must be inside project root")
+    _assert_under_project_root(path, field_name, dual_anchor=True)
 
 
 def rebuild_indexes(
