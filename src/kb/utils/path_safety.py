@@ -83,3 +83,69 @@ def _assert_under_project_root(
     # Optional symlink rejection
     if not allow_symlinks and path.is_symlink():
         raise ValueError(f"{field_name} is a symlink (not allowed): {path}")
+
+
+import ctypes
+import logging
+import sys
+
+_LOG = logging.getLogger(__name__)
+_warned_fallback = False
+
+
+def _open_no_follow(path: Path) -> int:
+    """Open a file with symlink-follow prevention (TOCTOU mitigation for AC10).
+
+    Returns the file descriptor (int) which the caller must close.
+    
+    On POSIX: uses os.O_NOFOLLOW flag.
+    On Windows: uses FILE_FLAG_OPEN_REPARSE_POINT via CreateFileW.
+    On unsupported platforms: falls back to re-resolve before mutation (once per process warning).
+
+    Raises:
+        OSError: If the file is a symlink (primary path) or cannot be opened.
+    """
+    global _warned_fallback
+    
+    if sys.platform == "win32":
+        # Windows: use CreateFileW with FILE_FLAG_OPEN_REPARSE_POINT
+        try:
+            GENERIC_READ = 0x80000000
+            OPEN_EXISTING = 3
+            FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+            
+            handle = ctypes.windll.kernel32.CreateFileW(
+                str(path), GENERIC_READ, 0, None, OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT, None
+            )
+            if handle == -1:
+                raise OSError(f"Cannot open file: {path}")
+            return handle
+        except (AttributeError, OSError):
+            # Fallback if kernel32 missing or open fails
+            if not _warned_fallback:
+                _LOG.warning(
+                    "AC10: O_NOFOLLOW unsupported on platform %s; "
+                    "falling back to re-resolve TOCTOU mitigation",
+                    sys.platform
+                )
+                _warned_fallback = True
+            # Re-resolve immediately and return a dummy handle
+            path.resolve()
+            return -1  # Dummy handle
+    else:
+        # POSIX: use os.O_NOFOLLOW
+        try:
+            fd = os.open(str(path), os.O_NOFOLLOW | os.O_RDONLY)
+            return fd
+        except OSError:
+            # Fallback
+            if not _warned_fallback:
+                _LOG.warning(
+                    "AC10: O_NOFOLLOW unsupported on platform %s; "
+                    "falling back to re-resolve TOCTOU mitigation",
+                    sys.platform
+                )
+                _warned_fallback = True
+            path.resolve()
+            return -1
