@@ -25,6 +25,7 @@ from kb.utils.sanitize import sanitize_error_text
 from kb.utils.text import yaml_escape
 
 logger = logging.getLogger(__name__)
+from kb.mcp._error_boundary import _mcp_error_boundary
 
 _CTRL_CHAR_RE = re.compile(r"[\x00-\x1f]")
 
@@ -35,6 +36,7 @@ def _strip_control_chars(s: str) -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_review_page(page_id: str) -> str:
     """Review a wiki page — returns page content, raw sources, and review checklist.
 
@@ -61,6 +63,7 @@ def kb_review_page(page_id: str) -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "") -> str:
     """Update a wiki page's content while preserving frontmatter.
 
@@ -128,6 +131,7 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_lint_deep(page_id: str) -> str:
     """Deep lint a single page — returns page + raw sources side-by-side
     for source fidelity evaluation.
@@ -154,6 +158,7 @@ def kb_lint_deep(page_id: str) -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_lint_consistency(page_ids: str = "") -> str:
     """Cross-page consistency check — returns related pages grouped for
     contradiction detection.
@@ -186,6 +191,7 @@ def kb_lint_consistency(page_ids: str = "") -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: str = "") -> str:
     """Record feedback on a query answer to improve wiki reliability.
 
@@ -228,6 +234,7 @@ def kb_query_feedback(question: str, rating: str, cited_pages: str = "", notes: 
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_reliability_map() -> str:
     """Show page trust scores based on query feedback history.
 
@@ -263,6 +270,7 @@ def kb_reliability_map() -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_affected_pages(page_id: str) -> str:
     """Find pages affected when this page changes.
 
@@ -344,6 +352,7 @@ def kb_affected_pages(page_id: str) -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_save_lint_verdict(
     page_id: str,
     verdict_type: str,
@@ -406,6 +415,7 @@ def kb_save_lint_verdict(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_create_page(
     page_id: str,
     title: str,
@@ -572,6 +582,7 @@ confidence: {confidence}
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_refine_sweep(hours: int = 168, action: str = "mark_failed", dry_run: bool = False) -> str:
     """Sweep stale refine-history `pending` rows older than ``hours`` (cycle 20 AC14).
 
@@ -618,6 +629,7 @@ def kb_refine_sweep(hours: int = 168, action: str = "mark_failed", dry_run: bool
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_refine_list_stale(hours: int = 24) -> str:
     """List refine-history `pending` rows older than ``hours`` (cycle 20 AC17).
 

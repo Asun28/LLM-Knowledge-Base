@@ -21,6 +21,7 @@ from kb.utils.sanitize import sanitize_error_text
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
+from kb.mcp._error_boundary import _mcp_error_boundary
 
 # MCP-only whitelist — kept local so ingest tools do not import the heavy
 # ingest pipeline merely to validate source extensions.
@@ -135,6 +136,7 @@ def _validate_filename_slug(filename: str) -> tuple[str, str | None]:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_ingest(
     source_path: str,
     source_type: str = "",
@@ -306,6 +308,7 @@ def kb_ingest(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_ingest_content(
     content: str,
     filename: str,
@@ -454,6 +457,7 @@ def kb_ingest_content(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_save_source(
     content: str,
     filename: str,
@@ -554,6 +558,7 @@ def kb_save_source(
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_capture(content: str, provenance: str | None = None) -> str:
     """Extract discrete knowledge items (decisions, discoveries, corrections, gotchas)
     from up to 50KB of unstructured text and write each to raw/captures/<slug>.md.
