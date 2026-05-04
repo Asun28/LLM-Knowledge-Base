@@ -45,6 +45,32 @@ def _resolve_project_root() -> Path:
     return heuristic
 
 
+def get_project_root() -> Path:
+    """Return the project root path, reading KB_PROJECT_ROOT at call time.
+    
+    Cycle-19 L2 reload-leak hazard: the env var is checked on EVERY call,
+    not cached at import time. This allows tests and long-lived processes
+    to observe env mutations after module import.
+    
+    Falls back to heuristic if env var is not set: pyproject.toml detection
+    in the module's parent.parent.parent, then cwd walk-up, then hard-coded
+    parent-parent-parent of this module.
+    
+    Returns:
+        The project root as a Path, resolved to absolute form.
+    """
+    return _resolve_project_root()
+
+
+def _reset_project_root() -> None:
+    """Test helper: reset any internal project-root cache.
+    
+    Currently a no-op since get_project_root() reads env at call time.
+    Future implementations may cache - this hook prevents test brittleness.
+    """
+    pass
+
+
 PROJECT_ROOT = _resolve_project_root()
 RAW_DIR = PROJECT_ROOT / "raw"
 WIKI_DIR = PROJECT_ROOT / "wiki"
@@ -700,3 +726,22 @@ DUPLICATE_SLUG_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
 # before alternation — future additions with metachars cannot corrupt
 # the pattern).
 CALLOUT_MARKERS: tuple[str, ...] = ("contradiction", "gap", "stale", "key-insight")
+
+
+# ── PEP 562: Module-level __getattr__ for call-time config accessors ────
+# Cycle-19 L2 reload-leak hazard mitigation: when production code or tests
+# access kb.config.PROJECT_ROOT (attribute lookup) AFTER the module is
+# imported, the shim fires if the attribute is not in the module dict,
+# returning the fresh call-time value. The initial module-level binding
+# (line 93) is retained for code that imports the constant at module-load
+# time (snapshot binding). Both patterns coexist.
+#
+# AC3: extended to also handle AUGMENT_ALLOWED_DOMAINS for back-compat
+# with code that accesses the constant via attribute form.
+def __getattr__(name: str):
+    """Module-level attribute access hook (PEP 562)."""
+    if name == "PROJECT_ROOT":
+        return get_project_root()
+    if name == "AUGMENT_ALLOWED_DOMAINS":
+        return get_allowed_domains()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
