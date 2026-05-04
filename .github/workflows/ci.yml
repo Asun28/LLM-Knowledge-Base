@@ -117,7 +117,7 @@ jobs:
         #         (backslash semantics, drive-letter abspath); anti-POSIX
         #         skipif on Windows-helper tests; cycle-37 BACKLOG tracks
         #         the deeper POSIX symlink security gap.
-        run: python -m pytest -q
+        run: python -m pytest -q --snapshot-warn-unused
 
       - name: Pip resolver check (soft-fail per cycle 34 T5)
         # T5 mitigation: three known conflicts (arxiv/requests, crawl4ai/lxml,
