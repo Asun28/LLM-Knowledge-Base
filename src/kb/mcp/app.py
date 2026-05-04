@@ -166,6 +166,7 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
 # double-gate where page IDs of 201-255 chars passed MCP validation but later
 # tripped the persistence layer. Single source of truth now in kb.config.
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_ILLEGAL_CHARS_RE = re.compile(r'[:<>"|?*]')
 _NOTES_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 # Cycle 17 AC11-AC13 â€” shared run-id validator for `kb_lint(resume=...)`.
@@ -232,6 +233,14 @@ def _validate_page_id(
 ) -> str | None:
     """Validate a page ID for security and optionally existence.
 
+    Validation rules (in order of application):
+    - AC6: No trailing dots or spaces in path segments (Windows forbidden)
+    - AC7: No Windows illegal characters (: < > " | ? *)
+    - AC8: No parent-directory segments (..) â€” segment-aware check
+    - Control characters, empty, length, absolute paths, Windows reserved names
+    - Path containment check (no escape from wiki directory)
+    - Optional existence check
+
     Args:
         page_id: Page identifier (e.g., 'concepts/rag').
         check_exists: If True (default), also verify the page file exists.
@@ -250,13 +259,25 @@ def _validate_page_id(
     # Cycle 4 item #13 â€” length cap before filesystem resolve.
     if len(page_id) > MAX_PAGE_ID_LEN:
         return f"page_id too long ({len(page_id)} chars; max {MAX_PAGE_ID_LEN})."
+    # AC6 — Trailing dot/space rejection: Windows forbidden at segment level
+    for seg in page_id.replace("\\", "/").split("/"):
+        if seg and seg != ".." and seg != seg.rstrip(". "):
+            return f"page_id segment {seg!r} has trailing dot or space (Windows forbidden)."
+    
+    # AC7 — Windows illegal characters rejection
+    if _WINDOWS_ILLEGAL_CHARS_RE.search(page_id):
+        return "page_id contains Windows-illegal character (one of : < > \" | ? *)."
+    
+    # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar")
+    if any(seg == ".." for seg in page_id.replace("\\", "/").split("/")):
+        return "page_id contains parent-directory segment ('..')."
+    
     if (
-        ".." in page_id
-        or page_id.startswith("/")
+        page_id.startswith("/")
         or page_id.startswith("\\")
         or os.path.isabs(page_id)
     ):
-        return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+        return f"Invalid page_id: {page_id}. Must not start with '/'."
     # Cycle 4 item #13 â€” reject Windows reserved basenames cross-platform.
     if _is_windows_reserved(page_id):
         return (
