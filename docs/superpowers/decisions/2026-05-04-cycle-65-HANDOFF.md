@@ -27,7 +27,49 @@
 
 ## What's in flight (paused)
 
-- ⏳ **Step 08** Plan gate (depends on Step 07 plan; risk of phantom-gap REJECT per cycle-6 L4)
+- ⏳ **Step 09** Implementation TDD — 21 commits / 30 named tests / 10 caller-grep checkpoints / 12 NEW underscore-private functions. Foundation commit (`tests/_helpers/ast_walk.py`) lands FIRST. Owner: `mimocoding-rescue` @ `mimo-v2.5-pro` impl + `deepseek-rescue` @ `deepseek-v4-pro` background reviewer (C59 cross-family adversarial).
+
+## Resume addendum — 2026-05-05 session (post Step 08)
+
+This session resumed cycle 65 from Step 08 per user's `/dev-mimo-opus resume cycle 65 from Step 08` command. State after this session:
+
+- ✅ **Step 07 v2** Opus expanded the 90-line summary to a 21-commit walkthrough (~2500 words) at commit `8cad3d5`. Per HANDOFF Option C: design.md authority preserved; AC2 separated from AC1+AC3 (was mis-batched); 30 named tests enumerated 1:1 against C1-C23; 10 explicit Step-11 caller-grep checkpoints; 12 NEW underscore-private functions inventoried.
+- ✅ **Step 08** Plan gate APPROVE at commit `24db5cd` (`mimocoding-rescue` R1, ~90s wall-clock, 26/26 criteria PASS, no blocking findings). Verdict file: `2026-05-04-cycle-65-plan-gate-mimo-R1.md`. Trial telemetry: gate cost (~90s) is dramatically cheaper than authoring (8.2 min summary) — confirms cycle-65 hypothesis that mimocoding-rescue verification roles work even when authoring roles can summarize.
+
+Branch HEAD progression: `3a4da90` (Steps 0-5) → `e111d29` (handoff) → `c0a8020` (Step 7 v1 summary) → `a626d6e` (handoff addendum) → `8cad3d5` (Step 7 v2 expansion) → `24db5cd` (Step 8 verdict).
+
+**Next resume point:** Step 09 implementation. Per cycle-65 NEW failure mode lesson (this very HANDOFF document), conversation context exhaustion via repeated `ScheduleWakeup` is a real risk on multi-agent dispatches; **handoff via `/clear` was deliberately chosen here** at the post-Step-8 natural boundary the original HANDOFF named.
+
+### Resume instructions for fresh Step 09 session
+
+```
+# 1. Confirm worktree state
+cd D:/Projects/llm-wiki-flywheel/.claude/worktrees/cycle-65
+git log --oneline -5
+# Expected (newest first): 24db5cd 8cad3d5 a626d6e c0a8020 e111d29
+
+# 2. Verify foundation file does NOT yet exist
+ls -la tests/_helpers/ast_walk.py 2>&1 | head -1
+# Expected: "No such file or directory" (foundation commit creates it)
+
+# 3. Re-invoke /dev-mimo-opus
+/dev-mimo-opus resume cycle 65 from Step 09 — implementation
+```
+
+### Step 09 implementation contract (authoritative inputs)
+
+1. **Plan v2:** `2026-05-04-cycle-65-plan.md` (HEAD `8cad3d5`) — 21-commit walkthrough with named tests + checkpoints.
+2. **Design lock:** `2026-05-04-cycle-65-design.md` (HEAD `3a4da90`) — AC contracts, Q2.1-Q2.10 decisions.
+3. **Threat model:** `2026-05-04-cycle-65-threat-model.md` — T1-T21, C1-C23.
+4. **Plan-gate verdict:** `2026-05-04-cycle-65-plan-gate-mimo-R1.md` (HEAD `24db5cd`) — PASS scorecard + Step 9 implementer guidance.
+
+The fresh session dispatches `mimocoding-rescue` @ `mimo-v2.5-pro` for the implementation chunks and `deepseek-rescue` @ `deepseek-v4-pro` for the background cross-family reviewer (C59). Step 11 caller-grep checkpoints fire AFTER each of the 10 signature-touching commits, NOT at end.
+
+### Risk carry-forward to Step 09
+
+- **Trial-skill enforcement (C58-L4 / C59-L4):** mimocoding-rescue is the BINDING owner for Step 09 implementation. Falling back to primary-session implementation is permissible only on "vendor hard-down" (401 key suspended, credit limit reached, persistent 9+ min hangs). Document any fallback in Step 24 scorecard. The Step 7 summary-not-body failure was an under-delivery telemetry data point, NOT a vendor-hard-down event.
+- **Anti-summary discipline for Step 09:** dispatch prompt must include explicit "MUST commit code" + "MUST run pytest" + "MUST report git log SHA + test-count delta" clauses. No verbal-only summaries.
+- **Chunking strategy:** consider chunking 21 commits into ~5 dispatches (low-deps preflight / config accessors / sandbox+page_id+path_safety / URL+embeddings+CLI / MCP+hygiene) to keep each dispatch ≤10 min and reduce context load per fresh session.
 
 ## What's next
 
