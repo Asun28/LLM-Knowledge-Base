@@ -1,24 +1,23 @@
 # serializer version: 1
 # name: test_evidence_trail_format_snapshot
-  '''
-  ---
-  title: RAG
-  source: []
-  type: concept
-  confidence: stated
-  ---
-  
-  # RAG
-  
-  Retrieval-augmented generation.
-  
-  ## Evidence Trail
-  <!-- evidence-trail:begin -->
-  - 2026-05-03 | raw/articles/cycle64-update.md | updated
-  - 2026-04-15 | raw/articles/lewis-2020.md | appended
-  - 2026-04-01 | raw/articles/karpathy-2026.md | appended
-  
-  '''
+  list([
+    '---',
+    'title: RAG',
+    'source: []',
+    'type: concept',
+    'confidence: stated',
+    '---',
+    '',
+    '# RAG',
+    '',
+    'Retrieval-augmented generation.',
+    '',
+    '## Evidence Trail',
+    '<!-- evidence-trail:begin -->',
+    '- 2026-05-03 | raw/articles/cycle64-update.md | updated',
+    '- 2026-04-15 | raw/articles/lewis-2020.md | appended',
+    '- 2026-04-01 | raw/articles/karpathy-2026.md | appended',
+  ])
 # ---
 # name: test_lint_report_format_snapshot
   dict({

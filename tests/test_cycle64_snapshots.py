@@ -67,7 +67,7 @@ def test_evidence_trail_format_snapshot(tmp_path, snapshot):
     )
 
     rendered = page_path.read_text(encoding="utf-8")
-    assert rendered == snapshot
+    assert rendered.splitlines() == snapshot
 
 
 def test_mermaid_export_format_snapshot(tmp_path, snapshot):

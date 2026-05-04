@@ -9,6 +9,24 @@
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-03 — cycle 64 — Backlog feature batch + landing-review fix
+
+**Theme:** Land the large cycle-64 backlog batch that was left at the pre-merge gate. Scope spans test isolation, vector-index self-healing, lint graph caching, compile-time publish output, snapshot infrastructure, and doc sync. The branch was reviewed as PR #87 / `origin/feat/cycle-64`; Codex landing review completed deferred AC21 reference/history docs and whitespace hygiene before merge.
+
+**A — test sandboxing (`tests/conftest.py`).** Added autouse `_autouse_kb_path_sandbox` to redirect KB path constants to per-test `tmp_path` by default. The implementation splits patching from mkdir side effects: autouse applies patch-only, while explicit `tmp_kb_env` / `kb_sandbox` preserves the patch+mkdir contract for existing tests. Added `--use-real-paths` plus `real_project_root` for rare opt-outs. Regression coverage: `tests/test_cycle64_conftest_leak.py`.
+
+**B — dim-mismatch auto-rebuild (`src/kb/query/embeddings.py`).** Added `VectorIndex._derive_wiki_dir()`, call-time `KB_DISABLE_VECTOR_AUTO_REBUILD`, PROJECT_ROOT validation through `_validate_path_under_project_root(..., "vector_auto_rebuild_target")`, and `get_dim_mismatch_auto_rebuild_count()`. First mismatch query still returns `[]`; the rebuild makes the next query eligible to use a fresh index. Regression coverage: `tests/test_cycle64_dim_mismatch_autorebuild.py`.
+
+**C — lint graph cache (`src/kb/graph/cache.py`).** Added process-shared `get_graph`, `invalidate`, and `get_cache_stats` with an RLock, FIFO size bound 4, mtime-keyed disk-scan caching, and explicit `pages=` bypass. Lint callers use attribute lookup (`kb.graph.cache.get_graph`) to keep monkeypatching reliable. Invalidation hooks run after ingest, refine, compile, and lint fix-mode writes. Regression coverage: `tests/test_cycle64_graph_cache.py`.
+
+**D — compile auto-publish and siblings manifest (`src/kb/compile/publish.py`, `src/kb/compile/compiler.py`).** Added `auto_publish_after_compile`, defaulting artifacts to `<wiki_dir>.parent/_publish` outside the wiki tree, with `KB_DISABLE_COMPILE_AUTO_PUBLISH` read at call time and path validation through `_validate_path_under_project_root(..., "publish_out_dir")`. `compile_wiki` invalidates graph cache before the auto-publish hook and isolates publish failures from compile. `build_per_page_siblings` now tracks `<wiki_dir>.parent/.data/publish-siblings-manifest.json` and unlinks only pages that were previously emitted but are no longer kept; corrupt manifests fall back to the cycle-16 cleanup semantics. Regression coverage: `tests/test_cycle64_auto_publish.py` and `tests/test_cycle64_publish_manifest.py`.
+
+**E — snapshot foundation.** Added `syrupy>=4.6.0` to the dev extra and committed `tests/__snapshots__/test_cycle64_snapshots.ambr`. Snapshot subjects cover evidence-trail rendering, Mermaid export rendering, and lint report structure. The update workflow is documented in `docs/reference/testing.md`, including the CI guard: never run `--snapshot-update` in CI.
+
+**F — docs and backlog sync.** Updated `CHANGELOG.md`, this archive, `CLAUDE.md`, `BACKLOG.md`, `docs/reference/architecture.md`, and `docs/reference/testing.md`. `BACKLOG.md` deletes fully-resolved entries for conftest leak surface, dim-mismatch auto-rebuild, compile auto-publish, and publish siblings cleanup; graph-cache and snapshot entries are rewritten as partials where non-lint callers and broader snapshot subjects remain deferred.
+
+**Verification recorded by cycle 64:** full Windows local pytest was 3036 passed + 18 skipped + 0 failed in 149.5s; cycle-64 self-review records 9/9 security verifier coverage. Codex landing review additionally fixed `git diff --check` whitespace issues in `docs/superpowers/decisions/2026-05-03-cycle-64-design-eval-R2.md` and `tests/__snapshots__/test_cycle64_snapshots.ambr` before merge verification.
+
 ### 2026-05-03 — cycle 58 — Backlog hygiene + freeze-and-fold continuation (4-fold batch, 1 AC dropped at rebase)
 
 **Theme:** Continue the freeze-and-fold cadence from cycles 47-57 (Phase 4.5 HIGH #4) with **5 small fold targets** picked at Step 1. Cycle-54-pickup landed during cycle-58 and folded one of cycle-58's planned sources (`test_cycle15_lint_status_mature.py`, AC4) — the rebase onto origin/main used `git rebase --skip` to drop the now-redundant AC4 commit; cycle-58 ships **4 folds** instead of 5. Production-code changes: zero. Fourth `dev-mimo-opus` trial cycle (after cycles 55, 56, 57). Receivers verified disjoint from in-flight `worktree-cycle-53` and from the just-merged cycle-54-pickup folds.

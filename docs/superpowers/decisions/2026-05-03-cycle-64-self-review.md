@@ -5,7 +5,7 @@
 **Tier:** 2 (standard feature batch)
 **Trial:** May 2026 MiMo trial — sixth `dev-mimo-opus` cycle
 **Author:** Opus 4.7 primary session
-**Outcome:** ✓ COMPLETE — 25 ACs landed (21 main + 4 sub-ACs); 30 new cycle-64 tests; 7 trial-skip-marks for AC3 migration debt; full pytest 3036 passed + 18 skipped + 0 failed.
+**Outcome:** ✓ COMPLETE — 25 ACs landed (21 main + 4 sub-ACs); 30 new cycle-64 tests; 7 trial-skip-marks for AC3 migration debt; full pytest 3036 passed + 18 skipped + 0 failed. Codex landing review completed the deferred AC21 docs/reference + CHANGELOG-history sync and fixed pre-merge whitespace hygiene.
 
 ---
 
@@ -149,12 +149,9 @@ The 3 categories are not equivalent for trial-purposes-of-evaluating-binding-own
 
 These remain deferred to cycle-65+:
 
-1. **CHANGELOG-history.md detailed cycle-64 entry** — CHANGELOG.md compact entry suffices for now; cycle-65 doc-sync can populate the full bullet-level archive mechanically.
-2. **docs/reference/architecture.md "Graph cache contract" section** — AC11 doc requirement; deferred to keep cycle-64 PR focused.
-3. **docs/reference/testing.md conftest sandbox + snapshot-update workflow notes** — AC1/AC18/AC20 doc requirements; deferred similarly.
-4. **5 non-lint `build_graph` callers** (evolve/analyzer ×3, graph/export, mcp/browse, query/engine) for cache migration — explicit scope decision per Step-5 R1-F2 (AC10 narrow-scope to 5 lint sites only; non-lint deferred to cycle-65+).
-5. **3 broader snapshot subjects** (page-render, llms-full body, JSON-LD) — Q6 design-decision deferred coverage breadth.
-6. **7 trial-skipped tests** (test_pagerank, test_run_all_checks_fix_rescan_call_count, test_refine_page_derives_history_path_from_wiki_dir, test_write_oserror_returns_error_string, test_cycle12_ac12_augment_execute_wiki_dir_containment, test_cycle12_ac13_run_augment_default_paths_custom_wiki_dir, plus 2 manifest-corrupted-fallback edge cases) — each documented with skip-reason; cycle-65+ migrate.
+1. **5 non-lint `build_graph` callers** (evolve/analyzer ×3, graph/export, mcp/browse, query/engine) for cache migration — explicit scope decision per Step-5 R1-F2 (AC10 narrow-scope to 5 lint sites only; non-lint deferred to cycle-65+).
+2. **3 broader snapshot subjects** (page-render, llms-full body, JSON-LD) — Q6 design-decision deferred coverage breadth.
+3. **7 trial-skipped tests** (test_pagerank, test_run_all_checks_fix_rescan_call_count, test_refine_page_derives_history_path_from_wiki_dir, test_write_oserror_returns_error_string, test_cycle12_ac12_augment_execute_wiki_dir_containment, test_cycle12_ac13_run_augment_default_paths_custom_wiki_dir, plus 2 manifest-corrupted-fallback edge cases) — each documented with skip-reason; cycle-65+ migrate.
 
 ---
 

@@ -31,3 +31,31 @@ Enforced by `test_cycle19_lint_redundant_patches.py` AST scan:
 - `tmp_kb_env` already redirects `kb.compile.compiler.HASH_MANIFEST` — do NOT also `monkeypatch.setattr` it.
 - Patching the four migrated MCP callables (`ingest_source`, `query_wiki`, `search_pages`, `compute_trust_scores`): patch the OWNER MODULE (`kb.ingest.pipeline.ingest_source`), not `kb.mcp.core.*`.
 - Tests that reach `sweep_stale_pending` / `list_stale_pending` via MCP or CLI: also `monkeypatch.setattr(kb.review.refiner.REVIEW_HISTORY_PATH, ...)` and `kb.mcp.quality.WIKI_DIR` defensively (mirror-rebind loop isn't guaranteed to hit post-fixture imports under every test ordering).
+
+## Cycle 64 Test Sandbox
+
+Cycle 64 adds an autouse path sandbox. `_autouse_kb_path_sandbox` redirects `kb.config.PROJECT_ROOT`, `RAW_*`, `WIKI_*`, capture/output/history paths, and `SOURCE_TYPE_DIRS` to per-test `tmp_path` by default. `project_root` / `raw_dir` / `wiki_dir` are sandbox-aware after this change.
+
+Tests that genuinely need the real repository root must request `real_project_root` and run pytest with `--use-real-paths`. Do not bypass the autouse sandbox by importing `kb.config.PROJECT_ROOT` at module top in tests.
+
+Explicit `tmp_kb_env` and its public alias `kb_sandbox` keep the patch+mkdir contract for tests that need a fully-built temporary project tree. `_kb_sandbox` remains as a compatibility alias.
+
+Cycle 64 branch reference: 3036 passed + 18 skipped on Windows local. The new cycle-64 tests cover conftest sandboxing, vector dim-mismatch auto-rebuild, graph cache invalidation, compile auto-publish, publish-siblings manifest cleanup, and snapshots.
+
+## Snapshot Tests
+
+Cycle 64 introduced `syrupy>=4.6.0` under the `dev` extra and committed `tests/__snapshots__/test_cycle64_snapshots.ambr`. Snapshot subjects cover evidence-trail rendering, Mermaid export, and lint report structure.
+
+Run ordinary snapshot tests with:
+
+```bash
+python -m pytest tests/test_cycle64_snapshots.py
+```
+
+After an intentional rendering-format change, update the committed snapshot with:
+
+```bash
+python -m pytest tests/test_cycle64_snapshots.py --snapshot-update
+```
+
+Never run `--snapshot-update` in CI. Review snapshot diffs like source code; they are the canonical expected rendering for the tested output surfaces.
