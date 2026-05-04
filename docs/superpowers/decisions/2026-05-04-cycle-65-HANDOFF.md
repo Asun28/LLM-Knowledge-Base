@@ -17,10 +17,17 @@
 - ✅ **Step 05** Locked design `design.md` (verdict APPROVE, 10/10 questions resolved, 5 ADOPT / 2 DEFER-DOCS / 2 DEFER-66 / 2 REJECT on R2 devex; 2 more drifts caught: `sanitize_error_text` location + `KB_` prefix)
 - ✅ **Step 06** SKIPPED per skip-when (Step 4 absorbed Context7; no new external lib refs survived design lock-in)
 
+## What's done — addendum
+
+- ✅ **Step 07** MiMo Coding plan landed at `c0a8020` after 8.2 min total. ⚠️ **CAVEAT:** plan is 90 lines / 3.6KB — a summary, NOT the requested full plan body. **Cycle-6 L4 risk applies** — plan-gate (Step 8) on a summary hallucinates gaps that exist in the implicit full plan. Fresh session decision matrix:
+  - **Option A:** accept summary plan as-is. Step 8 gate may REJECT with phantom gaps; resolve inline per cycle-21 Step 8 lesson (most gaps will already be answered in the locked design.md).
+  - **Option B:** re-dispatch MiMo Coding with explicit "MINIMUM 3000 WORDS, NO SUMMARIES, full code sketches per AC" anti-summary clause.
+  - **Option C:** Opus drafts a more detailed plan inline by reading design.md + walking the 23 ACs (~2000 words; still cheaper than re-dispatch wait time).
+  - **Recommendation:** Option C if context budget allows (Opus has the design.md context); fall back to Option A if budget tight (locked design.md is authoritative for impl, plan-gate phantom gaps can be resolved inline).
+
 ## What's in flight (paused)
 
-- ⏳ **Step 07** Implementation plan via `mimocoding-rescue` subagent (dispatch ID `ad3209ce54d877f78`). Agent has been running 9+ min without writing output. May complete asynchronously or may need re-dispatch.
-- ⏳ **Step 08** Plan gate (depends on Step 07 plan)
+- ⏳ **Step 08** Plan gate (depends on Step 07 plan; risk of phantom-gap REJECT per cycle-6 L4)
 
 ## What's next
 
