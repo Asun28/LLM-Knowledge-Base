@@ -54,6 +54,7 @@ from kb.graph.builder import build_graph
 # Insertion-ordered dict (CPython 3.7+) keyed on
 # (wiki_dir.resolve().as_posix(), max_mtime_of_wiki_subdirs). FIFO eviction
 # by oldest insertion when size exceeds _MAX_CACHE_SIZE.
+__all__ = []
 _GLOBAL_CACHE: dict[tuple[str, float], nx.DiGraph] = {}
 
 # Re-entrant lock so test fixtures can invoke invalidate() from inside an
