@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import secrets
 import threading
 
 import jsonschema
@@ -126,15 +127,35 @@ def _scrub_env(backend: str) -> dict[str, str]:
 
 
 def _check_no_secrets_on_argv(argv: list[str]) -> None:
-    """Raise LLMError if any argv element looks like a secret token (T8)."""
-    for elem in argv:
-        if _TOKEN_PATTERN.search(elem):
-            from kb.utils.llm import LLMError  # local import avoids circular dep
-
-            raise LLMError(
-                "Refusing to place a token-shaped string on subprocess argv (T8).",
-                kind="invalid_request",
-            )
+    """Raise LLMError if any actual env secret value appears in argv (T8, AC16).
+    
+    AC16 value-based scrub: iterate six env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY).
+    For each non-empty value, check if any argv element equals it via
+    secrets.compare_digest (timing-safe comparison).
+    """
+    from kb.utils.llm import LLMError  # local import avoids circular dep
+    
+    env_keys = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MIMOCODING_API_KEY",
+        "MIMOCHAT_API_KEY",
+    ]
+    
+    for key in env_keys:
+        secret_value = os.environ.get(key, "")
+        if not secret_value:
+            continue
+        
+        for elem in argv:
+            if secrets.compare_digest(elem, secret_value):
+                raise LLMError(
+                    f"Refusing to place env secret {key!r} on subprocess argv (T8, AC16).",
+                    kind="invalid_request",
+                )
 
 
 def call_cli(
