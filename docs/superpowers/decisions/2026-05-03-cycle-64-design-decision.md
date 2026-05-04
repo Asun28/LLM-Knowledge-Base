@@ -264,11 +264,11 @@ Consolidates the threat-model's 8 verifier checks + new requirements from R1+R2 
 
 4. **AC9 import shape:** `Grep "from kb\.graph\.builder import build_graph" src/kb/graph/cache.py` — exactly 1 hit. (R1-F12.)
 
-5. **AC10 caller import shape:** `Grep "from kb\.graph\.cache import" src/kb/lint/` — exactly 0 hits for `get_graph` (must use attribute lookup). Then `Grep "kb\.graph\.cache\.get_graph" src/kb/lint/` — exactly 5 hits (one per caller site). (R1-F2 + cycle-18 L1.)
+5. **AC10 caller import shape:** `Grep "from kb\.graph\.cache import" src/kb/lint/` — exactly 0 hits for `get_graph` (must use attribute lookup). Then `Grep "kb\.graph\.cache\.get_graph" src/kb/lint/` — **exactly 6 hits** (one per caller site; runner.py has 2 — initial build at line 61 + post-fix-rebuild at line 102). (R1-F2 + cycle-18 L1; count corrected post-R2 per cycle-23 L3 — original spec said "5 hits" but runner.py legitimately has 2 callers.)
 
 6. **AC10 scope discipline (non-lint not touched):** `Grep "kb\.graph\.cache\.(get_graph\|invalidate)" src/kb/evolve/ src/kb/graph/export.py src/kb/mcp/browse.py src/kb/query/engine.py` — exactly 0 hits. (R1-F2 cycle-64 scope.)
 
-7. **AC11 invalidation sites:** `Grep "kb\.graph\.cache\.invalidate" src/kb/` — exactly 3 hits (`ingest/pipeline.py`, `review/refiner.py`, `compile/compiler.py` per AC11+AC11.5). (R1-F3 + R1-F8.)
+7. **AC11 invalidation sites:** `Grep "kb\.graph\.cache\.invalidate" src/kb/` — **exactly 4 hits** (`ingest/pipeline.py`, `review/refiner.py`, `compile/compiler.py` per AC11+AC11.5, **plus `lint/runner.py:101`** post-fix-dead-link rebuild path that was already part of AC10 wiring). (R1-F3 + R1-F8; count corrected post-R2 per cycle-23 L3 — original spec missed lint/runner.py invalidate.)
 
 8. **AC13 path validation present:** `Grep "_validate_path_under_project_root.*publish_out_dir" src/kb/compile/publish.py` — exactly 1 hit. (R1-F9.)
 

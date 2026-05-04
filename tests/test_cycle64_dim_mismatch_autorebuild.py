@@ -156,6 +156,95 @@ def test_dim_mismatch_triggers_rebuild_under_default_env(tmp_path, monkeypatch):
     assert captured_wiki_dirs == [kb_config.WIKI_DIR]
 
 
+def test_auto_rebuild_disabled_when_db_path_is_tmp_suffix(tmp_path, monkeypatch):
+    """AC8 case 4: when ``db_path`` ends in ``.tmp`` (rebuild-in-progress
+    sentinel), the FULL ``query()`` path skips auto-rebuild via ``_derive_wiki_dir``
+    returning ``None`` (T5 mitigation: prevents nested rebuild recursion).
+
+    Per cycle-15 L4 + ``feedback_test_behavior_over_signature``: drives the
+    full ``query()`` call path with dim-mismatch inputs, NOT only the
+    ``_derive_wiki_dir`` helper in isolation. Reverting the ``.tmp``-suffix
+    rejection in ``_derive_wiki_dir`` causes auto-rebuild to fire (spy
+    invocation) — diverges from this test's zero-call assertion.
+    """
+    monkeypatch.delenv("KB_DISABLE_VECTOR_AUTO_REBUILD", raising=False)
+
+    rebuild_call_count = 0
+
+    def _spy_rebuild(wiki_dir, force=False):
+        nonlocal rebuild_call_count
+        rebuild_call_count += 1
+        return False
+
+    monkeypatch.setattr(embeddings_mod, "rebuild_vector_index", _spy_rebuild)
+
+    # `.tmp` suffix is the rebuild-in-progress sentinel; auto-rebuild path
+    # must be skipped here to prevent nested rebuilds (T5).
+    tmp_db = tmp_path / ".data" / "vector_index.db.tmp"
+    idx = _make_dim_mismatch_idx(tmp_db, monkeypatch)
+
+    pre = get_dim_mismatch_auto_rebuild_count()
+    result = idx.query([0.1] * 128)  # 128 != stored 256 → mismatch
+    assert result == []
+    assert rebuild_call_count == 0, (
+        f"auto-rebuild should NOT fire for `.tmp` db_path; got {rebuild_call_count} calls"
+    )
+    assert get_dim_mismatch_auto_rebuild_count() == pre, (
+        "counter incremented despite `.tmp`-suffix skip path"
+    )
+
+
+def test_auto_rebuild_rejects_wiki_dir_outside_project_root(tmp_path, monkeypatch):
+    """AC8 case 5 / R1-F9: when ``_derive_wiki_dir`` resolves to a path
+    outside ``PROJECT_ROOT``, ``_validate_path_under_project_root`` raises
+    ``ValidationError`` and the auto-rebuild branch returns ``[]`` silently
+    (no rebuild attempt, contract preserved per AC6).
+
+    Per cycle-44 L4 DROP-with-test-anchor: M4/T6 path-traversal mitigation
+    promoted to AC contract. Reverting the path-validation call in AC6
+    re-enables symlink/malicious-db-path rebuild → spy fires → test fails.
+    """
+    monkeypatch.delenv("KB_DISABLE_VECTOR_AUTO_REBUILD", raising=False)
+
+    rebuild_call_count = 0
+
+    def _spy_rebuild(wiki_dir, force=False):
+        nonlocal rebuild_call_count
+        rebuild_call_count += 1
+        return False
+
+    monkeypatch.setattr(embeddings_mod, "rebuild_vector_index", _spy_rebuild)
+
+    # Force `_derive_wiki_dir` to return a path outside PROJECT_ROOT (Windows
+    # `C:/Windows/...` or POSIX `/etc/...`) so `_validate_path_under_project_root`
+    # raises ValidationError. The auto-rebuild branch must catch + skip silently.
+    import kb.config as kb_config  # noqa: PLC0415
+
+    outside_dir = Path("C:/") if Path("C:/").exists() else Path("/etc")
+
+    # Build a canonical-shaped db_path so _derive_wiki_dir would otherwise
+    # accept it; then patch _derive_wiki_dir to return the out-of-tree dir.
+    canonical = tmp_path / ".data" / "vector_index.db"
+    idx = _make_dim_mismatch_idx(canonical, monkeypatch)
+    monkeypatch.setattr(idx, "_derive_wiki_dir", lambda: outside_dir)
+
+    # Sanity: outside_dir must NOT be under PROJECT_ROOT.
+    project_root = kb_config.PROJECT_ROOT
+    assert not str(outside_dir.resolve()).startswith(str(project_root.resolve())), (
+        f"test setup error: {outside_dir} is unexpectedly under {project_root}"
+    )
+
+    pre = get_dim_mismatch_auto_rebuild_count()
+    result = idx.query([0.1] * 128)
+    assert result == []
+    assert rebuild_call_count == 0, (
+        f"auto-rebuild should NOT fire for out-of-tree wiki_dir; got {rebuild_call_count} calls"
+    )
+    assert get_dim_mismatch_auto_rebuild_count() == pre, (
+        "counter incremented despite path-validation reject"
+    )
+
+
 def test_concurrent_query_during_rebuild_idempotent(tmp_path, monkeypatch):
     """AC8: N=4 concurrent dim-mismatch queries each call into AC6's branch.
 

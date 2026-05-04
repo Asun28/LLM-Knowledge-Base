@@ -44,12 +44,10 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import networkx as nx
 
 from kb.graph.builder import build_graph
-
-if TYPE_CHECKING:
-    import networkx as nx
 
 # ── Cache state ──
 
@@ -188,13 +186,13 @@ def get_cache_stats() -> dict:
     Threat T7 mitigation: keys are NOT exposed (would leak resolved paths).
     Counters are integer-only.
     """
-    with _CACHE_LOCK:
-        return {
-            "hits": _cache_hits,
-            "misses": _cache_misses,
-            "invalidations": _cache_invalidations,
-            "size": len(_GLOBAL_CACHE),
-        }
+    # Lock-free read per AC9 spec / cycle-25 Q8 precedent — counts approximate.
+    return {
+        "hits": _cache_hits,
+        "misses": _cache_misses,
+        "invalidations": _cache_invalidations,
+        "size": len(_GLOBAL_CACHE),
+    }
 
 
 def _reset_for_tests() -> None:
