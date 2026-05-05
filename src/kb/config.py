@@ -96,11 +96,7 @@ def get_project_root() -> Path:
 
 
 def _reset_project_root() -> None:
-    """Test helper: reset any internal project-root cache.
-
-    Cycle-66 AC3 wired this hook to clear the lru_cache on
-    ``_heuristic_walk_up_cached`` so cwd changes between tests are observed.
-    """
+    """Clear the cwd-walk lru_cache so tests changing cwd observe fresh resolution."""
     _heuristic_walk_up_cached.cache_clear()
 
 
@@ -782,19 +778,15 @@ CALLOUT_MARKERS: tuple[str, ...] = ("contradiction", "gap", "stale", "key-insigh
 # ── PEP 562: Module-level __getattr__ for call-time config accessors ────
 # PEP 562 fires ONLY for attribute names NOT in the module dict.
 #
-# PROJECT_ROOT IS bound at module load (line 107), so attribute access
+# PROJECT_ROOT IS bound at module load, so attribute access
 # (`kb.config.PROJECT_ROOT`) returns the module-dict binding directly —
 # this hook never fires for that name. Tests that
 # `monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)` mutate the
 # module dict; `get_project_root()`'s `globals().get("PROJECT_ROOT")` shim
-# at line 70 picks up the new value at call time (cycle-65 Step-12 fix).
+# picks up the new value at call time.
 #
 # AUGMENT_ALLOWED_DOMAINS is the only live PEP 562 branch — it has NO
-# module-level binding (cycle-65 AC3 created `get_allowed_domains()` as
-# the call-time accessor; no `AUGMENT_ALLOWED_DOMAINS = ...` constant).
-#
-# Cycle-66 AC1 deleted the dead `PROJECT_ROOT` branch from this hook
-# because line 107's binding makes that branch structurally unreachable.
+# module-level binding (`get_allowed_domains()` is the call-time accessor).
 def __getattr__(name: str):
     """Module-level attribute access hook (PEP 562)."""
     if name == "AUGMENT_ALLOWED_DOMAINS":

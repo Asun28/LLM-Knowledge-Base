@@ -10,9 +10,8 @@ Primary usage:
 Design notes:
   - Dual anchor: checks both literal form and resolved form under project root
   - Call-time access to KB_PROJECT_ROOT via get_project_root() for reload-leak safety
-  - Hard cap: 3 keyword-only parameters (Q2.2 cycle-65 lock; cycle-66 AC5
-    dropped `allow_symlinks` because zero callers opted out — symlink rejection
-    is now structurally unconditional)
+  - Hard cap: 3 keyword-only parameters (Q2.2 design lock). Symlinks are always
+    rejected (no opt-out)
   - Raises ValueError with field_name interpolated for traceability
 """
 
