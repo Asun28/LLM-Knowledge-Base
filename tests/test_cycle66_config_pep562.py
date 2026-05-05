@@ -98,3 +98,25 @@ class TestProjectRootGoesThroughModuleBinding:
         """
         with pytest.raises(AttributeError, match=r"has no attribute"):
             _ = kb.config.SOME_UNDEFINED_NAME  # type: ignore[attr-defined]
+
+    def test_dead_branch_absent_when_module_binding_removed(self):
+        """Strengthened AC1 divergent-fail (R1 review fix).
+
+        The earlier tests verify module-binding propagation but do not
+        divergent-fail on AC1 revert because the dead branch is structurally
+        unreachable while line 107 binds `PROJECT_ROOT` in the module dict.
+        This test forces the PEP 562 path to fire by removing the module
+        binding, then asserts attribute access RAISES AttributeError —
+        proving the `if name == "PROJECT_ROOT"` branch is gone.
+
+        After AC1 revert (re-add the `if name == "PROJECT_ROOT": return
+        get_project_root()` branch), this test FAILS RED because the branch
+        returns a Path instead of raising.
+        """
+        original_value = kb.config.PROJECT_ROOT
+        try:
+            delattr(kb.config, "PROJECT_ROOT")
+            with pytest.raises(AttributeError, match=r"has no attribute 'PROJECT_ROOT'"):
+                _ = kb.config.PROJECT_ROOT
+        finally:
+            kb.config.PROJECT_ROOT = original_value

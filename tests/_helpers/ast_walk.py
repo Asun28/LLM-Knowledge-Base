@@ -48,6 +48,14 @@ def find_module_imports(module: str, *, src_root: Path) -> dict[str, list[Path]]
     Detects namespace prefixes: `import module.sub` and `from module.sub import X`
     both count for `module`. Sibling names like `module_other` do NOT match.
 
+    Out of scope: relative imports (`from . import X`, `from .. import X`).
+    These are detected only when `node.module` is non-None, so `from . import
+    diskcache` (which would import a SIBLING module also named `diskcache`)
+    is silently skipped. For the current cycle-66 use case (CVE-banned external
+    modules), relative imports cannot reach the banned third-party packages,
+    so this is intentional. Future use cases that need relative-import
+    coverage should extend the helper with `node.level > 0` handling.
+
     Used by cycle-66 AC4 to consolidate CVE-banned-import regression checks
     across multiple modules. Closes cycle-66 T6: a previous helper detected
     only `ast.ImportFrom`, so a regression to `import diskcache` would have

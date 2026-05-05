@@ -51,19 +51,31 @@ def test_scrub_blocks_argv_with_env_value(key, monkeypatch):
 
 
 def test_scrub_allows_argv_without_env_value(monkeypatch):
-    """T3 negative control: literal env-var NAME in argv must NOT raise unless
-    the env VALUE is also set.
-
-    The substring scrub looks for the env value, not the env name. This
-    confirms the cycle-65 substring-scrub semantics are unchanged — adding the
-    5 net-new keys did not introduce a false-positive on argv that mentions
-    the literal name `GEMINI_API_KEY`.
+    """T3 negative control (env-unset variant): literal env-var NAME in argv
+    must NOT raise when the env VALUE is unset.
     """
     for key in _CANONICAL_SCRUB_KEYS:
         monkeypatch.delenv(key, raising=False)
-    # Mention every canonical key as a literal in argv. Env values are unset,
-    # so the substring scan should not fire for any of them.
     argv = ["kb", "--note", "discussing " + " ".join(_CANONICAL_SCRUB_KEYS)]
+    kb.utils.cli_backend._check_no_secrets_on_argv(argv)
+
+
+def test_scrub_allows_env_name_in_argv_when_value_distinct(monkeypatch):
+    """T3 strengthened negative control (R1 review fix): env value IS set to a
+    distinct sentinel, and argv contains the literal env-var NAME (not value).
+
+    This distinguishes "scrub matches values" from "scrub matches names". A
+    naive implementation that scrubbed by env-var name (rather than env value)
+    would fire RED here even though no secret is being leaked.
+    """
+    for key in _CANONICAL_SCRUB_KEYS:
+        # Set each env to a distinct, easily-recognised sentinel that is NOT
+        # the same string as the env-var name.
+        monkeypatch.setenv(key, f"DISTINCT-VALUE-FOR-{key}-9876")
+    # Argv mentions the env-var NAMES literally (e.g., "GEMINI_API_KEY") but
+    # NOT the values. Production logs / debug output may legitimately contain
+    # env-var names without leaking the actual key value.
+    argv = ["kb", "--note", "discussing keys: " + ", ".join(_CANONICAL_SCRUB_KEYS)]
     kb.utils.cli_backend._check_no_secrets_on_argv(argv)
 
 
