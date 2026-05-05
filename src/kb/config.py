@@ -758,19 +758,23 @@ CALLOUT_MARKERS: tuple[str, ...] = ("contradiction", "gap", "stale", "key-insigh
 
 
 # ── PEP 562: Module-level __getattr__ for call-time config accessors ────
-# Cycle-19 L2 reload-leak hazard mitigation: when production code or tests
-# access kb.config.PROJECT_ROOT (attribute lookup) AFTER the module is
-# imported, the shim fires if the attribute is not in the module dict,
-# returning the fresh call-time value. The initial module-level binding
-# (line 93) is retained for code that imports the constant at module-load
-# time (snapshot binding). Both patterns coexist.
+# PEP 562 fires ONLY for attribute names NOT in the module dict.
 #
-# AC3: extended to also handle AUGMENT_ALLOWED_DOMAINS for back-compat
-# with code that accesses the constant via attribute form.
+# PROJECT_ROOT IS bound at module load (line 107), so attribute access
+# (`kb.config.PROJECT_ROOT`) returns the module-dict binding directly —
+# this hook never fires for that name. Tests that
+# `monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)` mutate the
+# module dict; `get_project_root()`'s `globals().get("PROJECT_ROOT")` shim
+# at line 70 picks up the new value at call time (cycle-65 Step-12 fix).
+#
+# AUGMENT_ALLOWED_DOMAINS is the only live PEP 562 branch — it has NO
+# module-level binding (cycle-65 AC3 created `get_allowed_domains()` as
+# the call-time accessor; no `AUGMENT_ALLOWED_DOMAINS = ...` constant).
+#
+# Cycle-66 AC1 deleted the dead `PROJECT_ROOT` branch from this hook
+# because line 107's binding makes that branch structurally unreachable.
 def __getattr__(name: str):
     """Module-level attribute access hook (PEP 562)."""
-    if name == "PROJECT_ROOT":
-        return get_project_root()
     if name == "AUGMENT_ALLOWED_DOMAINS":
         return get_allowed_domains()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
