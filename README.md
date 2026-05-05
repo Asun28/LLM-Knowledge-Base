@@ -125,7 +125,7 @@ kb --version
 #   pip install -e '.[hybrid]'      # vector search via model2vec + sqlite-vec
 #   pip install -e '.[augment]'     # kb_lint --augment fetcher (httpx + trafilatura)
 #   pip install -e '.[formats]'     # kb_query --format=jupyter (nbformat)
-#   pip install -e '.[eval]'        # ragas / litellm evaluation harness
+#   pip install -e '.[eval]'        # datasets / provider-eval scaffolding
 #   pip install -e '.[dev]'         # pytest + ruff + pytest-httpx + build + twine
 #
 # Use requirements.txt for full reproducibility (frozen transitive pins).
