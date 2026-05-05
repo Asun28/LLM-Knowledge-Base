@@ -58,14 +58,15 @@ def test_pyproject_has_required_extras():
         )
 
 
-def test_pyproject_runtime_deps_include_jsonschema_and_anthropic():
-    """AC39: runtime dependencies include jsonschema (cycle 34 fix) and anthropic (Q1 KEEP)."""
+def test_pyproject_runtime_deps_include_jsonschema_anthropic_and_scipy():
+    """AC39: runtime dependencies include jsonschema, anthropic, and graph stats deps."""
     deps = _load_pyproject()["project"]["dependencies"]
     dep_names = {
         d.split(">")[0].split("=")[0].split("<")[0].split("[")[0].strip().lower() for d in deps
     }
     assert "jsonschema" in dep_names, f"jsonschema missing from runtime deps: {deps}"
     assert "anthropic" in dep_names, f"anthropic must remain required (Q1): {deps}"
+    assert "scipy" in dep_names, f"scipy must remain required for networkx.pagerank: {deps}"
 
 
 def test_pyproject_version_is_0_12_0():
