@@ -58,14 +58,15 @@ def test_pyproject_has_required_extras():
         )
 
 
-def test_pyproject_runtime_deps_include_jsonschema_and_anthropic():
-    """AC39: runtime dependencies include jsonschema (cycle 34 fix) and anthropic (Q1 KEEP)."""
+def test_pyproject_runtime_deps_include_jsonschema_anthropic_and_scipy():
+    """AC39: runtime dependencies include jsonschema, anthropic, and graph stats deps."""
     deps = _load_pyproject()["project"]["dependencies"]
     dep_names = {
         d.split(">")[0].split("=")[0].split("<")[0].split("[")[0].strip().lower() for d in deps
     }
     assert "jsonschema" in dep_names, f"jsonschema missing from runtime deps: {deps}"
     assert "anthropic" in dep_names, f"anthropic must remain required (Q1): {deps}"
+    assert "scipy" in dep_names, f"scipy must remain required for networkx.pagerank: {deps}"
 
 
 def test_pyproject_version_is_0_12_0():
@@ -203,8 +204,8 @@ def test_security_md_has_required_sections():
     # reasonable form
     for header in ("## Vulnerability Reporting", "## Known Advisories", "## Re-check Cadence"):
         assert header in body, f"SECURITY.md missing header: {header!r}"
-    # Each of the 4 narrow-role advisories listed
-    for cve_id in ("CVE-2025-69872", "GHSA-xqmj-j6mv-4862", "CVE-2026-3219", "CVE-2026-6587"):
+    # Each remaining narrow-role advisory is listed.
+    for cve_id in ("CVE-2025-69872", "CVE-2026-3219"):
         assert cve_id in body, f"SECURITY.md must document advisory {cve_id}"
 
 
@@ -220,7 +221,7 @@ def test_ci_workflow_yaml_parses():
     Per NEW-Q16: on: push: branches: [main], pull_request: {} (NT4).
     Per NEW-Q23: concurrency: cancel-in-progress: true (NT5).
     Per AC50: dedicated `pip install build twine pip-audit` step.
-    Per AC14: pip-audit -r requirements.txt with 4 ignore-vuln IDs.
+    Per AC14: pip-audit live-env invocation with documented ignore-vuln IDs.
     Per Step-6 amendment: actions use @v6 (not @v4/@v5).
     """
     workflow_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -269,8 +270,8 @@ def test_ci_workflow_yaml_parses():
     # AC50: dedicated CI tooling install step
     assert "pip install build twine pip-audit" in raw, "AC50 dedicated install step missing"
 
-    # AC14: pip-audit invocation with 4 ignore-vuln flags
-    for cve_id in ("CVE-2025-69872", "GHSA-xqmj-j6mv-4862", "CVE-2026-3219", "CVE-2026-6587"):
+    # AC14: pip-audit invocation with the remaining documented ignore-vuln flags.
+    for cve_id in ("CVE-2025-69872", "CVE-2026-3219"):
         assert cve_id in raw, f"pip-audit must ignore {cve_id} (T4 mitigation)"
 
     # T2 amendment: actions/checkout@v6 + actions/setup-python@v6 (not @v4/@v5)
@@ -311,8 +312,8 @@ def test_pip_audit_invocation_audits_live_env():
         f"pip-audit must audit live env, not requirements.txt (cycle-22 L1 trap); "
         f"audit step: {audit_step!r}"
     )
-    # Must still carry all 4 ignore-vuln flags
-    for cve in ("CVE-2025-69872", "GHSA-xqmj-j6mv-4862", "CVE-2026-3219", "CVE-2026-6587"):
+    # Must still carry all documented ignore-vuln flags.
+    for cve in ("CVE-2025-69872", "CVE-2026-3219"):
         assert cve in audit_step, f"pip-audit step missing {cve} ignore"
 
 
