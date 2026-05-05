@@ -75,23 +75,24 @@ def get_project_root() -> Path:
 
 def _reset_project_root() -> None:
     """Test helper: reset any internal project-root cache.
-    
+
     Currently a no-op since get_project_root() reads env at call time.
     Future implementations may cache - this hook prevents test brittleness.
     """
     pass
 
+
 def get_allowed_domains() -> tuple[str, ...]:
     """Return allowed domains for augment operations, reading env at call time.
-    
+
     Cycle-19 L2 reload-leak hazard: env vars are read at EVERY call, not
     cached at import time. This allows tests and long-lived processes to
     observe env mutations after module import.
-    
+
     Reads KB_AUGMENT_ALLOWED_DOMAINS first (KB_ prefix for namespace hygiene),
     falls back to unprefixed AUGMENT_ALLOWED_DOMAINS for back-compat, then
     defaults to "en.wikipedia.org,arxiv.org".
-    
+
     Returns:
         Tuple of allowed domain names (whitespace-stripped, deduplicated).
     """
@@ -101,7 +102,6 @@ def get_allowed_domains() -> tuple[str, ...]:
         or "en.wikipedia.org,arxiv.org"
     )
     return tuple(d.strip() for d in raw.split(",") if d.strip())
-
 
 
 PROJECT_ROOT = _resolve_project_root()

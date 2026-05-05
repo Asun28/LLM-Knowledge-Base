@@ -2,7 +2,6 @@
 
 import ast
 from pathlib import Path
-from typing import Optional
 
 
 def find_imports_from(module: str, name: str) -> list[Path]:
@@ -41,7 +40,7 @@ def find_imports_from(module: str, name: str) -> list[Path]:
     return matches
 
 
-def find_function_def(file_path: Path, name: str) -> Optional[ast.FunctionDef]:
+def find_function_def(file_path: Path, name: str) -> ast.FunctionDef | None:
     """
     Parse a file and return the FunctionDef node for the given function name.
 

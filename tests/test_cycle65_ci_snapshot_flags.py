@@ -29,9 +29,8 @@ def test_ci_yml_no_snapshot_update():
     except yaml.YAMLError as exc:
         pytest.fail(f"Failed to parse CI YAML: {exc}")
 
-    # Walk all jobs and steps
+    # Walk all jobs and steps — first hit raises pytest.fail()
     jobs = ci_data.get("jobs", {})
-    found_snapshot_update = False
 
     for job_name, job_data in jobs.items():
         steps = job_data.get("steps", [])
@@ -39,7 +38,6 @@ def test_ci_yml_no_snapshot_update():
             if isinstance(step, dict):
                 run_block = step.get("run", "")
                 if run_block and "--snapshot-update" in run_block:
-                    found_snapshot_update = True
                     pytest.fail(
                         f"Job '{job_name}' contains --snapshot-update in run block: {run_block}"
                     )

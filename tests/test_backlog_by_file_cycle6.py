@@ -89,7 +89,6 @@ class TestMcpHealthToolsThreadWikiDir:
     """AC2 — kb_detect_drift / kb_evolve / kb_graph_viz accept ``wiki_dir``."""
 
     def test_kb_detect_drift_passes_wiki_dir(self, tmp_path, monkeypatch):
-        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
@@ -104,15 +103,15 @@ class TestMcpHealthToolsThreadWikiDir:
                 "deleted_affected_pages": [],
             }
 
+        # kb.mcp.app uses call-time get_project_root() (cycle 65); patching
+        # kb.config.PROJECT_ROOT flows through. health still binds it locally.
         monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr("kb.compile.compiler.detect_source_drift", _fake)
         health.kb_detect_drift(wiki_dir=str(tmp_path))
         assert received["wiki_dir"] == tmp_path
 
     def test_kb_evolve_passes_wiki_dir(self, tmp_project, monkeypatch):
-        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
@@ -122,7 +121,9 @@ class TestMcpHealthToolsThreadWikiDir:
             received["wiki_dir"] = wiki_dir
             return {"suggestions": []}
 
-        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
+        # kb.mcp.app uses call-time get_project_root() (cycle 65); the autouse
+        # path-sandbox fixture already redirects kb.config.PROJECT_ROOT to
+        # tmp_path. health still binds PROJECT_ROOT locally.
         monkeypatch.setattr(health, "PROJECT_ROOT", tmp_project)
         monkeypatch.setattr("kb.evolve.analyzer.generate_evolution_report", _fake)
         monkeypatch.setattr("kb.evolve.analyzer.format_evolution_report", lambda r: "report")
@@ -130,7 +131,6 @@ class TestMcpHealthToolsThreadWikiDir:
         assert received["wiki_dir"] == wiki_dir
 
     def test_kb_graph_viz_passes_wiki_dir(self, tmp_path, monkeypatch):
-        from kb.mcp import app as mcp_app
         from kb.mcp import health
 
         received: dict = {}
@@ -139,8 +139,9 @@ class TestMcpHealthToolsThreadWikiDir:
             received["wiki_dir"] = wiki_dir
             return "graph LR\n"
 
+        # kb.mcp.app uses call-time get_project_root() (cycle 65); patching
+        # kb.config.PROJECT_ROOT flows through. health still binds it locally.
         monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(health, "PROJECT_ROOT", tmp_path)
         # Cycle 17 AC6: export_mermaid is imported function-locally inside
         # kb_graph_viz; monkeypatch the owner module.

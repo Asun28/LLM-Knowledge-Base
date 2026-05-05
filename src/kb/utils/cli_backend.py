@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import subprocess
-import secrets
 import threading
 
 import jsonschema
@@ -135,9 +134,6 @@ def _check_no_secrets_on_argv(argv: list[str]) -> None:
     Substring containment catches both the bare-equality and embedded-in-flag
     cases. Timing leak via `in`-search is acceptable in the CLI subprocess
     threat model (no remote attacker observes argv-construction timing).
-
-    The `secrets` import is retained for downstream callers that still want
-    constant-time equality elsewhere; this scrub no longer uses compare_digest.
     """
     from kb.utils.llm import LLMError  # local import avoids circular dep
 

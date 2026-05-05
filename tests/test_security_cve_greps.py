@@ -22,9 +22,7 @@ class TestCVEBannedImports:
                 if import_pattern.match(line):
                     failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
 
-        assert (
-            not failed_files
-        ), f"diskcache imports found:\n" + "\n".join(failed_files)
+        assert not failed_files, "diskcache imports found:\n" + "\n".join(failed_files)
 
     def test_litellm_zero_imports(self):
         """Assert litellm is never imported in src/kb/**/*.py."""
@@ -40,9 +38,7 @@ class TestCVEBannedImports:
                 if import_pattern.match(line):
                     failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
 
-        assert (
-            not failed_files
-        ), f"litellm imports found:\n" + "\n".join(failed_files)
+        assert not failed_files, "litellm imports found:\n" + "\n".join(failed_files)
 
     def test_pip_zero_imports(self):
         """Assert pip is never imported in src/kb/**/*.py."""
@@ -58,9 +54,7 @@ class TestCVEBannedImports:
                 if import_pattern.match(line):
                     failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
 
-        assert (
-            not failed_files
-        ), f"pip imports found:\n" + "\n".join(failed_files)
+        assert not failed_files, "pip imports found:\n" + "\n".join(failed_files)
 
     def test_ragas_zero_imports(self):
         """Assert ragas is never imported in src/kb/**/*.py."""
@@ -76,6 +70,4 @@ class TestCVEBannedImports:
                 if import_pattern.match(line):
                     failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
 
-        assert (
-            not failed_files
-        ), f"ragas imports found:\n" + "\n".join(failed_files)
+        assert not failed_files, "ragas imports found:\n" + "\n".join(failed_files)

@@ -48,15 +48,7 @@ def test_grep_step_present_in_ci_yml():
     assert found_step, "dummy-key-leak-guard step not found in CI"
 
     # Verify the step content contains the required elements
-    assert (
-        "sk-ant-dummy" in step_content
-    ), "step does not search for 'sk-ant-dummy'"
-    assert (
-        "git ls-files" in step_content
-    ), "step does not use 'git ls-files'"
-    assert (
-        "xargs grep" in step_content or "xargs" in step_content
-    ), "step does not use 'xargs grep'"
-    assert (
-        ".github/workflows/ci.yml" in step_content
-    ), "step does not exclude CI file itself"
+    assert "sk-ant-dummy" in step_content, "step does not search for 'sk-ant-dummy'"
+    assert "git ls-files" in step_content, "step does not use 'git ls-files'"
+    assert "xargs grep" in step_content or "xargs" in step_content, "step does not use 'xargs grep'"
+    assert ".github/workflows/ci.yml" in step_content, "step does not exclude CI file itself"

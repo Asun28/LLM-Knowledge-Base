@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import re
 import socket
 from dataclasses import dataclass
@@ -28,7 +29,6 @@ from urllib.robotparser import RobotFileParser
 
 import httpcore
 import httpx
-import os
 
 os.environ.setdefault("TRAFILATURA_DOWNLOAD_NO_CACHE", "1")
 import trafilatura
@@ -232,10 +232,9 @@ def _registered_domain(url: str) -> str | None:
         return None
 
 
-
 def _url_scheme_allowed(url: str) -> bool:
     """Return True if URL uses http or https scheme.
-    
+
     AC12 scheme gate: rejects non-HTTP(S) schemes (file, gopher, data,
     javascript, ftp, etc.) to prevent protocol-specific attacks.
     """

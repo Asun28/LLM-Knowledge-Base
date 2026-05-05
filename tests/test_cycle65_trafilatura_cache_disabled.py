@@ -1,7 +1,6 @@
 """Test that trafilatura download cache is disabled by default (AC15)."""
 
 import os
-import sys
 
 
 def test_no_cache_env_set():
@@ -10,18 +9,18 @@ def test_no_cache_env_set():
     import kb.lint.fetcher  # noqa: F401
 
     # Check that the environment variable is set
-    assert (
-        os.environ["TRAFILATURA_DOWNLOAD_NO_CACHE"] == "1"
-    ), "TRAFILATURA_DOWNLOAD_NO_CACHE env var not set correctly"
+    assert os.environ["TRAFILATURA_DOWNLOAD_NO_CACHE"] == "1", (
+        "TRAFILATURA_DOWNLOAD_NO_CACHE env var not set correctly"
+    )
 
 
 def test_fetch_url_observes_no_cache(monkeypatch):
     """Test that fetcher observes the no-cache environment variable."""
-    import kb.lint.fetcher
-    from unittest.mock import MagicMock
 
-    # Monkeypatch trafilatura to track if it's called
-    original_fetch = kb.lint.fetcher.trafilatura.fetch_url
+    import kb.lint.fetcher
+
+    # Monkeypatch trafilatura to track if it's called (monkeypatch
+    # auto-restores; no need to capture the original).
     call_tracker = {"called": False, "env_value": None}
 
     def spy_fetch_url(*args, **kwargs):

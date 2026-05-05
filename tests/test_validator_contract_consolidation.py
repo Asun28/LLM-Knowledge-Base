@@ -65,6 +65,5 @@ def test_three_historical_sites_present() -> None:
     # wrappers if they ever need the helper) add to the count.
     total = sum(by_file.values())
     assert total >= 1, (
-        f"AC9 total call-site floor not met: expected ≥1, found {total}. "
-        f"Distribution: {by_file}"
+        f"AC9 total call-site floor not met: expected ≥1, found {total}. Distribution: {by_file}"
     )

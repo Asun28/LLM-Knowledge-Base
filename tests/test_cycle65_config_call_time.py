@@ -1,9 +1,6 @@
 """Cycle 65 AC1: Test PROJECT_ROOT call-time accessor (C1)."""
 
-import os
 from pathlib import Path
-
-import pytest
 
 import kb.config
 
@@ -13,7 +10,7 @@ class TestProjectRootCallTime:
 
     def test_get_project_root_call_time_accessor(self, monkeypatch, tmp_path):
         """C1: get_project_root() reads KB_PROJECT_ROOT at call time.
-        
+
         Tests the accessor function directly, which must read env at CALL TIME
         per cycle-19 L2. This guards against the reload-leak hazard where env
         mutations after import are silently ignored.
@@ -38,7 +35,7 @@ class TestProjectRootCallTime:
 
     def test_kb_config_project_root_shim_back_compat(self, monkeypatch, tmp_path):
         """Test that kb.config.PROJECT_ROOT attribute access still works.
-        
+
         The module-level PROJECT_ROOT binding (snapshot at import time) is
         retained for back-compat. Code that does `from kb.config import PROJECT_ROOT`
         gets the import-time snapshot. Code that accesses via attribute lookup

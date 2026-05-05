@@ -8,14 +8,13 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 import kb.config
-from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
+from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, WIKI_DIR
 
 # Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
 # downstream caller that previously imported from `kb.mcp.app`. Ruff autofix
 # (`F401 unused-import`) will silently strip the line if the noqa is missing —
 # class-of-bug per cycle-22 L2 / feedback_ruff_unused_import_monkeypatch.
 from kb.utils.sanitize import _rel, sanitize_error_text  # noqa: F401
-from kb.utils.path_safety import _assert_under_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -285,18 +284,14 @@ def _validate_page_id(
     if _WINDOWS_ILLEGAL_CHARS_RE.search(page_id):
         return (
             f"Invalid page_id: {page_id}. Contains Windows-illegal character "
-            f"(one of : < > \" | ? *)."
+            f'(one of : < > " | ? *).'
         )
 
     # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar").
     if any(seg == ".." for seg in page_id.replace("\\", "/").split("/")):
         return f"Invalid page_id: {page_id}. Contains parent-directory segment ('..')."
-    
-    if (
-        page_id.startswith("/")
-        or page_id.startswith("\\")
-        or os.path.isabs(page_id)
-    ):
+
+    if page_id.startswith("/") or page_id.startswith("\\") or os.path.isabs(page_id):
         return f"Invalid page_id: {page_id}. Must not start with '/'."
     # Cycle 4 item #13 — reject Windows reserved basenames cross-platform.
     if _is_windows_reserved(page_id):

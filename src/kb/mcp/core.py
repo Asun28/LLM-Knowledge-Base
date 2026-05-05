@@ -26,6 +26,7 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
     WIKI_DIR,
 )
+from kb.mcp._error_boundary import _mcp_error_boundary
 from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
@@ -34,7 +35,6 @@ from kb.mcp.app import (
     error_tag,
     mcp,
 )
-from kb.mcp._error_boundary import _mcp_error_boundary
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.sanitize import sanitize_error_text

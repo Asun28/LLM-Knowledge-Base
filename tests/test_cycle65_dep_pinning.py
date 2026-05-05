@@ -18,7 +18,5 @@ def test_gitpython_has_floor_and_ceiling():
     assert gitpython_line is not None, "GitPython not found in requirements.txt"
 
     # Check for both floor and ceiling
-    assert ">=3.1.47" in gitpython_line, (
-        f"Floor version >=3.1.47 not found in: {gitpython_line}"
-    )
+    assert ">=3.1.47" in gitpython_line, f"Floor version >=3.1.47 not found in: {gitpython_line}"
     assert "<3.2" in gitpython_line, f"Ceiling version <3.2 not found in: {gitpython_line}"

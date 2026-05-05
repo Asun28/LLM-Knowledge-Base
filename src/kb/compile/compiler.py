@@ -19,12 +19,12 @@ from kb.errors import ValidationError
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
-from kb.utils.wiki_log import append_wiki_log
 from kb.utils.path_safety import (
     _assert_under_project_root,
     _close_no_follow_fd,
     _open_no_follow,
 )
+from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
 

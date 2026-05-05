@@ -1,6 +1,7 @@
 """AC12 — URL scheme allowlist tests."""
 
 import pytest
+
 from kb.lint.fetcher import _url_is_allowed
 
 
@@ -52,13 +53,13 @@ class TestUrlSchemeAllowlist:
             "socket.gethostbyname",
             lambda host: "127.0.0.1" if host == "rebind-attempt.com" else "1.2.3.4",
         )
-        
+
         # The _url_is_allowed function itself doesn't resolve IPs; that's SafeBackend's job.
         # Here we verify that if the domain allowlist included "rebind-attempt.com",
         # the function would pass it, but SafeBackend would catch it at transport time.
         result = _url_is_allowed("http://rebind-attempt.com/", ("rebind-attempt.com",))
         # _url_is_allowed succeeds (domain is allowed), but SafeBackend would reject
         assert result is True
-        # The actual rebind rejection happens in SafeBackend.connect(), which is 
+        # The actual rebind rejection happens in SafeBackend.connect(), which is
         # tested separately via the integration tests. AC12 provides scheme gating;
         # SafeBackend provides DNS-rebind defense-in-depth.
