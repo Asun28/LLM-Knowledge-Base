@@ -42,16 +42,19 @@ def test_three_historical_sites_present() -> None:
         rel = path.relative_to(Path("src/kb")).as_posix()
         by_file[rel] = by_file.get(rel, 0) + 1
 
-    # Historical site 1+2: mcp/app.py contains both _validate_wiki_dir AND
-    # the _validate_page_id containment migration; expect ≥2 calls.
+    # Historical site 1: mcp/app.py contains _validate_wiki_dir migration.
+    # The original Q2.9 design also listed _validate_page_id containment as a
+    # third site, but Step 12 hard-gate revealed page_id has always been
+    # WIKI_DIR-anchored (not PROJECT_ROOT-anchored), so AC9 reverted that
+    # migration in the Step 12 fix. mcp/app.py now has exactly 1 call.
     app_count = by_file.get("mcp/app.py", 0)
-    assert app_count >= 2, (
-        "AC9 historical sites missing from migration: mcp/app.py expected ≥2 "
-        f"calls (_validate_wiki_dir + _validate_page_id), found {app_count}. "
+    assert app_count >= 1, (
+        "AC9 historical site missing from migration: mcp/app.py expected ≥1 "
+        f"call (_validate_wiki_dir), found {app_count}. "
         f"All call sites: {by_file}"
     )
 
-    # Historical site 3: compile/compiler.py contains the
+    # Historical site 2: compile/compiler.py contains the
     # _validate_path_under_project_root migration; expect ≥1 call.
     compiler_count = by_file.get("compile/compiler.py", 0)
     assert compiler_count >= 1, (
@@ -60,10 +63,10 @@ def test_three_historical_sites_present() -> None:
         f"found {compiler_count}. All call sites: {by_file}"
     )
 
-    # Q2.9 Option B: ADDITIONAL callers are allowed. Total floor is 3 across
-    # the historical sites; new callers can add to the count.
+    # Q2.9 Option B: ADDITIONAL callers are allowed. Total floor is 2 across
+    # the historical PROJECT_ROOT-anchored sites; new callers add to the count.
     total = sum(by_file.values())
-    assert total >= 3, (
-        f"AC9 total call-site floor not met: expected ≥3, found {total}. "
+    assert total >= 2, (
+        f"AC9 total call-site floor not met: expected ≥2, found {total}. "
         f"Distribution: {by_file}"
     )

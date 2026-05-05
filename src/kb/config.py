@@ -46,19 +46,30 @@ def _resolve_project_root() -> Path:
 
 
 def get_project_root() -> Path:
-    """Return the project root path, reading KB_PROJECT_ROOT at call time.
-    
-    Cycle-19 L2 reload-leak hazard: the env var is checked on EVERY call,
-    not cached at import time. This allows tests and long-lived processes
-    to observe env mutations after module import.
-    
-    Falls back to heuristic if env var is not set: pyproject.toml detection
-    in the module's parent.parent.parent, then cwd walk-up, then hard-coded
-    parent-parent-parent of this module.
-    
+    """Return the project root path, reading at call time.
+
+    Resolution order (call-time, not import-time):
+
+    1. ``KB_PROJECT_ROOT`` env var (cycle-19 L2 reload-leak hazard mitigation —
+       env mutations after module import take effect immediately).
+    2. The module-level ``PROJECT_ROOT`` binding if it has been set or
+       monkeypatched after import (cycle-18 L1 + cycle-23 precedent —
+       ``monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)`` is the
+       standard test pattern across the suite).
+    3. ``_resolve_project_root()`` heuristic as final fallback.
+
     Returns:
         The project root as a Path, resolved to absolute form.
     """
+    env_value = os.environ.get("KB_PROJECT_ROOT")
+    if env_value:
+        return Path(env_value).resolve()
+    # Honor the current module-level binding so monkeypatched test PROJECT_ROOT
+    # values flow through. globals() avoids the PEP 562 __getattr__ recursion
+    # that direct attribute access on this module would trigger.
+    current = globals().get("PROJECT_ROOT")
+    if current is not None:
+        return Path(current)
     return _resolve_project_root()
 
 

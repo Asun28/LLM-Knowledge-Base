@@ -55,94 +55,91 @@ def _assert_under_project_root(
         _assert_under_project_root(Path("wiki"), "wiki_dir", require_exists=True)
         _assert_under_project_root(Path("raw/foo.md"), "source_path")
     """
-    path = Path(path)
+    # Preserve Path subclasses (e.g., test-time _ResolvingPath used by cycle-29
+    # dual-anchor divergence tests) — Path(path) on a subclass returns a
+    # vanilla Path, losing the overridden .resolve() and breaking the test.
+    if not isinstance(path, Path):
+        path = Path(path)
     proj_root = kb.config.get_project_root()
     proj_root_resolved = proj_root.resolve()
 
-    # Dual anchor: literal and resolved forms both under project root
-    if dual_anchor:
+    # Dual anchor: literal and resolved forms both under project root.
+    # The literal-anchor check only applies to ABSOLUTE paths — for relative
+    # paths the resolved check below covers literal+resolved equivalence
+    # (Path(".").relative_to(/abs/root) would always fail, but Path(".").resolve()
+    # is the cwd which can legitimately be inside proj_root). The dual-anchor
+    # divergence the design targets is symlink/`..`-bypass on absolute paths.
+    #
+    # Error messages keep the legacy "{field_name} must be inside project root"
+    # wording (no path interpolation) so:
+    #   - existing tests asserting that exact phrase continue to match
+    #   - actual paths are NOT leaked in user-visible error messages (T6 hardening)
+    if dual_anchor and path.is_absolute():
         try:
             path.relative_to(proj_root)
         except ValueError:
-            raise ValueError(
-                f"{field_name} escapes project root (literal form): {path} "
-                f"not under {proj_root}"
-            )
+            raise ValueError(f"{field_name} must be inside project root")
 
-    # Resolved anchor (always checked)
+    # Resolved anchor (always checked).
     try:
         path.resolve().relative_to(proj_root_resolved)
     except ValueError:
-        raise ValueError(
-            f"{field_name} escapes project root (resolved form): {path.resolve()} "
-            f"not under {proj_root_resolved}"
-        )
+        raise ValueError(f"{field_name} must be inside project root")
 
     # Optional existence check
     if require_exists and not path.exists():
-        raise ValueError(f"{field_name} does not exist: {path}")
+        raise ValueError(f"{field_name} does not exist")
 
     # Optional directory check
     if require_dir and not path.is_dir():
-        raise ValueError(f"{field_name} is not a directory: {path}")
+        raise ValueError(f"{field_name} is not a directory")
 
     # Optional symlink rejection
     if not allow_symlinks and path.is_symlink():
-        raise ValueError(f"{field_name} is a symlink (not allowed): {path}")
+        raise ValueError(f"{field_name} is a symlink (not allowed)")
 
 
 def _open_no_follow(path: Path) -> int:
-    """Open a file with symlink-follow prevention (TOCTOU mitigation for AC10).
+    """Reject the path if it is a symlink; otherwise return a sentinel handle.
 
-    Returns the file descriptor (int) which the caller must close.
-    
-    On POSIX: uses os.O_NOFOLLOW flag.
-    On Windows: uses FILE_FLAG_OPEN_REPARSE_POINT via CreateFileW.
-    On unsupported platforms: falls back to re-resolve before mutation (once per process warning).
+    Cycle-65 AC10 TOCTOU mitigation. Behavior depends on platform:
+
+    - **POSIX**: ``os.open(path, O_NOFOLLOW | O_RDONLY)``. This is atomic — if
+      the path is a symlink the open fails with ``OSError(ELOOP)`` and no
+      mutation has occurred. Returns the actual file descriptor; caller must
+      pair with ``_close_no_follow_fd`` to close.
+    - **Windows**: ``path.is_symlink()`` check. NOT atomic (the OS-level
+      ``CreateFileW(FILE_FLAG_OPEN_REPARSE_POINT)`` ctypes path was tried in
+      the cycle-65 initial implementation but had restype/HANDLE-type
+      correctness issues that broke real-file unlinks — see Step 12 hard
+      gate). The non-atomic check still rejects existing symlinks, which
+      is the dominant attack vector in the local-FS threat model. Returns
+      the sentinel ``-1`` (no handle to close on this path).
+    - **Other / unsupported** platforms fall through to a re-resolve +
+      once-per-process ``logger.warning`` (Q2.3 design lock).
 
     Raises:
-        OSError: If the file is a symlink (primary path) or cannot be opened.
+        OSError: If the path is a symlink (POSIX: via O_NOFOLLOW; Windows: via
+            is_symlink) or otherwise cannot be opened.
     """
     global _warned_fallback
-    
+
     if sys.platform == "win32":
-        # Windows: use CreateFileW with FILE_FLAG_OPEN_REPARSE_POINT
-        try:
-            GENERIC_READ = 0x80000000
-            OPEN_EXISTING = 3
-            FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-            
-            handle = ctypes.windll.kernel32.CreateFileW(
-                str(path), GENERIC_READ, 0, None, OPEN_EXISTING,
-                FILE_FLAG_OPEN_REPARSE_POINT, None
-            )
-            if handle == -1:
-                raise OSError(f"Cannot open file: {path}")
-            return handle
-        except (AttributeError, OSError):
-            # Fallback if kernel32 missing or open fails
-            if not _warned_fallback:
-                _LOG.warning(
-                    "AC10: O_NOFOLLOW unsupported on platform %s; "
-                    "falling back to re-resolve TOCTOU mitigation",
-                    sys.platform
-                )
-                _warned_fallback = True
-            # Re-resolve immediately and return a dummy handle
-            path.resolve()
-            return -1  # Dummy handle
+        # Defensive symlink rejection. Not TOCTOU-atomic (race window between
+        # is_symlink and the caller's unlink) but sufficient for the local-FS
+        # threat model and avoids the ctypes HANDLE-typing fragility.
+        if path.is_symlink():
+            raise OSError(f"AC10 reject: path is a symlink ({path})")
+        return -1
     else:
-        # POSIX: use os.O_NOFOLLOW
         try:
-            fd = os.open(str(path), os.O_NOFOLLOW | os.O_RDONLY)
-            return fd
+            return os.open(str(path), os.O_NOFOLLOW | os.O_RDONLY)
         except OSError:
-            # Fallback
             if not _warned_fallback:
                 _LOG.warning(
                     "AC10: O_NOFOLLOW unsupported on platform %s; "
                     "falling back to re-resolve TOCTOU mitigation",
-                    sys.platform
+                    sys.platform,
                 )
                 _warned_fallback = True
             path.resolve()

@@ -258,18 +258,26 @@ def _validate_page_id(
     # Cycle 4 item #13 — length cap before filesystem resolve.
     if len(page_id) > MAX_PAGE_ID_LEN:
         return f"page_id too long ({len(page_id)} chars; max {MAX_PAGE_ID_LEN})."
-    # AC6 — Trailing dot/space rejection: Windows forbidden at segment level
+    # AC6 — Trailing dot/space rejection: Windows forbidden at segment level.
+    # Prefix preserved as "Invalid page_id:" so existing v0.7.0+ test contracts
+    # asserting that prefix continue to match (cycle-2 Q1 negative-assert lesson).
     for seg in page_id.replace("\\", "/").split("/"):
         if seg and seg != ".." and seg != seg.rstrip(". "):
-            return f"page_id segment {seg!r} has trailing dot or space (Windows forbidden)."
-    
-    # AC7 — Windows illegal characters rejection
+            return (
+                f"Invalid page_id: {page_id}. Segment {seg!r} has trailing dot "
+                f"or space (Windows forbidden)."
+            )
+
+    # AC7 — Windows illegal characters rejection.
     if _WINDOWS_ILLEGAL_CHARS_RE.search(page_id):
-        return "page_id contains Windows-illegal character (one of : < > \" | ? *)."
-    
-    # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar")
+        return (
+            f"Invalid page_id: {page_id}. Contains Windows-illegal character "
+            f"(one of : < > \" | ? *)."
+        )
+
+    # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar").
     if any(seg == ".." for seg in page_id.replace("\\", "/").split("/")):
-        return "page_id contains parent-directory segment ('..')."
+        return f"Invalid page_id: {page_id}. Contains parent-directory segment ('..')."
     
     if (
         page_id.startswith("/")
@@ -286,8 +294,15 @@ def _validate_page_id(
         )
     effective_wiki_dir = wiki_dir or WIKI_DIR
     page_path = effective_wiki_dir / f"{page_id}.md"
+    # Containment check anchored against effective_wiki_dir (NOT PROJECT_ROOT).
+    # Cycle-65 Step 09 originally migrated this to _assert_under_project_root,
+    # which broke ~80 tests because they construct WIKI_DIR under tmp_path
+    # (outside the actual project worktree). The page_id contract has always
+    # been WIKI_DIR-anchored — only _validate_wiki_dir / _validate_path_under_project_root
+    # are properly PROJECT_ROOT-anchored. Step 12 hard-gate caught this.
     try:
-        _assert_under_project_root(effective_wiki_dir / page_id, "page_id")
+        candidate = (effective_wiki_dir / page_id).resolve()
+        candidate.relative_to(effective_wiki_dir.resolve())
     except ValueError:
         return f"Invalid page_id: {page_id}. Path escapes wiki directory."
     if check_exists and not page_path.exists():

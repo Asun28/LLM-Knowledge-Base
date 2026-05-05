@@ -30,60 +30,52 @@ def test_symlink_swap_rejected_primary(tmp_path: Path) -> None:
         _open_no_follow(symlink_path)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Q2.3 fallback path is POSIX-only; Windows uses non-atomic is_symlink "
+    "check directly (no warning emitted) per Step 12 fix.",
+)
 def test_symlink_swap_rejected_fallback(monkeypatch, tmp_path: Path, caplog) -> None:
-    """Q2.3 fallback — when O_NOFOLLOW unavailable, re-resolve and warn once."""
-    # Create a real file
+    """Q2.3 fallback — when O_NOFOLLOW unavailable on POSIX, re-resolve and warn once."""
     real_file = tmp_path / "real.txt"
     real_file.write_text("test content")
-    
-    # Simulate O_NOFOLLOW being unavailable
-    if sys.platform == "win32":
-        monkeypatch.setattr(
-            "ctypes.windll.kernel32.CreateFileW",
-            lambda *a, **k: (_ for _ in ()).throw(OSError("simulated failure"))
-        )
-    else:
-        monkeypatch.setattr(
-            "os.open",
-            lambda *a, **k: (_ for _ in ()).throw(OSError("simulated failure"))
-        )
-    
-    # Call _open_no_follow — should use fallback
-    fd = _open_no_follow(real_file)
-    
-    # Check that warning was logged (once per process)
-    assert any("AC10" in record.message for record in caplog.records), \
+
+    monkeypatch.setattr(
+        "os.open",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("simulated failure")),
+    )
+
+    _open_no_follow(real_file)
+
+    assert any("AC10" in record.message for record in caplog.records), (
         "Should log AC10 fallback warning"
+    )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Fallback warning only fires on POSIX path; Windows direct is_symlink check "
+    "has no fallback to warn about.",
+)
 def test_warning_fires_only_once(monkeypatch, tmp_path: Path, caplog) -> None:
-    """Fallback warning should fire once per process, not per call."""
+    """Fallback warning should fire once per process, not per call (POSIX only)."""
     real_file = tmp_path / "real.txt"
     real_file.write_text("test")
-    
-    # Simulate O_NOFOLLOW being unavailable
-    if sys.platform == "win32":
-        monkeypatch.setattr(
-            "ctypes.windll.kernel32.CreateFileW",
-            lambda *a, **k: (_ for _ in ()).throw(OSError("simulated"))
-        )
-    else:
-        monkeypatch.setattr(
-            "os.open",
-            lambda *a, **k: (_ for _ in ()).throw(OSError("simulated"))
-        )
-    
-    # Reset the module-level flag to test
+
+    monkeypatch.setattr(
+        "os.open",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("simulated")),
+    )
+
     import kb.utils.path_safety
+
     kb.utils.path_safety._warned_fallback = False
-    
-    # First call should warn
+
     caplog.clear()
     _open_no_follow(real_file)
     first_warnings = [r for r in caplog.records if "AC10" in r.message]
     assert len(first_warnings) == 1, "First call should produce one warning"
-    
-    # Second call should NOT warn (flag is set)
+
     caplog.clear()
     _open_no_follow(real_file)
     second_warnings = [r for r in caplog.records if "AC10" in r.message]

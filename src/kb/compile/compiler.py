@@ -663,7 +663,15 @@ def _validate_path_under_project_root(path: Path, field_name: str) -> None:
     # is under PROJECT_ROOT. An outer `if hash_manifest is not None` / `if
     # vector_db is not None` guard in `rebuild_indexes` already skips the
     # helper for `None` defaults, so the helper never sees `None` here.
-    _assert_under_project_root(path, field_name, dual_anchor=True)
+    #
+    # Cycle 65 AC9 — body migrated to _assert_under_project_root. The cycle 29
+    # contract was to raise ValidationError (project-specific KBError subclass);
+    # the helper raises plain ValueError, so we rewrap to preserve the contract
+    # for the established 12-test cycle-29 audit suite.
+    try:
+        _assert_under_project_root(path, field_name, dual_anchor=True)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def rebuild_indexes(
