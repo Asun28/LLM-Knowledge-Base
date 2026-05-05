@@ -78,17 +78,41 @@ class TestCheckNoSecretsOnArgv:
         _check_no_secrets_on_argv(argv)
 
     def test_timing_safe_comparison(self, monkeypatch):
-        """Verification that secrets.compare_digest is used (no guarantee needed).
-        
-        This is a structural check — secrets.compare_digest is used internally
-        in _check_no_secrets_on_argv to prevent timing attacks.
+        """Verification that the secret-in-argv check fires for exact match.
+
+        Note: cycle-65 Step 10 simplify pass relaxed the equality check to
+        substring containment; see test_embedded_secret_in_flag_blocked below
+        for the substring case the original equality check missed.
         """
         secret = "sk-test-timing-safe"
         monkeypatch.setenv("FIRECRAWL_API_KEY", secret)
-        
+
         # Test with exact match
         with pytest.raises(LLMError):
             _check_no_secrets_on_argv(["--api-key", secret])
-        
+
         # Test with different value
         _check_no_secrets_on_argv(["--api-key", "sk-different"])
+
+    def test_embedded_secret_in_flag_blocked(self, monkeypatch):
+        """C18 substring leak — secret embedded inside a longer argv element MUST
+        also be blocked, not just bare-equality.
+
+        Cycle-65 Step 09 background review (deepseek-rescue) surfaced this gap:
+        the original secrets.compare_digest equality check would let an argv
+        element like ``Authorization: Bearer <SECRET>`` slip through because no
+        element EQUALS the bare secret. The substring check closes that gap.
+        """
+        secret = "sk-real-secret-9876543210"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+
+        # Embedded inside a longer string — equality check would miss this.
+        argv = ["curl", "-H", f"Authorization: Bearer {secret}", "https://api.example/"]
+
+        with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
+            _check_no_secrets_on_argv(argv)
+
+        # Embedded inside an env-var assignment shape.
+        argv2 = ["python", "-c", f"import os; os.environ['X']='{secret}'"]
+        with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
+            _check_no_secrets_on_argv(argv2)

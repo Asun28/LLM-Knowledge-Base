@@ -123,14 +123,24 @@ def _scrub_env(backend: str) -> dict[str, str]:
 
 def _check_no_secrets_on_argv(argv: list[str]) -> None:
     """Raise LLMError if any actual env secret value appears in argv (T8, AC16).
-    
+
     AC16 value-based scrub: iterate six env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
     FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY).
-    For each non-empty value, check if any argv element equals it via
-    secrets.compare_digest (timing-safe comparison).
+    For each non-empty value, check if any argv element CONTAINS it as a substring.
+
+    Substring vs exact-match: cycle-65 Step 09 background review surfaced that
+    secrets.compare_digest equality alone misses the embedded-secret leak (e.g.,
+    `["kb", "--header", f"Authorization: Bearer {ANTHROPIC_API_KEY}"]` would slip
+    past an equality check because no argv element EQUALS the bare secret).
+    Substring containment catches both the bare-equality and embedded-in-flag
+    cases. Timing leak via `in`-search is acceptable in the CLI subprocess
+    threat model (no remote attacker observes argv-construction timing).
+
+    The `secrets` import is retained for downstream callers that still want
+    constant-time equality elsewhere; this scrub no longer uses compare_digest.
     """
     from kb.utils.llm import LLMError  # local import avoids circular dep
-    
+
     env_keys = [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
@@ -139,14 +149,14 @@ def _check_no_secrets_on_argv(argv: list[str]) -> None:
         "MIMOCODING_API_KEY",
         "MIMOCHAT_API_KEY",
     ]
-    
+
     for key in env_keys:
         secret_value = os.environ.get(key, "")
         if not secret_value:
             continue
-        
+
         for elem in argv:
-            if secrets.compare_digest(elem, secret_value):
+            if secret_value in elem:
                 raise LLMError(
                     f"Refusing to place env secret {key!r} on subprocess argv (T8, AC16).",
                     kind="invalid_request",
