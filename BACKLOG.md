@@ -24,29 +24,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 ---
 
-## Cycle 66 candidates (2026-05-04, surfaced by cycle-65 reviews)
-
-### MEDIUM
-
-- `src/kb/config.py::get_project_root` PEP 562 dead-`PROJECT_ROOT`-branch — module-level `PROJECT_ROOT = _resolve_project_root()` (line 96) shadows the `__getattr__("PROJECT_ROOT")` branch (PEP 562 only fires for missing names). The cycle-19 L2 reload-leak hazard is therefore NOT closed for `kb.config.PROJECT_ROOT` attribute access — Step-12 fix worked around this by making `get_project_root()` honor `globals().get("PROJECT_ROOT")` so monkeypatched values flow through, but the shim branch itself remains misleading. (cycle-65 Step-10 simplify quality finding H1)
-  (fix: either delete the module-level binding (breaks 200+ `from kb.config import PROJECT_ROOT` snapshot callers — needs migration) OR replace the binding with a `LazyPathProxy` that re-reads on every attribute access OR delete the dead `__getattr__` branch + document the limitation explicitly.)
-
-- `src/kb/utils/cli_backend.py::_check_no_secrets_on_argv` env-key list expansion — current implementation hardcodes 6 env-var names (ANTHROPIC_API_KEY, OPENAI_API_KEY, FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY). `kb.config.CLI_BACKEND_ENV_INJECT` is the canonical source-of-truth and includes additional keys for Gemini/Kimi/Qwen/Zai/ZhipuAI backends. Using the local list silently misses scrub for those backends — argv leak risk for the un-listed keys. (cycle-65 Step-10 simplify reuse finding H1)
-  (fix: replace local list with `set().union(*CLI_BACKEND_ENV_INJECT.values()) | {"ANTHROPIC_API_KEY", "FIRECRAWL_API_KEY", "MIMOCODING_API_KEY", "MIMOCHAT_API_KEY"}`; add per-backend test cases for the newly-covered keys.)
-
-- `src/kb/config.py::get_project_root` per-call cost — every call re-runs the heuristic walk-up (env-read → optional `Path.resolve()` + `is_dir()` → `pyproject.toml` exists → potential `Path.cwd().resolve()` + 5-level walk-up). On the MCP boundary path (`_validate_page_id` → `_assert_under_project_root` → `get_project_root`) this adds up to ~6 filesystem syscalls per MCP tool call when no env is set. Docstring acknowledges as future. (cycle-65 Step-10 simplify efficiency finding H1)
-  (fix: cache resolution keyed on `(env_value, cwd)` with explicit invalidation via `_reset_project_root()` (already a no-op stub at config.py:65). Test-time monkeypatch should clear the cache.)
-
-### LOW
-
-- `tests/test_security_cve_greps.py` 4-walk efficiency — 4 separate test methods each rglob `src/kb/**/*.py` and read every file. With ~150+ files that's ~600 file reads when one walk could check all 4 patterns. (cycle-65 Step-10 simplify efficiency finding M)
-  (fix: replace 4 methods with one parametrized test that does a single `rglob` + asserts each pattern in turn. Alternative: use `find_imports_from` AST helper for correctness AND speed.)
-
-- `src/kb/utils/path_safety.py::_assert_under_project_root` `allow_symlinks` kwarg removal — always defaults to False, never overridden by any of the 3 callers. Q2.2 hard cap of 4 kwargs would relax to 3 if removed, freeing namespace for a future param. (cycle-65 Step-10 simplify quality finding H4)
-  (fix: drop `allow_symlinks` parameter entirely; symlink rejection becomes unconditional. Update existing tests that pass `allow_symlinks=False` explicitly.)
-
----
-
 ## Phase 6 R2 — Wider mimo-v2.5-pro audit (2026-05-04)
 
 <!-- 6 parallel mimo-v2.5-pro CLI calls (arch / tests / docs / security-wide / env / deps).

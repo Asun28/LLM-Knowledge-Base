@@ -10,7 +10,8 @@ Primary usage:
 Design notes:
   - Dual anchor: checks both literal form and resolved form under project root
   - Call-time access to KB_PROJECT_ROOT via get_project_root() for reload-leak safety
-  - Hard cap: 4 keyword-only parameters (Q2.2 design lock)
+  - Hard cap: 3 keyword-only parameters (Q2.2 design lock). Symlinks are always
+    rejected (no opt-out)
   - Raises ValueError with field_name interpolated for traceability
 """
 
@@ -34,7 +35,6 @@ def _assert_under_project_root(
     require_exists: bool = False,
     require_dir: bool = False,
     dual_anchor: bool = True,
-    allow_symlinks: bool = False,
 ) -> None:
     """Assert that a path is contained within the project root.
 
@@ -47,7 +47,6 @@ def _assert_under_project_root(
         require_exists: If True, raise if the path does not exist.
         require_dir: If True, raise if the path is not a directory.
         dual_anchor: If True (default), check both literal and resolved forms.
-        allow_symlinks: If False (default), raise if the path is a symlink.
 
     Raises:
         ValueError: If any check fails. Error message includes field_name.
@@ -95,8 +94,9 @@ def _assert_under_project_root(
     if require_dir and not path.is_dir():
         raise ValueError(f"{field_name} is not a directory")
 
-    # Optional symlink rejection
-    if not allow_symlinks and path.is_symlink():
+    # Symlink rejection (cycle-66 AC5: structurally unconditional after
+    # `allow_symlinks` kwarg removal — zero callers ever opted out).
+    if path.is_symlink():
         raise ValueError(f"{field_name} is a symlink (not allowed)")
 
 

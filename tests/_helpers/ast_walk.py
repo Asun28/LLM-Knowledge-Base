@@ -40,6 +40,69 @@ def find_imports_from(module: str, name: str) -> list[Path]:
     return matches
 
 
+def find_module_imports(module: str, *, src_root: Path) -> dict[str, list[Path]]:
+    """
+    Scan src_root/**/*.py and return files importing `module` via either
+    `import module` (bare form) or `from module import ...` (from form).
+
+    Detects namespace prefixes: `import module.sub` and `from module.sub import X`
+    both count for `module`. Sibling names like `module_other` do NOT match.
+
+    Out of scope: relative imports (`from . import X`, `from .. import X`).
+    These are detected only when `node.module` is non-None, so `from . import
+    diskcache` (which would import a SIBLING module also named `diskcache`)
+    is silently skipped. For the current cycle-66 use case (CVE-banned external
+    modules), relative imports cannot reach the banned third-party packages,
+    so this is intentional. Future use cases that need relative-import
+    coverage should extend the helper with `node.level > 0` handling.
+
+    Used by cycle-66 AC4 to consolidate CVE-banned-import regression checks
+    across multiple modules. Closes cycle-66 T6: a previous helper detected
+    only `ast.ImportFrom`, so a regression to `import diskcache` would have
+    silently passed.
+
+    Args:
+        module: Module name (e.g., "diskcache")
+        src_root: Root directory to scan recursively for *.py files
+
+    Returns:
+        dict with keys "import" and "from"; each maps to a list of Path
+        objects where that import form appeared. A file containing both
+        forms appears in both lists.
+    """
+    result: dict[str, list[Path]] = {"import": [], "from": []}
+
+    if not src_root.exists():
+        return result
+
+    for py_file in src_root.rglob("*.py"):
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+
+        seen_bare = False
+        seen_from = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == module or alias.name.startswith(f"{module}."):
+                        seen_bare = True
+                        break
+            elif isinstance(node, ast.ImportFrom):
+                if node.module is not None and (
+                    node.module == module or node.module.startswith(f"{module}.")
+                ):
+                    seen_from = True
+
+        if seen_bare:
+            result["import"].append(py_file)
+        if seen_from:
+            result["from"].append(py_file)
+
+    return result
+
+
 def find_function_def(file_path: Path, name: str) -> ast.FunctionDef | None:
     """
     Parse a file and return the FunctionDef node for the given function name.

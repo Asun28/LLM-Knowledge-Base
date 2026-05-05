@@ -1,4 +1,10 @@
 # Ingestion Commands
+<!-- FORMAT GUIDE
+Purpose: Shell commands for converting web pages, PDFs, and videos into markdown for raw/.
+- Add a new command block when a new source type or conversion tool is adopted.
+- Update an existing block when a flag or tool invocation changes.
+- Keep each block as a commented bash snippet with a one-line description above it.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Ingestion Commands" section. Pairs with [mcp-servers.md](mcp-servers.md) (`kb_ingest` MCP tool).
 

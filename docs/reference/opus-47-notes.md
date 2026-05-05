@@ -1,4 +1,10 @@
 # Opus 4.7 Behaviour Notes & Extraction Templates
+<!-- FORMAT GUIDE
+Purpose: Model-specific behaviour notes and reusable extraction prompt templates.
+- Behaviour Notes section: add a bullet when a new Opus 4.7 quirk is discovered affecting prompt structure.
+- Extraction Templates section: add a new template block when a new source type requires a distinct extraction pattern.
+- Do NOT document general prompting theory here — only Opus 4.7-specific observations confirmed by this project's use.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the Opus 4.7 behaviour notes and extraction templates referenced from the "Model Tiering" section.
 

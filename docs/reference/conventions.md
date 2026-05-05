@@ -1,4 +1,10 @@
 # Conventions
+<!-- FORMAT GUIDE
+Purpose: Canonical rules for wiki authorship, Evidence Trail, and Architecture Diagram Sync.
+- Base Conventions: add a bullet only for a new cross-cutting rule affecting all wiki pages.
+- Evidence Trail: document only behavioral invariants a caller must not violate (not API signatures).
+- Architecture Diagram Sync: update the Playwright snippet if render parameters change (viewport, scale, format).
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Conventions" section. Pairs with [architecture.md](architecture.md) (Evidence Trail API).
 

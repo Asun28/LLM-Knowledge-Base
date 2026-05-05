@@ -1,4 +1,13 @@
 # Security Policy
+<!-- FORMAT GUIDE
+Purpose: CVE acceptance policy + disclosure path. Keep this file concise.
+- Known Advisories table: add ONE ROW per accepted advisory. Required columns: Package | Version | Advisory | Fix? | Narrow role | Verification grep.
+  - "Narrow role" must describe why the vulnerable code path is not reachable from src/kb/ runtime.
+  - "Verification grep" must be a runnable command returning zero hits in src/kb/.
+  - New rows require: (a) verification grep, (b) sign-off from maintainer, (c) --ignore-vuln= entry in ci.yml pip-audit step.
+- Resolved advisories: add a brief prose note below the table; delete the table row.
+- Update "Last reviewed:" date each cycle when CVEs are re-checked.
+-->
 
 ## Vulnerability Reporting
 

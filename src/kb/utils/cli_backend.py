@@ -34,6 +34,15 @@ MAX_CLI_JSON_SCAN_BYTES: int = 65_536
 # Model name placeholder — only [A-Za-z0-9._:/-] chars are legal (T1).
 _MODEL_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._:/-]*$")
 
+# Derived from CLI_BACKEND_ENV_INJECT plus 4 standalone keys (Anthropic /
+# Firecrawl / MiMo wrappers don't go through the backend registry). Safe to
+# capture at import: CLI_BACKEND_ENV_INJECT is a module-literal dict with no
+# os.environ read in its definition (cycle-19 L2 IR-1).
+_SCRUB_KEYS: frozenset[str] = frozenset(
+    {"ANTHROPIC_API_KEY", "FIRECRAWL_API_KEY", "MIMOCODING_API_KEY", "MIMOCHAT_API_KEY"}
+    | {key for keys in CLI_BACKEND_ENV_INJECT.values() for key in keys}
+)
+
 # ── Semaphore pool (T6) ───────────────────────────────────────────────────────
 _semaphore_lock = threading.Lock()
 _backend_semaphores: dict[str, threading.Semaphore] = {}
@@ -123,9 +132,7 @@ def _scrub_env(backend: str) -> dict[str, str]:
 def _check_no_secrets_on_argv(argv: list[str]) -> None:
     """Raise LLMError if any actual env secret value appears in argv (T8, AC16).
 
-    AC16 value-based scrub: iterate six env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY).
-    For each non-empty value, check if any argv element CONTAINS it as a substring.
+    Scrub keys come from ``_SCRUB_KEYS`` (module top).
 
     Substring vs exact-match: cycle-65 Step 09 background review surfaced that
     secrets.compare_digest equality alone misses the embedded-secret leak (e.g.,
@@ -137,16 +144,7 @@ def _check_no_secrets_on_argv(argv: list[str]) -> None:
     """
     from kb.utils.llm import LLMError  # local import avoids circular dep
 
-    env_keys = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "FIRECRAWL_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MIMOCODING_API_KEY",
-        "MIMOCHAT_API_KEY",
-    ]
-
-    for key in env_keys:
+    for key in _SCRUB_KEYS:
         secret_value = os.environ.get(key, "")
         if not secret_value:
             continue

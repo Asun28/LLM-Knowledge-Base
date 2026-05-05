@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Reference
 
-- **State:** v0.12.0 · 3134 passed + 21 skipped tests / ~213 files (Windows local; ubuntu-latest CI strict-gated since cycle 36; windows-latest CI matrix deferred to cycle-53+ per cycle-36 L1 CI-cost discipline + cycle-39..65 carry-over). Counts at cycle-65 branch HEAD post-Step-12 fix-cascade (~95 new tests across 12 new test files: `tests/_helpers/test_ast_walk.py`, `tests/test_security_cve_greps.py`, 10 × `tests/test_cycle65_*.py`). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
+- **State:** v0.12.0 · 3173 passed + 23 skipped tests / ~218 files (Windows local; ubuntu-latest CI strict-gated since cycle 36; windows-latest CI matrix deferred to cycle-53+ per cycle-36 L1 CI-cost discipline + cycle-39..66 carry-over). Counts at cycle-66 branch HEAD post-Step-10 simplify (~39 new tests across 5 new test files: `tests/test_cycle66_{config_pep562,path_safety_symlink,project_root_cache,secret_scrub,cve_greps_consolidated}.py`, plus 8 helper tests appended to `tests/_helpers/test_ast_walk.py` and `find_module_imports` added to `tests/_helpers/ast_walk.py`). Shipped → `CHANGELOG.md` (index) + `CHANGELOG-history.md` (per-cycle detail). Open → `BACKLOG.md`.
 - **Always `.venv`** — activate before `pytest`, `kb`, `pip`. Never global Python.
 - **Test fixtures** — under cycle 64 AC1, an autouse `_autouse_kb_path_sandbox` fixture redirects `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` to per-test `tmp_path` for EVERY test by default. Tests that genuinely need the real repo paths request `real_project_root` and run pytest with `--use-real-paths`. Explicit `tmp_kb_env` (alias `kb_sandbox`) keeps the cycle-12+ patch+mkdir contract for the 230+ existing call sites. Never write real `wiki/` or `raw/`. `tmp_kb_env` already redirects `HASH_MANIFEST` — don't also monkeypatch it.
 - **Graph cache** (cycle 64 AC9) — `kb.graph.cache.get_graph(wiki_dir, *, pages=None)` is the canonical entry for lint-pass graph lookup. Pages-supplying callers BYPASS the cache. Mutators (`ingest_source`, `refine_page`, `compile_wiki`) call `invalidate(wiki_dir)` post-success. Use attribute-lookup form (`kb.graph.cache.get_graph(...)`) per cycle-18 L1 to avoid snapshot-binding hazards.
@@ -25,7 +25,7 @@ Detail moved out of this file lives in [`docs/reference/`](docs/reference/README
 |---|---|
 | Architecture — 3-layer content, 5-ops cycle, Python package APIs, wiki index files | [docs/reference/architecture.md](docs/reference/architecture.md) |
 | Module map — per-module breakdown of `src/kb/` | [docs/reference/module-map.md](docs/reference/module-map.md) |
-| Implementation status — latest-cycle notes (32 / 33 / 34) | [docs/reference/implementation-status.md](docs/reference/implementation-status.md) |
+| Implementation status — compact cycle history index (cycle 65) | [docs/reference/implementation-status.md](docs/reference/implementation-status.md) |
 | Testing — pytest layout + fixture rules | [docs/reference/testing.md](docs/reference/testing.md) |
 | Error handling conventions | [docs/reference/error-handling.md](docs/reference/error-handling.md) |
 | Phase 2 workflows — Standard / Thorough Ingest, Deep Lint, Query | [docs/reference/workflows.md](docs/reference/workflows.md) |
@@ -140,7 +140,7 @@ confidence: stated | inferred | speculative
 - **Shipped:** see `CHANGELOG.md` (brief compact index, newest first — compact Items / Tests / Scope / Detail per cycle) and `CHANGELOG-history.md` (full per-cycle bullet-level archive). Format: [Keep a Changelog](https://keepachangelog.com/).
 - **Open work:** see `BACKLOG.md` — severity levels CRITICAL → LOW, grouped by file. Resolved items are deleted (brief entry in `CHANGELOG.md`, detail in `CHANGELOG-history.md`); resolved phases collapse to a one-liner under "Resolved Phases".
 - **Roadmap (Phase 5 deferred + Phase 6 cut):** see `BACKLOG.md` §"Phase 5 — Community followup proposals" and §"Phase 6 candidates". Includes the 2026-04-13 Karpathy-gist re-evaluation ("RECOMMENDED NEXT SPRINT") and all deferred features (inline claim tags, URL-aware ingest, semantic chunking, typed graph relations, autonomous research loop, etc.).
-- **Latest-cycle notes (32 / 33 / 34):** see [docs/reference/implementation-status.md](docs/reference/implementation-status.md).
+- **Latest-cycle notes:** see [docs/reference/implementation-status.md](docs/reference/implementation-status.md).
 
 ## Automation
 
