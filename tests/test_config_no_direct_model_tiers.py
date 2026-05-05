@@ -1,9 +1,6 @@
 """Cycle 65 AC2: Test no direct imports of MODEL_TIERS outside config.py (C3)."""
 
-import sys
 from pathlib import Path
-
-import pytest
 
 from tests._helpers.ast_walk import find_imports_from
 
@@ -28,7 +25,8 @@ class TestNoDirectModelTiersImports:
 
         matches = find_imports_from(module="kb.config", name="MODEL_TIERS")
         filtered = [
-            m for m in matches
+            m
+            for m in matches
             if not any(m.as_posix().endswith(excl) for excl in excluded_files)
             and "src/kb/config.py" not in str(m)
         ]
@@ -42,6 +40,7 @@ class TestNoDirectModelTiersImports:
         """Verify no MODEL_TIERS[...] bracket access outside config.py."""
         # This is a more basic test that grep can catch
         import subprocess
+
         result = subprocess.run(
             ["grep", "-r", r"MODEL_TIERS\[", "src/kb/", "--include=*.py"],
             cwd=Path(__file__).parent.parent,
@@ -49,7 +48,9 @@ class TestNoDirectModelTiersImports:
             text=True,
         )
         # Only src/kb/config.py should have bracket access (in the accessor body)
-        lines = [l for l in result.stdout.strip().split('\n') if l and 'config.py' not in l]
+        lines = [
+            line for line in result.stdout.strip().split("\n") if line and "config.py" not in line
+        ]
         assert not lines, (
             f"Found MODEL_TIERS[...] bracket access outside config.py:\n{result.stdout}; "
             "must use get_model_tier() accessor"

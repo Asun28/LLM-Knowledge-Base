@@ -15,16 +15,16 @@ def test_symlink_swap_rejected_primary(tmp_path: Path) -> None:
     # Create a real file
     real_file = tmp_path / "real.txt"
     real_file.write_text("test content")
-    
+
     # Successfully open the real file
     fd = _open_no_follow(real_file)
     assert fd > 0, "Should successfully open a real file"
     os.close(fd)
-    
+
     # Now create a symlink and verify it's rejected
     symlink_path = tmp_path / "link.txt"
     symlink_path.symlink_to(real_file)
-    
+
     # Attempt to open the symlink should raise OSError
     with pytest.raises(OSError):
         _open_no_follow(symlink_path)

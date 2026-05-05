@@ -11,8 +11,8 @@ class TestAC6TrailingDotSpace:
     @pytest.mark.parametrize(
         "invalid_page_id",
         [
-            "foo.",           # trailing dot
-            "foo ",           # trailing space
+            "foo.",  # trailing dot
+            "foo ",  # trailing space
             "path/foo./bar",  # trailing dot in middle segment
             "path/foo /bar",  # trailing space in middle segment
         ],
@@ -30,13 +30,13 @@ class TestAC7WindowsIllegalChars:
     @pytest.mark.parametrize(
         "invalid_page_id",
         [
-            "foo:bar",      # colon
-            "foo<bar",      # less-than
-            "foo>bar",      # greater-than
-            'foo"bar',      # quote
-            "foo|bar",      # pipe
-            "foo?bar",      # question mark
-            "foo*bar",      # asterisk
+            "foo:bar",  # colon
+            "foo<bar",  # less-than
+            "foo>bar",  # greater-than
+            'foo"bar',  # quote
+            "foo|bar",  # pipe
+            "foo?bar",  # question mark
+            "foo*bar",  # asterisk
         ],
     )
     def test_ac7_rejects_windows_illegal_chars(self, invalid_page_id: str) -> None:
@@ -56,8 +56,9 @@ class TestAC8SegmentAwareDotDot:
         # Either None (valid) or a different error (e.g., path-escapes if we try to resolve)
         # For our test, we just verify it doesn't reject due to segment ".." check
         if result is not None:
-            assert "parent-directory" not in result.lower(), \
+            assert "parent-directory" not in result.lower(), (
                 f"Should not reject literal 'notes..draft' as parent-directory: {result}"
+            )
 
     def test_ac8_segment_dotdot_rejected(self) -> None:
         """AC8 — page_id 'foo/../bar' (segment-level ..) should be REJECTED."""

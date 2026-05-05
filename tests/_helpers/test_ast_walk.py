@@ -1,7 +1,6 @@
 """Unit tests for AST walking helpers."""
 
 import ast
-from pathlib import Path
 
 import pytest
 
@@ -9,7 +8,6 @@ from tests._helpers.ast_walk import (
     assert_decorator_present,
     find_calls_of,
     find_function_def,
-    find_imports_from,
 )
 
 
@@ -24,14 +22,9 @@ class TestFindImportsFrom:
         test_file = src_dir / "test_module.py"
         test_file.write_text("from kb.config import PROJECT_ROOT\n")
 
-        # Temporarily patch the search path
-        original_cwd = Path.cwd()
-        try:
-            # The helper looks in src/kb relative to cwd
-            # For this test we'll just verify the logic works
-            pass
-        finally:
-            pass
+        # The helper looks in src/kb relative to cwd; this stub test only
+        # verifies the import/setup path resolves. Real coverage lives in
+        # tests/test_graph_cache_no_direct_imports.py against the live tree.
 
     def test_find_imports_from_missing_symbol(self, tmp_path):
         """Test when the symbol is not imported."""
@@ -76,10 +69,7 @@ class TestFindImportsFrom:
     def test_find_calls_of_name_form(self, tmp_path):
         """Test finding Name(id=...) form calls."""
         test_file = tmp_path / "test_calls.py"
-        test_file.write_text(
-            "def test():\n"
-            "    _assert_under_project_root(path, 'field')\n"
-        )
+        test_file.write_text("def test():\n    _assert_under_project_root(path, 'field')\n")
 
         results = find_calls_of([test_file], "_assert_under_project_root")
         assert len(results) == 1
@@ -89,10 +79,7 @@ class TestFindImportsFrom:
     def test_find_calls_of_attribute_form(self, tmp_path):
         """Test finding Attribute(attr=...) form calls."""
         test_file = tmp_path / "test_calls.py"
-        test_file.write_text(
-            "def test():\n"
-            "    module._assert_under_project_root(path, 'field')\n"
-        )
+        test_file.write_text("def test():\n    module._assert_under_project_root(path, 'field')\n")
 
         results = find_calls_of([test_file], "_assert_under_project_root")
         assert len(results) == 1

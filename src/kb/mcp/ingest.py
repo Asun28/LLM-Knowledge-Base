@@ -15,13 +15,13 @@ from kb.config import (
     RAW_DIR,
     SOURCE_TYPE_DIRS,
 )
+from kb.mcp._error_boundary import _mcp_error_boundary
 from kb.mcp.app import _format_ingest_result, _is_windows_reserved, _rel, mcp
 from kb.utils.io import atomic_text_write
 from kb.utils.sanitize import sanitize_error_text
 from kb.utils.text import slugify, yaml_escape
 
 logger = logging.getLogger(__name__)
-from kb.mcp._error_boundary import _mcp_error_boundary
 
 # MCP-only whitelist — kept local so ingest tools do not import the heavy
 # ingest pipeline merely to validate source extensions.

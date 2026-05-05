@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#development)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet)](#claude-code-integration-mcp-server)
-[![Version](https://img.shields.io/badge/version-v0.11.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.12.0-orange)](CHANGELOG.md)
 
 Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 28 MCP tools — **no API key required**. Also runs on any local AI CLI tool (Ollama, Gemini CLI, OpenCode, Codex CLI, and more) via `KB_LLM_BACKEND`.
 

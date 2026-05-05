@@ -16,10 +16,10 @@ runner = CliRunner()
 
 
 def test_cli_version():
-    """CLI --version prints version (cycle 34 bumped 0.10.0 → 0.11.0)."""
+    """CLI --version prints version (cycle 65 bumped 0.11.0 → 0.12.0)."""
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "0.11.0" in result.output
+    assert "0.12.0" in result.output
 
 
 def test_cli_help():

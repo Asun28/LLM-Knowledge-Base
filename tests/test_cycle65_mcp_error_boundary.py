@@ -6,8 +6,6 @@ functions are caught, logged, and returned as sanitized error strings.
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestMCPErrorBoundarySanitization:
     """Tests for _mcp_error_boundary decorator functionality."""
@@ -101,8 +99,9 @@ class TestMCPErrorBoundarySanitization:
 
         C17 — verify _mcp_error_boundary is applied below @mcp.tool().
         """
-        from kb.mcp import core
         import inspect
+
+        from kb.mcp import core
 
         # Get the source of kb_query to verify decorator is present
         source = inspect.getsource(core.kb_query)
@@ -130,7 +129,6 @@ class TestMCPErrorBoundarySanitization:
 
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
-                    decorator_names = []
                     for dec in node.decorator_list:
                         if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
                             if dec.func.attr == "tool":
@@ -140,9 +138,10 @@ class TestMCPErrorBoundarySanitization:
                                 boundary_count += 1
 
             # Every module should have matching counts
-            assert (
-                mcp_tool_count == boundary_count
-            ), f"{module_path}: {mcp_tool_count} @mcp.tool() but {boundary_count} @_mcp_error_boundary"
+            assert mcp_tool_count == boundary_count, (
+                f"{module_path}: {mcp_tool_count} @mcp.tool() but "
+                f"{boundary_count} @_mcp_error_boundary"
+            )
 
     def test_error_with_windows_path(self):
         """Test that Windows paths are sanitized.
@@ -185,7 +184,7 @@ class TestMCPErrorBoundarySanitization:
 
             @_mcp_error_boundary
             def tool_raises():
-                if exc_class == KeyError:
+                if exc_class is KeyError:
                     raise exc_class("secret")
                 else:
                     raise exc_class("error at /root/path")

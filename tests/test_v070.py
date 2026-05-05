@@ -806,16 +806,17 @@ class TestCliSourceTypeList:
 
 
 class TestVersionBump:
-    """Version must be bumped to current minor (cycle 34: 0.11.0)."""
+    """Version must be bumped to current minor (cycle 65: 0.12.0)."""
 
     def test_version_is_0_9_16(self):
         # Test name preserves historical context (originally validated 0.9.16);
-        # cycle 34 bumped to 0.11.0 per NEW-Q11. The cycle-34 regression
-        # test_pyproject_version_is_0_11_0 + test_kb_init_version_matches_pyproject
-        # provide the new cross-file lockstep guard.
+        # cycle 34 bumped to 0.11.0; cycle 65 bumped to 0.12.0. The cycle-34
+        # regression test_pyproject_version_is_0_12_0 +
+        # test_kb_init_version_matches_pyproject provide the cross-file
+        # lockstep guard.
         from kb import __version__
 
-        assert __version__ == "0.11.0"
+        assert __version__ == "0.12.0"
 
 
 # ── Cycle 17 AC4-AC7 — MCP cold-boot lazy imports (cycle 57 fold) ───────────

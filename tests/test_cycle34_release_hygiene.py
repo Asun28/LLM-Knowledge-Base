@@ -68,10 +68,10 @@ def test_pyproject_runtime_deps_include_jsonschema_and_anthropic():
     assert "anthropic" in dep_names, f"anthropic must remain required (Q1): {deps}"
 
 
-def test_pyproject_version_is_0_11_0():
-    """AC52: cycle-34 minor bump 0.10.0 → 0.11.0 (NEW-Q11 / AC4a)."""
+def test_pyproject_version_is_0_12_0():
+    """AC52 (cycle-65 update): cycle-65 minor bump 0.11.0 → 0.12.0."""
     version = _load_pyproject()["project"]["version"]
-    assert version == "0.11.0", f"expected 0.11.0, got {version!r}"
+    assert version == "0.12.0", f"expected 0.12.0, got {version!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ def test_kb_init_version_matches_pyproject():
     """
     import kb
 
-    assert kb.__version__ == "0.11.0", f"kb.__version__ is {kb.__version__!r}, expected 0.11.0"
+    assert kb.__version__ == "0.12.0", f"kb.__version__ is {kb.__version__!r}, expected 0.12.0"
     pyproject_version = _load_pyproject()["project"]["version"]
     assert kb.__version__ == pyproject_version, (
         f"kb.__version__ ({kb.__version__!r}) drifted from pyproject ({pyproject_version!r})"
@@ -120,12 +120,12 @@ def test_kb_save_synthesis_absent_from_readme():
     )
 
 
-def test_readme_version_badge_is_v0_11_0():
-    """AC54: README.md version badge updated to v0.11.0 (NEW-Q11 / AC4c)."""
+def test_readme_version_badge_is_v0_12_0():
+    """AC54 (cycle-65 update): README.md version badge tracks v0.12.0."""
     body = _read("README.md")
-    assert "version-v0.11.0-orange" in body, "version badge URL must show v0.11.0"
-    # Forward regression: stale v0.10.0 badge would re-introduce Finding 6 drift class.
-    assert "version-v0.10.0-orange" not in body, "stale v0.10.0 badge must be removed"
+    assert "version-v0.12.0-orange" in body, "version badge URL must show v0.12.0"
+    # Forward regression: stale v0.11.0 badge would re-introduce Finding 6 drift class.
+    assert "version-v0.11.0-orange" not in body, "stale v0.11.0 badge must be removed"
 
 
 # ─────────────────────────────────────────────────────────────────────

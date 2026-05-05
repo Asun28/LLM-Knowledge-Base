@@ -1,13 +1,13 @@
 import json
 
 from kb.config import MAX_INGEST_CONTENT_CHARS, QUERY_CONTEXT_MAX_CHARS
-from kb.mcp import app as mcp_app
 from kb.mcp import core
 
 
 def test_kb_compile_scan_honors_wiki_dir(tmp_project, monkeypatch):
+    # kb.mcp.app uses call-time get_project_root() (cycle 65); patching
+    # kb.config.PROJECT_ROOT is the canonical site and flows through.
     monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_project)
-    monkeypatch.setattr(mcp_app, "PROJECT_ROOT", tmp_project)
     source = tmp_project / "raw" / "articles" / "new.md"
     source.write_text("new article", encoding="utf-8")
     seen = {}

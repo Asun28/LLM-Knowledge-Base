@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 def test_index_md_includes_all_reference_files():
     """Assert INDEX.md includes all docs/reference/*.md files (except INDEX.md, README.md).
@@ -25,18 +23,12 @@ def test_index_md_includes_all_reference_files():
     # Get all .md files in docs/reference (except INDEX.md and README.md)
     ref_dir = Path("docs/reference")
     reference_files = sorted(
-        [
-            f.name
-            for f in ref_dir.glob("*.md")
-            if f.name not in {"INDEX.md", "README.md"}
-        ]
+        [f.name for f in ref_dir.glob("*.md") if f.name not in {"INDEX.md", "README.md"}]
     )
 
     # Check that each reference file is mentioned in INDEX.md
     for filename in reference_files:
-        assert (
-            filename in index_content
-        ), f"{filename} not found in INDEX.md"
+        assert filename in index_content, f"{filename} not found in INDEX.md"
 
 
 def test_claude_md_table_includes_all_reference_files():
@@ -53,17 +45,13 @@ def test_claude_md_table_includes_all_reference_files():
     # Get all .md files in docs/reference (except INDEX.md and README.md)
     ref_dir = Path("docs/reference")
     reference_files = sorted(
-        [
-            f.name
-            for f in ref_dir.glob("*.md")
-            if f.name not in {"INDEX.md", "README.md"}
-        ]
+        [f.name for f in ref_dir.glob("*.md") if f.name not in {"INDEX.md", "README.md"}]
     )
 
     # Check that each reference file path is mentioned in CLAUDE.md
     # The table format is `docs/reference/filename.md`
     for filename in reference_files:
         file_path = f"docs/reference/{filename}"
-        assert (
-            file_path in claude_content
-        ), f"{file_path} not found in CLAUDE.md Detailed Documentation table"
+        assert file_path in claude_content, (
+            f"{file_path} not found in CLAUDE.md Detailed Documentation table"
+        )
