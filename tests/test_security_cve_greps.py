@@ -1,10 +1,19 @@
-"""Regression tests for CVE-banned package imports (AC18)."""
+"""Regression tests for CVE-banned package imports (AC18; cycle-66 AC4 refactor)."""
 
 import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
+from tests._helpers.ast_walk import find_module_imports
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Modules removed from the project under prior CVE-driven dependency repairs.
+# The helper detects BOTH bare-form (`import M`) and from-form (`from M import X`)
+# plus namespace prefixes (`import M.sub`). Cycle-66 AC4 / T6 closure.
+CVE_BANNED_MODULES = ["diskcache", "litellm", "pip", "ragas"]
 
 
 def _requirement_name(requirement: str) -> str:
@@ -18,70 +27,17 @@ def _requirement_name(requirement: str) -> str:
 class TestCVEBannedImports:
     """Assert that known-CVE packages are not imported by production code."""
 
-    def test_diskcache_zero_imports(self):
-        """Assert diskcache is never imported in src/kb/**/*.py."""
+    @pytest.mark.parametrize("module", CVE_BANNED_MODULES)
+    def test_module_zero_imports(self, module):
+        """Assert `module` is never imported in src/kb/**/*.py (bare or from form)."""
         src_kb = Path("src/kb")
         assert src_kb.exists(), "src/kb directory not found"
 
-        # Patterns for: import diskcache and from diskcache import ...
-        import_pattern = re.compile(r"^\s*(import\s+diskcache\b|from\s+diskcache\b)")
-
-        failed_files = []
-        for py_file in src_kb.rglob("*.py"):
-            content = py_file.read_text(encoding="utf-8")
-            for line_num, line in enumerate(content.splitlines(), 1):
-                if import_pattern.match(line):
-                    failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
-
-        assert not failed_files, "diskcache imports found:\n" + "\n".join(failed_files)
-
-    def test_litellm_zero_imports(self):
-        """Assert litellm is never imported in src/kb/**/*.py."""
-        src_kb = Path("src/kb")
-        assert src_kb.exists(), "src/kb directory not found"
-
-        import_pattern = re.compile(r"^\s*(import\s+litellm\b|from\s+litellm\b)")
-
-        failed_files = []
-        for py_file in src_kb.rglob("*.py"):
-            content = py_file.read_text(encoding="utf-8")
-            for line_num, line in enumerate(content.splitlines(), 1):
-                if import_pattern.match(line):
-                    failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
-
-        assert not failed_files, "litellm imports found:\n" + "\n".join(failed_files)
-
-    def test_pip_zero_imports(self):
-        """Assert pip is never imported in src/kb/**/*.py."""
-        src_kb = Path("src/kb")
-        assert src_kb.exists(), "src/kb directory not found"
-
-        import_pattern = re.compile(r"^\s*(import\s+pip\b|from\s+pip\b)")
-
-        failed_files = []
-        for py_file in src_kb.rglob("*.py"):
-            content = py_file.read_text(encoding="utf-8")
-            for line_num, line in enumerate(content.splitlines(), 1):
-                if import_pattern.match(line):
-                    failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
-
-        assert not failed_files, "pip imports found:\n" + "\n".join(failed_files)
-
-    def test_ragas_zero_imports(self):
-        """Assert ragas is never imported in src/kb/**/*.py."""
-        src_kb = Path("src/kb")
-        assert src_kb.exists(), "src/kb directory not found"
-
-        import_pattern = re.compile(r"^\s*(import\s+ragas\b|from\s+ragas\b)")
-
-        failed_files = []
-        for py_file in src_kb.rglob("*.py"):
-            content = py_file.read_text(encoding="utf-8")
-            for line_num, line in enumerate(content.splitlines(), 1):
-                if import_pattern.match(line):
-                    failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
-
-        assert not failed_files, "ragas imports found:\n" + "\n".join(failed_files)
+        result = find_module_imports(module, src_root=src_kb)
+        all_hits = sorted(set(result["import"]) | set(result["from"]))
+        assert not all_hits, f"{module} imports found in production code:\n" + "\n".join(
+            str(p) for p in all_hits
+        )
 
 
 class TestDependabotAlertManifests:

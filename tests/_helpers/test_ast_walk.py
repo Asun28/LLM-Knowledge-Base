@@ -8,6 +8,7 @@ from tests._helpers.ast_walk import (
     assert_decorator_present,
     find_calls_of,
     find_function_def,
+    find_module_imports,
 )
 
 
@@ -142,3 +143,76 @@ class TestAssertDecoratorPresent:
 
         # Should find "fixture" from @pytest.fixture(...)
         assert_decorator_present(func_def, "fixture", test_file)
+
+
+class TestFindModuleImports:
+    """Tests for find_module_imports helper (cycle-66 AC4).
+
+    Each case writes synthetic .py fixtures under tmp_path and asserts the
+    helper detects the expected `import` / `from` form. These are MANDATORY
+    real tests — running them after reverting find_module_imports back to
+    ImportFrom-only must turn at least one case RED.
+    """
+
+    def test_find_module_imports_bare_form(self, tmp_path):
+        """`import module` is detected as a bare-form hit, not a from-form hit."""
+        f = tmp_path / "a.py"
+        f.write_text("import diskcache\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert f in result["import"]
+        assert f not in result["from"]
+
+    def test_find_module_imports_from_form(self, tmp_path):
+        """`from module import X` is detected as a from-form hit, not bare-form."""
+        f = tmp_path / "a.py"
+        f.write_text("from diskcache import Cache\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert f in result["from"]
+        assert f not in result["import"]
+
+    def test_find_module_imports_both_forms(self, tmp_path):
+        """A file with both forms appears in both lists."""
+        f = tmp_path / "a.py"
+        f.write_text("import diskcache\nfrom diskcache import Cache\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert f in result["import"]
+        assert f in result["from"]
+
+    def test_find_module_imports_namespace_prefix_bare(self, tmp_path):
+        """`import module.submodule` matches `module` as a bare-form hit."""
+        f = tmp_path / "a.py"
+        f.write_text("import diskcache.core\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert f in result["import"]
+
+    def test_find_module_imports_namespace_prefix_from(self, tmp_path):
+        """`from module.submodule import X` matches `module` as a from-form hit."""
+        f = tmp_path / "a.py"
+        f.write_text("from diskcache.core import Cache\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert f in result["from"]
+
+    def test_find_module_imports_unrelated_module(self, tmp_path):
+        """Sibling-name `module_other` must NOT be matched as `module`."""
+        f = tmp_path / "a.py"
+        f.write_text("import diskcache_other\nfrom diskcache_other import X\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert result["import"] == []
+        assert result["from"] == []
+
+    def test_find_module_imports_syntax_error_file(self, tmp_path):
+        """Files that fail to parse are silently skipped; sibling files still scanned."""
+        good_f = tmp_path / "good.py"
+        good_f.write_text("import diskcache\n")
+        bad_f = tmp_path / "bad.py"
+        bad_f.write_text("def broken(\n")
+        result = find_module_imports("diskcache", src_root=tmp_path)
+        assert good_f in result["import"]
+        assert bad_f not in result["import"]
+        assert bad_f not in result["from"]
+
+    def test_find_module_imports_missing_src_root(self, tmp_path):
+        """Missing src_root returns empty result without raising."""
+        nonexistent = tmp_path / "does_not_exist"
+        result = find_module_imports("diskcache", src_root=nonexistent)
+        assert result == {"import": [], "from": []}
