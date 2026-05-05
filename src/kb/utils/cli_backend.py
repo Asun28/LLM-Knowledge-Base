@@ -32,11 +32,6 @@ logger = logging.getLogger(__name__)
 # Max bytes to scan for a balanced JSON object in free-form CLI output.
 MAX_CLI_JSON_SCAN_BYTES: int = 65_536
 
-# Pattern to detect token-shaped secrets in argv elements (T8).
-_TOKEN_PATTERN: re.Pattern[str] = re.compile(
-    r"sk-[A-Za-z0-9_\-]{10,}|Bearer\s+\S+|ghp_[A-Za-z0-9]{10,}"
-)
-
 # Model name placeholder — only [A-Za-z0-9._:/-] chars are legal (T1).
 _MODEL_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._:/-]*$")
 
