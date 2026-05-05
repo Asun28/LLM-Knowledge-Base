@@ -15,6 +15,7 @@ Design notes:
 """
 
 import ctypes
+import errno
 import logging
 import os
 import sys
@@ -134,7 +135,13 @@ def _open_no_follow(path: Path) -> int:
     else:
         try:
             return os.open(str(path), os.O_NOFOLLOW | os.O_RDONLY)
-        except OSError:
+        except OSError as exc:
+            # ELOOP is the kernel's atomic "this is a symlink" signal under
+            # O_NOFOLLOW — propagate so the caller aborts the mutation.
+            # Any other OSError means O_NOFOLLOW is unavailable on this
+            # platform; fall back to re-resolve + once-per-process warn.
+            if exc.errno == errno.ELOOP:
+                raise
             if not _warned_fallback:
                 _LOG.warning(
                     "AC10: O_NOFOLLOW unsupported on platform %s; "
