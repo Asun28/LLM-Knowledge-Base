@@ -20,7 +20,11 @@ from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
 from kb.utils.wiki_log import append_wiki_log
-from kb.utils.path_safety import _assert_under_project_root
+from kb.utils.path_safety import (
+    _assert_under_project_root,
+    _close_no_follow_fd,
+    _open_no_follow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -737,11 +741,16 @@ def rebuild_indexes(
     }
 
     # (1) Manifest — unlink under file_lock so a concurrent compile_wiki
-    # save cannot race us.
+    # save cannot race us. AC10: _open_no_follow rejects a symlink swapped
+    # in between exists() and unlink() (TOCTOU window).
     try:
         with file_lock(manifest_path, timeout=1.0):
             if manifest_path.exists():
-                manifest_path.unlink()
+                fd = _open_no_follow(manifest_path)
+                try:
+                    manifest_path.unlink()
+                finally:
+                    _close_no_follow_fd(fd)
             result["manifest"]["cleared"] = True
     except TimeoutError:
         result["manifest"]["error"] = "lock busy"
@@ -749,13 +758,17 @@ def rebuild_indexes(
         result["manifest"]["error"] = str(e)
 
     # (2) Vector DB — single-writer contract inside embeddings.py, unlocked
-    # unlink is sufficient.  Symlinks are not followed: Path.unlink removes
-    # the symlink itself, the target survives by design.
+    # unlink is sufficient. AC10 rejects a symlink swapped in for the vector
+    # DB path between exists() and unlink().
     vec_error: str | None = None
     tmp_error: str | None = None
     try:
         if vector_path.exists():
-            vector_path.unlink()
+            fd = _open_no_follow(vector_path)
+            try:
+                vector_path.unlink()
+            finally:
+                _close_no_follow_fd(fd)
         result["vector"]["cleared"] = True
     except OSError as e:
         vec_error = str(e)
@@ -776,7 +789,12 @@ def rebuild_indexes(
     # reported via the compound error message below.
     tmp_path = vector_path.parent / (vector_path.name + ".tmp")
     try:
-        tmp_path.unlink(missing_ok=True)
+        if tmp_path.exists():
+            fd = _open_no_follow(tmp_path)
+            try:
+                tmp_path.unlink()
+            finally:
+                _close_no_follow_fd(fd)
     except OSError as e:
         tmp_error = str(e)
 

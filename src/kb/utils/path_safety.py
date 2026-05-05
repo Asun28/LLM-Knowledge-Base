@@ -14,10 +14,16 @@ Design notes:
   - Raises ValueError with field_name interpolated for traceability
 """
 
+import ctypes
+import logging
 import os
+import sys
 from pathlib import Path
 
 import kb.config
+
+_LOG = logging.getLogger(__name__)
+_warned_fallback = False
 
 
 def _assert_under_project_root(
@@ -85,14 +91,6 @@ def _assert_under_project_root(
         raise ValueError(f"{field_name} is a symlink (not allowed): {path}")
 
 
-import ctypes
-import logging
-import sys
-
-_LOG = logging.getLogger(__name__)
-_warned_fallback = False
-
-
 def _open_no_follow(path: Path) -> int:
     """Open a file with symlink-follow prevention (TOCTOU mitigation for AC10).
 
@@ -149,3 +147,26 @@ def _open_no_follow(path: Path) -> int:
                 _warned_fallback = True
             path.resolve()
             return -1
+
+
+def _close_no_follow_fd(fd: int) -> None:
+    """Close a file descriptor returned by _open_no_follow.
+
+    Handles the cross-platform handle types (POSIX int fd vs Windows HANDLE)
+    and the sentinel value (-1) returned by the fallback path. Errors during
+    close are swallowed because the caller has already done the security check
+    (no symlink) and proceeded with the mutation; a close failure here is
+    cosmetic, not security-critical.
+    """
+    if fd == -1:
+        return
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.kernel32.CloseHandle(fd)
+        except (AttributeError, OSError):
+            pass
+    else:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
