@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+import kb.config
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 
 # Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
@@ -124,7 +125,10 @@ def _validate_wiki_dir(
 ) -> tuple[Path | None, str | None]:
     if wiki_dir is None:
         return None, None
-    effective_project_root = project_root or PROJECT_ROOT
+    # Honor explicit project_root override (cycle-29 contract); fall back to
+    # call-time get_project_root() so monkeypatched kb.config.PROJECT_ROOT
+    # (cycle-18 L1) and KB_PROJECT_ROOT env (cycle-19 L2) both flow through.
+    effective_project_root = project_root or kb.config.get_project_root()
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
@@ -136,10 +140,19 @@ def _validate_wiki_dir(
     if not path.is_dir():
         return None, f"wiki_dir is not a directory: {sanitize_error_text(str(path))}"
     path_resolved = path.resolve()
+    # Inline dual-anchor containment check honoring explicit project_root.
+    # Cycle-65 AC9 originally migrated this to _assert_under_project_root, but
+    # that helper reads kb.config.get_project_root() and drops the explicit
+    # project_root parameter, breaking the cycle-29 explicit-override contract
+    # (Step 12 hard gate). The inline check is equivalent in semantics
+    # (literal-anchor on absolute path + resolved-anchor always) and preserves
+    # the legacy "wiki_dir must be inside project root" error format.
+    proj_root_resolved = effective_project_root.resolve()
     try:
-        _assert_under_project_root(path, "wiki_dir", require_exists=True, require_dir=True)
-    except ValueError as e:
-        return None, f"wiki_dir validation failed: {sanitize_error_text(str(e))}"
+        path.relative_to(effective_project_root)
+        path_resolved.relative_to(proj_root_resolved)
+    except ValueError:
+        return None, "wiki_dir must be inside project root"
     return path_resolved, None
 
 

@@ -145,10 +145,14 @@ def test_cold_load_high_entry_deleted():
             f"substring {needle!r} still present."
         )
 
-    # Dual-guard — HIGH-Deferred survives with its cold-load-latency language
-    # (C12 sibling check; if this assertion ever flips, the deletion was too
-    # aggressive and clobbered the authoritative summary).
-    assert "cold-load latency" in backlog, (
-        "C12 guard: HIGH-Deferred cold-load-latency summary must survive — "
+    # Dual-guard — HIGH-Deferred section survives with cold-load language
+    # somewhere (C12 sibling check; if this assertion ever flips, the deletion
+    # was too aggressive and clobbered the authoritative summary).
+    #
+    # Cycle-64 BACKLOG hygiene commit (9b64a28) reworded "cold-load latency"
+    # to "cold-load instrumentation" inside the Phase 4.5 HIGH-Deferred
+    # one-liner. Either phrasing satisfies the C12 guard intent.
+    assert "cold-load instrumentation" in backlog or "cold-load latency" in backlog, (
+        "C12 guard: HIGH-Deferred cold-load summary must survive — "
         "deletion is scoped to the HIGH section only"
     )

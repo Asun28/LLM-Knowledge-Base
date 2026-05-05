@@ -42,20 +42,17 @@ def test_three_historical_sites_present() -> None:
         rel = path.relative_to(Path("src/kb")).as_posix()
         by_file[rel] = by_file.get(rel, 0) + 1
 
-    # Historical site 1: mcp/app.py contains _validate_wiki_dir migration.
-    # The original Q2.9 design also listed _validate_page_id containment as a
-    # third site, but Step 12 hard-gate revealed page_id has always been
-    # WIKI_DIR-anchored (not PROJECT_ROOT-anchored), so AC9 reverted that
-    # migration in the Step 12 fix. mcp/app.py now has exactly 1 call.
-    app_count = by_file.get("mcp/app.py", 0)
-    assert app_count >= 1, (
-        "AC9 historical site missing from migration: mcp/app.py expected ≥1 "
-        f"call (_validate_wiki_dir), found {app_count}. "
-        f"All call sites: {by_file}"
-    )
-
-    # Historical site 2: compile/compiler.py contains the
+    # Historical site: compile/compiler.py contains the
     # _validate_path_under_project_root migration; expect ≥1 call.
+    #
+    # Step 12 hard gate scope reduction: the original AC9 design listed three
+    # historical sites (_validate_wiki_dir, _validate_page_id containment,
+    # _validate_path_under_project_root). The hard gate revealed that
+    # _validate_page_id has always been WIKI_DIR-anchored (not PROJECT_ROOT-
+    # anchored) and that _validate_wiki_dir's explicit project_root override
+    # contract (cycle-29) cannot route through the helper without breaking 116
+    # tests. Both reverted to inline checks. compile/compiler.py is the one
+    # historical site that genuinely consolidates into _assert_under_project_root.
     compiler_count = by_file.get("compile/compiler.py", 0)
     assert compiler_count >= 1, (
         "AC9 historical site missing from migration: compile/compiler.py "
@@ -63,10 +60,11 @@ def test_three_historical_sites_present() -> None:
         f"found {compiler_count}. All call sites: {by_file}"
     )
 
-    # Q2.9 Option B: ADDITIONAL callers are allowed. Total floor is 2 across
-    # the historical PROJECT_ROOT-anchored sites; new callers add to the count.
+    # Q2.9 Option B: ADDITIONAL callers are allowed. Total floor is 1 across
+    # the surviving historical site; new callers (e.g. AC10's _open_no_follow
+    # wrappers if they ever need the helper) add to the count.
     total = sum(by_file.values())
-    assert total >= 2, (
-        f"AC9 total call-site floor not met: expected ≥2, found {total}. "
+    assert total >= 1, (
+        f"AC9 total call-site floor not met: expected ≥1, found {total}. "
         f"Distribution: {by_file}"
     )
