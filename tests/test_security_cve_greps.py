@@ -1,7 +1,18 @@
 """Regression tests for CVE-banned package imports (AC18)."""
 
 import re
+import tomllib
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _requirement_name(requirement: str) -> str:
+    return (
+        re.split(r"\s*(?:==|>=|<=|~=|!=|<|>|;|\[)", requirement, maxsplit=1)[0]
+        .strip()
+        .lower()
+    )
 
 
 class TestCVEBannedImports:
@@ -71,3 +82,36 @@ class TestCVEBannedImports:
                     failed_files.append(f"{py_file}:{line_num}: {line.strip()}")
 
         assert not failed_files, "ragas imports found:\n" + "\n".join(failed_files)
+
+
+class TestDependabotAlertManifests:
+    """Assert removed Dependabot-alerted package names stay out of install manifests."""
+
+    def test_litellm_and_ragas_absent_from_install_manifests(self):
+        blocked = {"litellm", "ragas"}
+
+        pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        project = pyproject["project"]
+        manifest_requirements: list[tuple[str, str]] = [
+            ("pyproject.toml [project.dependencies]", dep)
+            for dep in project.get("dependencies", [])
+        ]
+        for extra_name, deps in project.get("optional-dependencies", {}).items():
+            manifest_requirements.extend(
+                (f"pyproject.toml [project.optional-dependencies.{extra_name}]", dep)
+                for dep in deps
+            )
+
+        for line in (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                continue
+            manifest_requirements.append(("requirements.txt", stripped))
+
+        found = [
+            f"{source}: {requirement}"
+            for source, requirement in manifest_requirements
+            if _requirement_name(requirement) in blocked
+        ]
+
+        assert not found, "Dependabot-alerted packages must stay removed:\n" + "\n".join(found)
