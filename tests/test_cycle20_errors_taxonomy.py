@@ -183,11 +183,24 @@ class TestNoStarImportFromKbErrors:
         # the literal phrase (would otherwise self-trigger).
         needle = "from kb.errors import " + "*"
         repo_root = Path(__file__).resolve().parents[1]
+        excluded_dirs = {
+            ".claude",
+            ".codex",
+            ".git",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "__pycache__",
+            "build",
+            "dist",
+            "site-packages",
+        }
         violators: list[Path] = []
         for py in repo_root.rglob("*.py"):
-            # Skip virtualenv / caches / this test file.
-            parts = set(py.parts)
-            if ".venv" in parts or "site-packages" in parts or "__pycache__" in parts:
+            # Skip local tool worktrees, virtualenvs, generated output, and caches.
+            parts = set(py.relative_to(repo_root).parts)
+            if parts & excluded_dirs:
                 continue
             if py.resolve() == Path(__file__).resolve():
                 continue

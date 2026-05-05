@@ -38,20 +38,21 @@ class TestNoDirectModelTiersImports:
 
     def test_model_tiers_bracket_access_migrated(self):
         """Verify no MODEL_TIERS[...] bracket access outside config.py."""
-        # This is a more basic test that grep can catch
-        import subprocess
+        repo_root = Path(__file__).resolve().parents[1]
+        src_kb = repo_root / "src" / "kb"
+        config_py = src_kb / "config.py"
+        matches: list[str] = []
 
-        result = subprocess.run(
-            ["grep", "-r", r"MODEL_TIERS\[", "src/kb/", "--include=*.py"],
-            cwd=Path(__file__).parent.parent,
-            capture_output=True,
-            text=True,
-        )
-        # Only src/kb/config.py should have bracket access (in the accessor body)
-        lines = [
-            line for line in result.stdout.strip().split("\n") if line and "config.py" not in line
-        ]
-        assert not lines, (
-            f"Found MODEL_TIERS[...] bracket access outside config.py:\n{result.stdout}; "
-            "must use get_model_tier() accessor"
+        for py_file in src_kb.rglob("*.py"):
+            if py_file.resolve() == config_py.resolve():
+                continue
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if "MODEL_TIERS[" in line:
+                    rel_path = py_file.relative_to(repo_root).as_posix()
+                    matches.append(f"{rel_path}:{lineno}: {line.strip()}")
+
+        assert not matches, (
+            "Found MODEL_TIERS[...] bracket access outside config.py:\n"
+            + "\n".join(matches)
+            + "\nall callers must use get_model_tier() accessor"
         )
