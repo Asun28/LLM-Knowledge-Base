@@ -362,9 +362,10 @@ class AugmentFetcher:
     def fetch(self, url: str, *, respect_robots: bool = True) -> FetchResult:
         from kb.config import AUGMENT_FETCH_MAX_REDIRECTS
 
-        # 1. Scheme allow-list (initial URL)
+        # 1. Scheme allow-list (initial URL) — delegate to _url_scheme_allowed
+        # so the four cycle-65 AC12 sites share one scheme allow-list helper.
         parsed = urlparse(url)
-        if parsed.scheme.lower() not in {"http", "https"}:
+        if not _url_scheme_allowed(url):
             return FetchResult(
                 status="blocked",
                 content=None,
@@ -419,7 +420,7 @@ class AugmentFetcher:
                 # re-checked before we issue the next network request.
                 if hop > 0:
                     hop_parsed = urlparse(current_url)
-                    if hop_parsed.scheme.lower() not in {"http", "https"}:
+                    if not _url_scheme_allowed(current_url):
                         return FetchResult(
                             status="blocked",
                             content=None,
