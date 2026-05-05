@@ -1,4 +1,10 @@
 # MCP Servers
+<!-- FORMAT GUIDE
+Purpose: MCP server catalogue — what each server does, key tools, and configuration notes.
+- Add a new section when a new MCP server is added to .mcp.json.
+- Update a section when a server's key tools or configuration change significantly.
+- Do NOT list every tool parameter here — just the purpose, key tools, and any non-obvious config.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "MCP Servers" section. Pairs with [workflows.md](workflows.md) (Phase 2 workflows that use these tools) and [ingestion-commands.md](ingestion-commands.md).
 

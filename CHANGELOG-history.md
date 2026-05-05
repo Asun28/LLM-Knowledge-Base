@@ -1,4 +1,12 @@
 # Changelog — Historical Archive
+<!-- FORMAT GUIDE
+Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact index that points here.
+- Add ONE SECTION per cycle at the top (newest first), under the active-unreleased archive header.
+- Each section heading: ## YYYY-MM-DD — cycle N (theme)
+- Keep the Items / Tests / Scope / Detail structure within each section.
+- Resolved cycles stay here permanently — never delete them.
+- CHANGELOG.md Quick Reference entries should point here with an anchor or "see CHANGELOG-history.md cycle-N".
+-->
 
 > **Reading guide:** This file is the full-detail reference archive. Keep entries newest first. High-level summaries of all cycles live in [CHANGELOG.md](CHANGELOG.md); per-item bullet-level detail lives here.
 > Cross-reference: [BACKLOG.md](BACKLOG.md) for open work.

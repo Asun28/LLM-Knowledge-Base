@@ -25,7 +25,7 @@ Detail moved out of this file lives in [`docs/reference/`](docs/reference/README
 |---|---|
 | Architecture — 3-layer content, 5-ops cycle, Python package APIs, wiki index files | [docs/reference/architecture.md](docs/reference/architecture.md) |
 | Module map — per-module breakdown of `src/kb/` | [docs/reference/module-map.md](docs/reference/module-map.md) |
-| Implementation status — latest-cycle notes (32 / 33 / 34) | [docs/reference/implementation-status.md](docs/reference/implementation-status.md) |
+| Implementation status — compact cycle history index (cycle 65) | [docs/reference/implementation-status.md](docs/reference/implementation-status.md) |
 | Testing — pytest layout + fixture rules | [docs/reference/testing.md](docs/reference/testing.md) |
 | Error handling conventions | [docs/reference/error-handling.md](docs/reference/error-handling.md) |
 | Phase 2 workflows — Standard / Thorough Ingest, Deep Lint, Query | [docs/reference/workflows.md](docs/reference/workflows.md) |
@@ -140,7 +140,7 @@ confidence: stated | inferred | speculative
 - **Shipped:** see `CHANGELOG.md` (brief compact index, newest first — compact Items / Tests / Scope / Detail per cycle) and `CHANGELOG-history.md` (full per-cycle bullet-level archive). Format: [Keep a Changelog](https://keepachangelog.com/).
 - **Open work:** see `BACKLOG.md` — severity levels CRITICAL → LOW, grouped by file. Resolved items are deleted (brief entry in `CHANGELOG.md`, detail in `CHANGELOG-history.md`); resolved phases collapse to a one-liner under "Resolved Phases".
 - **Roadmap (Phase 5 deferred + Phase 6 cut):** see `BACKLOG.md` §"Phase 5 — Community followup proposals" and §"Phase 6 candidates". Includes the 2026-04-13 Karpathy-gist re-evaluation ("RECOMMENDED NEXT SPRINT") and all deferred features (inline claim tags, URL-aware ingest, semantic chunking, typed graph relations, autonomous research loop, etc.).
-- **Latest-cycle notes (32 / 33 / 34):** see [docs/reference/implementation-status.md](docs/reference/implementation-status.md).
+- **Latest-cycle notes:** see [docs/reference/implementation-status.md](docs/reference/implementation-status.md).
 
 ## Automation
 

@@ -1,4 +1,11 @@
 # Phase 2 Workflows
+<!-- FORMAT GUIDE
+Purpose: Step-by-step workflows for Ingest, Deep Lint, and Query operations.
+- Add a new ## section when a new multi-step workflow is introduced.
+- Update existing sections when a step's behavior changes materially.
+- Keep each step as a numbered list item; annotate when-to-skip conditions inline.
+- Do NOT list tool parameters here — just the step sequence and decision points.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Phase 2 Workflows" section. Pairs with [mcp-servers.md](mcp-servers.md) (kb tool catalogue).
 

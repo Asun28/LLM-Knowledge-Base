@@ -1,4 +1,10 @@
 # Error Handling Conventions
+<!-- FORMAT GUIDE
+Purpose: Exception taxonomy, boundary rules, and path-safety contract. Keep as a flat bullet list.
+- Exception taxonomy: add a bullet when a NEW KBError subclass ships. Include: class name, when raised, and any notable fields (e.g. StorageError.kind).
+- Path safety: add a bullet when a new containment primitive or validation site is introduced (e.g. a new _assert_under_project_root call site or a new O_NOFOLLOW guard).
+- Do NOT document business logic here — only error/validation contract.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Error Handling Conventions" section. Pairs with [architecture.md](architecture.md) (`kb.errors` API).
 

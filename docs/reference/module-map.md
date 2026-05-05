@@ -1,4 +1,10 @@
 # Module Map (`src/kb/`)
+<!-- FORMAT GUIDE
+Purpose: One-paragraph-per-phase summary of src/kb/ modules. Pairs with architecture.md Key APIs.
+- New module: add a one-line entry under the appropriate Phase bullet (module name + key exported symbols + one-sentence role).
+- Changed module role: update the existing entry inline; do not create a new bullet.
+- Do NOT list every function — only the module-level role and the most important public symbols.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Module Map" section. Pairs with [architecture.md](architecture.md) (Python package APIs).
 

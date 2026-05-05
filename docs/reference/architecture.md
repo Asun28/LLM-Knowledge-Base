@@ -1,4 +1,10 @@
 # Architecture
+<!-- FORMAT GUIDE
+Purpose: Three-layer content model, five-operations cycle, Python package Key APIs, Wiki Index Files.
+- Key APIs section: add a bullet when a NEW API ships or an existing contract changes non-obviously. One bullet per API; describe only what is non-obvious (behavior callers rely on, not signatures/mechanics).
+- Wiki Index Files table: add a row when a new wiki/ index file is introduced.
+- Do NOT duplicate docstring content here — reference the source module path instead.
+-->
 
 > **Part of [CLAUDE.md](../../CLAUDE.md)** — detail for the "Architecture" sections. Pairs with [module-map.md](module-map.md) (`src/kb/` per-module breakdown).
 
