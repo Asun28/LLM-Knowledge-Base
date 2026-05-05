@@ -1,5 +1,6 @@
 """Project configuration — paths, model tiers, and settings."""
 
+import functools
 import logging
 import math
 import os
@@ -10,6 +11,33 @@ from types import MappingProxyType
 
 # ── Project paths ──────────────────────────────────────────────
 _LOG = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=8)
+def _heuristic_walk_up_cached(cwd_str: str) -> Path:
+    """Walk from cwd through up to 5 parent levels; return first dir with pyproject.toml.
+
+    Cache key is the string-form cwd. Cycle-66 AC3: amortises filesystem stats
+    during tight test loops where the same cwd is queried repeatedly. The cache
+    key MUST include cwd because different invocation directories yield different
+    parent chains (Q-7.4 / Q-7.5: cache key validity).
+
+    Falls back to the parent-of-`__file__` heuristic when no `pyproject.toml` is
+    found within 5 levels — same fallback the un-cached implementation had.
+
+    Cleared by ``_reset_project_root()`` which calls ``cache_clear()``.
+    """
+    heuristic = Path(__file__).resolve().parent.parent.parent
+    cwd = Path(cwd_str)
+    for candidate in (cwd, *cwd.parents[:5]):
+        if (candidate / "pyproject.toml").exists():
+            _LOG.info(
+                "Detected project root from cwd walk-up via pyproject.toml: path=%s wiki_exists=%s",
+                candidate,
+                (candidate / "wiki").exists(),
+            )
+            return candidate
+    return heuristic
 
 
 def _resolve_project_root() -> Path:
@@ -30,19 +58,13 @@ def _resolve_project_root() -> Path:
         return heuristic
 
     # Walk from cwd through at most 5 parent levels; no unbounded filesystem scan.
+    # Cycle-66 AC3 delegates to lru_cache-wrapped inner so repeat calls under
+    # the same cwd amortise filesystem stats across the test suite.
     try:
         cwd = Path.cwd().resolve()
     except (OSError, RuntimeError):
         return heuristic
-    for candidate in (cwd, *cwd.parents[:5]):
-        if (candidate / "pyproject.toml").exists():
-            _LOG.info(
-                "Detected project root from cwd walk-up via pyproject.toml: path=%s wiki_exists=%s",
-                candidate,
-                (candidate / "wiki").exists(),
-            )
-            return candidate
-    return heuristic
+    return _heuristic_walk_up_cached(str(cwd))
 
 
 def get_project_root() -> Path:
@@ -76,10 +98,10 @@ def get_project_root() -> Path:
 def _reset_project_root() -> None:
     """Test helper: reset any internal project-root cache.
 
-    Currently a no-op since get_project_root() reads env at call time.
-    Future implementations may cache - this hook prevents test brittleness.
+    Cycle-66 AC3 wired this hook to clear the lru_cache on
+    ``_heuristic_walk_up_cached`` so cwd changes between tests are observed.
     """
-    pass
+    _heuristic_walk_up_cached.cache_clear()
 
 
 def get_allowed_domains() -> tuple[str, ...]:
