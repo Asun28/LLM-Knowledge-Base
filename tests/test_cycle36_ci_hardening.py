@@ -103,7 +103,7 @@ class TestSecurityMdIgnoreVulnParity:
     def test_workflow_ignore_vuln_nonempty(self):
         # Sanity: regression guard against accidentally dropping the entire
         # ignore list (would silently fail pip-audit on production CVEs).
-        assert len(self._workflow_ignore_vuln_ids()) >= 2
+        assert len(self._workflow_ignore_vuln_ids()) >= 1
 
 
 class TestCycle23MultiprocessingSkipifMarker:

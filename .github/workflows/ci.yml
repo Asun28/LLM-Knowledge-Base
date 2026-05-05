@@ -74,6 +74,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      - name: Upgrade pip to fixed audit floor
+        # CI runner image 20260413 shipped pip 26.0.1. pip-audit now reports
+        # CVE-2026-6357 fixed in pip 26.1, so patch the installer before any
+        # dependency installs and before auditing the live environment.
+        run: python -m pip install --upgrade 'pip>=26.1'
+
       - name: Install package + ALL feature extras + dev tools
         # cycle 34 fix-after-CI-failure: tests cover ALL feature surfaces
         # (formats / augment / hybrid / eval) so CI must install every extra.
@@ -81,14 +87,14 @@ jobs:
         # sqlite_vec / optional-extra deps missing → collection errors on the
         # test files that import the corresponding feature modules. Net: CI install =
         # full test surface.
-        run: pip install -e '.[dev,formats,augment,hybrid,eval]'
+        run: python -m pip install -e '.[dev,formats,augment,hybrid,eval]'
 
       - name: Install CI tooling (build, twine, pip-audit)
         # AC50 / NEW-Q13: dedicated step keeps `[dev]` lean for actual developers
         # while making CI tooling explicit. `pip-audit` is also in `[dev]` per
         # AC2, this redundant install ensures it's available even if a future
         # cycle removes it from `[dev]`.
-        run: pip install build twine pip-audit
+        run: python -m pip install build twine pip-audit
 
       - name: Ruff check
         run: ruff check src/ tests/
@@ -137,8 +143,8 @@ jobs:
         # formats,augment,hybrid,eval]`), the live env IS the audit surface,
         # and pip-audit just walks `pip list` without spinning up a fresh
         # venv install.  Audit coverage equivalent; no resolution conflict.
-        # The two --ignore-vuln IDs match SECURITY.md's "Known Advisories"
-        # table 1:1.  ANY new CVE on these or other packages will fail this step.
+        # The --ignore-vuln ID matches SECURITY.md's "Known Advisories"
+        # table 1:1. ANY new CVE on this or other packages will fail this step.
         # Cycle 36 fix — use bash backslash line-continuation (works on both
         # ubuntu-latest bash and windows-latest pwsh shell-parsing modes).
         # Previous PowerShell backtick `\`` worked on windows-latest but
@@ -146,8 +152,7 @@ jobs:
         # and misparsed the --ignore-vuln args as commands.
         run: |
           pip-audit \
-            --ignore-vuln=CVE-2025-69872 \
-            --ignore-vuln=CVE-2026-3219
+            --ignore-vuln=CVE-2025-69872
 
 
       - name: dummy-key-leak-guard

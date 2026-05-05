@@ -205,7 +205,7 @@ def test_security_md_has_required_sections():
     for header in ("## Vulnerability Reporting", "## Known Advisories", "## Re-check Cadence"):
         assert header in body, f"SECURITY.md missing header: {header!r}"
     # Each remaining narrow-role advisory is listed.
-    for cve_id in ("CVE-2025-69872", "CVE-2026-3219"):
+    for cve_id in ("CVE-2025-69872",):
         assert cve_id in body, f"SECURITY.md must document advisory {cve_id}"
 
 
@@ -267,11 +267,18 @@ def test_ci_workflow_yaml_parses():
                 f"step {step.get('name')!r} references secrets.* (T1)"
             )
 
+    assert "python -m pip install --upgrade 'pip>=26.1'" in raw, (
+        "CI must upgrade pip before dependency installs so pip-audit does not fail "
+        "on runner-provided vulnerable pip"
+    )
+
     # AC50: dedicated CI tooling install step
-    assert "pip install build twine pip-audit" in raw, "AC50 dedicated install step missing"
+    assert "python -m pip install build twine pip-audit" in raw, (
+        "AC50 dedicated install step missing"
+    )
 
     # AC14: pip-audit invocation with the remaining documented ignore-vuln flags.
-    for cve_id in ("CVE-2025-69872", "CVE-2026-3219"):
+    for cve_id in ("CVE-2025-69872",):
         assert cve_id in raw, f"pip-audit must ignore {cve_id} (T4 mitigation)"
 
     # T2 amendment: actions/checkout@v6 + actions/setup-python@v6 (not @v4/@v5)
@@ -313,8 +320,11 @@ def test_pip_audit_invocation_audits_live_env():
         f"audit step: {audit_step!r}"
     )
     # Must still carry all documented ignore-vuln flags.
-    for cve in ("CVE-2025-69872", "CVE-2026-3219"):
+    for cve in ("CVE-2025-69872",):
         assert cve in audit_step, f"pip-audit step missing {cve} ignore"
+    assert "CVE-2026-3219" not in audit_step, (
+        "pip is upgraded to the fixed floor before audit; do not keep stale pip ignores"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────

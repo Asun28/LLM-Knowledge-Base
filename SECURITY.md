@@ -22,16 +22,17 @@ We aim to acknowledge reports within 72 hours and to land a fix or documented mi
 
 ## Known Advisories
 
-The two packages below carry open advisories with no installable upstream patch and remain in the local tooling or transitive optional-dependency surface. Each is tracked with a re-check cadence and a verification grep confirming the package is not used by `src/kb/` runtime.
+The package below carries an open advisory with no installable upstream patch and remains in the transitive optional-dependency surface. It is tracked with a re-check cadence and a verification grep confirming the package is not used by `src/kb/` runtime.
 
 | Package | Version | Advisory | Fix? | Narrow role | Verification grep |
 |---|---|---|---|---|---|
 | `diskcache` | 5.6.3 | [CVE-2025-69872](https://nvd.nist.gov/vuln/detail/CVE-2025-69872) (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in cache files. | None as of 2026-04-25 (`pip-audit` reports empty `fix_versions`). | Transitive of `trafilatura`'s robots.txt cache. Exploit requires local write access to the cache directory. | `grep -rnE "diskcache\|DiskCache\|FanoutCache" src/kb` → zero direct imports. |
-| `pip` | 26.0.1 | [CVE-2026-3219](https://nvd.nist.gov/vuln/detail/CVE-2026-3219) (GHSA-58qw-9mgm-455v): pip handles concatenated tar+ZIP files as ZIP regardless of filename, enabling confusing installation behaviour. | None as of 2026-04-25. | TOOLING, not runtime. Advisory affects `pip install` of adversarial tar+zip payloads which requires local shell access. Production `kb` runtime never shells out to `pip`. | N/A (pip is universally bundled with Python). |
 
 Resolved 2026-05-05: the optional eval harness no longer declares `ragas` or the `litellm` distribution. Dependabot alerts #12 through #15 were closed by removing both package names from `pyproject.toml` `[eval]` and `requirements.txt`. RAGAS had no patched release (`0.4.3` was still latest on PyPI), and patched LiteLLM releases still required `click==8.1.8`, conflicting with this repo's `click==8.3.2` pin. The separate `unclecode-litellm` distribution remains a `crawl4ai` devtime dependency in `requirements.txt`; production `src/kb/` imports of the top-level `litellm` module remain forbidden by `tests/test_security_cve_greps.py`.
 
-These two advisory IDs are explicitly listed in `.github/workflows/ci.yml` `pip-audit` step via `--ignore-vuln=` so the CI gate's green-checkmark means "no NEW CVE since cycle 34." Adding any new advisory to the ignore list requires (a) a verification grep, (b) a row in this table, (c) sign-off from the maintainer.
+Resolved 2026-05-06: CI now upgrades `pip` to `>=26.1` before dependency installs and before the live-environment audit. This removes the prior accepted `CVE-2026-3219` `pip` row and also clears the later `CVE-2026-6357` finding reported against runner-provided `pip 26.0.1`.
+
+The advisory ID above is explicitly listed in `.github/workflows/ci.yml` `pip-audit` step via `--ignore-vuln=` so the CI gate's green-checkmark means "no NEW CVE since cycle 34." Adding any new advisory to the ignore list requires (a) a verification grep, (b) a row in this table, (c) sign-off from the maintainer.
 
 The CI pip-audit step audits the **live installed environment** (no `-r requirements.txt`) — see cycle-34 fix-after-CI-failure-4 in `.github/workflows/ci.yml`. Audit coverage is equivalent because the previous CI step installs every extra (`[dev,formats,augment,hybrid,eval]`), so the live env carries the full pin set. Auditing the live env avoids pip-audit's underlying `pip install --dry-run` step, which trips ResolutionImpossible on `arxiv 2.4.1` ↔ `requests 2.33.0` (cycle-22 L1).
 
@@ -61,4 +62,4 @@ This policy does NOT cover:
 
 ---
 
-*Last reviewed: 2026-05-05 (Dependabot alert repair).*
+*Last reviewed: 2026-05-06 (pip toolchain CVE repair).*
