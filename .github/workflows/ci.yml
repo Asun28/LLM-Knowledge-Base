@@ -154,7 +154,12 @@ jobs:
 
       - name: dummy-key-leak-guard
         run: |
-          git ls-files | xargs grep -l 'sk-ant-dummy' | grep -v '.github/workflows/ci.yml' | (! read)
+          # AC22: production source must not contain the dummy CI key. Scope to
+          # src/ so legitimate references in tests (fixture helpers / regression
+          # tests for this very guard) and in docs (BACKLOG, CHANGELOG, decision
+          # notes) and in .github/workflows/ci.yml itself (the canonical home of
+          # the dummy ANTHROPIC_API_KEY env value) do not trigger a false fail.
+          git ls-files 'src/**' | xargs -r grep -l 'sk-ant-dummy' | (! read)
       - name: Build distribution + twine check
         # AC15: catches malformed pyproject.toml (cycle 34 fixed readme pointer)
         # and validates package metadata before any future PyPI publish.
