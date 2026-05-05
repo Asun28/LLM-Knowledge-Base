@@ -5,9 +5,23 @@
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-05-03
+## Active-unreleased archive — 2026-04-16 to 2026-05-05
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-05-05 — Dependabot alert repair
+
+**Theme:** Close the four open Dependabot dependency alerts (#12-#15) in one PR by removing the vulnerable optional eval-harness packages instead of accepting resolver downgrades.
+
+**Dependency changes.** Removed `ragas` and the `litellm` distribution from `pyproject.toml` `[project.optional-dependencies].eval` and from `requirements.txt`. RAGAS had no patched release available (`0.4.3` was still the latest), while patched LiteLLM releases still required `click==8.1.8`, conflicting with this repo's `click==8.3.2` pin. The separate `unclecode-litellm` distribution remains only through the `crawl4ai` devtime surface in `requirements.txt`; production `src/kb/` imports of the top-level `litellm` module stay blocked by `tests/test_security_cve_greps.py`.
+
+**Runtime dependency correction.** Declared `scipy>=1.14` directly in `pyproject.toml` because graph statistics already use `networkx.pagerank`'s SciPy path. This had previously been supplied transitively by the removed eval harness, and CI run 25361061995 exposed the missing direct dependency. The follow-up CI run passed after the direct declaration.
+
+**Security/docs cleanup.** Retired resolved `pip-audit` ignore IDs from `.github/workflows/ci.yml`, removed the stale `litellm`/`ragas` BACKLOG entries, updated `SECURITY.md` to list only the two remaining accepted advisory IDs, and refreshed the README eval-extra description to `datasets` / provider-eval scaffolding.
+
+**Regression coverage.** Added manifest-level guards ensuring exact package names `litellm` and `ragas` are absent from `pyproject.toml` dependencies/extras and from `requirements.txt`. Updated release-hygiene and CI-hardening tests to require parity between `SECURITY.md` and the CI `pip-audit --ignore-vuln` list.
+
+**Verification recorded:** targeted ruff and pytest passed locally; `pip install --dry-run -e ".[dev,formats,augment,hybrid,eval]"` passed; `pip-audit --ignore-vuln=CVE-2025-69872 --ignore-vuln=CVE-2026-3219` reported no known vulnerabilities found with two ignored; GitHub Actions PR run 25361209711 passed.
 
 ### 2026-05-04 — cycle 65 — Security hardening + config consistency (seventh dev-mimo-opus trial)
 
