@@ -70,9 +70,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `tests/conftest.py` hardcoded lru_cache clear list — `load_purpose` + `_load_template_cached` + `_build_schema_cached` only. Production adding a 4th `@lru_cache` on a path-sensitive callable silently leaks across tests. (mimo r2 Q2)
   (fix: at sandbox teardown, walk every `kb.*` module in `sys.modules`, introspect attributes for `cache_clear`, and call all of them; remove the hardcoded list.)
 
-- `SECURITY.md` known-advisory verification greps not CI-enforced — the 4 accepted-CVE rationales (`diskcache`, `litellm`, `pip`, `ragas`) each end with `grep -rnE "PKG_NAME" src/kb` returning zero hits. A refactor that imports any of those packages silently invalidates the rationale. (mimo r3 Q5)
-  (fix: `tests/test_security_cve_greps.py` runs each grep as a `subprocess` call and asserts zero hits; CI failure = "remove the package or reclassify the CVE in SECURITY.md.")
-
 ### MEDIUM
 
 - `lint/fetcher.py:31` trafilatura + diskcache transitive RCE chain — project's own robots cache is in-memory `dict`, NOT diskcache, so direct attack path is mitigated. Trafilatura's internal `fetch_url` + extraction code paths NOT audited for diskcache pickle reads on attacker-supplied URLs. (mimo r6 Q5)
@@ -190,12 +187,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE. No patched upstream as of last re-check.
   (mitigation: diskcache used only by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports; track upstream for patched release)
 
-- `requirements.txt` `ragas==0.4.3` — CVE-2026-6587 (GHSA-95ww-475f-pr4f): SSRF in `_try_process_local_file` / `_try_process_url`. No patched upstream as of last re-check.
-  (mitigation: dev-eval-only dep, used manually for evaluation harness; `grep -rnE "ragas|Ragas" src/kb` confirms zero runtime imports; track for patched release)
-
-- `requirements.txt` `litellm==1.83.0` — GHSA-xqmj-j6mv-4862 (high) + GHSA-r75f-5x8p-qvmc (critical) + GHSA-v4p8-mg3p-g94g (high): LiteLLM Proxy template render without sandboxing + authenticated MCP-stdio command execution. Fix at `litellm==1.83.7`, BLOCKED by transitive `click==8.1.8` pin (we need `click==8.3.2` per cycle 31/32) and `python-dotenv==1.0.1` pin (introduces CVE-2026-28684 HIGH symlink on `set_key()` if accepted). Cycle 55 attempted patch + reverted.
-  (mitigation: dev-eval-only dep; `grep -rnE "import litellm|from litellm" src/kb` confirms zero runtime imports; we never start LiteLLM Proxy mode. Unblock path: wait for litellm to relax transitive pins, or vendor a fork.)
-
 - `.venv` `pip==26.0.1` — CVE-2026-3219 (GHSA-58qw-9mgm-455v): pip handles concatenated tar+ZIP files as ZIP regardless of filename. No confirmed patched upstream.
   (mitigation: pip is TOOLING, not runtime; advisory affects `pip install` of adversarial payloads which requires local shell access. Production `kb` runtime never shells out to pip. Track upstream.)
 
@@ -234,10 +225,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `tests/test_utils_text.py` `tests/test_utils_io.py` Windows pyreadline3 pytest crash (cycle-57+) — local Windows pytest crashes with STATUS_ACCESS_VIOLATION (-1073741819) during/after `test_sanitize_strips_control_chars` and `test_sweep_orphan_tmp_logs_warning_and_continues_on_unlink_error`. Workaround: `pytest -p no:capture -p no:debugging`. CI on ubuntu-latest unaffected. Investigate `kb.utils.text.yaml_sanitize` and `kb.utils.io.sweep_orphan_tmp` logging paths — pyreadline3 import-time interference suspected.
 
 - `tests/test_capture.py::TestWriteItemFiles` POSIX off-by-one + creates_dir investigation (cycle-53+) — cycle 36 ubuntu-probe surfaced 2 test failures: `test_creates_dir_if_missing`, `test_pre_existing_file_collision`. The latter expected slug `decision-foo-2` becomes `decision-foo-3` on POSIX. Currently `@_WINDOWS_ONLY` skipif'd. Root cause needs direct POSIX shell access to instrument `_scan_existing_slugs` / `_build_slug` / `_reserve_hidden_temp`.
-
-- Dependabot pip-audit drift on litellm GHSA-r75f-5x8p-qvmc (cycle-52+) — Dependabot reports the critical advisory but `pip-audit` on the live CI install env still does not emit this ID. Workflow `--ignore-vuln` does NOT include this ID. Monitor for pip-audit data refresh; escalate if pip-audit catches up.
-
-- Dependabot pip-audit drift on litellm GHSA-v4p8-mg3p-g94g (cycle-52+) — same handling as `GHSA-r75f-5x8p-qvmc` above.
 
 ### LOW
 
