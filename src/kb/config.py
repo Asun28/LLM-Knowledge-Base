@@ -45,6 +45,65 @@ def _resolve_project_root() -> Path:
     return heuristic
 
 
+def get_project_root() -> Path:
+    """Return the project root path, reading at call time.
+
+    Resolution order (call-time, not import-time):
+
+    1. ``KB_PROJECT_ROOT`` env var (cycle-19 L2 reload-leak hazard mitigation —
+       env mutations after module import take effect immediately).
+    2. The module-level ``PROJECT_ROOT`` binding if it has been set or
+       monkeypatched after import (cycle-18 L1 + cycle-23 precedent —
+       ``monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)`` is the
+       standard test pattern across the suite).
+    3. ``_resolve_project_root()`` heuristic as final fallback.
+
+    Returns:
+        The project root as a Path, resolved to absolute form.
+    """
+    env_value = os.environ.get("KB_PROJECT_ROOT")
+    if env_value:
+        return Path(env_value).resolve()
+    # Honor the current module-level binding so monkeypatched test PROJECT_ROOT
+    # values flow through. globals() avoids the PEP 562 __getattr__ recursion
+    # that direct attribute access on this module would trigger.
+    current = globals().get("PROJECT_ROOT")
+    if current is not None:
+        return Path(current)
+    return _resolve_project_root()
+
+
+def _reset_project_root() -> None:
+    """Test helper: reset any internal project-root cache.
+    
+    Currently a no-op since get_project_root() reads env at call time.
+    Future implementations may cache - this hook prevents test brittleness.
+    """
+    pass
+
+def get_allowed_domains() -> tuple[str, ...]:
+    """Return allowed domains for augment operations, reading env at call time.
+    
+    Cycle-19 L2 reload-leak hazard: env vars are read at EVERY call, not
+    cached at import time. This allows tests and long-lived processes to
+    observe env mutations after module import.
+    
+    Reads KB_AUGMENT_ALLOWED_DOMAINS first (KB_ prefix for namespace hygiene),
+    falls back to unprefixed AUGMENT_ALLOWED_DOMAINS for back-compat, then
+    defaults to "en.wikipedia.org,arxiv.org".
+    
+    Returns:
+        Tuple of allowed domain names (whitespace-stripped, deduplicated).
+    """
+    raw = (
+        os.getenv("KB_AUGMENT_ALLOWED_DOMAINS")
+        or os.getenv("AUGMENT_ALLOWED_DOMAINS")
+        or "en.wikipedia.org,arxiv.org"
+    )
+    return tuple(d.strip() for d in raw.split(",") if d.strip())
+
+
+
 PROJECT_ROOT = _resolve_project_root()
 RAW_DIR = PROJECT_ROOT / "raw"
 WIKI_DIR = PROJECT_ROOT / "wiki"
@@ -475,11 +534,7 @@ AUGMENT_COOLDOWN_HOURS = 24
 AUGMENT_RELEVANCE_THRESHOLD = 0.5
 AUGMENT_WIKIPEDIA_FUZZY_THRESHOLD = 0.7
 
-AUGMENT_ALLOWED_DOMAINS: tuple[str, ...] = tuple(
-    d.strip()
-    for d in os.getenv("AUGMENT_ALLOWED_DOMAINS", "en.wikipedia.org,arxiv.org").split(",")
-    if d.strip()
-)
+# AUGMENT_ALLOWED_DOMAINS moved to get_allowed_domains() function
 AUGMENT_CONTENT_TYPES: tuple[str, ...] = (
     "text/html",
     "text/markdown",
@@ -700,3 +755,22 @@ DUPLICATE_SLUG_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
 # before alternation — future additions with metachars cannot corrupt
 # the pattern).
 CALLOUT_MARKERS: tuple[str, ...] = ("contradiction", "gap", "stale", "key-insight")
+
+
+# ── PEP 562: Module-level __getattr__ for call-time config accessors ────
+# Cycle-19 L2 reload-leak hazard mitigation: when production code or tests
+# access kb.config.PROJECT_ROOT (attribute lookup) AFTER the module is
+# imported, the shim fires if the attribute is not in the module dict,
+# returning the fresh call-time value. The initial module-level binding
+# (line 93) is retained for code that imports the constant at module-load
+# time (snapshot binding). Both patterns coexist.
+#
+# AC3: extended to also handle AUGMENT_ALLOWED_DOMAINS for back-compat
+# with code that accesses the constant via attribute form.
+def __getattr__(name: str):
+    """Module-level attribute access hook (PEP 562)."""
+    if name == "PROJECT_ROOT":
+        return get_project_root()
+    if name == "AUGMENT_ALLOWED_DOMAINS":
+        return get_allowed_domains()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

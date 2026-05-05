@@ -34,6 +34,7 @@ from kb.mcp.app import (
     error_tag,
     mcp,
 )
+from kb.mcp._error_boundary import _mcp_error_boundary
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.sanitize import sanitize_error_text
@@ -233,6 +234,7 @@ def _save_synthesis(slug: str, result: dict) -> str:
 
 
 @mcp.tool()
+@_mcp_error_boundary
 def kb_query(
     question: str,
     max_results: int = 10,

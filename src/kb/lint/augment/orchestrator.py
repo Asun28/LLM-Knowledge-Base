@@ -211,7 +211,7 @@ def run_augment(
             from kb.lint.fetcher import AugmentFetcher
 
             with AugmentFetcher(
-                allowed_domains=config.AUGMENT_ALLOWED_DOMAINS,
+                allowed_domains=config.get_allowed_domains(),
                 version=kb.__version__,
             ) as fetcher:
                 for prop in proposals:
@@ -231,7 +231,7 @@ def run_augment(
 
                     fetched_ok = False
                     for url in prop["urls"]:
-                        if not _url_is_allowed(url, config.AUGMENT_ALLOWED_DOMAINS):
+                        if not _url_is_allowed(url, config.get_allowed_domains()):
                             manifest.advance(
                                 stub_id,
                                 "failed",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+import kb.config
 from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 
 # Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
@@ -14,6 +15,7 @@ from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, PROJECT_ROOT, WIKI_DIR
 # (`F401 unused-import`) will silently strip the line if the noqa is missing —
 # class-of-bug per cycle-22 L2 / feedback_ruff_unused_import_monkeypatch.
 from kb.utils.sanitize import _rel, sanitize_error_text  # noqa: F401
+from kb.utils.path_safety import _assert_under_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,10 @@ def _validate_wiki_dir(
 ) -> tuple[Path | None, str | None]:
     if wiki_dir is None:
         return None, None
-    effective_project_root = project_root or PROJECT_ROOT
+    # Honor explicit project_root override (cycle-29 contract); fall back to
+    # call-time get_project_root() so monkeypatched kb.config.PROJECT_ROOT
+    # (cycle-18 L1) and KB_PROJECT_ROOT env (cycle-19 L2) both flow through.
+    effective_project_root = project_root or kb.config.get_project_root()
     try:
         path = Path(wiki_dir).expanduser()
     except (TypeError, ValueError) as e:
@@ -135,12 +140,19 @@ def _validate_wiki_dir(
     if not path.is_dir():
         return None, f"wiki_dir is not a directory: {sanitize_error_text(str(path))}"
     path_resolved = path.resolve()
-    root = effective_project_root.resolve()
-    if path_resolved != root and not path_resolved.is_relative_to(root):
-        return (
-            None,
-            f"wiki_dir must be inside project root — got {sanitize_error_text(str(path_resolved))}",
-        )
+    # Inline dual-anchor containment check honoring explicit project_root.
+    # Cycle-65 AC9 originally migrated this to _assert_under_project_root, but
+    # that helper reads kb.config.get_project_root() and drops the explicit
+    # project_root parameter, breaking the cycle-29 explicit-override contract
+    # (Step 12 hard gate). The inline check is equivalent in semantics
+    # (literal-anchor on absolute path + resolved-anchor always) and preserves
+    # the legacy "wiki_dir must be inside project root" error format.
+    proj_root_resolved = effective_project_root.resolve()
+    try:
+        path.relative_to(effective_project_root)
+        path_resolved.relative_to(proj_root_resolved)
+    except ValueError:
+        return None, "wiki_dir must be inside project root"
     return path_resolved, None
 
 
@@ -166,6 +178,7 @@ _WINDOWS_RESERVED_BASENAMES: frozenset[str] = frozenset(
 # double-gate where page IDs of 201-255 chars passed MCP validation but later
 # tripped the persistence layer. Single source of truth now in kb.config.
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_ILLEGAL_CHARS_RE = re.compile(r'[:<>"|?*]')
 _NOTES_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 # Cycle 17 AC11-AC13 — shared run-id validator for `kb_lint(resume=...)`.
@@ -232,6 +245,14 @@ def _validate_page_id(
 ) -> str | None:
     """Validate a page ID for security and optionally existence.
 
+    Validation rules (in order of application):
+    - AC6: No trailing dots or spaces in path segments (Windows forbidden)
+    - AC7: No Windows illegal characters (: < > " | ? *)
+    - AC8: No parent-directory segments (..) — segment-aware check
+    - Control characters, empty, length, absolute paths, Windows reserved names
+    - Path containment check (no escape from wiki directory)
+    - Optional existence check
+
     Args:
         page_id: Page identifier (e.g., 'concepts/rag').
         check_exists: If True (default), also verify the page file exists.
@@ -250,13 +271,33 @@ def _validate_page_id(
     # Cycle 4 item #13 — length cap before filesystem resolve.
     if len(page_id) > MAX_PAGE_ID_LEN:
         return f"page_id too long ({len(page_id)} chars; max {MAX_PAGE_ID_LEN})."
+    # AC6 — Trailing dot/space rejection: Windows forbidden at segment level.
+    # Prefix preserved as "Invalid page_id:" so existing v0.7.0+ test contracts
+    # asserting that prefix continue to match (cycle-2 Q1 negative-assert lesson).
+    for seg in page_id.replace("\\", "/").split("/"):
+        if seg and seg != ".." and seg != seg.rstrip(". "):
+            return (
+                f"Invalid page_id: {page_id}. Segment {seg!r} has trailing dot "
+                f"or space (Windows forbidden)."
+            )
+
+    # AC7 — Windows illegal characters rejection.
+    if _WINDOWS_ILLEGAL_CHARS_RE.search(page_id):
+        return (
+            f"Invalid page_id: {page_id}. Contains Windows-illegal character "
+            f"(one of : < > \" | ? *)."
+        )
+
+    # AC8 — Segment-aware parent-directory match (allow "notes..draft" but reject "foo/../bar").
+    if any(seg == ".." for seg in page_id.replace("\\", "/").split("/")):
+        return f"Invalid page_id: {page_id}. Contains parent-directory segment ('..')."
+    
     if (
-        ".." in page_id
-        or page_id.startswith("/")
+        page_id.startswith("/")
         or page_id.startswith("\\")
         or os.path.isabs(page_id)
     ):
-        return f"Invalid page_id: {page_id}. Must not contain '..' or start with '/'."
+        return f"Invalid page_id: {page_id}. Must not start with '/'."
     # Cycle 4 item #13 — reject Windows reserved basenames cross-platform.
     if _is_windows_reserved(page_id):
         return (
@@ -266,8 +307,15 @@ def _validate_page_id(
         )
     effective_wiki_dir = wiki_dir or WIKI_DIR
     page_path = effective_wiki_dir / f"{page_id}.md"
+    # Containment check anchored against effective_wiki_dir (NOT PROJECT_ROOT).
+    # Cycle-65 Step 09 originally migrated this to _assert_under_project_root,
+    # which broke ~80 tests because they construct WIKI_DIR under tmp_path
+    # (outside the actual project worktree). The page_id contract has always
+    # been WIKI_DIR-anchored — only _validate_wiki_dir / _validate_path_under_project_root
+    # are properly PROJECT_ROOT-anchored. Step 12 hard-gate caught this.
     try:
-        page_path.resolve().relative_to(effective_wiki_dir.resolve())
+        candidate = (effective_wiki_dir / page_id).resolve()
+        candidate.relative_to(effective_wiki_dir.resolve())
     except ValueError:
         return f"Invalid page_id: {page_id}. Path escapes wiki directory."
     if check_exists and not page_path.exists():

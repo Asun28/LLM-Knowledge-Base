@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import secrets
 import threading
 
 import jsonschema
@@ -30,11 +31,6 @@ logger = logging.getLogger(__name__)
 
 # Max bytes to scan for a balanced JSON object in free-form CLI output.
 MAX_CLI_JSON_SCAN_BYTES: int = 65_536
-
-# Pattern to detect token-shaped secrets in argv elements (T8).
-_TOKEN_PATTERN: re.Pattern[str] = re.compile(
-    r"sk-[A-Za-z0-9_\-]{10,}|Bearer\s+\S+|ghp_[A-Za-z0-9]{10,}"
-)
 
 # Model name placeholder — only [A-Za-z0-9._:/-] chars are legal (T1).
 _MODEL_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._:/-]*$")
@@ -126,15 +122,45 @@ def _scrub_env(backend: str) -> dict[str, str]:
 
 
 def _check_no_secrets_on_argv(argv: list[str]) -> None:
-    """Raise LLMError if any argv element looks like a secret token (T8)."""
-    for elem in argv:
-        if _TOKEN_PATTERN.search(elem):
-            from kb.utils.llm import LLMError  # local import avoids circular dep
+    """Raise LLMError if any actual env secret value appears in argv (T8, AC16).
 
-            raise LLMError(
-                "Refusing to place a token-shaped string on subprocess argv (T8).",
-                kind="invalid_request",
-            )
+    AC16 value-based scrub: iterate six env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY).
+    For each non-empty value, check if any argv element CONTAINS it as a substring.
+
+    Substring vs exact-match: cycle-65 Step 09 background review surfaced that
+    secrets.compare_digest equality alone misses the embedded-secret leak (e.g.,
+    `["kb", "--header", f"Authorization: Bearer {ANTHROPIC_API_KEY}"]` would slip
+    past an equality check because no argv element EQUALS the bare secret).
+    Substring containment catches both the bare-equality and embedded-in-flag
+    cases. Timing leak via `in`-search is acceptable in the CLI subprocess
+    threat model (no remote attacker observes argv-construction timing).
+
+    The `secrets` import is retained for downstream callers that still want
+    constant-time equality elsewhere; this scrub no longer uses compare_digest.
+    """
+    from kb.utils.llm import LLMError  # local import avoids circular dep
+
+    env_keys = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MIMOCODING_API_KEY",
+        "MIMOCHAT_API_KEY",
+    ]
+
+    for key in env_keys:
+        secret_value = os.environ.get(key, "")
+        if not secret_value:
+            continue
+
+        for elem in argv:
+            if secret_value in elem:
+                raise LLMError(
+                    f"Refusing to place env secret {key!r} on subprocess argv (T8, AC16).",
+                    kind="invalid_request",
+                )
 
 
 def call_cli(

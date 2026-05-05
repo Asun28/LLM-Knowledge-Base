@@ -75,7 +75,7 @@ def _build_proposer_prompt(stub: dict[str, Any], purpose_text: str) -> str:
         title=title,
         page_type=stub.get("page_type", "concept"),
         existing_sources="[" + ", ".join(existing_repr) + "]",
-        allowed_domains=list(config.AUGMENT_ALLOWED_DOMAINS),
+        allowed_domains=list(config.get_allowed_domains()),
         purpose=(
             wrap_purpose(purpose_text, max_chars=1000)
             if purpose_text
@@ -102,7 +102,7 @@ def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
     raw_urls = response.get("urls") or []
     filtered: list[str] = []
     for u in raw_urls:
-        if _url_is_allowed(u, config.AUGMENT_ALLOWED_DOMAINS):
+        if _url_is_allowed(u, config.get_allowed_domains()):
             filtered.append(u)
         else:
             rd = _registered_domain(u)

@@ -341,9 +341,24 @@ def test_stderr_redacted(monkeypatch):
 
 
 def test_no_token_on_gemini_argv(monkeypatch):
-    """Gemini --prompt path must reject token-shaped strings in the prompt."""
+    """Gemini --prompt path must reject argv elements containing actual env-secret values.
+
+    Cycle-65 AC16 replaced the cycle-21 regex-based prompt-content scan
+    (``_TOKEN_PATTERN`` against ``sk-/Bearer/ghp_`` shapes) with a value-based
+    scrub: argv elements are checked against the SIX env-secret values
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, FIRECRAWL_API_KEY, DEEPSEEK_API_KEY,
+    MIMOCODING_API_KEY, MIMOCHAT_API_KEY). Step-10 simplify pass added
+    substring containment so embedded-secret leaks (Step-09 DeepSeek BLOCKER-1)
+    are also caught.
+
+    Test updated to reflect the new contract: setenv a fake secret value, then
+    construct a prompt containing that value, then assert the gemini --prompt
+    delivery refuses (LLMError) before subprocess.run.
+    """
     monkeypatch.setenv("KB_LLM_BACKEND", "gemini")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/gemini")
+    fake_secret = "sk-ant-test-fake-cycle21-token-not-real-9876543210"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", fake_secret)
 
     def _should_not_run(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called after token check")
@@ -351,7 +366,7 @@ def test_no_token_on_gemini_argv(monkeypatch):
     monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", _should_not_run)
 
     with pytest.raises(LLMError) as exc_info:
-        call_llm("Here is my key sk-proj-abcdefghij1234567890 use it")
+        call_llm(f"Here is my key {fake_secret} use it")
     assert exc_info.value.kind == "invalid_request"
 
 

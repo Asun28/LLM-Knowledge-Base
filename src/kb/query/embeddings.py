@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 
 from kb.config import EMBEDDING_MODEL
+from kb.utils.io import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -579,7 +580,12 @@ class VectorIndex:
                 conn.enable_load_extension(True)
                 import sqlite_vec
 
-                sqlite_vec.load(conn)
+                try:
+                    sqlite_vec.load(conn)
+                except sqlite3.OperationalError as exc:
+                    raise RuntimeError(
+                        "sqlite-vec extension failed to load; reinstall the sqlite-vec wheel"
+                    ) from exc
                 conn.enable_load_extension(False)
             except Exception as e:
                 if not self._ext_warned:
@@ -652,26 +658,27 @@ class VectorIndex:
             raise ValueError(f"Invalid embedding dim={dim!r}; expected int in [1, {self._MAX_DIM}]")
         conn = sqlite3.connect(str(target_path))
         try:
-            conn.enable_load_extension(True)
-            import sqlite_vec
+            with file_lock(target_path.with_suffix(".db.lock")):
+                conn.enable_load_extension(True)
+                import sqlite_vec
 
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
 
-            conn.execute("DROP TABLE IF EXISTS page_ids")
-            conn.execute("DROP TABLE IF EXISTS vec_pages")
-            conn.execute("CREATE TABLE page_ids (rowid INTEGER PRIMARY KEY, page_id TEXT)")
-            conn.execute(f"CREATE VIRTUAL TABLE vec_pages USING vec0(embedding float[{dim}])")
+                conn.execute("DROP TABLE IF EXISTS page_ids")
+                conn.execute("DROP TABLE IF EXISTS vec_pages")
+                conn.execute("CREATE TABLE page_ids (rowid INTEGER PRIMARY KEY, page_id TEXT)")
+                conn.execute(f"CREATE VIRTUAL TABLE vec_pages USING vec0(embedding float[{dim}])")
 
-            for i, (page_id, vec) in enumerate(entries):
-                rowid = i + 1
-                conn.execute("INSERT INTO page_ids VALUES (?, ?)", (rowid, page_id))
-                conn.execute(
-                    "INSERT INTO vec_pages (rowid, embedding) VALUES (?, ?)",
-                    (rowid, sqlite_vec.serialize_float32(vec)),
-                )
+                for i, (page_id, vec) in enumerate(entries):
+                    rowid = i + 1
+                    conn.execute("INSERT INTO page_ids VALUES (?, ?)", (rowid, page_id))
+                    conn.execute(
+                        "INSERT INTO vec_pages (rowid, embedding) VALUES (?, ?)",
+                        (rowid, sqlite_vec.serialize_float32(vec)),
+                    )
 
-            conn.commit()
+                conn.commit()
             if db_path is None:
                 self._stored_dim = dim
         finally:
