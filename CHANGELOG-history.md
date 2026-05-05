@@ -17,6 +17,45 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-05 — cycle 66 (carry-over hardening — eighth dev-mimo-opus trial cycle)
+
+**Theme:** Five carry-over hardening items surfaced by cycle-65 Step-10 simplify-pass quality findings + cycle-65 Step-12 fix-cascade observations. All five are signature-preserving or scope-tightening (no new public APIs, no schema changes, no new dependencies).
+
+**Per-AC detail (commit-order IR-6: AC5 → AC1 → AC4 → AC3 → AC2 → simplify):**
+
+- **AC5 — `path_safety._assert_under_project_root` drop `allow_symlinks` kwarg** (commit `27acbc4`).
+  Pre-cycle the helper accepted `allow_symlinks: bool = False` as a 4th keyword-only parameter. Verified at threat-model time: 1 production caller (`compile/compiler.py::_validate_path_under_project_root`), 0 test callers, ZERO opt-out usage anywhere. Q2.2 hard cap relaxes 4 → 3. Symlink rejection is now structurally unconditional (`if path.is_symlink(): raise`). Closes T7 ("future fourth caller passes `allow_symlinks=True`, opens a symlink to outside the project root").
+  Tests: `tests/test_cycle66_path_safety_symlink.py` (4 tests, 2 platform-skipped on Windows). Belt-and-suspenders divergent-fail: `inspect.signature` pin + behavioral symlink-rejection test + caller pin.
+
+- **AC1 — `kb.config.__getattr__` dead-`PROJECT_ROOT`-branch removal** (commit `5e91470`).
+  PEP 562 fires ONLY for attribute names NOT in the module dict. `PROJECT_ROOT = _resolve_project_root()` at module load means attribute access (`kb.config.PROJECT_ROOT`) resolves via the module dict and never hits `__getattr__`. The branch was effectively unreachable since cycle-65 introduced `get_project_root()` as the call-time accessor. Comment block rewritten to explain the structural shadowing.
+  Tests: `tests/test_cycle66_config_pep562.py` (5 tests). T1 closure: monkeypatched `__getattr__` raises unconditionally; `get_project_root()` still returns the monkeypatched `PROJECT_ROOT` (proves the test exercises the module-binding path, not the dead branch — divergent-fail control).
+
+- **AC4 — `tests/_helpers/ast_walk.find_module_imports` + CVE-grep consolidation** (commit `b094124`).
+  New helper signature: `find_module_imports(module: str, *, src_root: Path) -> dict[str, list[Path]]` returning `{"import": [...], "from": [...]}` lists. Detects BOTH `ast.Import` (bare form `import diskcache`) AND `ast.ImportFrom` (from form `from diskcache import Cache`). Handles namespace prefixes: `import module.sub` matches `module`, sibling `module_other` does not. Refactor: `tests/test_security_cve_greps.py::TestCVEBannedImports` collapses 4 duplicate `test_*_zero_imports` methods into 1 parametrized `test_module_zero_imports` over 4 banned modules.
+  Tests: `tests/_helpers/test_ast_walk.py::TestFindModuleImports` (8 tests covering bare/from/both/namespace-prefix-bare/namespace-prefix-from/unrelated/syntax-error/missing-src-root) + `tests/test_cycle66_cve_greps_consolidated.py` (4 parametrized cases, per-module both-forms divergent-fail fixture). T6 closure: revert helper to ImportFrom-only and the `bare_file in result["import"]` assertion fires RED for every banned module.
+
+- **AC3 — `kb.config._heuristic_walk_up_cached` lru_cache** (commit `238271c`).
+  New `@functools.lru_cache(maxsize=8) def _heuristic_walk_up_cached(cwd_str: str) -> Path` consolidating the cwd parent-walk loop. Cache key is string-form cwd (different invocation directories yield different parent chains — Q-7.4 / Q-7.5 cache-key validity). `_resolve_project_root()` env / heuristic paths unchanged; the walk-up now delegates to the cached inner. `_reset_project_root()` (was no-op) calls `_heuristic_walk_up_cached.cache_clear()`. Production typically sets `KB_PROJECT_ROOT` and short-circuits BEFORE the cache; the cache is a test-suite + dev-loop optimization, not an MCP-boundary perf claim (IR-4 framing lock).
+  Tests: `tests/test_cycle66_project_root_cache.py` (5 tests). Late-binds via `kb.config.X` attribute access per cycle-20 L1 reload-leak (sibling tests `importlib.reload(kb.config)` would invalidate `from`-imported names). Delta-based assertions (compare currsize / hits before-and-after) so background suite cache state cannot poison the file. T5 closure: `test_cwd_change_invalidates_cache` writes 2 cwd subdirs, asserts ≥2 cache entries, then asserts cwd1 repeat hits the existing entry.
+
+- **AC2 — `cli_backend._SCRUB_KEYS` derived from `CLI_BACKEND_ENV_INJECT`** (commit `93b8fa5`).
+  Pre-cycle `_check_no_secrets_on_argv` iterated a hardcoded 6-key list (ANTHROPIC/OPENAI/FIRECRAWL/DEEPSEEK/MIMOCODING/MIMOCHAT). The CLI backend registry however injects 5 additional secret keys at subprocess boundaries that were NOT scrubbed: GEMINI_API_KEY, KIMI_API_KEY, QWEN_API_KEY, ZAI_API_KEY, ZHIPUAI_API_KEY. New module-top `_SCRUB_KEYS: frozenset[str]` derives at IMPORT TIME from `kb.config.CLI_BACKEND_ENV_INJECT.values()` flattened + 4 standalone keys (Anthropic / Firecrawl / MiMoCoding / MiMoChat — these wrappers don't go through the backend registry). Cycle-19 L2 IR-1 safety: `CLI_BACKEND_ENV_INJECT` is a module-literal dict (not env-derived), so capturing it at import time is safe — re-importing this module re-evaluates the comprehension on the fresh dict.
+  Tests: `tests/test_cycle66_secret_scrub.py` (14 cases: 11 parametrized `test_scrub_blocks_argv_with_env_value` over the canonical scrub keys + T3 negative-control + empty-env edge + T4 production-vs-canonical equality assertion). T2 closure: 5 net-new keys gain scrub coverage. T4 closure: parametrize source is the canonical `CLI_BACKEND_ENV_INJECT.values()` flattened, NOT a literal mirror — a future revert that hardcodes the production list and forgets a key fires RED on the missing case.
+
+- **Step 10 simplify pass** (commit `a15780c`).
+  Three-agent (reuse / quality / efficiency) parallel review identified 5 instances of changelog-style narration in source comments that belonged in commit messages. Net: −29 lines of comment cruft, zero behaviour change, zero signature change. Trimmed: `cli_backend.py` `_SCRUB_KEYS` comment block (22 → 4 lines, kept cycle-19 L2 IR-1 import-time safety rationale only); `cli_backend.py` `_check_no_secrets_on_argv` docstring; `config.py` `_reset_project_root` docstring; `config.py` PEP-562 comment closing AC1 reference; `path_safety.py` module docstring AC5 chronology.
+
+**Step 11 SAST + secrets scan.** Bandit on the 3 changed src files: 2 LOW pre-existing findings (B404 subprocess import, B603 `subprocess.run(shell=False)`) — both documented and design-required by `cli_backend.py` (CLI subprocess backend). detect-secrets on the cycle-66 unified diff: `"results": {}` (zero secrets).
+
+**Step 12 CI hard gate.** Full pytest 3173 passed + 23 skipped (zero failures, zero new skips). Ruff check + format clean on all touched files. pip-audit (single SCA invocation): 2 known vulnerabilities matching cycle-65 / cycle-66 baseline — diskcache 5.6.3 / CVE-2025-69872 (transitive, accepted) and pip 26.0.1 / CVE-2026-3219 (tooling, accepted); both already listed in SECURITY.md and `.github/workflows/ci.yml --ignore-vuln`. NO new CVEs introduced by cycle-66.
+
+**Step 13 coverage delta.** Touched src/ files via focused subset: `cli_backend.py` 93%, `config.py` 79%, `path_safety.py` 41%. Absolute config.py / path_safety.py figures reflect existing untouched code paths; the cycle-66-NEW lines have dedicated test coverage (5 cycle-66 test files + 8 helper tests + cycle-65 reuse). Coverage instrumentation has a known interaction with the suite's autouse fixture under full-suite invocation that surfaces 295 cascading failures specific to the coverage tool (verified pre-existing — bare full-suite is green) — the focused subset is the operative measurement.
+
+**Step 14 security verify.** All 7 threats from the Step-2 threat model (T1–T7) closed by delivered tests with explicit divergent-fail verification. SCA artifact triage: 2 CVEs match Step-2 baseline (no drift, no new advisories during the cycle wall-clock window). Steps 15 (existing-CVE patch — skip-when "no open alerts on main") and 16 (IaC/SBOM — skip-when "no `*.tf` / no Dockerfile / no dep-manifest diff") both met skip conditions.
+
+**Decision-doc trail.** Eight cycle-66 decision documents land in this commit alongside the doc updates: `2026-05-05-cycle-66-{requirements,threat-model,brainstorm,design-eval-R1-opus,design-eval-R2-deepseek,design,plan,plan-gate}.md`.
+
 ### 2026-05-05 — Dependabot alert repair
 
 **Theme:** Close the four open Dependabot dependency alerts (#12-#15) in one PR by removing the vulnerable optional eval-harness packages instead of accepting resolver downgrades.
