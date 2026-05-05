@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -74,11 +75,18 @@ def _wait_for_child_acquire(
     pid_sentinel: Path,
     *,
     timeout: float,
-) -> None:
+) -> int:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pid_sentinel.exists():
-            return
+            sentinel_text = pid_sentinel.read_text(encoding="ascii").strip()
+            if sentinel_text:
+                try:
+                    return int(sentinel_text)
+                except ValueError as exc:
+                    raise AssertionError(
+                        f"child wrote invalid PID sentinel: {sentinel_text!r}"
+                    ) from exc
         exit_code = child.poll()
         if exit_code is not None:
             stdout, stderr = child.communicate(timeout=1)
@@ -104,6 +112,33 @@ def _running_under_codex_tooling() -> bool:
             "CODEX_SANDBOX_NETWORK_DISABLED",
         )
     )
+
+
+class _StillRunningChild:
+    returncode = None
+
+    def poll(self):
+        return None
+
+    def communicate(self, timeout=None):
+        return "", ""
+
+
+def test_wait_for_child_acquire_waits_for_pid_content(tmp_path):
+    """Regression: CI can observe the sentinel after create but before write."""
+    pid_sentinel = tmp_path / "child.pid"
+    pid_sentinel.write_text("", encoding="ascii")
+
+    def populate_sentinel() -> None:
+        time.sleep(0.05)
+        pid_sentinel.write_text("12345", encoding="ascii")
+
+    writer = threading.Thread(target=populate_sentinel)
+    writer.start()
+    try:
+        assert _wait_for_child_acquire(_StillRunningChild(), pid_sentinel, timeout=1.0) == 12345
+    finally:
+        writer.join(timeout=1.0)
 
 
 @pytest.mark.integration
@@ -141,12 +176,11 @@ def test_cross_process_file_lock_timeout_then_recovery(tmp_path):
     try:
         # 15 s covers generous interpreter bootstrap on CI. Unlike the older
         # multiprocessing Event path, this loop also notices early child exit.
-        _wait_for_child_acquire(child, pid_sentinel, timeout=15.0)
+        recorded_pid = _wait_for_child_acquire(child, pid_sentinel, timeout=15.0)
 
         # PID sentinel confirms which process now owns the lock (belt-and-
         # braces; the acquire wait above is the primary signal).
         assert pid_sentinel.exists()
-        recorded_pid = int(pid_sentinel.read_text(encoding="ascii"))
         assert recorded_pid != os.getpid()
         lock_file = lock_target.with_suffix(lock_target.suffix + ".lock")
         assert lock_file.read_text(encoding="ascii").strip() == str(recorded_pid)
