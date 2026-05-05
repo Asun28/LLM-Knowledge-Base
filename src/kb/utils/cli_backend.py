@@ -34,6 +34,29 @@ MAX_CLI_JSON_SCAN_BYTES: int = 65_536
 # Model name placeholder — only [A-Za-z0-9._:/-] chars are legal (T1).
 _MODEL_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._:/-]*$")
 
+# ── Scrub-key derivation (cycle-66 AC2) ───────────────────────────────────────
+# `_SCRUB_KEYS` is derived AT IMPORT TIME from `kb.config.CLI_BACKEND_ENV_INJECT`
+# (canonical, module-literal dict at config.py:351-360) plus 4 standalone keys
+# that are not registered as CLI backends but are used directly via the
+# Anthropic / Firecrawl / MiMo wrappers.
+#
+# DO NOT re-hardcode this list. Adding a 9th backend (or a new env var to an
+# existing backend's tuple) automatically gains scrub coverage with zero churn
+# in this file. The companion test (tests/test_cycle66_secret_scrub.py)
+# parametrizes from the same canonical source, so a missing scrub key fires
+# RED at the test boundary before reaching production (T4 revert hazard).
+#
+# Cycle-19 L2 safety (IR-1): L2 targets env-DERIVED constants captured from
+# os.environ at import time, which can stale across reloads or env mutations.
+# CLI_BACKEND_ENV_INJECT is a module-literal dict (no os.environ read in its
+# definition), so capturing it at import time is safe — the only mutation
+# path is module reload, and re-importing this module re-evaluates the
+# comprehension on the fresh dict.
+_SCRUB_KEYS: frozenset[str] = frozenset(
+    {"ANTHROPIC_API_KEY", "FIRECRAWL_API_KEY", "MIMOCODING_API_KEY", "MIMOCHAT_API_KEY"}
+    | {key for keys in CLI_BACKEND_ENV_INJECT.values() for key in keys}
+)
+
 # ── Semaphore pool (T6) ───────────────────────────────────────────────────────
 _semaphore_lock = threading.Lock()
 _backend_semaphores: dict[str, threading.Semaphore] = {}
@@ -123,9 +146,13 @@ def _scrub_env(backend: str) -> dict[str, str]:
 def _check_no_secrets_on_argv(argv: list[str]) -> None:
     """Raise LLMError if any actual env secret value appears in argv (T8, AC16).
 
-    AC16 value-based scrub: iterate six env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    FIRECRAWL_API_KEY, DEEPSEEK_API_KEY, MIMOCODING_API_KEY, MIMOCHAT_API_KEY).
-    For each non-empty value, check if any argv element CONTAINS it as a substring.
+    Scrub keys come from ``_SCRUB_KEYS`` (module top), derived at import time
+    from ``CLI_BACKEND_ENV_INJECT`` plus 4 standalone keys. Cycle-66 AC2
+    expanded the set from 6 hardcoded entries to 11 derived entries; any new
+    backend or env var added to ``CLI_BACKEND_ENV_INJECT`` automatically
+    gains scrub coverage on the next import — there is no second list to
+    keep in sync. Closes T2 (argv leak of GEMINI/KIMI/QWEN/ZAI/ZHIPUAI net-new
+    keys) and T4 (revert hazard re-hardcoding the scrub list).
 
     Substring vs exact-match: cycle-65 Step 09 background review surfaced that
     secrets.compare_digest equality alone misses the embedded-secret leak (e.g.,
@@ -137,16 +164,7 @@ def _check_no_secrets_on_argv(argv: list[str]) -> None:
     """
     from kb.utils.llm import LLMError  # local import avoids circular dep
 
-    env_keys = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "FIRECRAWL_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MIMOCODING_API_KEY",
-        "MIMOCHAT_API_KEY",
-    ]
-
-    for key in env_keys:
+    for key in _SCRUB_KEYS:
         secret_value = os.environ.get(key, "")
         if not secret_value:
             continue
