@@ -335,7 +335,6 @@ def kb_stats(wiki_dir: str | None = None) -> str:
     """Get wiki statistics: page counts by type, graph metrics, coverage info."""
     try:
         import kb.graph.cache  # cycle-68 AC08b — pages-None call site routes through cache
-
         from kb.evolve.analyzer import analyze_coverage
         from kb.graph.builder import graph_stats
 

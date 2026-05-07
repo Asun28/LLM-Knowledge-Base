@@ -276,10 +276,14 @@ def test_kb_stats_runs(tmp_project, monkeypatch):
         "bridge_nodes": [("concepts/llm", 0.15)],
     }
 
-    # Lazy imports inside kb_stats — patch at the source module
+    # Lazy imports inside kb_stats — patch at the source module.
+    # Cycle 68 AC08b — kb_stats now reads via kb.graph.cache.get_graph (cache
+    # layer); the underlying kb.graph.builder.build_graph runs on cache miss
+    # but the test's intent is to mock-out graph access entirely, so we patch
+    # the cache entry point instead.
     with (
         patch("kb.evolve.analyzer.analyze_coverage", return_value=mock_coverage) as mock_cov,
-        patch("kb.graph.builder.build_graph", return_value="fake_graph") as mock_bg,
+        patch("kb.graph.cache.get_graph", return_value="fake_graph") as mock_bg,
         patch("kb.graph.builder.graph_stats", return_value=mock_stats) as mock_gs,
     ):
         result = kb_stats()

@@ -29,9 +29,8 @@ def test_backlog_does_not_contain_shipped_phase_4_5_high_entries():
     """AC15b — every cycle-67-audited stale BACKLOG entry has been removed."""
     backlog_text = BACKLOG_PATH.read_text(encoding="utf-8")
     found_stale = [s for s in DELETED_ENTRIES if s in backlog_text]
-    assert not found_stale, (
-        "BACKLOG.md still contains stale entries:\n"
-        + "\n".join(f"  - {s!r}" for s in found_stale)
+    assert not found_stale, "BACKLOG.md still contains stale entries:\n" + "\n".join(
+        f"  - {s!r}" for s in found_stale
     )
 
 

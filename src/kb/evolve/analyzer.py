@@ -5,6 +5,7 @@ import re
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
+import kb.graph.cache  # cycle-68 AC07 — pages-None call site routes through cache
 from kb.config import (
     MAX_PAGES_FOR_TERM,
     MIN_PAGES_FOR_TERM,
@@ -13,7 +14,6 @@ from kb.config import (
     UNDER_COVERED_TYPE_THRESHOLD,
     WIKI_DIR,
 )
-import kb.graph.cache  # cycle-68 AC07 — pages-None call site routes through cache
 from kb.graph.builder import build_graph, graph_stats
 from kb.lint.checks import check_stub_pages
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
