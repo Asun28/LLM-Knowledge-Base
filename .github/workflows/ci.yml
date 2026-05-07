@@ -157,12 +157,30 @@ jobs:
 
       - name: dummy-key-leak-guard
         run: |
-          # AC22: production source must not contain the dummy CI key. Scope to
-          # src/ so legitimate references in tests (fixture helpers / regression
+          # AC22 (cycle 65) + AC11 (cycle 67): the dummy CI key must not appear
+          # in any tracked file outside the explicit allowlist. The allowlist
+          # covers legitimate references in tests (fixture helpers / regression
           # tests for this very guard) and in docs (BACKLOG, CHANGELOG, decision
           # notes) and in .github/workflows/ci.yml itself (the canonical home of
-          # the dummy ANTHROPIC_API_KEY env value) do not trigger a false fail.
-          git ls-files 'src/**' | xargs -r grep -l 'sk-ant-dummy' | (! read)
+          # the dummy ANTHROPIC_API_KEY env value).
+          #
+          # Cycle 67 AC11 broadens the cycle-65 src/**-only scope to all tracked
+          # files because mimo r5 Q7 flagged a real risk: a test that mocks HTTP
+          # at the httpx layer (rather than the SDK client constructor) could
+          # bake the dummy literal into a VCR cassette / pytest snapshot file
+          # under tests/__snapshots__/ or similar. The src-only scan misses that.
+          DUMMY=$(grep -oE 'sk-ant-dummy[A-Za-z0-9_-]*' .github/workflows/ci.yml | head -1)
+          if [ -z "$DUMMY" ]; then
+            echo "::error::cycle-67 AC11: no dummy key found in .github/workflows/ci.yml; cannot run check"
+            exit 1
+          fi
+          ALLOWLIST='^\.github/workflows/ci\.yml$|^BACKLOG\.md$|^CHANGELOG\.md$|^CHANGELOG-history\.md$|^docs/reference/testing\.md$|^docs/superpowers/decisions/|^tests/test_cycle65_ci_dummy_key_guard\.py$|^tests/_helpers/api_key\.py$|^tests/test_cycle67_|^tests/test_cycle36_ci_hardening\.py$'
+          matches=$(git ls-files | xargs grep -l "$DUMMY" 2>/dev/null | grep -vE "$ALLOWLIST" || true)
+          if [ -n "$matches" ]; then
+            echo "::error::cycle-67 AC11: dummy CI key leaked into tracked files outside the allowlist:"
+            echo "$matches"
+            exit 1
+          fi
       - name: Build distribution + twine check
         # AC15: catches malformed pyproject.toml (cycle 34 fixed readme pointer)
         # and validates package metadata before any future PyPI publish.

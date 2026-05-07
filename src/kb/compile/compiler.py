@@ -616,6 +616,17 @@ def compile_wiki(
                 incremental=incremental,
             )
         except Exception as auto_exc:  # noqa: BLE001
+            # Cycle 67 AC04 — KB_STRICT_PUBLISH=1 re-raises instead of swallowing.
+            # Read at CALL time per cycle-19 L2 reload-leak rule. Truthy variants
+            # match AC06 KB_DISABLE_VECTORS convention (R1-C3 / C-AC04-truthy).
+            # Default behavior (env unset) preserves the cycle-64 swallow-and-warn
+            # contract so existing callers do not break.
+            if os.environ.get("KB_STRICT_PUBLISH", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                raise
             logger.warning("Cycle 64 auto-publish skipped: %s", auto_exc)
 
     return results

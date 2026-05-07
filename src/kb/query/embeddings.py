@@ -662,7 +662,18 @@ class VectorIndex:
                 conn.enable_load_extension(True)
                 import sqlite_vec
 
-                sqlite_vec.load(conn)
+                # Cycle 67 AC05 — sanitize sqlite_vec.load OperationalError.
+                # The error message embeds the absolute filesystem path of the
+                # .so/.dll that failed to load, which can leak via MCP error
+                # responses (T15 information disclosure class). Cycle 65 AC14
+                # already shipped this fix at the _connect() call site (line
+                # 583-588); AC05 closes the second call site here.
+                try:
+                    sqlite_vec.load(conn)
+                except sqlite3.OperationalError as exc:
+                    raise RuntimeError(
+                        "sqlite-vec extension failed to load; reinstall the sqlite-vec wheel"
+                    ) from exc
                 conn.enable_load_extension(False)
 
                 conn.execute("DROP TABLE IF EXISTS page_ids")

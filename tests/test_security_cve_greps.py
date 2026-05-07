@@ -17,11 +17,7 @@ CVE_BANNED_MODULES = ["diskcache", "litellm", "pip", "ragas"]
 
 
 def _requirement_name(requirement: str) -> str:
-    return (
-        re.split(r"\s*(?:==|>=|<=|~=|!=|<|>|;|\[)", requirement, maxsplit=1)[0]
-        .strip()
-        .lower()
-    )
+    return re.split(r"\s*(?:==|>=|<=|~=|!=|<|>|;|\[)", requirement, maxsplit=1)[0].strip().lower()
 
 
 class TestCVEBannedImports:

@@ -59,9 +59,7 @@ class TestAllowSymlinksKwargRemoved:
         # Cap drops to 3 keyword-only params per Q2.2 cycle-66 update.
         # Positional params (path, field_name) excluded from this set.
         kw_only = {
-            name
-            for name, p in sig.parameters.items()
-            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            name for name, p in sig.parameters.items() if p.kind == inspect.Parameter.KEYWORD_ONLY
         }
         assert kw_only == {"require_exists", "require_dir", "dual_anchor"}, (
             f"AC5 Q2.2: keyword-only param set drifted; got {kw_only}"
