@@ -1,6 +1,7 @@
 """Hybrid search — RRF fusion of BM25 + vector search with multi-query expansion."""
 
 import logging
+import os
 
 from kb.config import (
     BM25_SEARCH_LIMIT_MULTIPLIER,
@@ -10,6 +11,25 @@ from kb.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _vectors_disabled_at_runtime() -> bool:
+    """Cycle 67 AC06 — runtime kill-switch for hybrid search vector branch.
+
+    Reads ``KB_DISABLE_VECTORS`` at CALL time (cycle-19 L2 reload-leak rule).
+    Truthy variants `{1, true, yes}` (case-insensitive, whitespace-tolerant)
+    enable disable. Symmetric with AC04 ``KB_STRICT_PUBLISH`` truthiness
+    convention per design FW-3 / R1-C3.
+
+    When disabled, ``hybrid_search`` skips ``vector_fn`` invocations and
+    falls back to BM25-only results. Allows operators to flip per-environment
+    without uninstalling the ``[hybrid]`` extra (Phase 4.5 MEDIUM).
+    """
+    return os.environ.get("KB_DISABLE_VECTORS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def rrf_fusion(lists: list[list[dict]], k: int = RRF_K) -> list[dict]:
@@ -118,20 +138,27 @@ def hybrid_search(
     if bm25_results:
         all_lists.append(bm25_results)
 
-    # Vector search on all query variants
-    for q in queries:
-        try:
-            vec_results = vector_fn(q, vector_limit)
-        except Exception as exc:
-            logger.warning(
-                "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
-                exc.__class__.__name__,
-                exc,
-                len(q.split()),
-            )
-            vec_results = []
-        if vec_results:
-            all_lists.append(vec_results)
+    # Vector search on all query variants — skipped if KB_DISABLE_VECTORS=1
+    # (cycle 67 AC06 runtime kill-switch). Per cycle-19 L2 the env var is read
+    # at CALL time, so an operator can flip behavior mid-process.
+    if not _vectors_disabled_at_runtime():
+        for q in queries:
+            try:
+                vec_results = vector_fn(q, vector_limit)
+            except Exception as exc:
+                logger.warning(
+                    "hybrid_search backend=vector failed: %s (%s); query_tokens=%d",
+                    exc.__class__.__name__,
+                    exc,
+                    len(q.split()),
+                )
+                vec_results = []
+            if vec_results:
+                all_lists.append(vec_results)
+    else:
+        logger.debug(
+            "hybrid_search vector branch skipped: KB_DISABLE_VECTORS=1 (cycle 67 AC06)"
+        )
 
     if not all_lists:
         return []
