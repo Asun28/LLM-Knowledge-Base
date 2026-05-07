@@ -28,12 +28,16 @@ def test_pyproject_httpx_pin_has_explicit_ceiling():
     """
     pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     data = tomllib.loads(pyproject_text)
-    deps = data.get("project", {}).get("dependencies", [])
+    # httpx lives in the `augment` optional-dependencies extra (not main deps);
+    # cycle-68 BACKLOG entry pinned location at pyproject.toml:29.
+    augment = data.get("project", {}).get("optional-dependencies", {}).get("augment", [])
     httpx_constraint = next(
-        (d for d in deps if d.startswith("httpx") and "pytest" not in d),
+        (d for d in augment if d.startswith("httpx") and "pytest" not in d),
         None,
     )
-    assert httpx_constraint is not None, "httpx not in pyproject.toml [project].dependencies"
+    assert httpx_constraint is not None, (
+        "httpx not in pyproject.toml [project.optional-dependencies].augment"
+    )
     assert ">=0.28" in httpx_constraint, (
         f"httpx constraint missing >=0.28 floor: {httpx_constraint!r}"
     )
