@@ -1,5 +1,11 @@
-"""Cycle 21 — CLI subprocess backend tests (AC17-AC30)."""
+"""Cycle 21 — CLI subprocess backend tests (AC17-AC30).
 
+Cycle 68 AC01 — migrated from ``subprocess.run`` mocks to ``subprocess.Popen``
+factories. Test intent is unchanged; the stub now adheres to the AC01 contract
+(separate stdin write thread + chunked stdout/stderr readers).
+"""
+
+import io
 import subprocess
 from unittest.mock import MagicMock
 
@@ -12,17 +18,89 @@ from kb.utils.cli_backend import (
 )
 from kb.utils.llm import LLMError, call_llm, call_llm_json
 
+# ── AC01 Popen-stub helpers (cycle 68 migration) ─────────────────────────────
+
+
+class _FakePopen:
+    """Minimal Popen stub for AC01 contract.
+
+    Mimics ``subprocess.Popen`` interface used by ``cli_backend.call_cli``:
+    stdin/stdout/stderr (file-like), poll(), wait(timeout), terminate(),
+    kill(), returncode.
+    """
+
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        wait_raises: type[BaseException] | None = None,
+    ):
+        self.returncode = returncode if wait_raises is None else None
+        self.stdout = io.BytesIO(stdout)
+        self.stderr = io.BytesIO(stderr)
+        self.stdin = io.BytesIO()
+        self._wait_raises = wait_raises
+        self._terminated = False
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self._wait_raises and not self._terminated:
+            raise self._wait_raises("fake", timeout)
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+    def terminate(self):
+        self._terminated = True
+        if self.returncode is None:
+            self.returncode = -15
+
+    def kill(self):
+        self._terminated = True
+        if self.returncode is None:
+            self.returncode = -9
+
+
+def _make_popen(captured, *, returncode=0, stdout=b"", stderr=b"", wait_raises=None):
+    """Build a Popen factory that records cmd/env/shell/input into ``captured``."""
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["shell"] = kwargs.get("shell")
+        captured["env"] = kwargs.get("env")
+        proc = _FakePopen(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            wait_raises=wait_raises,
+        )
+        original_write = proc.stdin.write
+
+        def tracked_write(data):
+            captured["input"] = (captured.get("input") or b"") + data
+            return original_write(data)
+
+        proc.stdin.write = tracked_write
+        return proc
+
+    return fake_popen
+
+
 # ── AC17: Anthropic path unchanged when KB_LLM_BACKEND unset ─────────────────
 
 
 def test_anthropic_path_unchanged(monkeypatch):
-    """subprocess.run must never be called on the default anthropic path."""
+    """subprocess.Popen must never be called on the default anthropic path."""
     monkeypatch.delenv("KB_LLM_BACKEND", raising=False)
 
     def _raise(*args, **kwargs):
-        raise AssertionError("subprocess.run was called on the anthropic path")
+        raise AssertionError("subprocess.Popen was called on the anthropic path")
 
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", _raise)
+    monkeypatch.setattr("kb.utils.cli_backend.subprocess.Popen", _raise)
 
     mock_response = MagicMock()
     mock_response.content = [MagicMock(type="text", text="hello")]
@@ -44,13 +122,10 @@ def test_call_cli_stdin_path(monkeypatch):
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
     captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input")
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout=b"result text\n", stderr=b"")
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b"result text\n"),
+    )
 
     result = call_llm("hello world", tier="write")
     assert result == "result text"
@@ -67,21 +142,17 @@ def test_call_cli_arg_path_gemini(monkeypatch):
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/gemini")
 
     captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input")
-        return subprocess.CompletedProcess(
-            cmd, returncode=0, stdout=b"gemini says hi\n", stderr=b""
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b"gemini says hi\n"),
+    )
 
     result = call_llm("my prompt", tier="write")
     assert result == "gemini says hi"
     assert "--prompt" in captured["cmd"]
     assert "my prompt" in captured["cmd"]
-    assert captured["input"] is None
+    # No stdin written: gemini path uses DEVNULL (no stdin write thread).
+    assert captured.get("input") is None
 
 
 def test_call_cli_codex_exec_jsonl_path(monkeypatch):
@@ -91,20 +162,16 @@ def test_call_cli_codex_exec_jsonl_path(monkeypatch):
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/codex")
 
     captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input")
-        captured["shell"] = kwargs.get("shell")
-        stdout = (
-            b'{"type":"thread.started","thread_id":"t1"}\n'
-            b'{"type":"item.completed","item":{"type":"agent_message",'
-            b'"text":"KB_CODEX_BACKEND_OK"}}\n'
-            b"Reading additional input from stdin...\n"
-        )
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout=stdout, stderr=b"")
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    stdout = (
+        b'{"type":"thread.started","thread_id":"t1"}\n'
+        b'{"type":"item.completed","item":{"type":"agent_message",'
+        b'"text":"KB_CODEX_BACKEND_OK"}}\n'
+        b"Reading additional input from stdin...\n"
+    )
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=stdout),
+    )
 
     result = call_llm("Reply exactly KB_CODEX_BACKEND_OK.", tier="write")
     assert result == "KB_CODEX_BACKEND_OK"
@@ -125,9 +192,9 @@ def test_call_cli_not_installed(monkeypatch):
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: None)
 
     def _raise(*args, **kwargs):
-        raise AssertionError("subprocess.run should not be called")
+        raise AssertionError("subprocess.Popen should not be called")
 
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", _raise)
+    monkeypatch.setattr("kb.utils.cli_backend.subprocess.Popen", _raise)
 
     with pytest.raises(LLMError) as exc_info:
         call_llm("prompt")
@@ -141,9 +208,11 @@ def test_call_cli_not_installed(monkeypatch):
 def test_call_cli_timeout(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
+
+    captured = {}
     monkeypatch.setattr(
-        "kb.utils.cli_backend.subprocess.run",
-        lambda *a, **kw: (_ for _ in ()).throw(subprocess.TimeoutExpired("ollama", 120)),
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, wait_raises=subprocess.TimeoutExpired),
     )
 
     with pytest.raises(LLMError) as exc_info:
@@ -158,12 +227,11 @@ def test_call_cli_nonzero_exit(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd, returncode=1, stdout=b"", stderr=b"Error: model not found"
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=1, stderr=b"Error: model not found"),
+    )
 
     with pytest.raises(LLMError) as exc_info:
         call_llm("prompt")
@@ -177,12 +245,11 @@ def test_call_cli_json_bare_json(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd, returncode=0, stdout=b'{"title": "foo"}', stderr=b""
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b'{"title": "foo"}'),
+    )
 
     schema = {
         "type": "object",
@@ -201,15 +268,11 @@ def test_call_cli_json_fenced(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd,
-            returncode=0,
-            stdout=b'```json\n{"title":"bar"}\n```',
-            stderr=b"",
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b'```json\n{"title":"bar"}\n```'),
+    )
 
     schema = {
         "type": "object",
@@ -229,13 +292,12 @@ def test_call_cli_json_schema_validated(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        # Missing required field "title"
-        return subprocess.CompletedProcess(
-            cmd, returncode=0, stdout=b'{"body": "no title here"}', stderr=b""
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    # Missing required field "title"
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b'{"body": "no title here"}'),
+    )
 
     schema = {
         "type": "object",
@@ -255,12 +317,11 @@ def test_call_cli_json_no_json(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd, returncode=0, stdout=b"I cannot do that.", stderr=b""
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b"I cannot do that."),
+    )
 
     schema = {"type": "object", "properties": {}, "additionalProperties": False}
     with pytest.raises(LLMError) as exc_info:
@@ -322,15 +383,15 @@ def test_stderr_redacted(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd,
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(
+            captured,
             returncode=1,
-            stdout=b"",
             stderr=b"auth error key=sk-abc12345678901234567890",
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+        ),
+    )
 
     with pytest.raises(LLMError) as exc_info:
         call_llm("prompt")
@@ -353,7 +414,7 @@ def test_no_token_on_gemini_argv(monkeypatch):
 
     Test updated to reflect the new contract: setenv a fake secret value, then
     construct a prompt containing that value, then assert the gemini --prompt
-    delivery refuses (LLMError) before subprocess.run.
+    delivery refuses (LLMError) before subprocess.Popen.
     """
     monkeypatch.setenv("KB_LLM_BACKEND", "gemini")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/gemini")
@@ -361,9 +422,9 @@ def test_no_token_on_gemini_argv(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", fake_secret)
 
     def _should_not_run(*args, **kwargs):
-        raise AssertionError("subprocess.run should not be called after token check")
+        raise AssertionError("subprocess.Popen should not be called after token check")
 
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", _should_not_run)
+    monkeypatch.setattr("kb.utils.cli_backend.subprocess.Popen", _should_not_run)
 
     with pytest.raises(LLMError) as exc_info:
         call_llm(f"Here is my key {fake_secret} use it")
@@ -378,15 +439,15 @@ def test_stdout_redacted(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(
-            cmd,
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(
+            captured,
             returncode=0,
             stdout=b"result with sk-abc12345678901234567890 embedded",
-            stderr=b"",
-        )
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+        ),
+    )
 
     result = call_llm("prompt")
     assert "sk-abc12345678901234567890" not in result
@@ -401,15 +462,11 @@ def test_token_shaped_prompt_via_stdin(monkeypatch):
     monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
     monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
 
-    captured: dict = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["input"] = kwargs.get("input")
-        captured["shell"] = kwargs.get("shell")
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout=b"ok", stderr=b"")
-
-    monkeypatch.setattr("kb.utils.cli_backend.subprocess.run", fake_run)
+    captured = {}
+    monkeypatch.setattr(
+        "kb.utils.cli_backend.subprocess.Popen",
+        _make_popen(captured, returncode=0, stdout=b"ok"),
+    )
 
     prompt = "Analyse the key sk-ant-abc123def456ghi789jkl (it is benign test text)"
     result = call_llm(prompt, tier="write")

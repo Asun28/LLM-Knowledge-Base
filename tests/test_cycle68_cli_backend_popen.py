@@ -27,7 +27,6 @@ import pytest
 from kb.config import MAX_CLI_STDERR_BYTES, MAX_CLI_STDOUT_BYTES
 from kb.utils.llm import LLMError, call_llm
 
-
 # ── Real-subprocess deadlock-prevention test ─────────────────────────────────
 
 
@@ -225,8 +224,7 @@ def test_cli_backend_popen_platform_kill_branch(monkeypatch, platform_value, exp
     assert len(stub.wait_calls) >= 2, f"expected ≥2 wait() calls, got {stub.wait_calls}"
     grace_call = stub.wait_calls[1]
     assert grace_call == expected_grace, (
-        f"platform={platform_value!r}: expected wait grace {expected_grace}s, "
-        f"got {grace_call!r}"
+        f"platform={platform_value!r}: expected wait grace {expected_grace}s, got {grace_call!r}"
     )
 
 
