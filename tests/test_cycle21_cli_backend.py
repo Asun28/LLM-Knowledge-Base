@@ -32,12 +32,16 @@ class _FakePopen:
     def __init__(
         self,
         *,
-        returncode: int = 0,
+        returncode: int | None = 0,
         stdout: bytes = b"",
         stderr: bytes = b"",
         wait_raises: type[BaseException] | None = None,
     ):
-        self.returncode = returncode if wait_raises is None else None
+        # Cycle 68 R2 Codex n1: returncode typed as Optional to reflect the
+        # actual assignment — when wait_raises is set, the stub starts in the
+        # "running" state (returncode=None) and only resolves to an int after
+        # wait()/terminate()/kill().
+        self.returncode: int | None = returncode if wait_raises is None else None
         self.stdout = io.BytesIO(stdout)
         self.stderr = io.BytesIO(stderr)
         self.stdin = io.BytesIO()

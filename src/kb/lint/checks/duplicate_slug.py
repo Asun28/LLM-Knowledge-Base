@@ -56,25 +56,52 @@ def _slug_for_duplicate(page: Path, wiki_dir: Path) -> str:
     return pid.lower().replace("_", "-")
 
 
-def _is_allowlisted_pair(slug_a: str, slug_b: str) -> bool:
+def _is_allowlisted_pair(
+    slug_a: str, slug_b: str, *, extra_pairs: list[frozenset[str]] | None = None
+) -> bool:
     """Return True for near-slug pairs known to represent distinct concepts.
 
     Cycle 68 AC04 — overlays ``wiki/_lint.yml::duplicate_slug_allowlist`` on top
     of the ``DUPLICATE_SLUG_ALLOWLIST`` baked-in defaults. The yaml override is
     additive: any pair allowlisted in either source short-circuits to ``True``.
-    Function-local import keeps the yaml loader off the import-graph hot path
-    (call-time read per cycle-19 L2; lazy yaml import).
+
+    Cycle 68 R2 Codex M1 closed: ``extra_pairs`` is pre-materialised by
+    :func:`check_duplicate_slugs` once per call and threaded in (the previous
+    behaviour re-loaded ``_lint.yml`` from disk inside the O(N²) inner loop
+    AND ignored the caller's ``wiki_dir`` because the lazy ``load_lint_config``
+    call defaulted to the module-level ``WIKI_DIR``).
+
+    The legacy single-shot lazy load (``extra_pairs is None``) is preserved
+    for any external caller that invokes this helper directly.
     """
     pair = frozenset((slug_a, slug_b))
     if pair in DUPLICATE_SLUG_ALLOWLIST:
         return True
-    from kb.lint._lint_yaml import load_lint_config
+    if extra_pairs is None:
+        from kb.lint._lint_yaml import load_lint_config
 
-    extra = load_lint_config().get("duplicate_slug_allowlist", [])
-    for entry in extra:
-        if frozenset(entry) == pair:
-            return True
-    return False
+        extra_pairs = _materialise_yaml_allowlist(load_lint_config())
+    return pair in extra_pairs
+
+
+def _materialise_yaml_allowlist(config: dict) -> list[frozenset[str]]:
+    """Convert the YAML ``duplicate_slug_allowlist`` payload to frozensets.
+
+    Cycle 68 R2 Codex M2 closed: skip non-string entries defensively. The
+    ``_lint_yaml.load_lint_config`` schema gate already drops a malformed
+    top-level value; this helper enforces per-entry well-formedness so a
+    later schema relaxation cannot trigger ``TypeError`` from
+    ``frozenset({"unhashable": "dict"})`` inside the allowlist check.
+    """
+    raw = config.get("duplicate_slug_allowlist", []) or []
+    pairs: list[frozenset[str]] = []
+    for entry in raw:
+        if not isinstance(entry, list) or len(entry) != 2:
+            continue
+        if not all(isinstance(item, str) for item in entry):
+            continue
+        pairs.append(frozenset(entry))
+    return pairs
 
 
 def check_duplicate_slugs(
@@ -98,6 +125,14 @@ def check_duplicate_slugs(
     wiki_dir = wiki_dir or checks.WIKI_DIR
     if pages is None:
         pages = scan_wiki_pages(wiki_dir)
+
+    # Cycle 68 R2 Codex M1: materialise the YAML overlay ONCE per call (was
+    # previously re-loaded inside the O(N²) inner loop). Threading wiki_dir
+    # through also fixes the silent default-to-module-WIKI_DIR for callers
+    # that supply a custom wiki_dir (e.g., test sandboxes).
+    from kb.lint._lint_yaml import load_lint_config
+
+    extra_pairs = _materialise_yaml_allowlist(load_lint_config(wiki_dir))
 
     if len(pages) > _DUPLICATE_SLUGS_PAGE_CAP:
         return [
@@ -142,7 +177,7 @@ def check_duplicate_slugs(
                 for slug_b, pid_b in cb[start:]:
                     if slug_a == slug_b:
                         continue  # AC10 — distance 0 excluded
-                    if _is_allowlisted_pair(slug_a, slug_b):
+                    if _is_allowlisted_pair(slug_a, slug_b, extra_pairs=extra_pairs):
                         continue
                     key = (min(pid_a, pid_b), max(pid_a, pid_b))
                     if key in seen_pairs:

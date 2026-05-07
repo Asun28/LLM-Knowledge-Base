@@ -314,6 +314,16 @@ def call_cli(
                     proc.wait(timeout=grace)
                 except subprocess.TimeoutExpired:
                     pass  # truly hung; reader threads are daemonized
+            # Cycle 68 R2 Codex M3 closed: explicitly close pipes from the
+            # main thread so any blocked writer/reader surfaces an error and
+            # exits before we join. Without this, a writer mid-write to a
+            # buffered pipe could survive past the raised LLMError.
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except (OSError, ValueError):
+                        pass
             # Drain readers/writer briefly; they exit on EOF after kill.
             if stdin_thread is not None:
                 stdin_thread.join(timeout=0.5)
