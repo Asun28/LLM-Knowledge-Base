@@ -67,14 +67,25 @@ def _pages_supplied(node: ast.Call) -> bool:
         node: An ``ast.Call`` node already known to call ``build_graph``.
 
     Returns:
-        True iff a ``pages`` keyword arg exists AND its literal value is not
-        ``None`` (catch-all heuristic: any non-Constant or non-None Constant
-        passes; ``pages=None`` literal fails — i.e., a regression).
+        True iff a ``pages`` arg (keyword OR positional second arg) exists AND
+        its literal value is not ``None``. Cycle 68 R1 Sonnet M1 closed: also
+        accepts ``build_graph(wiki_dir, pages_var)`` positional form so a
+        future signature change that drops the keyword-only ``*`` marker does
+        not silently bypass the AST check.
     """
+    # Keyword form: build_graph(..., pages=None) or build_graph(..., pages=x).
     for kw in node.keywords:
         if kw.arg != "pages":
             continue
         if isinstance(kw.value, ast.Constant) and kw.value.value is None:
+            return False
+        return True
+    # Positional form: build_graph(wiki_dir, pages_arg). Today blocked by the
+    # ``*`` in build_graph's signature; this branch future-proofs against a
+    # signature relaxation.
+    if len(node.args) >= 2:
+        pos = node.args[1]
+        if isinstance(pos, ast.Constant) and pos.value is None:
             return False
         return True
     return False

@@ -72,7 +72,7 @@ def check_cli_available(backend: str) -> bool:
 
 
 def _backend_executable(backend: str) -> str:
-    """Return the executable name to pass to ``subprocess.run``."""
+    """Return the executable name to pass to ``subprocess.Popen``."""
     binary = CLI_TOOL_COMMANDS[backend][0]
     if backend == "codex" and os.name == "nt":
         return "codex.cmd"
@@ -197,13 +197,16 @@ def _write_stdin_close(proc: subprocess.Popen, data: bytes | None) -> None:
 
     Closes stdin when done OR if the child has already exited (BrokenPipeError
     is an OSError subclass and is caught by the OSError clauses below).
+    Cycle 68 R1 Sonnet M2 closed: catch ValueError on write too — real pipes
+    raise BrokenPipeError (OSError subclass), but BytesIO-backed test stubs
+    raise ValueError on writes after close, which would otherwise propagate.
     """
     if proc.stdin is None:
         return
     try:
         if data is not None:
             proc.stdin.write(data)
-    except OSError:
+    except (OSError, ValueError):
         pass
     finally:
         try:

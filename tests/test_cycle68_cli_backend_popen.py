@@ -117,10 +117,13 @@ def test_cli_backend_popen_stderr_capped(monkeypatch):
         call_llm("trigger non-zero exit")
 
     # The LLMError message contains stderr (post-redaction). Assert the
-    # underlying stderr capture was capped — message length should not blow
-    # past MAX_CLI_STDERR_BYTES + envelope (~200 bytes for "CLI backend...").
+    # underlying stderr capture was capped — envelope is the literal
+    # "CLI backend 'ollama' exited with code 1: " prefix (~45 bytes); 200
+    # bytes is generous coverage. Cycle 68 R1 Sonnet m1 closed: tightened
+    # from +1024 to +200 so a future 2× cap drift would FAIL this assertion
+    # (cycle-22 L5 vacuous-test envelope).
     msg = str(exc_info.value)
-    assert len(msg) <= MAX_CLI_STDERR_BYTES + 1024, (
+    assert len(msg) <= MAX_CLI_STDERR_BYTES + 200, (
         f"stderr cap appears bypassed — LLMError message is {len(msg)} bytes"
     )
 
