@@ -4,8 +4,9 @@ import logging
 import re
 from pathlib import Path
 
+import kb.graph.cache  # cycle-68 AC08a — pages-None call site routes through cache
 from kb.config import WIKI_DIR
-from kb.graph.builder import build_graph
+from kb.graph.builder import build_graph  # noqa: F401 — retained for signature parity
 from kb.utils.pages import load_all_pages, load_page_frontmatter
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,8 @@ def export_mermaid(
         graph = None
     wiki_dir = wiki_dir or WIKI_DIR
     if graph is None:
-        graph = build_graph(wiki_dir)
+        # cycle-68 AC08a — route pages-None lookup through process-shared cache.
+        graph = kb.graph.cache.get_graph(wiki_dir)
 
     if graph.number_of_nodes() == 0:
         return "graph LR\n  %% No pages in wiki"
