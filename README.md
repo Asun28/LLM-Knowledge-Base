@@ -131,6 +131,24 @@ kb --version
 # Use requirements.txt for full reproducibility (frozen transitive pins).
 ```
 
+### Non-clone install (`pip install`)
+
+If you `pip install kb` without cloning the repo (e.g. as a library or MCP
+server inside a separate project tree), set `KB_PROJECT_ROOT` to the directory
+containing your wiki:
+
+```bash
+export KB_PROJECT_ROOT=/path/to/your/kb     # Unix
+$env:KB_PROJECT_ROOT = "C:\path\to\your\kb"  # PowerShell
+```
+
+Without it, `kb.config` resolves data paths via a `cwd` → `pyproject.toml`
+walk → installed-file-location heuristic (`config.py:get_project_root`),
+which can land inside the venv `site-packages/` and silently write
+`wiki/`/`raw/`/`.data/` there. Setting `KB_PROJECT_ROOT` makes the bootstrap
+explicit and stable across `cd` operations. The env var is read at call time
+(cycle 65 AC1), so a process-wide set is enough — no restart needed.
+
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
 
 **Obsidian:** Open `wiki/` as a vault. Press `Ctrl+G` for the knowledge graph. See the **[full Obsidian guide](docs/guides/quickstart-obsidian.md)** ([HTML version](docs/guides/quickstart-obsidian.html)).
