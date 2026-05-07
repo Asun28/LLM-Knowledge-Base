@@ -29,9 +29,7 @@ import kb.config
 class TestProjectRootGoesThroughModuleBinding:
     """AC1 divergent-fail control: prove the module-binding path is the live route."""
 
-    def test_get_project_root_uses_module_binding_not_dead_branch(
-        self, tmp_path, monkeypatch
-    ):
+    def test_get_project_root_uses_module_binding_not_dead_branch(self, tmp_path, monkeypatch):
         """Divergent-fail: with `__getattr__` rebound to raise for ANY name,
         `get_project_root()` MUST still return the monkeypatched value
         because the live route is the module-dict binding (line 107) +

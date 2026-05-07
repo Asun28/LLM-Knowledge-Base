@@ -111,9 +111,7 @@ def test_t06c_call_time_read(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("truthy", ["1", "true", "yes", "TRUE", "Yes", "  yes  "])
-def test_t06d_truthy_variants_disable_vectors(
-    truthy: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_t06d_truthy_variants_disable_vectors(truthy: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """T06-D: truthiness convention symmetric with AC04. Each of {1, true,
     yes} (case-insensitive, whitespace-tolerant) disables vectors.
     """
@@ -124,9 +122,7 @@ def test_t06d_truthy_variants_disable_vectors(
 
 
 @pytest.mark.parametrize("falsy", ["0", "false", "no", "", "anything-else"])
-def test_t06d_falsy_variants_enable_vectors(
-    falsy: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_t06d_falsy_variants_enable_vectors(falsy: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """T06-D inverse: falsy / unrecognized values keep default behavior."""
     monkeypatch.setenv("KB_DISABLE_VECTORS", falsy)
     assert _vectors_disabled_at_runtime() is False, (

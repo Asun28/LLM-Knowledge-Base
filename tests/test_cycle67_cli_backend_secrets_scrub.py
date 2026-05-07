@@ -26,7 +26,6 @@ import pytest
 from kb.utils.cli_backend import _check_no_secrets_on_argv
 from kb.utils.llm import LLMError
 
-
 # Split-string construction so platform scanners don't tag the literal as a
 # real secret. The actual env value is the concatenated string, which is what
 # `_check_no_secrets_on_argv` matches against argv.
@@ -45,8 +44,7 @@ def test_t15a_bare_equality_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(LLMError) as exc_info:
         _check_no_secrets_on_argv(argv)
     assert _SCRUB_KEY in str(exc_info.value), (
-        f"LLMError message must name the offending env key {_SCRUB_KEY}; "
-        f"got: {exc_info.value!s}"
+        f"LLMError message must name the offending env key {_SCRUB_KEY}; got: {exc_info.value!s}"
     )
 
 

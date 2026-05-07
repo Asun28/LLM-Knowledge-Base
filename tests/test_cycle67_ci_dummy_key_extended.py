@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 _CI_YML = Path(".github/workflows/ci.yml")
 
 
@@ -70,9 +69,7 @@ def test_dummy_key_leak_guard_scopes_to_all_tracked_files() -> None:
     )
     # Defensive: the literal `'src/**'` should NOT appear as a path argument
     # to git ls-files in the broadened step (it can still appear in comments).
-    code_lines = [
-        line for line in run_block.splitlines() if not line.strip().startswith("#")
-    ]
+    code_lines = [line for line in run_block.splitlines() if not line.strip().startswith("#")]
     code_text = "\n".join(code_lines)
     assert "'src/**'" not in code_text, (
         "AC11: src-only scoping has been broadened; `git ls-files 'src/**'` "

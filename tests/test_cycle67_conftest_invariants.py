@@ -23,7 +23,6 @@ import ast
 import textwrap
 from pathlib import Path
 
-
 _CONFTEST_PATH = Path(__file__).resolve().parent / "conftest.py"
 _FIXTURE_NAME = "_autouse_kb_path_sandbox"
 

@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 _REF_DIR = Path("docs/reference")
 _INDEX = _REF_DIR / "INDEX.md"
 _CLAUDE = Path("CLAUDE.md")
@@ -28,11 +27,7 @@ _INLINE_LINK_RE = re.compile(r"\[[^\]]*\]\(docs/reference/([^)]+\.md)\)")
 
 def _real_files() -> set[str]:
     """Set of file basenames in docs/reference/, excluding meta files."""
-    return {
-        p.name
-        for p in _REF_DIR.glob("*.md")
-        if p.name not in {"INDEX.md", "README.md"}
-    }
+    return {p.name for p in _REF_DIR.glob("*.md") if p.name not in {"INDEX.md", "README.md"}}
 
 
 def _entries_in(path: Path) -> set[str]:
@@ -50,8 +45,7 @@ def test_t14a_index_entries_all_correspond_to_real_files() -> None:
     referenced = _entries_in(_INDEX)
     orphan_entries = referenced - real
     assert not orphan_entries, (
-        f"AC14 T14-A: INDEX.md inline-link entries that don't map to a real "
-        f"file: {orphan_entries}"
+        f"AC14 T14-A: INDEX.md inline-link entries that don't map to a real file: {orphan_entries}"
     )
 
 
@@ -63,8 +57,7 @@ def test_t14b_claude_md_table_entries_all_correspond_to_real_files() -> None:
     referenced = _entries_in(_CLAUDE)
     orphan_entries = referenced - real
     assert not orphan_entries, (
-        f"AC14 T14-B: CLAUDE.md inline-link entries that don't map to a real "
-        f"file: {orphan_entries}"
+        f"AC14 T14-B: CLAUDE.md inline-link entries that don't map to a real file: {orphan_entries}"
     )
 
 
@@ -80,8 +73,7 @@ def test_t14c_multilink_per_line_regex(tmp_path: Path) -> None:
     )
     matches = _INLINE_LINK_RE.findall(fixture.read_text(encoding="utf-8"))
     assert len(matches) == 2, (
-        f"AC14 T14-C: regex MUST detect both links on one line. "
-        f"Got {len(matches)}: {matches!r}"
+        f"AC14 T14-C: regex MUST detect both links on one line. Got {len(matches)}: {matches!r}"
     )
     assert "architecture.md" in matches
     assert "testing.md" in matches
@@ -101,8 +93,7 @@ def test_t14d_regex_ignores_reference_style_links(tmp_path: Path) -> None:
     )
     matches = _INLINE_LINK_RE.findall(fixture.read_text(encoding="utf-8"))
     assert matches == [], (
-        f"AC14 T14-D: reference-style link should NOT be detected by inline "
-        f"regex. Got: {matches!r}"
+        f"AC14 T14-D: reference-style link should NOT be detected by inline regex. Got: {matches!r}"
     )
 
 
@@ -125,6 +116,5 @@ def test_t14e_negative_control_orphan_entry_detected(tmp_path: Path) -> None:
     referenced = set(_INLINE_LINK_RE.findall(fake_index.read_text(encoding="utf-8")))
     orphans = referenced - real
     assert "architecturee.md" in orphans, (
-        f"AC14 T14-E: inverse-check MUST catch typo'd filename. Got orphans: "
-        f"{orphans!r}"
+        f"AC14 T14-E: inverse-check MUST catch typo'd filename. Got orphans: {orphans!r}"
     )

@@ -156,9 +156,7 @@ def hybrid_search(
             if vec_results:
                 all_lists.append(vec_results)
     else:
-        logger.debug(
-            "hybrid_search vector branch skipped: KB_DISABLE_VECTORS=1 (cycle 67 AC06)"
-        )
+        logger.debug("hybrid_search vector branch skipped: KB_DISABLE_VECTORS=1 (cycle 67 AC06)")
 
     if not all_lists:
         return []

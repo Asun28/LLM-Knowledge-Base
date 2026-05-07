@@ -54,9 +54,7 @@ def test_t05a_build_sanitizes_operational_error(
     assert "AppData" not in msg, (
         f"AC05 T05-A: leaky path 'AppData' fragment leaked into message: {msg!r}"
     )
-    assert ".dll" not in msg, (
-        f"AC05 T05-A: '.dll' suffix leaked into message: {msg!r}"
-    )
+    assert ".dll" not in msg, f"AC05 T05-A: '.dll' suffix leaked into message: {msg!r}"
 
 
 def test_t05b_cause_chain_preserved_for_local_logs(

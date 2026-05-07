@@ -26,7 +26,7 @@ from collections.abc import Mapping
 import pytest
 
 import kb.config
-from kb.config import MODEL_TIERS, _DEFAULT_MODEL_TIERS, _ModelTiersView
+from kb.config import _DEFAULT_MODEL_TIERS, MODEL_TIERS, _ModelTiersView
 
 
 def test_t01a_call_time_lookup_reflects_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,8 +84,7 @@ def test_t01e_mapping_methods_env_dynamic(
 
     values = list(MODEL_TIERS.values())
     assert "map-haiku" in values, (
-        f"AC01 T01-E: .values() should reflect env-dynamic value 'map-haiku'; "
-        f"got {values!r}"
+        f"AC01 T01-E: .values() should reflect env-dynamic value 'map-haiku'; got {values!r}"
     )
     items = dict(MODEL_TIERS.items())
     assert items["scan"] == "map-haiku"

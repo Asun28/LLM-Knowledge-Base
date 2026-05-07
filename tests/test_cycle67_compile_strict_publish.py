@@ -42,6 +42,7 @@ def _patch_publish_to_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     module attribute. Patching kb.compile.publish.auto_publish_after_compile
     reaches the call site.
     """
+
     def _raising_publish(*args, **kwargs):
         raise RuntimeError("simulated auto-publish failure for AC04")
 
@@ -60,9 +61,7 @@ def test_t04a_default_swallows_publish_failure(
     assert isinstance(result, dict), "compile_wiki must return a dict"
 
 
-def test_t04b_strict_one_reraises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_t04b_strict_one_reraises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """T04-B: env=`"1"` → publish exception propagates to caller."""
     monkeypatch.setenv("KB_STRICT_PUBLISH", "1")
     wiki, raw = _make_minimal_wiki(tmp_path)
@@ -97,9 +96,7 @@ def test_t04c_falsy_variants_keep_default(
     assert isinstance(result, dict)
 
 
-def test_t04d_call_time_read(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_t04d_call_time_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """T04-D: env var read at CALL time per cycle-19 L2. Setting it after the
     first call mutates behavior on the second call WITHOUT process restart.
     """
@@ -116,9 +113,7 @@ def test_t04d_call_time_read(
         compile_wiki(wiki_dir=wiki, raw_dir=raw)
 
 
-def test_t04e_compiler_module_loadable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_t04e_compiler_module_loadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity check that the compiler module's compile_wiki is the same
     object as the imported one, ensuring monkeypatch on publish_mod reaches
     the call site (cycle-18 L1 anchor)."""
