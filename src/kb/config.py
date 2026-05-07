@@ -409,6 +409,10 @@ CLI_MAX_CONCURRENCY: int = 2
 # Hard cap on stdout bytes read from CLI subprocess (T5).
 MAX_CLI_STDOUT_BYTES: int = 2_000_000
 
+# cycle-68 AC02 / R1-F6 — hard cap on stderr bytes; symmetric with stdout cap.
+# Used by Popen reader thread in cli_backend.call_cli (cycle-68 AC01).
+MAX_CLI_STDERR_BYTES: int = 64 * 1024
+
 
 def get_cli_backend() -> str:
     """Return the active LLM backend, reading KB_LLM_BACKEND at call time.

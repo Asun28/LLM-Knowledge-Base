@@ -334,15 +334,16 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
 def kb_stats(wiki_dir: str | None = None) -> str:
     """Get wiki statistics: page counts by type, graph metrics, coverage info."""
     try:
+        import kb.graph.cache  # cycle-68 AC08b — pages-None call site routes through cache
         from kb.evolve.analyzer import analyze_coverage
-        from kb.graph.builder import build_graph, graph_stats
+        from kb.graph.builder import graph_stats
 
         wiki_path, err = _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
         if err:
             return f"Error: {err}"
 
         coverage = analyze_coverage(wiki_dir=wiki_path)
-        graph = build_graph(wiki_dir=wiki_path)
+        graph = kb.graph.cache.get_graph(wiki_path)
         stats = graph_stats(graph)
     except Exception as e:
         logger.exception("Error computing wiki stats")

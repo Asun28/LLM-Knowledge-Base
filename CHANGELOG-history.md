@@ -13,9 +13,74 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-05-05
+## Active-unreleased archive — 2026-04-16 to 2026-05-08
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-05-08 — cycle 68 (dev-mimo-opus trial — CLI hardening, lint/deps hygiene, automated docstring gate, backlog lock-in)
+
+**Theme:**
+Cycle 68 hardens the CLI subsystem by replacing `subprocess.run(input=...)` with a `Popen` orchestration that splits stdin write from stdout/stderr drain (FW-1) and caps both streams at `MAX_CLI_STDOUT_BYTES` / `MAX_CLI_STDERR_BYTES`. The YAML lint loader (`yaml.safe_load` only — FW-2 RCE T7 mitigation) ships behind a function-local import, with the duplicate-slug allowlist gaining a `wiki/_lint.yml` overlay. A new `audit_docstrings` script (warn-only CI step this cycle, hard-fail in cycle 69+) enforces FW-4 docstring metadata on `kb.__all__`. Three remaining `pages=None` `build_graph` call sites are migrated to `kb.graph.cache.get_graph` (the in-project graph cache module — NOT the `diskcache` library), completing the cycle-64 cache migration. `httpx` is pinned to `>=0.28,<0.29` to prevent runtime-guard drift. BACKLOG is cleaned up (cycle-67 carry-over items removed; CVE-2025-69872 transitive `diskcache` library RCE added with risk acceptance) and locked in via regression tests.
+
+**Per-AC detail (commit-order approximated):**
+
+- **AC01 — `src/kb/utils/cli_backend.py` Popen refactor**
+  Replaced `subprocess.run(input=...)` with `subprocess.Popen` + 2 daemon reader threads (stdout/stderr) + separate stdin write thread. Caps stdout at `MAX_CLI_STDOUT_BYTES` and stderr at `MAX_CLI_STDERR_BYTES` (64 KB). Platform-aware terminate→wait grace (2.0s POSIX / 0.5s Windows) → kill cascade. FW-1: stdin write on SEPARATE thread, never `proc.communicate(input=...)`. Tests: `tests/test_cycle68_cli_backend_popen.py` (9 tests covering kill-cascade, stderr cap, error-kind preservation). Coverage: 92% on cli_backend.py.
+
+- **AC02 — `src/kb/config.py` MAX_CLI_STDERR_BYTES constant**
+  Defines `MAX_CLI_STDERR_BYTES: int = 64 * 1024` at module top; used in AC01 refactor. Symmetric with existing `MAX_CLI_STDOUT_BYTES`.
+
+- **AC03 — `src/kb/lint/_lint_yaml.py` NEW YAML loader**
+  Enforces `yaml.safe_load` only (no fallback to `yaml.load` — T7 RCE mitigation). Validates YAML file presence and schema at import time. Tests: `tests/test_cycle68_lint_yaml.py` (6 tests covering file-not-found, malformed YAML, IO permission, schema validation, call-time read, malicious payload rejection).
+
+- **AC04 — `src/kb/lint/checks/duplicate_slug.py` allowlist externalisation**
+  `wiki/_lint.yml` overlay extends `DUPLICATE_SLUG_ALLOWLIST` defaults via function-local import. Schema validated at lint bootstrap time.
+
+- **AC05 — `scripts/audit_docstrings.py` NEW**
+  Walks `kb.__all__` via `inspect.unwrap` + AST, enforces FW-4 (generators with `raise` need `Raises:` section). `--warn-only` mode exits 0. Tests: `tests/test_cycle68_audit_docstrings.py` (4 tests).
+
+- **AC06 — `.github/workflows/ci.yml` docstring audit step**
+  Docstring audit added to CI in warn-only mode (hard-fail deferred to cycle 69+). Gates `main` branch merge.
+
+- **AC07 — `src/kb/evolve/analyzer.py:127` graph cache migration**
+  Migrated `build_graph(wiki_dir)` (pages=None) → `kb.graph.cache.get_graph(wiki_dir)` (attribute-lookup form per cycle-18 L1). Pages-supplying calls at lines 28+358 stay on `build_graph` per FW-7.
+
+- **AC08a — `src/kb/graph/export.py:83` graph cache migration**
+  Migrated to `kb.graph.cache.get_graph`.
+
+- **AC08b — `src/kb/mcp/browse.py:345` (kb_stats) graph cache migration**
+  Migrated to `kb.graph.cache.get_graph`.
+
+- **AC09 — `pyproject.toml` httpx pin**
+  Tightened `httpx>=0.27` → `httpx>=0.28,<0.29` (matches `lint/fetcher.py:51` runtime guard). Prevents accidental API drift.
+
+- **AC10 — `BACKLOG.md` cleanup + lock-in**
+  Deleted 3 cycle-67 carry-over entries (AC03 cli_backend Popen, AC07 wiki/_lint.yml, AC12 audit_docstrings — now shipped). Added NEW entry: diskcache 5.6.3 / CVE-2025-69872 pickle-RCE with risk acceptance (cache never read from untrusted dir; lives under .venv/ user-owned). Re-check at cycle 69 Step 02 baseline. BACKLOG now locked for cycle 68 completion.
+
+**Regression test ACs (AC11–AC15):**
+
+| AC | Test file | Purpose | Count |
+|---|---|---|---|
+| AC11 | `tests/test_cycle68_cli_backend_popen.py` | Popen refactor, stderr cap, kill-cascade | 9 |
+| AC12 | `tests/test_cycle68_lint_yaml.py` | YAML loader safety, fallback, call-time read | 6 |
+| AC13 | `tests/test_cycle68_audit_docstrings.py` | generator+raise detection, warn-only mode | 4 |
+| AC14 | `tests/test_cycle68_graph_cache_caller_migrations.py` | AST guard for FW-7, cache-hit spy with negative-control | 3 |
+| AC15a | `tests/test_cycle68_httpx_pin_drift.py` | pyproject parser, pip resolver dry-run | 2 |
+| AC15b | `tests/test_cycle68_backlog_cleanup_lockin.py` | shipped entries absent, cycle-68 self-refs preserved | 1 |
+
+Total: 25 new tests. Full suite: 3273 passed + 24 skipped. Windows local per cycle-67 baseline methodology.
+
+**Step 11 SAST + secrets scan**
+Bandit on changed src files: 2 LOW pre-existing (B404 subprocess import, B603 shell=False) — both documented and design-required by cli_backend.py refactor. detect-secrets on cycle-68 diff: zero secrets found.
+
+**Step 12 CI hard gate**
+Full pytest 3273 passed + 24 skipped (zero failures, zero new skips). Ruff check + format clean. pip-audit: 2 known vulnerabilities matching cycle-67 baseline — diskcache 5.6.3 (CVE-2025-69872, transitive, accepted) and pip 26.0.1 (CVE-2026-3219, tooling, accepted). Zero new CVEs introduced.
+
+**Step 12 fix (post-Step-09 fix-cascade)**
+AC08b migration: patched `kb.graph.cache.get_graph` instead of now-bypassed `kb.graph.builder.build_graph` in `tests/test_mcp_browse_health.py::test_kb_stats_runs` to match actual migration target.
+
+**Metrics + Telemetry**
+Trial cycle (dev-mimo-opus): Opus/DeepSeek/MiMo dispatch per skill assignments. All steps within budget. Full suite regression: 3248 → 3273 (+25 tests across 6 new files). Files: ~226 → ~232 (+6 new test files).
 
 ### 2026-05-05 — cycle 66 (carry-over hardening — eighth dev-mimo-opus trial cycle)
 

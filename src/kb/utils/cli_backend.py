@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 
 import jsonschema
@@ -23,8 +24,13 @@ from kb.config import (
     CLI_PROMPT_VIA_ARG,
     CLI_SAFE_ENV_KEYS,
     CLI_TOOL_COMMANDS,
+    MAX_CLI_STDERR_BYTES,
     MAX_CLI_STDOUT_BYTES,
 )
+
+# Reader-thread chunk size — small enough to drain pipes promptly, large enough
+# to avoid per-byte syscall overhead on multi-MB outputs (cycle-68 AC01).
+_READ_CHUNK_BYTES: int = 64 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +72,7 @@ def check_cli_available(backend: str) -> bool:
 
 
 def _backend_executable(backend: str) -> str:
-    """Return the executable name to pass to ``subprocess.run``."""
+    """Return the executable name to pass to ``subprocess.Popen``."""
     binary = CLI_TOOL_COMMANDS[backend][0]
     if backend == "codex" and os.name == "nt":
         return "codex.cmd"
@@ -157,6 +163,58 @@ def _check_no_secrets_on_argv(argv: list[str]) -> None:
                 )
 
 
+def _read_stream_capped(stream, cap: int) -> bytes:
+    """Read from a Popen pipe, accumulate up to ``cap`` bytes.
+
+    Cycle 68 AC01 / FW-1: continues reading-and-discarding past the cap so the
+    child process never blocks on a full pipe buffer. Without this, a child
+    that produces > cap stdout would deadlock the moment the parent's pipe
+    buffer (~64 KB) fills.
+
+    Returns the accumulated bytes (length ≤ cap). Errors during read (e.g.,
+    closed pipe after kill) are swallowed — the caller surfaces real failure
+    via returncode.
+    """
+    chunks: list[bytes] = []
+    accumulated = 0
+    while True:
+        try:
+            chunk = stream.read(_READ_CHUNK_BYTES)
+        except (OSError, ValueError):
+            break
+        if not chunk:
+            break
+        if accumulated < cap:
+            take = min(cap - accumulated, len(chunk))
+            chunks.append(chunk[:take])
+            accumulated += take
+        # past cap: drop chunk, keep draining so producer doesn't block
+    return b"".join(chunks)
+
+
+def _write_stdin_close(proc: subprocess.Popen, data: bytes | None) -> None:
+    """Write ``data`` to ``proc.stdin`` on a separate thread (FW-1).
+
+    Closes stdin when done OR if the child has already exited (BrokenPipeError
+    is an OSError subclass and is caught by the OSError clauses below).
+    Cycle 68 R1 Sonnet M2 closed: catch ValueError on write too — real pipes
+    raise BrokenPipeError (OSError subclass), but BytesIO-backed test stubs
+    raise ValueError on writes after close, which would otherwise propagate.
+    """
+    if proc.stdin is None:
+        return
+    try:
+        if data is not None:
+            proc.stdin.write(data)
+    except (OSError, ValueError):
+        pass
+    finally:
+        try:
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+
 def call_cli(
     prompt: str,
     *,
@@ -208,41 +266,99 @@ def call_cli(
 
     sem = _get_semaphore(backend)
     sem.acquire()
+    raw_stdout: bytes = b""
+    raw_stderr: bytes = b""
+    returncode: int | None = None
     try:
-        try:
-            result = subprocess.run(
-                cmd,
-                input=stdin_input,
-                capture_output=True,
-                timeout=timeout,
-                shell=False,
-                env=_scrub_env(backend),
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE if stdin_input is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            env=_scrub_env(backend),
+        )
+
+        stdout_holder: dict[str, bytes] = {}
+        stderr_holder: dict[str, bytes] = {}
+
+        def _drain_stdout() -> None:
+            stdout_holder["data"] = _read_stream_capped(proc.stdout, MAX_CLI_STDOUT_BYTES)
+
+        def _drain_stderr() -> None:
+            stderr_holder["data"] = _read_stream_capped(proc.stderr, MAX_CLI_STDERR_BYTES)
+
+        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        stdin_thread: threading.Thread | None = None
+        if stdin_input is not None:
+            # FW-1: stdin write on a SEPARATE thread, never proc.communicate().
+            stdin_thread = threading.Thread(
+                target=_write_stdin_close, args=(proc, stdin_input), daemon=True
             )
+            stdin_thread.start()
+
+        try:
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            proc.terminate()
+            grace = 0.5 if sys.platform == "win32" else 2.0
+            try:
+                proc.wait(timeout=grace)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=grace)
+                except subprocess.TimeoutExpired:
+                    pass  # truly hung; reader threads are daemonized
+            # Cycle 68 R2 Codex M3 closed: explicitly close pipes from the
+            # main thread so any blocked writer/reader surfaces an error and
+            # exits before we join. Without this, a writer mid-write to a
+            # buffered pipe could survive past the raised LLMError.
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except (OSError, ValueError):
+                        pass
+            # Drain readers/writer briefly; they exit on EOF after kill.
+            if stdin_thread is not None:
+                stdin_thread.join(timeout=0.5)
+            stdout_thread.join(timeout=0.5)
+            stderr_thread.join(timeout=0.5)
             raise LLMError(
                 f"CLI timeout after {timeout}s for backend {backend!r}",
                 kind="timeout",
             )
+
+        # Process exited normally — join threads to collect their accumulated bytes.
+        if stdin_thread is not None:
+            stdin_thread.join(timeout=1.0)
+        stdout_thread.join(timeout=5.0)
+        stderr_thread.join(timeout=5.0)
+
+        raw_stdout = stdout_holder.get("data", b"")
+        raw_stderr = stderr_holder.get("data", b"")
+        returncode = proc.returncode
     finally:
         sem.release()
 
     # Redact stderr before any logging (T3).
-    stderr_text = result.stderr[:500].decode("utf-8", errors="replace")
+    stderr_text = raw_stderr.decode("utf-8", errors="replace")
     stderr_safe = _redact_secrets(stderr_text)
 
-    if result.returncode != 0:
-        raise LLMError(
-            f"CLI backend {backend!r} exited with code {result.returncode}: {stderr_safe}"
-        )
+    if returncode != 0:
+        raise LLMError(f"CLI backend {backend!r} exited with code {returncode}: {stderr_safe}")
 
     if stderr_safe:
         logger.debug("cli_backend %s stderr: %s", backend, stderr_safe)
 
-    # Cap and redact stdout before returning (T3, T5).
-    # Accepted risk: subprocess.run buffers all stdout before this slice runs.
-    # The 2 MB cap limits downstream processing cost; OOM from a giant response
-    # before the slice is the residual risk accepted in cycle-21 plan gate (gap 8).
-    raw_stdout = result.stdout[:MAX_CLI_STDOUT_BYTES]
+    # Cap is enforced inside the reader thread (cycle-68 AC01 / R1-F6); the
+    # cycle-21 OOM-on-giant-response residual risk is now retired — Popen
+    # streams chunks rather than buffering the entire stdout.
     stdout_text = raw_stdout.decode("utf-8", errors="replace")
     return _redact_secrets(_postprocess_stdout(backend, stdout_text)).strip()
 
