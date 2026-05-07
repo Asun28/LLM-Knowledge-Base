@@ -46,31 +46,35 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
      - CI sk-ant-dummy grep (mimo r5 Q7) → SHIPPED cycle 67 AC11 (broadened cycle-65 src-only scan to all tracked files with allowlist).
      - docs/reference/ INDEX.md (mimo r3 NEW) → cycle-65 AC20 forward + cycle 67 AC14 inverse both shipped.
 
+
      CYCLE 67 CARRY-OVER to cycle 68 (design-locked, deferred for time/risk):
-     - cli_backend.py:241 pre-cap stdout buffering → AC03 (Popen refactor + chunked stdout cap with platform-aware kill).
-     - kb/__init__.py public API docstring audit (mimo r3 Q7) → AC12 (scripts/audit_docstrings.py with Args/Returns/Raises gate).
-     - duplicate-slug allowlist externalization (Phase 4.5 MEDIUM) → AC07 (wiki/_lint.yml lazy YAML loader with safe_load).
+     - cli_backend.py:241 pre-cap stdout buffering → SHIPPED cycle 68 AC01 (Popen refactor + chunked stdout cap with platform-aware kill).
+     - kb/__init__.py public API docstring audit (mimo r3 Q7) → SHIPPED cycle 68 AC05 (scripts/audit_docstrings.py with Args/Returns/Raises gate).
+     - duplicate-slug allowlist externalization (Phase 4.5 MEDIUM) → SHIPPED cycle 68 AC04 (wiki/_lint.yml lazy YAML loader with safe_load).
      - mcp_server.py + mcp/__init__.py PEP-562 redundancy (mimo r1 Q5) → still LOW; deferred indefinitely (low-value churn). -->
+
 
 ### CYCLE 68 carry-over (cycle-67 design-locked, deferred for time/risk)
 
-- **AC03** (high risk; src/kb/utils/cli_backend.py:213-247) — replace `subprocess.run(capture_output=True)` with `Popen` + chunked stdout reader (64 KB chunks) + `terminate()` at `MAX_CLI_STDOUT_BYTES`; platform-aware kill grace (Windows `terminate(); wait(0.5)`; POSIX `terminate(); wait(2); kill()`); split stdin write from daemon readers (do NOT use `proc.communicate(input=...)`). Introduce `MAX_CLI_STDERR_BYTES = 64 * 1024` constant for stderr cap symmetry. Spec frozen at `docs/superpowers/decisions/2026-05-07-cycle-67-design.md` C-AC03-{stdin,platform,stderr,error-kinds} and FW-1.
-- **AC07** (medium effort; new `src/kb/lint/_lint_yaml.py` + edit `src/kb/lint/checks/duplicate_slug.py`) — externalize `DUPLICATE_SLUG_ALLOWLIST` to optional `wiki/_lint.yml`; `yaml.safe_load` ONLY (never `yaml.load` — RCE class T7); 6 fallback tests (file-not-found, malformed YAML, IO permission, schema validation, call-time read, malicious payload rejection). Spec frozen at design.md C-AC07-{safe,fallback,schema}.
-- **AC12** (medium effort; new `scripts/audit_docstrings.py` + CI step) — walk `kb.__all__`, parse `__doc__` via `ast.get_docstring` + regex for `Args:` / `Returns:` / `Raises:` sections; conditional Raises requirement gated by `ast.walk` for `raise` statements (R2-F16); warn-only mode initially, hard-fail in cycle 69+. Spec frozen at design.md C-AC12-generator.
+<!-- AC15b lock-in: these entries are preserved through the cycle 68 PR and
+     deleted by a follow-up doc-cleanup cycle (cycle 69+) once the AC15b
+     regression test is revised or retired. AC15b's
+     `test_backlog_preserves_cycle68_self_reference_entries` pins both the
+     section heading AND the **AC03**/**AC07**/**AC12** bold markers below. -->
+
+- **AC03** (SHIPPED cycle 68 AC01) — `subprocess.run` → `Popen` refactor with chunked stdout/stderr cap and platform-aware terminate→kill grace (FW-1 stdin/reader split). See `CHANGELOG-history.md` cycle 68 AC01.
+- **AC07** (SHIPPED cycle 68 AC03+AC04) — `wiki/_lint.yml` lazy YAML loader (`yaml.safe_load` only) + duplicate-slug allowlist overlay. See `CHANGELOG-history.md` cycle 68 AC03/AC04.
+- **AC12** (SHIPPED cycle 68 AC05+AC06+AC13) — `scripts/audit_docstrings.py` + CI warn-only step + FW-4 generator+raise rule pin. See `CHANGELOG-history.md` cycle 68 AC05/AC06/AC13.
 
 
 ### HIGH
 
 ### MEDIUM
 
-- `kb/__init__.py` public API docstring audit — `__init__.py` is a 67-line lazy `__getattr__` shim; the real Args/Returns/Raises must live on the underlying functions in `kb/ingest/pipeline.py`, `kb/compile/__init__.py`, `kb/query/__init__.py`, `kb/graph/__init__.py`. Whether those four targets actually carry Google-style sections is unverified. (mimo r3 Q7)
-  (fix: `scripts/audit_docstrings.py` imports each `__all__` entry, parses `__doc__` via `docstring_parser`, fails CI if any lacks `Args:` + `Returns:` + (`Raises:` when applicable).)
-
-- `utils/cli_backend.py:241` pre-cap stdout buffering — subprocess stdout is fully buffered in memory before the 2 MB truncation guard fires; a misbehaving backend producing large output causes unbounded memory growth until truncation.
-  (fix: read and accumulate stdout in 64 KB chunks, applying the cap incrementally; send SIGTERM / `proc.kill()` once the cap is reached rather than waiting for process completion.)
-
 ### LOW
 
+
+- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-08. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
 - `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
   (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
 
