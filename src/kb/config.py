@@ -234,11 +234,56 @@ def get_model_tier(tier: str) -> str:
     return os.environ.get(env_key, "").strip() or _DEFAULT_MODEL_TIERS[tier]
 
 
-MODEL_TIERS = {
-    "scan": os.environ.get("CLAUDE_SCAN_MODEL", "").strip() or "claude-haiku-4-5-20251001",
-    "write": os.environ.get("CLAUDE_WRITE_MODEL", "").strip() or "claude-sonnet-4-6",
-    "orchestrate": os.environ.get("CLAUDE_ORCHESTRATE_MODEL", "").strip() or "claude-opus-4-6",
-}
+# Cycle 67 AC01 — `MODEL_TIERS` was a literal dict that captured os.environ
+# at IMPORT TIME. Tests using `monkeypatch.setenv("CLAUDE_SCAN_MODEL", "x")`
+# AFTER `import kb.config` got stale values (T1 in cycle-67 threat model).
+# Replace with a `Mapping` view that delegates `__getitem__` to the
+# `get_model_tier()` accessor (which already reads env at call time per
+# cycle 7 AC24). Bracket access (`MODEL_TIERS["scan"]`) is preserved for
+# all 3 existing test call sites; reads now reflect the current env.
+#
+# Approach B from cycle-67 brainstorm: collections.abc.Mapping mixin gives
+# `.keys()`, `.values()`, `.items()`, `__contains__`, `dict()` conversion
+# all routed through the env-dynamic `__getitem__`. Avoids dict subclass
+# C-level fast-path bypass risk (cycle-67 design FW-5).
+class _ModelTiersView(Mapping):
+    """Call-time accessor view for the model-tier table.
+
+    Cycle 67 AC01 / FW-5: implements collections.abc.Mapping so all read
+    paths (``view[key]``, ``.get``, ``.keys``, ``.values``, ``.items``,
+    ``dict(view)``) delegate to ``get_model_tier(tier)`` which reads
+    os.environ at call time.
+
+    Iteration order matches ``_DEFAULT_MODEL_TIERS`` insertion order:
+    ``("scan", "write", "orchestrate")``. Equality with a bare dict literal
+    is NOT supported (use ``dict(view) == {...}`` per R2-F3 / C-AC01-eq).
+    """
+
+    __slots__ = ()
+
+    def __getitem__(self, tier: str) -> str:
+        try:
+            return get_model_tier(tier)
+        except ValueError as exc:
+            # Convert to KeyError so collections.abc.Mapping's default
+            # `.get` / `.__contains__` semantics work correctly. KeyError is
+            # the canonical "missing key" exception for Mapping ABC.
+            raise KeyError(tier) from exc
+
+    def __iter__(self):
+        return iter(_DEFAULT_MODEL_TIERS)
+
+    def __len__(self) -> int:
+        return len(_DEFAULT_MODEL_TIERS)
+
+    def __contains__(self, tier: object) -> bool:
+        return tier in _DEFAULT_MODEL_TIERS
+
+    def __repr__(self) -> str:
+        return f"_ModelTiersView({dict(self)!r})"
+
+
+MODEL_TIERS: Mapping[str, str] = _ModelTiersView()
 
 # ── Page types ────────────────────────────────────────────────
 PAGE_TYPES = ("entity", "concept", "comparison", "synthesis", "summary")
