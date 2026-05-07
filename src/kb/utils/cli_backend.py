@@ -195,14 +195,15 @@ def _read_stream_capped(stream, cap: int) -> bytes:
 def _write_stdin_close(proc: subprocess.Popen, data: bytes | None) -> None:
     """Write ``data`` to ``proc.stdin`` on a separate thread (FW-1).
 
-    Closes stdin when done OR if the child has already exited (BrokenPipeError).
+    Closes stdin when done OR if the child has already exited (BrokenPipeError
+    is an OSError subclass and is caught by the OSError clauses below).
     """
     if proc.stdin is None:
         return
     try:
         if data is not None:
             proc.stdin.write(data)
-    except (OSError, BrokenPipeError):
+    except OSError:
         pass
     finally:
         try:
