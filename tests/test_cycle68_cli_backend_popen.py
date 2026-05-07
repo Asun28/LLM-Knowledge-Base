@@ -281,3 +281,38 @@ def test_cli_backend_popen_preserves_error_kind_nonzero_exit(monkeypatch):
     assert "backend reported failure" in str(exc_info.value)
     assert exc_info.value.kind != "timeout"
     assert exc_info.value.kind != "not_installed"
+
+
+def test_cli_backend_popen_kill_cascade_after_terminate_grace_timeout(monkeypatch):
+    """C-AC03-platform: terminate→grace→kill→pass cascade when child is truly hung.
+
+    Forces the deepest timeout branch:
+      1. initial wait → TimeoutExpired (caller timeout fired)
+      2. terminate() called
+      3. wait(grace) → TimeoutExpired (process didn't honour SIGTERM)
+      4. kill() called
+      5. wait(grace) → TimeoutExpired (truly hung — caught + pass)
+      6. LLMError(kind=timeout) raised
+
+    Without this branch, a wedged child + a bug in the wait/kill cascade
+    would silently leak the LLMError raise and surface as a non-timeout
+    exception class. Covers production lines 308-313.
+    """
+    monkeypatch.setenv("KB_LLM_BACKEND", "ollama")
+    monkeypatch.setattr("kb.utils.cli_backend.shutil.which", lambda _: "/usr/bin/ollama")
+
+    stub = _StubPopen(
+        returncode=None,
+        wait_raises=subprocess.TimeoutExpired,
+        wait_after_terminate_raises=True,
+    )
+    monkeypatch.setattr("kb.utils.cli_backend.subprocess.Popen", lambda *a, **kw: stub)
+
+    with pytest.raises(LLMError) as exc_info:
+        call_llm("prompt", tier="write")
+    assert exc_info.value.kind == "timeout"
+    # The full cascade must run: terminate, then kill (because grace-wait raised).
+    assert stub.terminate_calls >= 1
+    assert stub.kill_calls >= 1
+    # Three waits total: caller timeout, terminate-grace, post-kill grace.
+    assert len(stub.wait_calls) >= 3, f"expected ≥3 wait calls, got {stub.wait_calls}"
