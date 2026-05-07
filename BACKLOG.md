@@ -61,40 +61,7 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 ### HIGH
 
-- `requirements.txt` `GitPython>=3.1.47` — only unpinned dependency in the file (every other line uses `==`); GitPython has carried RCE-class CVEs (2022-24439, 2023-40267, 2023-40590, 2024-22190), and a future 3.1.48+ release can pull in a regression with no PR-time signal. (mimo r6 Q1)
-  (fix: `GitPython==3.1.47` (or latest verified-safe) with explicit ceiling, e.g. `>=3.1.47,<3.2`.)
-
-- `ingest/pipeline.py` URL → external CLI — bare URL passed to `trafilatura` / `crawl4ai` / `yt-dlp` argv with no scheme allowlist (`file://`, `gopher://`, `data://` accepted) and no RFC1918 / loopback / link-local filter. Enables SSRF and local-file exfiltration via `file:///etc/passwd` or `http://169.254.169.254/...`. (mimo r4 B)
-  (fix: enforce `urlparse(url).scheme in {"http","https"}` + DNS-resolve hostname + reject when `ipaddress.ip_address(addr).is_private or .is_loopback or .is_link_local` BEFORE the subprocess spawn.)
-
-- `config.py:17` `KB_PROJECT_ROOT` — env var read at MODULE IMPORT TIME, inconsistent with the cycle-19 L2 call-time rule that the kill-switches and `KB_LLM_BACKEND` follow. Tests setting `KB_PROJECT_ROOT` after `import kb.config` get the stale resolved value. (mimo r5 Q1)
-  (fix: replace module-level `_PROJECT_ROOT = ...` with a `get_project_root()` accessor that re-reads `os.environ["KB_PROJECT_ROOT"]` at call time; expose `_reset_project_root()` for tests.)
-
-- `tests/conftest.py` `_autouse_kb_path_sandbox` no-drop guard — silent breakage if `autouse=True` is ever removed. Sandbox failure cascades into 200 test files writing to the real `wiki/` and `raw/` dirs. (mimo r2 Q1)
-  (fix: meta-test that `ast.parse`s `tests/conftest.py`, locates the `_autouse_kb_path_sandbox` `FunctionDef`, and asserts its decorator list includes `pytest.fixture(autouse=True)`.)
-
-- `tests/conftest.py` hardcoded lru_cache clear list — `load_purpose` + `_load_template_cached` + `_build_schema_cached` only. Production adding a 4th `@lru_cache` on a path-sensitive callable silently leaks across tests. (mimo r2 Q2)
-  (fix: at sandbox teardown, walk every `kb.*` module in `sys.modules`, introspect attributes for `cache_clear`, and call all of them; remove the hardcoded list.)
-
 ### MEDIUM
-
-- `lint/fetcher.py:31` trafilatura + diskcache transitive RCE chain — project's own robots cache is in-memory `dict`, NOT diskcache, so direct attack path is mitigated. Trafilatura's internal `fetch_url` + extraction code paths NOT audited for diskcache pickle reads on attacker-supplied URLs. (mimo r6 Q5)
-  (fix: confirm `trafilatura.fetch_url(...)` is invoked with caching disabled (`TRAFILATURA_DOWNLOAD_NO_CACHE=1`); OR pin diskcache to a patched version once one ships.)
-
-- `config.py:161-163` `_DEFAULT_MODEL_TIERS` dual mechanism — captures `os.environ.get(CLAUDE_*_MODEL)` at IMPORT TIME, while the canonical `MODEL_TIERS` accessor re-reads at call time per cycle-7 AC24. Any caller referencing `_DEFAULT_MODEL_TIERS` directly bypasses the call-time fix. (mimo r5 Q1, Q2)
-  (fix: delete `_DEFAULT_MODEL_TIERS`; the accessor returns `os.environ.get(env_key, "").strip() or "<hardcoded-default>"` directly.)
-
-- `config.py:480` `AUGMENT_ALLOWED_DOMAINS` — read + comma-split at IMPORT TIME with default `"en.wikipedia.org,arxiv.org"`. Same hazard class as `KB_PROJECT_ROOT` above. (mimo r5 Q5)
-  (fix: replace with `get_allowed_domains()` accessor reading at call time.)
-
-- MCP tool error responses propagate raw tracebacks — exception handlers across `mcp/core.py`, `mcp/ingest.py`, `mcp/quality.py` surface absolute filesystem paths (`/home/<user>/...`, `D:\Projects\...`) and subprocess stderr to the MCP client. Information disclosure on a typically-trusted local boundary. (mimo r4 E)
-  (fix: wrap each MCP tool body with a boundary handler that catches `Exception`, logs the full traceback locally, and returns `f"Error: {sanitize_error_text(e)}"`.)
-
-- `utils/cli_backend.py` `_check_no_secrets_on_argv` self-DoS — token-shape regex match on full argv refuses to spawn if ANY element matches a token pattern. A user prompt that legitimately discusses API-key formats silently fails. (mimo r4 A)
-  (fix: replace generic regex with value-based scrub — only refuse if an argv element equals the literal value of a listed env-var key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...).)
-
-- `graph/cache.py` 6th-caller drift — cycle 64 added the cache with 5 known callers using attribute-lookup form per cycle-18 L1. No `__all__ = []`, no ruff rule, no AST guard prevents a 6th caller doing `from kb.graph.cache import get_graph` and silently bypassing the test-spy hook. (mimo r1 Q4)
-  (fix: set `__all__ = []` in `cache.py`, plus AST-grep test that asserts zero `from kb.graph.cache import get_graph` in `src/kb/**/*.py`.)
 
 - `kb/__init__.py` public API docstring audit — `__init__.py` is a 67-line lazy `__getattr__` shim; the real Args/Returns/Raises must live on the underlying functions in `kb/ingest/pipeline.py`, `kb/compile/__init__.py`, `kb/query/__init__.py`, `kb/graph/__init__.py`. Whether those four targets actually carry Google-style sections is unverified. (mimo r3 Q7)
   (fix: `scripts/audit_docstrings.py` imports each `__all__` entry, parses `__doc__` via `docstring_parser`, fails CI if any lacks `Args:` + `Returns:` + (`Raises:` when applicable).)
@@ -107,15 +74,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
   (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
 
-- `tests/test_cycle64_snapshots.py` tautology risk — syrupy snapshots were captured FROM the same code path under test. No committed proof that mutating an input field causes the snapshot to diverge. (mimo r2 Q4)
-  (fix: per snapshot, commit a paired negative-control test that mutates one input field and asserts the snapshot does NOT match; AND reject `--snapshot-update` in CI pytest invocation.)
-
-- CI `ANTHROPIC_API_KEY=sk-ant-dummy-key-for-ci-tests-only` — dummy key in `.github/workflows/ci.yml`. If any test mocks HTTP at the `httpx` layer but not the SDK client constructor, the dummy could leak into a recorded cassette / VCR / pytest snapshot file. (mimo r5 Q7)
-  (fix: CI grep step that fails if `sk-ant-dummy` appears anywhere in tracked files except `.github/workflows/ci.yml`.)
-
-- `docs/reference/` lacks an INDEX.md — directory holds 10+ files but no single manifest mapping each to its scope. CLAUDE.md's "Detailed Documentation" table partially serves this role but is hand-maintained. (mimo r3 NEW)
-  (fix: generate `docs/reference/INDEX.md` from each file's frontmatter / first H1 + CI script asserting every `*.md` appears in the index AND in CLAUDE.md's table.)
-
 ---
 
 ## Phase 6 — Cross-LLM cycle-64 audit (mimo-v2.5-pro, 2026-05-04)
@@ -125,32 +83,10 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
      mimo-v2.5-pro endpoint self-identify as GLM-4 / Zhipu AI; Token Plan
      billing is genuinely mimo-v2.5-pro at 2x credits. -->
 
-### HIGH
-
-- `mcp/app.py:230` `_validate_page_id` — Windows trailing-dot / trailing-space filename confusion. A page_id like `"secret."` or `"secret "` passes every check, but `Path.resolve()` on Windows silently strips trailing dots and spaces, opening a *different* file than requested. Containment is preserved, so this is filename-confusion / target-substitution, not directory traversal. (mimo r2)
-  (fix: before the reserved-name check, reject any segment where `segment != segment.rstrip(". ")`.)
-
-### MEDIUM
-
-- `mcp/app.py:230` `_validate_page_id` — `:` is not in the blocked character set; on Windows, `"page:hidden"` produces NTFS Alternate Data Stream syntax. POSIX accepts the literal filename, creating cross-platform divergence. (mimo r2)
-  (fix: extend `_CTRL_CHARS_RE` (or add `_WINDOWS_ILLEGAL_CHARS_RE`) to reject `:` plus `< > " | ? *` at the same gate as the control-char check.)
-
-- `compile/compiler.py:645` `_validate_path_under_project_root` + downstream `rebuild_indexes` unlink — TOCTOU window between containment validation and filesystem mutation. Local attacker with write access inside the project tree can replace the validated path with a junction/symlink. (mimo r1, r2)
-  (fix: re-resolve and re-validate immediately before `unlink`/write, OR open with `os.O_NOFOLLOW` (POSIX) / `FILE_FLAG_OPEN_REPARSE_POINT` (Windows) so symlink-following is rejected at the kernel.)
-
-- `mcp/app.py:121,230` + `compile/compiler.py:645` validator-contract drift — three sibling validators with three different contracts: `_validate_wiki_dir` (absolute + exists + dir + single resolved-anchor); `_validate_path_under_project_root` (no exists check, dual literal+resolved anchor); `_validate_page_id` (substring-based + resolved-anchor). A future fourth call site can quietly adopt the weakest contract. (mimo r1, r2)
-  (fix: extract one canonical `_assert_under_project_root(path, *, require_exists=False, dual_anchor=True)`, migrate all three current sites, document in `docs/reference/error-handling.md`.)
-
 ### LOW
 
 - `mcp/app.py:254` `_validate_page_id` — `".." in page_id` is a substring match that rejects legitimate IDs like `"notes..draft"` or `"c++..faq"`. The final `resolve().relative_to()` is the actual safety net. Cosmetic. (mimo r1)
   (fix: replace with `any(seg == ".." for seg in page_id.replace("\\", "/").split("/"))`.)
-
-- `query/embeddings.py:619` `VectorIndex.build` — multi-PROCESS race on the same `db_path`. Module-level `_rebuild_lock` is a `threading.Lock`, so it serialises threads within one process but does NOT block two concurrent `kb` invocations from running DROP → CREATE → bulk INSERT against the same DB. (mimo r1)
-  (fix: take a `file_lock(db_path.with_suffix(".db.lock"))` around the DROP → CREATE → INSERT → COMMIT block.)
-
-- `query/embeddings.py:660` `VectorIndex.build` — `sqlite_vec.load(conn)` raises `sqlite3.OperationalError` whose message includes the absolute filesystem path of the .so/.dll that failed to load; can leak into MCP error responses. (mimo r2)
-  (fix: wrap the `sqlite_vec.load(conn)` call in `try/except sqlite3.OperationalError` and re-raise `RuntimeError("sqlite-vec extension failed to load; reinstall the sqlite-vec wheel")` with no path detail.)
 
 ---
 
