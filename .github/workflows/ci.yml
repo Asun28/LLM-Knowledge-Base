@@ -125,6 +125,14 @@ jobs:
         #         the deeper POSIX symlink security gap.
         run: python -m pytest -q --snapshot-warn-unused
 
+      - name: docstring audit (warn-only, cycle 68 transition)
+        # Cycle 68 AC06 — runs scripts/audit_docstrings.py in warn-only mode
+        # to surface missing Args/Returns/Raises/Yields sections on the public
+        # kb.* surface without failing the build during the transition window.
+        # FW-4 covers generators with `raise` (must require Raises:). After the
+        # public surface is clean, drop --warn-only in a follow-up cycle.
+        run: python scripts/audit_docstrings.py --warn-only
+
       - name: Pip resolver check (soft-fail per cycle 34 T5)
         # T5 mitigation: three known conflicts (arxiv/requests, crawl4ai/lxml,
         # instructor/rich) would fail strict pip check. continue-on-error is on
