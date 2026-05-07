@@ -57,8 +57,24 @@ def _slug_for_duplicate(page: Path, wiki_dir: Path) -> str:
 
 
 def _is_allowlisted_pair(slug_a: str, slug_b: str) -> bool:
-    """Return True for near-slug pairs known to represent distinct concepts."""
-    return frozenset((slug_a, slug_b)) in DUPLICATE_SLUG_ALLOWLIST
+    """Return True for near-slug pairs known to represent distinct concepts.
+
+    Cycle 68 AC04 — overlays ``wiki/_lint.yml::duplicate_slug_allowlist`` on top
+    of the ``DUPLICATE_SLUG_ALLOWLIST`` baked-in defaults. The yaml override is
+    additive: any pair allowlisted in either source short-circuits to ``True``.
+    Function-local import keeps the yaml loader off the import-graph hot path
+    (call-time read per cycle-19 L2; lazy yaml import).
+    """
+    pair = frozenset((slug_a, slug_b))
+    if pair in DUPLICATE_SLUG_ALLOWLIST:
+        return True
+    from kb.lint._lint_yaml import load_lint_config
+
+    extra = load_lint_config().get("duplicate_slug_allowlist", [])
+    for entry in extra:
+        if frozenset(entry) == pair:
+            return True
+    return False
 
 
 def check_duplicate_slugs(
