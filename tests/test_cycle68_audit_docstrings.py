@@ -92,9 +92,7 @@ def test_audit_docstrings_normal_func_with_args_returns(tmp_path: Path) -> None:
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     sections = flagged[0].get("missing", [])
-    assert "Args" in sections or "args" in sections, (
-        f"Expected Args missing, got {flagged[0]!r}"
-    )
+    assert "Args" in sections or "args" in sections, f"Expected Args missing, got {flagged[0]!r}"
     assert "Returns" in sections or "returns" in sections, (
         f"Expected Returns missing, got {flagged[0]!r}"
     )
@@ -166,10 +164,10 @@ def test_audit_docstrings_generator_with_yield_and_raise(tmp_path: Path) -> None
 def test_audit_docstrings_warn_only_exit_zero(tmp_path: Path) -> None:
     """AC13 — --warn-only exits 0 even when violations exist."""
     pkg_source = textwrap.dedent(
-        '''
+        """
         def bad():
             pass
-        '''
+        """
     ).strip()
     result = _run_audit_against_temp_pkg(tmp_path, pkg_source, warn_only=True)
     assert result.returncode == 0, (

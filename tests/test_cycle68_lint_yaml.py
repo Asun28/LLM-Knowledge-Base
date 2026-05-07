@@ -35,7 +35,7 @@ def test_lint_yaml_rejects_malicious_payload(
     wiki_dir.mkdir(parents=True, exist_ok=True)
     # Classic yaml.load RCE payload — !!python/object/new constructs Python objects
     # that yaml.safe_load REFUSES (raises ConstructorError); yaml.load would execute.
-    payload = "!!python/object/new:os.system [\"echo PWNED > pwned.txt\"]\n"
+    payload = '!!python/object/new:os.system ["echo PWNED > pwned.txt"]\n'
     (wiki_dir / "_lint.yml").write_text(payload, encoding="utf-8")
 
     invocations: list[tuple] = []
@@ -88,12 +88,8 @@ def test_lint_yaml_parse_error_returns_empty(
 
     assert result == {}, f"Malformed YAML should yield empty dict, got {result!r}"
     assert any(
-        "YAML" in rec.getMessage() or "parse" in rec.getMessage()
-        for rec in caplog.records
-    ), (
-        f"Expected YAML parse warning; got records: "
-        f"{[r.getMessage() for r in caplog.records]!r}"
-    )
+        "YAML" in rec.getMessage() or "parse" in rec.getMessage() for rec in caplog.records
+    ), f"Expected YAML parse warning; got records: {[r.getMessage() for r in caplog.records]!r}"
 
 
 @pytest.mark.skipif(
@@ -115,16 +111,11 @@ def test_lint_yaml_io_permission_returns_empty(
     try:
         with caplog.at_level(logging.WARNING, logger="kb.lint._lint_yaml"):
             result = load_lint_config(wiki_dir=wiki_dir)
-        assert result == {}, (
-            f"Permission error should yield empty dict, got {result!r}"
-        )
+        assert result == {}, f"Permission error should yield empty dict, got {result!r}"
         assert any(
             "read" in rec.getMessage().lower() or "error" in rec.getMessage().lower()
             for rec in caplog.records
-        ), (
-            f"Expected read-error warning; got: "
-            f"{[r.getMessage() for r in caplog.records]!r}"
-        )
+        ), f"Expected read-error warning; got: {[r.getMessage() for r in caplog.records]!r}"
     finally:
         # Restore perms so pytest can clean up.
         target.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -151,14 +142,9 @@ def test_lint_yaml_schema_mixed_type_warning(
     assert "duplicate_slug_allowlist" not in result, (
         f"Wrong-shape duplicate_slug_allowlist should be dropped; got {result!r}"
     )
-    assert result.get("other_key") == "keep_me", (
-        f"Sibling keys should survive; got {result!r}"
-    )
-    assert any(
-        "duplicate_slug_allowlist" in rec.getMessage() for rec in caplog.records
-    ), (
-        f"Expected schema warning; got: "
-        f"{[r.getMessage() for r in caplog.records]!r}"
+    assert result.get("other_key") == "keep_me", f"Sibling keys should survive; got {result!r}"
+    assert any("duplicate_slug_allowlist" in rec.getMessage() for rec in caplog.records), (
+        f"Expected schema warning; got: {[r.getMessage() for r in caplog.records]!r}"
     )
 
 
