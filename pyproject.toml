@@ -26,7 +26,8 @@ hybrid = [
     "numpy>=1.26",
 ]
 augment = [
-    "httpx>=0.27",
+    # cycle 68 AC09 — match lint/fetcher.py:51 runtime assertion (httpx 0.28.x).
+    "httpx>=0.28,<0.29",
     "httpcore>=1.0",
     "trafilatura>=1.12",
 ]
