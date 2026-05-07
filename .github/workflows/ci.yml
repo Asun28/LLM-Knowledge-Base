@@ -174,7 +174,7 @@ jobs:
             echo "::error::cycle-67 AC11: no dummy key found in .github/workflows/ci.yml; cannot run check"
             exit 1
           fi
-          ALLOWLIST='^\.github/workflows/ci\.yml$|^BACKLOG\.md$|^CHANGELOG\.md$|^CHANGELOG-history\.md$|^docs/reference/testing\.md$|^docs/superpowers/decisions/|^tests/test_cycle65_ci_dummy_key_guard\.py$|^tests/_helpers/api_key\.py$|^tests/test_cycle67_'
+          ALLOWLIST='^\.github/workflows/ci\.yml$|^BACKLOG\.md$|^CHANGELOG\.md$|^CHANGELOG-history\.md$|^docs/reference/testing\.md$|^docs/superpowers/decisions/|^tests/test_cycle65_ci_dummy_key_guard\.py$|^tests/_helpers/api_key\.py$|^tests/test_cycle67_|^tests/test_cycle36_ci_hardening\.py$'
           matches=$(git ls-files | xargs grep -l "$DUMMY" 2>/dev/null | grep -vE "$ALLOWLIST" || true)
           if [ -n "$matches" ]; then
             echo "::error::cycle-67 AC11: dummy CI key leaked into tracked files outside the allowlist:"

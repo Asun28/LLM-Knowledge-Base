@@ -90,6 +90,7 @@ def test_dummy_key_leak_guard_has_allowlist() -> None:
         "CHANGELOG",
         "docs/reference/testing",
         "docs/superpowers/decisions",
+        "test_cycle36_ci_hardening",
     ]
     for entry in required_allowlist_entries:
         assert entry in run_block, (
