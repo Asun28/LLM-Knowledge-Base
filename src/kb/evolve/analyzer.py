@@ -13,6 +13,7 @@ from kb.config import (
     UNDER_COVERED_TYPE_THRESHOLD,
     WIKI_DIR,
 )
+import kb.graph.cache  # cycle-68 AC07 — pages-None call site routes through cache
 from kb.graph.builder import build_graph, graph_stats
 from kb.lint.checks import check_stub_pages
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
@@ -124,7 +125,8 @@ def find_connection_opportunities(
         List of dicts: {page_a, page_b, shared_terms, suggestion}.
     """
     wiki_dir = wiki_dir or WIKI_DIR
-    graph = build_graph(wiki_dir)
+    # cycle-68 AC07 — route pages-None lookup through process-shared cache.
+    graph = kb.graph.cache.get_graph(wiki_dir)
     if pages is None:
         pages = scan_wiki_pages(wiki_dir)
 
