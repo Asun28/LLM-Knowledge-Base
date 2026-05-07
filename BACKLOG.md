@@ -28,7 +28,36 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 <!-- 6 parallel mimo-v2.5-pro CLI calls (arch / tests / docs / security-wide / env / deps).
      Items already covered by SECURITY.md or earlier BACKLOG entries OMITTED.
-     Source tag: (mimo r{N}). -->
+     Source tag: (mimo r{N}).
+
+     CYCLE 67 (2026-05-07) cleanup pass — many entries shipped or verified stale:
+     - GitPython unpinned (mimo r6 Q1) → cycle 67 Step 15 bumped to >=3.1.49,<3.2 (CVE-2026-44244).
+     - SSRF on URL → external CLI argv (mimo r4 B) → VERIFIED STALE: lint/fetcher.py has DNS-resolve + IP-allowlist + scheme-allowlist + per-hop redirect validation; crawl4ai/yt-dlp not imported in src/kb/.
+     - KB_PROJECT_ROOT call-time (mimo r5 Q1) → SHIPPED cycle 65 AC1 as get_project_root().
+     - AUGMENT_ALLOWED_DOMAINS call-time (mimo r5 Q5) → SHIPPED cycle 65 AC3 as get_allowed_domains().
+     - _autouse_kb_path_sandbox no-drop guard (mimo r2 Q1) → SHIPPED cycle 67 AC08 (AST meta-test).
+     - hardcoded lru_cache list (mimo r2 Q2) → SHIPPED cycle 17 AC16 (auto-discovery in conftest).
+     - trafilatura cache disable (mimo r6 Q5) → SHIPPED cycle 65 (TRAFILATURA_DOWNLOAD_NO_CACHE=1).
+     - _DEFAULT_MODEL_TIERS dual mechanism (mimo r5 Q1+Q2) → SHIPPED cycle 67 AC01 (actual surface was MODEL_TIERS, replaced with _ModelTiersView(Mapping)).
+     - MCP error response raw tracebacks (mimo r4 E) → SHIPPED cycle 65 AC21 (_mcp_error_boundary).
+     - _check_no_secrets_on_argv self-DoS (mimo r4 A) → VERIFIED INCORRECT: cycle 67 AC15 added 6 lock-in tests proving the substring scan is correct (no regex on argv).
+     - graph/cache 6th-caller drift (mimo r1 Q4) → SHIPPED cycle 67 AC02 (AST guard test) on top of cycle 64 __all__=[].
+     - tests/test_cycle64_snapshots.py tautology (mimo r2 Q4) → SHIPPED cycle 67 AC09 (non-vacuous paired negative-controls).
+     - CI sk-ant-dummy grep (mimo r5 Q7) → SHIPPED cycle 67 AC11 (broadened cycle-65 src-only scan to all tracked files with allowlist).
+     - docs/reference/ INDEX.md (mimo r3 NEW) → cycle-65 AC20 forward + cycle 67 AC14 inverse both shipped.
+
+     CYCLE 67 CARRY-OVER to cycle 68 (design-locked, deferred for time/risk):
+     - cli_backend.py:241 pre-cap stdout buffering → AC03 (Popen refactor + chunked stdout cap with platform-aware kill).
+     - kb/__init__.py public API docstring audit (mimo r3 Q7) → AC12 (scripts/audit_docstrings.py with Args/Returns/Raises gate).
+     - duplicate-slug allowlist externalization (Phase 4.5 MEDIUM) → AC07 (wiki/_lint.yml lazy YAML loader with safe_load).
+     - mcp_server.py + mcp/__init__.py PEP-562 redundancy (mimo r1 Q5) → still LOW; deferred indefinitely (low-value churn). -->
+
+### CYCLE 68 carry-over (cycle-67 design-locked, deferred for time/risk)
+
+- **AC03** (high risk; src/kb/utils/cli_backend.py:213-247) — replace `subprocess.run(capture_output=True)` with `Popen` + chunked stdout reader (64 KB chunks) + `terminate()` at `MAX_CLI_STDOUT_BYTES`; platform-aware kill grace (Windows `terminate(); wait(0.5)`; POSIX `terminate(); wait(2); kill()`); split stdin write from daemon readers (do NOT use `proc.communicate(input=...)`). Introduce `MAX_CLI_STDERR_BYTES = 64 * 1024` constant for stderr cap symmetry. Spec frozen at `docs/superpowers/decisions/2026-05-07-cycle-67-design.md` C-AC03-{stdin,platform,stderr,error-kinds} and FW-1.
+- **AC07** (medium effort; new `src/kb/lint/_lint_yaml.py` + edit `src/kb/lint/checks/duplicate_slug.py`) — externalize `DUPLICATE_SLUG_ALLOWLIST` to optional `wiki/_lint.yml`; `yaml.safe_load` ONLY (never `yaml.load` — RCE class T7); 6 fallback tests (file-not-found, malformed YAML, IO permission, schema validation, call-time read, malicious payload rejection). Spec frozen at design.md C-AC07-{safe,fallback,schema}.
+- **AC12** (medium effort; new `scripts/audit_docstrings.py` + CI step) — walk `kb.__all__`, parse `__doc__` via `ast.get_docstring` + regex for `Args:` / `Returns:` / `Raises:` sections; conditional Raises requirement gated by `ast.walk` for `raise` statements (R2-F16); warn-only mode initially, hard-fail in cycle 69+. Spec frozen at design.md C-AC12-generator.
+
 
 ### HIGH
 
