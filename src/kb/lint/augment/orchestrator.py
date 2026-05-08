@@ -16,6 +16,29 @@ from kb.lint.augment import quality as quality_mod
 from kb.lint.augment.fetcher import _url_is_allowed
 from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_purpose
+from kb.utils.text import wrap_wiki_context
+
+
+def _build_pre_extract_prompt(raw_content: str) -> str:
+    """Build the auto_ingest pre-extract scan-tier LLM prompt.
+
+    Cycle 72 AC03: replaces the pre-cycle-72 literal
+    ``<untrusted_source>...</untrusted_source>`` XML sentinel pair with
+    a ``wrap_wiki_context`` fence (closer-escape + system-prompt-style
+    assertion). The orchestrator's auto_ingest path calls this helper at
+    the L368 site previously embedded as an inline f-string.
+
+    Defense-in-depth complement to the existing JSON-schema validation
+    constraint on the LLM response. The fenced content is the just-fetched
+    URL body — fully untrusted; the wrap (a) escapes attacker-planted
+    ``</wiki_context>`` closers via ``_escape_wiki_context_close`` and
+    (b) prepends the system-prompt-style assertion sentence reminding the
+    LLM that fenced content is data not instructions.
+    """
+    return (
+        "Extract structured data from this article per the schema."
+        + wrap_wiki_context(raw_content)
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -362,11 +385,14 @@ def run_augment(
             try:
                 schema = _build_schema_cached("article")
                 raw_content = raw_path.read_text(encoding="utf-8")
+                # Cycle 72 AC03: prompt construction extracted into
+                # _build_pre_extract_prompt helper which uses
+                # wrap_wiki_context for closer-escape + assertion. Per
+                # cycle-23 L2 + cycle-16 L2 — extracting the helper lets
+                # AC08 lock-in test reach the production call site
+                # without complex run_augment fixture setup.
                 extraction = proposer_mod._call_llm_json(
-                    (
-                        "Extract structured data from this article per the schema.\n\n"
-                        f"<untrusted_source>\n{raw_content}\n</untrusted_source>"
-                    ),
+                    _build_pre_extract_prompt(raw_content),
                     tier="scan",
                     schema=schema,
                 )
