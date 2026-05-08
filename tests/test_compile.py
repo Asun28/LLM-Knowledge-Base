@@ -1,8 +1,9 @@
 """Tests for the compile module."""
 
-import inspect
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from kb.compile.compiler import (
     compile_wiki,
@@ -207,36 +208,99 @@ def test_detect_source_drift_does_not_mutate_manifest_when_sources_deleted(tmp_p
 # Cycle 52 fold — cycle-19 AC14-anchor (prune-base consistency).
 # Source: tests/test_cycle19_prune_base_consistency_anchor.py (deleted in same commit).
 # Per cycle-15 L2 (DROP-with-test-anchor), this test stays as a regression
-# anchor for the cycle-17 AC1 prune-base fix. The first test deliberately
-# uses inspect.getsource because the test's purpose is to LINT the shipped
-# form of two distinct call sites — see cycle-19 design.md AC14 DROP rationale.
-# A C41-L1 behavioral upgrade is feasible and has been filed as a cycle-53+
-# BACKLOG candidate (see Phase 4.5 HIGH `tests/` carry-over).
+# anchor for the cycle-17 AC1 prune-base fix.
+#
+# Cycle 70 AC10 — C41-L1 behavioural upgrade per design.md Q6-B (parametrize
+# 2 sites) + C5 (Mock(wraps=...) preserves real return values for downstream
+# `set` and `affected_pages` consumers). Replaces the prior inspect.getsource
+# source-grep with a positive spy-on-helper test that fails if the real
+# `_canonical_rel_path` call is removed from EITHER call site.
 
 
-def test_prune_base_uses_canonical_rel_path_at_both_sites() -> None:
-    """Both prune sites use the canonical helper or raw_dir.resolve().parent."""
+@pytest.mark.parametrize("call_site", ["drift_detect", "full_mode"])
+def test_canonical_rel_path_invoked_by_both_call_sites(call_site, tmp_path):
+    """Cycle 70 AC10 — both prune sites route through ``_canonical_rel_path``.
+
+    Replaces inspect.getsource source-grep (cycle-19 AC14 anchor) with a
+    behavioural spy. ``Mock(wraps=compiler._canonical_rel_path)`` preserves
+    the real return value so downstream ``set`` and ``existing_rel`` consumers
+    keep working (per design.md C5 — bare ``Mock()`` would break those sites
+    for unrelated reasons).
+
+    Mutation budget: removing ``_canonical_rel_path(...)`` from
+    ``detect_source_drift`` (compiler.py:292,312,373) fails the
+    ``drift_detect`` parametrized branch with ``spy.call_count == 0``.
+    Removing ``_canonical_rel_path(...)`` from ``compile_wiki`` full-mode
+    body (compiler.py:466) fails the ``full_mode`` branch.
+    """
     from kb.compile import compiler
 
-    src = inspect.getsource(compiler)
+    real_helper = compiler._canonical_rel_path
+    spy = MagicMock(wraps=real_helper)
 
-    # Site 1 — `detect_source_drift` near line 270 uses the canonical helper.
-    site1_present = (
-        "_canonical_rel_path(s, raw_dir)" in src or "_canonical_rel_path(source, raw_dir)" in src
-    )
-    assert site1_present, (
-        "Site 1 (detect_source_drift) must use _canonical_rel_path. If this "
-        "assertion fails, the cycle-17 AC1 fix has been regressed. See "
-        "docs/superpowers/decisions/2026-04-21-cycle19-design.md AC14 DROP rationale."
-    )
+    # Common setup: 1 raw file, valid wiki tree, empty manifest.
+    raw_dir_root = tmp_path / "raw"
+    articles = raw_dir_root / "articles"
+    articles.mkdir(parents=True)
+    (articles / "alive.md").write_text("# Alive\n", encoding="utf-8")
 
-    # Site 2 — `compile_wiki` full-mode tail prune near line 452 uses
-    # `raw_dir.resolve().parent` to match the canonical helper's anchor.
-    assert "raw_dir.resolve().parent" in src, (
-        "Site 2 (compile_wiki full-mode prune base) must derive from "
-        "raw_dir.resolve().parent. Cycle-17 AC1 shipped this fix; cycle-19 "
-        "AC14 anchored it. Regression: see design.md AC14 DROP rationale."
-    )
+    wiki_dir = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / subdir).mkdir(parents=True)
+
+    manifest_path = tmp_path / ".data" / "hashes.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    if call_site == "drift_detect":
+        # Spy on the bound name in compiler module — detect_source_drift looks
+        # up the name via module globals at call time.
+        with patch.object(compiler, "_canonical_rel_path", spy):
+            compiler.detect_source_drift(
+                raw_dir=raw_dir_root,
+                wiki_dir=wiki_dir,
+                manifest_path=manifest_path,
+            )
+        # detect_source_drift body invokes _canonical_rel_path at lines 292
+        # (existing_rel set comprehension), 312 (changed_refs loop), and 373
+        # (return-dict list comprehension). With 1 source on disk + empty
+        # manifest, line 292 fires once; line 312 fires once for the new
+        # source; line 373 fires once for the same source. Total >= 1.
+        assert spy.call_count >= 1, (
+            "detect_source_drift must route at least one path through "
+            "_canonical_rel_path. If spy was never called, the cycle-17 AC1 "
+            "fix has been reverted at compiler.py:292/312/373."
+        )
+    else:  # full_mode
+        # compile_wiki full-mode body line 466 calls _canonical_rel_path on each
+        # source. Stub ingest_source so we don't actually ingest (we only need
+        # the for-source loop to enter and call _canonical_rel_path at line 466
+        # before any heavy work).
+        with (
+            patch("kb.compile.compiler.ingest_source") as mock_ingest,
+            patch.object(compiler, "_canonical_rel_path", spy),
+        ):
+            mock_ingest.return_value = {
+                "source_path": "test",
+                "source_type": "article",
+                "content_hash": "abc123",
+                "pages_created": ["summaries/alive"],
+                "pages_updated": [],
+            }
+            compiler.compile_wiki(
+                incremental=False,
+                raw_dir=raw_dir_root,
+                manifest_path=manifest_path,
+                wiki_dir=wiki_dir,
+            )
+        # compile_wiki full-mode body iterates sources_to_process. For each
+        # source, line 466 (`rel_path = _canonical_rel_path(source, raw_dir)`)
+        # fires before the try/except block. With 1 source on disk, spy.call_count >= 1.
+        assert spy.call_count >= 1, (
+            "compile_wiki(mode='full') must route at least one path through "
+            "_canonical_rel_path. If spy was never called, the cycle-17 AC1 "
+            "fix has been reverted at compiler.py:466."
+        )
 
 
 def test_manifest_key_for_alias_is_canonical_rel_path_at_module_scope() -> None:
