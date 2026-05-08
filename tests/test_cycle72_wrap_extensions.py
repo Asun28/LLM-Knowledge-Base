@@ -97,7 +97,9 @@ class TestAC01_FidelityPageContentCap:
 
     def test_oversized_page_truncated_with_marker(self, monkeypatch):
         """Condition 2 + Condition 8: oversized page is capped AND the
-        truncation marker literal is at the end of the capped page region."""
+        truncation marker literal appears at the END of the capped page
+        region (position assertion per cycle-24 L1 + R1 DeepSeek M-2 fix).
+        """
         from kb.lint import semantic as semantic_mod
 
         monkeypatch.setattr(
@@ -108,9 +110,32 @@ class TestAC01_FidelityPageContentCap:
 
         out = semantic_mod.build_fidelity_context("entities/test")
 
-        # Marker literal must appear in the output.
-        assert "[truncated for context budget]" in out, (
+        # R1 DeepSeek M-2 fix: position assertion (cycle-24 L1
+        # position-not-presence rule). The marker must immediately follow
+        # the capped page body, BEFORE the source-rendering segment. We
+        # verify by locating the marker and confirming the page-body region
+        # ends with it.
+        marker = "[truncated for context budget]"
+        assert marker in out, (
             f"truncation marker missing from oversized output: {out[:500]!r}"
+        )
+        # The cap is applied INSIDE build_fidelity_context to
+        # paired["page_content"] BEFORE assembly, so the marker must appear
+        # AFTER the "## Wiki Page" heading and BEFORE the "\n---\n"
+        # separator (page region's trailing edge). Verify the marker
+        # position is BEFORE the next "---" separator (which separates
+        # page from sources).
+        marker_idx = out.find(marker)
+        page_heading_idx = out.find("## Wiki Page")
+        sources_separator_idx = out.find("\n---\n", marker_idx)
+        assert page_heading_idx >= 0, "## Wiki Page heading missing"
+        assert sources_separator_idx > marker_idx, (
+            "truncation marker NOT followed by page-body separator — "
+            "marker is not at end of capped page region"
+        )
+        assert page_heading_idx < marker_idx, (
+            "truncation marker appears BEFORE the page heading; "
+            "must be at the END of the capped page region"
         )
 
     def test_under_cap_passes_through_unchanged(self, monkeypatch):
@@ -458,6 +483,51 @@ class TestAC04_ConsistencyContextMigration:
         assert len(out) < upper_bound, (
             f"output length {len(out)} exceeds upper bound {upper_bound}"
         )
+
+    def test_auto_mode_caps_page_content(self, tmp_path):
+        """R1 Sonnet M-1 fix: auto-mode (no ``page_ids=``) triggers the
+        ``_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS`` truncation cap. Manual
+        mode (``page_ids=``) BYPASSES the cap; the cap is what design-
+        decision condition 5 specifies, so we MUST verify it under
+        auto-mode where it actually fires.
+
+        Auto-mode requires shared-source grouping (frontmatter ``source:``
+        field). We write 2 pages sharing the same raw source file and an
+        oversized body so the cap fires.
+        """
+        from kb.lint.semantic import (
+            _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS,
+            build_consistency_context,
+        )
+
+        wiki_dir = tmp_path / "wiki"
+        wiki_dir.mkdir(parents=True)
+        # Two pages sharing source raw/articles/shared.md so auto-mode
+        # `_group_by_shared_sources` puts them in the same group.
+        for pid in ["concepts/auto-a", "concepts/auto-b"]:
+            page_path = wiki_dir / f"{pid}.md"
+            page_path.parent.mkdir(parents=True, exist_ok=True)
+            page_path.write_text(
+                '---\n'
+                f'title: "{pid}"\n'
+                'source:\n  - "raw/articles/shared.md"\n'
+                'created: 2026-05-09\nupdated: 2026-05-09\n'
+                'type: concept\nconfidence: stated\n---\n\n'
+                '# Body\n\n' + ("Z" * (_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS + 200)),
+                encoding="utf-8",
+            )
+        # auto-mode: no page_ids= passed
+        out = build_consistency_context(wiki_dir=wiki_dir)
+
+        # Auto-mode truncation marker must appear (cap fired).
+        assert (
+            f"[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} chars" in out
+        ), (
+            "auto-mode cap did not fire — _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS "
+            "truncation expected for oversized page bodies"
+        )
+        # Per-page wrap fence must wrap the post-cap content.
+        assert "<wiki_context>" in out, "fence-open missing"
 
     def test_wrapped_constant_reserves_fence_overhead(self):
         """Condition 5 (option (b)): the wrapped per-page cap

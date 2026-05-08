@@ -180,3 +180,37 @@ DESIGN-DECISION: APPROVE-WITH-CONDITIONS (14)
 ```
 
 The 17 ACs of cycle-72 are APPROVED subject to the 14 binding conditions above. F-1 vs C1 divergence resolved as DEFER (R1 C1 stands; R2 F-1 rejected with documented rationale: §T1 explicit deferral + asymmetric expansion cost (+100 LoC + new wrap migration, not just +50 LoC parallel cap) + cycle-71 single-function-per-cycle precedent + scope-creep ceiling at 17 ACs + BACKLOG entry IS the user-intent drain mechanism). Step-7 mimocoding plan must encode all 14 conditions as Step-7 sub-ACs per cycle-22 L5.
+
+---
+
+## Implementation deviation note (Step-09 update)
+
+**Condition 5 (AC04 constant-resolution): switched from option (a) to option (b) at Step-09.**
+
+Step-05 picked option (a) — modify `kb.config:467 MAX_CONSISTENCY_PAGE_CONTENT_CHARS = 4096 - _FENCE_OVERHEAD` in place. R1 C5 itself flagged the prerequisite: "(requires importing `_FENCE_OVERHEAD` in config — circular-import check needed)". Option (b) — "add a NEW `MAX_CONSISTENCY_PAGE_CONTENT_CHARS_WRAPPED` constant" — was listed as the explicit fallback.
+
+At Step-09 C1 implementation the circular import materialized:
+```
+kb.config (importing kb.utils.text._FENCE_OVERHEAD)
+  → kb.utils.__init__ (eager submodule init)
+    → kb.utils.pages
+      → kb.config  ← cycle
+```
+
+`kb.utils.pages` imports `WIKI_DIR` and `WIKI_SUBDIR_TO_TYPE` from `kb.config`; that import direction is fundamental to the package layout and cannot be reversed without a much larger refactor. Per R1 C5's own listing, option (b) is the documented fallback when option (a)'s prerequisite fails. C1 commit message documents the switch.
+
+**Implementation choice (option (b)):**
+- `kb.config.MAX_CONSISTENCY_PAGE_CONTENT_CHARS = 4096` — public constant unchanged (back-compat for `tests/test_cycle8_consistency_caps.py:38-94` consumers).
+- `src/kb/lint/semantic.py` adds module-level constant `_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS = MAX_CONSISTENCY_PAGE_CONTENT_CHARS - _FENCE_OVERHEAD`.
+- `build_consistency_context` auto-mode truncation uses `_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS` — the wrapped per-page cap reserves fence overhead.
+- Per-page `wrap_wiki_context()` call in the interleave loop uses the truncated content.
+
+**Why this still satisfies the threat-model T5 mitigation:** the wrapped per-page total stays within the original 4096-char budget (cap reduces by overhead, then wrap adds it back; net per-page output ≤ 4096). The mitigation is functionally equivalent to option (a); only the constant lives in `lint/semantic.py` instead of `kb.config`.
+
+**Verify (Step-14 grep proof, both pieces present):**
+```
+grep -n 'MAX_CONSISTENCY_PAGE_CONTENT_CHARS' src/kb/config.py        → 1 hit (= 4096, unchanged)
+grep -n '_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS' src/kb/lint/semantic.py → 2 hits (definition + use)
+```
+
+Both R1 reviewers (DeepSeek M-1, Sonnet M-2) flagged the deviation as needing an explicit addendum rather than a comment-only swap. This section is the required addendum.
