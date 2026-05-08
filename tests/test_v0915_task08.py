@@ -372,12 +372,15 @@ class TestFrontmatterRegex:
         from kb.evolve import analyzer
         from kb.utils import markdown
 
-        assert hasattr(analyzer, "FRONTMATTER_RE"), (
-            "kb.evolve.analyzer must expose FRONTMATTER_RE "
-            "(via `from kb.utils.markdown import FRONTMATTER_RE`)"
+        # Import shape at evolve/analyzer.py:19 is
+        #   `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`
+        # so the bound module attribute is `_FRONTMATTER_RE` (aliased).
+        assert hasattr(analyzer, "_FRONTMATTER_RE"), (
+            "kb.evolve.analyzer must expose _FRONTMATTER_RE "
+            "(via `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`)"
         )
-        assert analyzer.FRONTMATTER_RE is markdown.FRONTMATTER_RE, (
-            "analyzer.FRONTMATTER_RE must be the SAME compiled regex "
+        assert analyzer._FRONTMATTER_RE is markdown.FRONTMATTER_RE, (
+            "analyzer._FRONTMATTER_RE must be the SAME compiled regex "
             "object as kb.utils.markdown.FRONTMATTER_RE; an inline "
             "re.compile() would create a different object and fail this check"
         )
