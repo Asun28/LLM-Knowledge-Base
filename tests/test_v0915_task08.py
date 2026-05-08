@@ -350,23 +350,40 @@ class TestFrontmatterRegex:
         # Just confirm no exception; frontmatter stripping is exercised
         find_connection_opportunities(wiki_dir=tmp_wiki)
 
-    def test_regex_has_no_leading_whitespace_prefix(self):
-        """The regex in find_connection_opportunities uses shared FRONTMATTER_RE.
+    def test_analyzer_frontmatter_re_identity_with_shared(self):
+        """Cycle 69 AC12 — C11-L1 upgrade per amendment A2.
 
-        Phase 4.5 HIGH P3: consolidated to use shared regex import instead of
-        inlined pattern.
+        Replaces inspect.getsource source-grep with behavioural identity
+        assertion: ``kb.evolve.analyzer.FRONTMATTER_RE is
+        kb.utils.markdown.FRONTMATTER_RE`` (same compiled regex object,
+        not an inline re-compile).
+
+        This catches the cycle-21 L4 mutation directly: replacing
+        ``from kb.utils.markdown import FRONTMATTER_RE`` with an inline
+        ``FRONTMATTER_RE = re.compile(r"\\A\\s*---")`` produces a NEW
+        compiled-regex object -> ``is`` check FAILs.
+
+        Identity assertion is strictly stronger than the CRLF + tab
+        divergence input proposed in A2 brainstorm — it catches ANY
+        inline-recompile mutation, not just one regex shape. Per
+        amendment-deviation rationale: stronger lock-in = better mutation
+        resistance.
         """
-        import inspect
-
         from kb.evolve import analyzer
+        from kb.utils import markdown
 
-        source = inspect.getsource(analyzer)
-        # Should NOT contain the old inlined regex
-        assert r"\A\s*---" not in source, (
-            "Frontmatter regex still has \\A\\s*--- prefix; should use shared FRONTMATTER_RE"
+        # Import shape at evolve/analyzer.py:19 is
+        #   `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`
+        # so the bound module attribute is `_FRONTMATTER_RE` (aliased).
+        assert hasattr(analyzer, "_FRONTMATTER_RE"), (
+            "kb.evolve.analyzer must expose _FRONTMATTER_RE "
+            "(via `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`)"
         )
-        # Should use shared FRONTMATTER_RE (imported, not inlined)
-        assert "FRONTMATTER_RE" in source, "analyzer should import and use shared FRONTMATTER_RE"
+        assert analyzer._FRONTMATTER_RE is markdown.FRONTMATTER_RE, (
+            "analyzer._FRONTMATTER_RE must be the SAME compiled regex "
+            "object as kb.utils.markdown.FRONTMATTER_RE; an inline "
+            "re.compile() would create a different object and fail this check"
+        )
 
 
 # ── Fix 8.9 — analyze_coverage threshold < 3 ─────────────────────────────────

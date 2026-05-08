@@ -1,8 +1,9 @@
 """Tests for v0.9.2 lint/query fixes."""
 
-import inspect
 import logging
 from pathlib import Path
+
+import pytest
 
 import kb.mcp.app
 import kb.mcp.browse
@@ -272,17 +273,83 @@ def test_read_page_case_insensitive_valid_path(tmp_wiki, monkeypatch):
 
 
 # ── Fix 6: health.py uses logger.error, not logger.exception ────
+# Cycle 69 AC07/AC08 — C11-L1 upgrade from inspect.getsource source-grep
+# to behavioural spy + entry-invocation. Per amendment A7: parametrize
+# over augment so both logger.error sites at health.py:87 (default path)
+# AND health.py:129 (augment path) are exercised. Per A8: AC08 spy
+# target is generate_evolution_report (the actual symbol kb_evolve calls
+# at health.py:150), not analyze_evolution.
 
 
-def test_health_lint_uses_logger_error():
-    """Verify kb_lint error handler uses logger.error, not logger.exception."""
-    source = inspect.getsource(kb_lint)
-    assert "logger.error" in source
-    assert "logger.exception" not in source
+@pytest.mark.parametrize("augment_mode", [False, True])
+def test_health_lint_logs_error_not_exception(monkeypatch, augment_mode, caplog):
+    """AC07 (cycle-69): kb_lint logs via logger.error not logger.exception
+    on both default and augment failure paths.
+
+    Mutation budget: change ``logger.error`` -> ``logger.exception`` at
+    ``mcp/health.py:87`` (default) or ``mcp/health.py:129`` (augment).
+    Either change attaches ``exc_info`` to the log record; this test
+    asserts ``exc_info is None`` -> mutation FAILs.
+    """
+    if augment_mode:
+        # R1 Sonnet fix: stub run_all_checks to RETURN a successful report so
+        # the augment block at health.py:109+ actually executes. Without this
+        # stub, run_all_checks may raise on the autouse-sandboxed (mkdir=False)
+        # WIKI_DIR, and the exception would be caught at health.py:87 (default
+        # path) — never reaching line 129 (augment path) — vacuously passing
+        # the mutation budget for AC07-augment.
+        from kb.lint import runner
+        from kb.lint.augment import orchestrator
+
+        def _empty_report(**_kwargs):
+            return {"checks_run": [], "summary": {}, "issues": []}
+
+        def _raise_in_augment(**_kwargs):
+            raise RuntimeError("augment-test-fail")
+
+        monkeypatch.setattr(runner, "run_all_checks", _empty_report)
+        monkeypatch.setattr(orchestrator, "run_augment", _raise_in_augment)
+    else:
+        from kb.lint import runner
+
+        def _raise_in_lint(**_kwargs):
+            raise RuntimeError("lint-test-fail")
+
+        monkeypatch.setattr(runner, "run_all_checks", _raise_in_lint)
+
+    caplog.set_level(logging.ERROR, logger="kb")
+    result = kb_lint(augment=augment_mode)
+
+    assert result.startswith("Error:"), f"Expected error response, got: {result!r}"
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert error_records, "Expected at least one ERROR-level log record"
+    assert all(r.exc_info is None for r in error_records), (
+        "logger.error must not include exc_info; "
+        "logger.exception would (which is the regression we're locking out)"
+    )
 
 
-def test_health_evolve_uses_logger_error():
-    """Verify kb_evolve error handler uses logger.error, not logger.exception."""
-    source = inspect.getsource(kb_evolve)
-    assert "logger.error" in source
-    assert "logger.exception" not in source
+def test_health_evolve_logs_error_not_exception(monkeypatch, caplog):
+    """AC08 (cycle-69): kb_evolve logs via logger.error not logger.exception.
+
+    Per amendment A8: spy target is ``kb.evolve.analyzer.generate_evolution_report``
+    (verified at ``analyzer.py:342``) — kb_evolve at ``health.py:136`` calls
+    this symbol at line 150, NOT ``analyze_evolution``.
+
+    Mutation budget: change ``logger.error`` -> ``logger.exception`` at
+    ``mcp/health.py:153`` -> exc_info attached -> test FAILs.
+    """
+    from kb.evolve import analyzer
+
+    def _raise_in_evolve(**_kwargs):
+        raise RuntimeError("evolve-test-fail")
+
+    monkeypatch.setattr(analyzer, "generate_evolution_report", _raise_in_evolve)
+
+    caplog.set_level(logging.ERROR, logger="kb")
+    result = kb_evolve()
+
+    assert result.startswith("Error:"), f"Expected error response, got: {result!r}"
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert error_records
+    assert all(r.exc_info is None for r in error_records), "logger.error must not include exc_info"

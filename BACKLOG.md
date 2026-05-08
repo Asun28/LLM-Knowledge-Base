@@ -54,19 +54,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
      - mcp_server.py + mcp/__init__.py PEP-562 redundancy (mimo r1 Q5) → still LOW; deferred indefinitely (low-value churn). -->
 
 
-### CYCLE 68 carry-over (cycle-67 design-locked, deferred for time/risk)
-
-<!-- AC15b lock-in: these entries are preserved through the cycle 68 PR and
-     deleted by a follow-up doc-cleanup cycle (cycle 69+) once the AC15b
-     regression test is revised or retired. AC15b's
-     `test_backlog_preserves_cycle68_self_reference_entries` pins both the
-     section heading AND the **AC03**/**AC07**/**AC12** bold markers below. -->
-
-- **AC03** (SHIPPED cycle 68 AC01) — `subprocess.run` → `Popen` refactor with chunked stdout/stderr cap and platform-aware terminate→kill grace (FW-1 stdin/reader split). See `CHANGELOG-history.md` cycle 68 AC01.
-- **AC07** (SHIPPED cycle 68 AC03+AC04) — `wiki/_lint.yml` lazy YAML loader (`yaml.safe_load` only) + duplicate-slug allowlist overlay. See `CHANGELOG-history.md` cycle 68 AC03/AC04.
-- **AC12** (SHIPPED cycle 68 AC05+AC06+AC13) — `scripts/audit_docstrings.py` + CI warn-only step + FW-4 generator+raise rule pin. See `CHANGELOG-history.md` cycle 68 AC05/AC06/AC13.
-
-
 ### HIGH
 
 ### MEDIUM
@@ -89,9 +76,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 ### LOW
 
-- `mcp/app.py:254` `_validate_page_id` — `".." in page_id` is a substring match that rejects legitimate IDs like `"notes..draft"` or `"c++..faq"`. The final `resolve().relative_to()` is the actual safety net. Cosmetic. (mimo r1)
-  (fix: replace with `any(seg == ".." for seg in page_id.replace("\\", "/").split("/"))`.)
-
 ---
 
 ## Phase 4.5 — Multi-agent post-v0.10.0 audit (2026-04-13)
@@ -106,9 +90,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 - `ingest/pipeline.py` state-store fan-out — a single `ingest_source` mutates summary page, N entity pages, N concept pages, `index.md`, `_sources.md`, `.data/hashes.json`, `wiki/log.md`, `wiki/contradictions.md`, plus N `inject_wikilinks` writes. Every step is independently atomic, none reversible. A crash between manifest-write and log-append leaves the manifest claiming "already ingested" while the log shows nothing. (R2)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests)
-
-- `graph/builder.py` non-lint `build_graph` callers (cycle-65+) — cycle 64 shipped `kb.graph.cache` and migrated the 5 lint callers to attribute-lookup form per cycle-18 L1. The 5 remaining `build_graph` callers in `evolve/analyzer.py` (3 sites) / `graph/export.py` / `mcp/browse.py` / `query/engine.py` were narrow-scope deferred and still bypass the cache.
-  (fix: migrate each caller to `kb.graph.cache.get_graph(wiki_dir)`; emit invalidation hooks on any new mutator path.)
 
 - `tests/` coverage-visibility — ~50 test files are named `test_v0NNN_taskNN.py` / `test_v0NNN_phaseNNN.py` / `test_phase4_audit_*.py`. Verifying canonical-module coverage requires grepping versioned files. Freeze-and-fold cadence in progress; cumulative ~190+ versioned files still to fold across future cycles. Per-cycle progress is in CHANGELOG-history.md, not here. (R3)
   (fix: freeze-and-fold rule — once a version ships, fold its tests INTO the canonical module file; enable `coverage` in CI and surface per-module % in PR comments)
@@ -126,9 +107,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 - `config.py` god-module — 35+ unrelated constants (paths, model IDs, BM25 hyperparameters, dedup thresholds, retries, ingest/evolve/lint limits, retention caps, query budgets, RRF, embeddings). Single-file churn invalidates import cache for the whole package in tests. (R1)
   (fix: split into `config/paths.py` / `config/models.py` / `config/limits.py` / `config/search.py` / `config/lint.py`; or a `Settings` dataclass with grouped subfields; keep `from kb.config import *` shim)
-
-- `lint/checks/duplicate_slug.py` `check_duplicate_slugs` — known-distinct near-slug pairs need an operator-managed allowlist instead of code edits. Current examples: `concepts/bot` vs `concepts/llm`, `entities/openai` vs `entities/openclaw`, `entities/logql` vs `entities/promql`.
-  (fix: move duplicate-slug allowlist to `wiki/_lint.yml` or `.data/lint_allowlist.json`, document the format, have `kb lint` load it before reporting duplicate-slug warnings)
 
 - `compile/compiler.py` `compile_wiki` per-source rollback — observability variant shipped (cycle 25 AC6/AC7/AC8: `in_progress:{pre_hash}` marker + stale-marker warning + full-mode prune exemption). Remaining: (a) rollback of wiki writes on manifest-save failure (requires receipt-file design or transaction-like helper); (b) escalating manifest-write failure to CRITICAL. (R1)
   (fix: per-ingest receipt file `.data/ingest_locks/<hash>.json` enumerating completed steps, written first and deleted last; recovery pass detects and completes partial ingests.)

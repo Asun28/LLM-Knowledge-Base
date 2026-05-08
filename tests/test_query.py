@@ -425,3 +425,142 @@ def test_tier1_budget_for_is_called(monkeypatch):
     assert "wiki_pages" in spy_calls, (
         f"expected tier1_budget_for('wiki_pages') call; got {spy_calls}"
     )
+
+
+# ── Cycle 69 AC16 — fold from test_v0917_rewriter.py (4 tests, bare-fn shape per Q5) ─
+
+
+def test_rewrite_query_standalone_query_unchanged():
+    from kb.query.rewriter import rewrite_query
+
+    result = rewrite_query("What is a transformer?", conversation_context="")
+    assert result == "What is a transformer?"
+
+
+def test_rewrite_query_returns_string():
+    """Mock call_llm so this test does not require a real API key.
+
+    The question has a deictic word ("it") which triggers _should_rewrite.
+    """
+    from unittest.mock import patch
+
+    from kb.query.rewriter import rewrite_query
+
+    with patch("kb.query.rewriter.call_llm", return_value="How does attention work?"):
+        result = rewrite_query(
+            "How does it work?",
+            conversation_context="User asked about attention mechanisms in transformers.",
+        )
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_rewrite_query_no_context_returns_original():
+    from kb.query.rewriter import rewrite_query
+
+    result = rewrite_query("Tell me more", conversation_context=None)
+    assert result == "Tell me more"
+
+
+def test_rewrite_query_empty_query():
+    from kb.query.rewriter import rewrite_query
+
+    result = rewrite_query("", conversation_context="some context")
+    assert result == ""
+
+
+# ── Cycle 69 AC17 — folded from test_v0917_raw_fallback.py (3 tests, class host shape) ─
+
+
+class TestSearchRawSources:
+    def test_finds_matching_raw_file(self, tmp_project, create_raw_source):
+        from kb.query.engine import search_raw_sources
+
+        create_raw_source(
+            "raw/articles/attention.md", "The attention mechanism computes...", tmp_project
+        )
+        results = search_raw_sources(
+            "attention mechanism", raw_dir=tmp_project / "raw", max_results=5
+        )
+        assert len(results) >= 1
+        assert any("attention" in r["id"] for r in results)
+
+    def test_returns_empty_for_no_match(self, tmp_project, create_raw_source):
+        from kb.query.engine import search_raw_sources
+
+        create_raw_source("raw/articles/unrelated.md", "Nothing relevant.", tmp_project)
+        results = search_raw_sources(
+            "quantum computing entanglement", raw_dir=tmp_project / "raw", max_results=5
+        )
+        assert len(results) == 0
+
+    def test_result_has_expected_keys(self, tmp_project, create_raw_source):
+        from kb.query.engine import search_raw_sources
+
+        create_raw_source("raw/articles/test.md", "Test content about transformers.", tmp_project)
+        results = search_raw_sources("transformers", raw_dir=tmp_project / "raw", max_results=5)
+        if results:
+            r = results[0]
+            assert "id" in r
+            assert "content" in r
+            assert "score" in r
+            assert r["id"].startswith("raw/")
+
+
+# ── Cycle 69 AC19 — fold from test_v0917_hybrid.py::TestRRFFusion (-> TestHybridQuery, Q5) ─
+
+
+class TestHybridQuery:
+    def test_single_list(self):
+        from kb.query.hybrid import rrf_fusion
+
+        results = [
+            {"id": "a", "score": 10.0},
+            {"id": "b", "score": 5.0},
+        ]
+        fused = rrf_fusion([results])
+        assert len(fused) == 2
+        assert fused[0]["id"] == "a"  # Rank 0 → 1/(60+0) > 1/(60+1)
+
+    def test_two_lists_same_order(self):
+        from kb.query.hybrid import rrf_fusion
+
+        list1 = [{"id": "a", "score": 10.0}, {"id": "b", "score": 5.0}]
+        list2 = [{"id": "a", "score": 0.9}, {"id": "b", "score": 0.5}]
+        fused = rrf_fusion([list1, list2])
+        assert fused[0]["id"] == "a"  # Appears rank 0 in both lists
+
+    def test_two_lists_disjoint(self):
+        from kb.query.hybrid import rrf_fusion
+
+        list1 = [{"id": "a", "score": 10.0}]
+        list2 = [{"id": "b", "score": 0.9}]
+        fused = rrf_fusion([list1, list2])
+        assert len(fused) == 2
+        # Both at rank 0 in their list, so equal RRF score — either order OK
+        ids = {r["id"] for r in fused}
+        assert ids == {"a", "b"}
+
+    def test_boosted_by_multiple_lists(self):
+        from kb.query.hybrid import rrf_fusion
+
+        list1 = [{"id": "a", "score": 10.0}, {"id": "b", "score": 5.0}]
+        list2 = [{"id": "b", "score": 0.9}, {"id": "c", "score": 0.5}]
+        fused = rrf_fusion([list1, list2])
+        # b appears in both lists (rank 1 + rank 0) so gets boosted
+        b_score = next(r["score"] for r in fused if r["id"] == "b")
+        c_score = next(r["score"] for r in fused if r["id"] == "c")
+        assert b_score > c_score
+
+    def test_empty_lists(self):
+        from kb.query.hybrid import rrf_fusion
+
+        assert rrf_fusion([]) == []
+        assert rrf_fusion([[], []]) == []
+
+    def test_rrf_scores_are_positive(self):
+        from kb.query.hybrid import rrf_fusion
+
+        results = [{"id": "a", "score": 1.0}]
+        fused = rrf_fusion([results])
+        assert all(r["score"] > 0 for r in fused)
