@@ -256,3 +256,79 @@ def test_build_graph_jsonld_negative_control_remove_wikilink(tmp_path):
     canonicalized_a = json.dumps(json.loads(out_a.read_text(encoding="utf-8")), sort_keys=True)
     canonicalized_b = json.dumps(json.loads(out_b.read_text(encoding="utf-8")), sort_keys=True)
     assert canonicalized_a != canonicalized_b
+
+
+# ── AC09: cycle-69 R2 Codex post-merge carry-over (Q5-C forward-looking lock-in) ──
+#
+# Audit verdict: cycle-69 AC14's _FakeDate monkeypatch covers ALL 4
+# date.today() call sites in pipeline.py (lines 207, 216, 351, 664) via
+# Python module-namespace lookup (`from datetime import UTC, date,
+# datetime` at pipeline.py:8 puts `date` in module globals; the monkeypatch
+# replaces that module-global). _persist_contradictions only reaches lines
+# 207 + 216; lines 351 (_write_wiki_page) and 664 (_update_existing_page)
+# are NOT in the transitive closure (verified by R1 Opus design eval).
+# Therefore no production change is needed.
+#
+# Forward-looking lock-in: this test exercises _persist_contradictions
+# with the same _FakeDate freeze and asserts the literal frozen date
+# "2026-05-08" appears in the persisted block. If a future code change
+# adds a non-patched date.today() site that leaks into the block, the
+# run-time date would diverge from the frozen value and the assertion
+# would trip. Mutation budget (a): comment out the monkeypatch.setattr
+# line -> assertion fails (run-time date != 2026-05-08 unless test
+# happens to run on that date). Mutation budget (b): future code change
+# adds a per-call date.today() site reachable from
+# _persist_contradictions that bypasses pipeline.date module lookup
+# -> assertion fails.
+
+
+class _AC09_FakeDate:
+    """Cycle 70 AC09 — module-local FakeDate mirroring cycle-69 AC14.
+
+    Independent class to avoid coupling cycle-70's lock-in to the
+    cycle-69 file's internals (cycle-50 helper-homing). Frozen at
+    2026-05-08 to match cycle-69 AC14 snapshot.
+    """
+
+    @staticmethod
+    def today():
+        from datetime import date as _real_date
+
+        return _real_date(2026, 5, 8)
+
+
+def test_persist_contradictions_date_string_lock_in(tmp_path, monkeypatch):
+    """AC09: assert persisted contradictions block contains the frozen
+    FakeDate string "2026-05-08".
+
+    Forward-looking lock-in for the cycle-69 R2 Codex post-merge "AC14
+    date-contingent" finding. Verifies that the cycle-69 AC14
+    monkeypatch (`monkeypatch.setattr(pipeline, "date", _FakeDate)`)
+    actually flows through to the persisted block — and that any future
+    code change adding a non-patched date.today() site (e.g. a sibling
+    helper imported at module scope) would shift the date in the output
+    and trip this assertion.
+    """
+    import kb.ingest.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "date", _AC09_FakeDate)
+
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    contradictions = [
+        {"claim": "Transformers use recurrence"},
+        {"claim": "Transformers eliminate recurrence"},
+    ]
+    pipeline._persist_contradictions(contradictions, "raw/articles/example.md", wiki_dir)
+    rendered = (wiki_dir / "contradictions.md").read_text(encoding="utf-8")
+
+    # Mutation budget: removing the monkeypatch (or adding a non-patched
+    # date.today() site reachable from _persist_contradictions) shifts
+    # the date in the persisted block away from 2026-05-08, failing this
+    # assertion.
+    assert "2026-05-08" in rendered, (
+        "Persisted contradictions block must contain the frozen FakeDate "
+        "string '2026-05-08'. If this fails, the cycle-69 AC14 date "
+        "monkeypatch has been bypassed by a new date.today() call site. "
+        "See cycle-70 design.md AC09 forward-looking lock-in rationale."
+    )
