@@ -292,11 +292,22 @@ def test_health_lint_logs_error_not_exception(monkeypatch, augment_mode, caplog)
     asserts ``exc_info is None`` -> mutation FAILs.
     """
     if augment_mode:
+        # R1 Sonnet fix: stub run_all_checks to RETURN a successful report so
+        # the augment block at health.py:109+ actually executes. Without this
+        # stub, run_all_checks may raise on the autouse-sandboxed (mkdir=False)
+        # WIKI_DIR, and the exception would be caught at health.py:87 (default
+        # path) — never reaching line 129 (augment path) — vacuously passing
+        # the mutation budget for AC07-augment.
+        from kb.lint import runner
         from kb.lint.augment import orchestrator
+
+        def _empty_report(**_kwargs):
+            return {"checks_run": [], "summary": {}, "issues": []}
 
         def _raise_in_augment(**_kwargs):
             raise RuntimeError("augment-test-fail")
 
+        monkeypatch.setattr(runner, "run_all_checks", _empty_report)
         monkeypatch.setattr(orchestrator, "run_augment", _raise_in_augment)
     else:
         from kb.lint import runner
