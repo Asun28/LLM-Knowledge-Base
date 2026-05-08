@@ -171,17 +171,16 @@ class TestAC02_KbReadPageBodyWrap:
     - C7: R2-F4 fence-balance equality
     """
 
-    def _write_oversized_page(self) -> None:
+    def _setup_wiki_with_oversized_page(self, tmp_path, monkeypatch):
         """Write a wiki page whose body exceeds the char-cap, including
-        the T3 attacker payload.
-
-        The autouse path sandbox fixture (per CLAUDE.md cycle-64 AC1)
-        redirects ``WIKI_DIR`` to per-test ``tmp_path``; we just create
-        the page file at the redirected location.
+        the T3 attacker payload, and patch ``browse.WIKI_DIR`` explicitly
+        to point at the test's ``tmp_path`` so cross-test ordering does
+        not affect path resolution (cycle-18 L1 snapshot-binding hazard).
         """
-        from kb.config import WIKI_DIR
+        from kb.mcp import browse as browse_mod
 
-        entities_dir = WIKI_DIR / "entities"
+        wiki_dir = tmp_path / "wiki"
+        entities_dir = wiki_dir / "entities"
         entities_dir.mkdir(parents=True, exist_ok=True)
         # Body length = QUERY_CONTEXT_MAX_CHARS + 1000 (well over cap).
         body = (
@@ -190,13 +189,16 @@ class TestAC02_KbReadPageBodyWrap:
             + ("Z" * QUERY_CONTEXT_MAX_CHARS)
         )
         (entities_dir / "test.md").write_text(body, encoding="utf-8")
+        # Pin browse.WIKI_DIR explicitly per test — defeats prior-test
+        # mutation residue (cycle-18 L1).
+        monkeypatch.setattr(browse_mod, "WIKI_DIR", wiki_dir)
 
-    def test_response_within_char_cap_with_wrap(self):
+    def test_response_within_char_cap_with_wrap(self, tmp_path, monkeypatch):
         """C2: SHARP cap — wrap-after-cap-reduction fits within
         ``QUERY_CONTEXT_MAX_CHARS`` total."""
         from kb.mcp.browse import kb_read_page
 
-        self._write_oversized_page()
+        self._setup_wiki_with_oversized_page(tmp_path, monkeypatch)
         response = kb_read_page("entities/test")
 
         assert len(response) <= QUERY_CONTEXT_MAX_CHARS, (
@@ -204,11 +206,11 @@ class TestAC02_KbReadPageBodyWrap:
             f"{QUERY_CONTEXT_MAX_CHARS} — char-cap reservation broken"
         )
 
-    def test_fence_present_with_balance(self):
+    def test_fence_present_with_balance(self, tmp_path, monkeypatch):
         """C7: fence-balance equality (R2-F4)."""
         from kb.mcp.browse import kb_read_page
 
-        self._write_oversized_page()
+        self._setup_wiki_with_oversized_page(tmp_path, monkeypatch)
         response = kb_read_page("entities/test")
 
         assert "<wiki_context>" in response, "fence-open missing from response"
@@ -217,12 +219,12 @@ class TestAC02_KbReadPageBodyWrap:
             f"closes={response.count('</wiki_context>')}"
         )
 
-    def test_footer_inside_fence(self):
+    def test_footer_inside_fence(self, tmp_path, monkeypatch):
         """C2 (T8 argued benign): truncation footer ends up INSIDE the
         fence because wrap is the LAST operation pre-return."""
         from kb.mcp.browse import kb_read_page
 
-        self._write_oversized_page()
+        self._setup_wiki_with_oversized_page(tmp_path, monkeypatch)
         response = kb_read_page("entities/test")
 
         fence_open = response.find("<wiki_context>")
@@ -238,11 +240,11 @@ class TestAC02_KbReadPageBodyWrap:
             f"got open={fence_open}, footer={footer_idx}, close={fence_close}"
         )
 
-    def test_attacker_substring_rewritten(self):
+    def test_attacker_substring_rewritten(self, tmp_path, monkeypatch):
         """C5: T3 escape rewrite of attacker-planted ``</wiki_context>``."""
         from kb.mcp.browse import kb_read_page
 
-        self._write_oversized_page()
+        self._setup_wiki_with_oversized_page(tmp_path, monkeypatch)
         response = kb_read_page("entities/test")
 
         # Fence-balance ensures the OUTER pair is the only ``</wiki_context>``;
@@ -258,18 +260,19 @@ class TestAC02_Mutation:
     """C6: Paired xfail-strict mutation control for AC02."""
 
     @pytest.mark.xfail(strict=True, reason="cycle-24 L1 / R5 mutation control")
-    def test_xfail_under_identity_wrap(self, monkeypatch):
-        from kb.config import WIKI_DIR
+    def test_xfail_under_identity_wrap(self, tmp_path, monkeypatch):
         from kb.mcp import browse as browse_mod
 
-        monkeypatch.setattr(browse_mod, "wrap_wiki_context", lambda x: x)
-
-        entities_dir = WIKI_DIR / "entities"
+        wiki_dir = tmp_path / "wiki"
+        entities_dir = wiki_dir / "entities"
         entities_dir.mkdir(parents=True, exist_ok=True)
         (entities_dir / "test.md").write_text(
             "---\ntitle: T\n---\nbody",
             encoding="utf-8",
         )
+        monkeypatch.setattr(browse_mod, "WIKI_DIR", wiki_dir)
+        monkeypatch.setattr(browse_mod, "wrap_wiki_context", lambda x: x)
+
         response = browse_mod.kb_read_page("entities/test")
         # Under identity-wrap, no fence appears -> this assertion fails.
         assert "<wiki_context>" in response
