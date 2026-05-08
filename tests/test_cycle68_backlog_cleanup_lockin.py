@@ -1,4 +1,4 @@
-"""Cycle 68/69 BACKLOG.md cleanup lock-in regression (cumulative cross-cycle).
+"""Cycle 68/69/70 BACKLOG.md cleanup lock-in regression (cumulative cross-cycle).
 
 Cycle 68 AC15b created this file to pin two invariants:
 1. Phase 4.5 / Phase 6 R2 deleted entries do NOT reappear (test 1).
@@ -9,6 +9,13 @@ Cycle 69 retires the second invariant (Step 17 carry-over from cycle 68
 per BACKLOG comment) and EXTENDS the first to lock in the cycle-69
 deletions per amendments A4 (AC03/AC04 substrings) and A5 (AC22
 duplicate_slug substring).
+
+Cycle 70 EXTENDS the first invariant further with 6 substrings locking
+in the cycle-70 deletions (AC01 httpx pin, AC02 README KB_PROJECT_ROOT,
+AC03 KB_STRICT_PUBLISH, AC04 versioned-file inspect.getsource batch,
+AC10 test_prune_base C41-L1, AC11 prompt-injection boundary gap)
+per design.md condition C1 (substrings unique enough to survive
+future BACKLOG narrative drift).
 """
 
 from pathlib import Path
@@ -30,6 +37,16 @@ DELETED_ENTRIES = (
     '`".." in page_id` is a substring match',  # AC03
     "graph/builder.py` non-lint `build_graph` callers",  # AC04
     "lint/checks/duplicate_slug.py` `check_duplicate_slugs`",  # AC22
+    # Cycle 70 cleanup (verified-shipped previous-cycle features per Step-1 grep)
+    # AC01 shipped cycle-68 AC09; AC02 shipped cycle-67 AC13;
+    # AC03 shipped cycle-67 AC04 (KB_STRICT_PUBLISH); AC04 shipped cycle-69 AC07-AC12;
+    # AC10 replaced inline this cycle; AC11 shipped this cycle.
+    "httpx constraint mismatch",
+    "package-install `KB_PROJECT_ROOT` bootstrap undocumented",
+    "auto_publish_after_compile` exceptions swallowed",
+    "versioned-file `inspect.getsource` C11-L1 batch-filing",
+    "test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1",
+    "prompt-injection boundary gap",
 )
 
 DELETED_SELF_REFS = ("AC03", "AC07", "AC12")

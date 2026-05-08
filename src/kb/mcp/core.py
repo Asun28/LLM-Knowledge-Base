@@ -38,7 +38,7 @@ from kb.mcp.app import (
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
 from kb.utils.sanitize import sanitize_error_text
-from kb.utils.text import slugify, yaml_escape, yaml_sanitize
+from kb.utils.text import slugify, wrap_wiki_context, yaml_escape, yaml_sanitize
 
 _INGEST_COMPAT_BINDINGS = (
     MAX_INGEST_CONTENT_CHARS,
@@ -420,15 +420,25 @@ def kb_query(
         "Synthesize an answer using this context. "
         "Cite sources with [[page_id]] format.\n",
     ]
+    # Cycle 70 AC11 — separate header (instructions to Claude Code) from
+    # wiki-content (data). The wiki-content block is wrapped with
+    # wrap_wiki_context()'s fence + assertion so attacker-planted prompt
+    # injections inside r["content"] cannot escape the fence and steer
+    # the downstream LLM. Empty results are short-circuited above (line
+    # 396-400) so wrap_wiki_context here always sees non-empty input.
+    page_sections: list[str] = []
     for r in results:
         trust = r.get("trust") or 0.5
         trust_label = f", trust: {trust:.2f}" if r["id"] in pages_with_feedback else ""
         stale_label = " [STALE]" if r.get("stale") else ""
-        lines.append(
+        page_sections.append(
             f"--- Page: {r['id']} (type: {r['type']}, "
             f"confidence: {r['confidence']}, score: {r['score']}{trust_label}){stale_label} ---\n"
             f"Title: {r['title']}\n\n{r['content']}\n"
         )
+    wrapped = wrap_wiki_context("\n".join(page_sections))
+    if wrapped:
+        lines.append(wrapped)
     return "\n".join(lines)
 
 
