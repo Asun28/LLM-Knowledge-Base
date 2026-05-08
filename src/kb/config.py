@@ -464,6 +464,14 @@ def get_cli_model(tier: str) -> str:
 LOW_TRUST_THRESHOLD = 0.4
 MAX_CONSISTENCY_GROUP_SIZE = 5
 MAX_CONSISTENCY_GROUPS = 20
+# Cycle 72 AC04: original 4096-char per-page cap. The post-cycle-72
+# wrapped per-page cap (4096 - _FENCE_OVERHEAD) lives in
+# ``kb.lint.semantic._MAX_CONSISTENCY_WRAPPED_PAGE_CHARS`` because
+# importing ``_FENCE_OVERHEAD`` here would trigger
+# ``kb.utils.__init__`` → ``kb.utils.pages`` → ``kb.config`` circular
+# import. Design-decision condition 5 picked option (a) modify-in-place
+# but R1 C5 flagged the circular-import risk; option (b) was the listed
+# fallback.
 MAX_CONSISTENCY_PAGE_CONTENT_CHARS = 4096
 
 # ── Lint tuning ──────────────────────────────────────────────

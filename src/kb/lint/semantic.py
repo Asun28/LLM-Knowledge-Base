@@ -31,7 +31,33 @@ def _truncate_source(content: str, budget: int) -> str:
     return content[:budget] + f"\n\n[... truncated from {len(content):,} to {budget:,} chars]\n"
 
 
+def _cap_page_content(text: str, max_chars: int) -> str:
+    """Cycle 72 AC01: cap ``paired['page_content']`` at ``max_chars`` so an
+    oversized wiki page body does not bypass the cycle-71 ``_FENCE_OVERHEAD``
+    reservation in ``build_fidelity_context``. Returns input unchanged when
+    under the cap; otherwise truncates with the marker
+    ``"\\n…[truncated for context budget]"``.
+
+    Single-site cap (design-decision condition 1): only ``build_fidelity_context``
+    calls this. ``build_completeness_context`` is deferred to cycle-73+
+    per threat-model §T1.
+    """
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n…[truncated for context budget]"
+
+
 _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
+
+# Cycle 72 AC04: per-page cap in ``build_consistency_context`` after the
+# ``wrap_wiki_context`` fence (Approach A — per-page wrap with per-page
+# assertion repetition per design-decision condition 6). The cap reserves
+# ``_FENCE_OVERHEAD`` so the wrapped per-page body stays within the
+# ``MAX_CONSISTENCY_PAGE_CONTENT_CHARS`` budget. Defined here (not in
+# ``kb.config``) per design-decision option (b) — option (a) modify-in-place
+# would cause a circular import (config → utils.text → utils.__init__ →
+# utils.pages → config).
+_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS = MAX_CONSISTENCY_PAGE_CONTENT_CHARS - _FENCE_OVERHEAD
 
 
 def _render_sources(
@@ -110,9 +136,16 @@ def build_fidelity_context(
         "---\n",
     ]
 
+    # Cycle 72 AC01: cap page_content BEFORE assembly so an oversized page
+    # body does not bypass the cycle-71 _FENCE_OVERHEAD reservation. Single
+    # site (build_fidelity_context only); completeness deferred per
+    # design-decision condition 1.
+    capped_page_content = _cap_page_content(
+        paired["page_content"], QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD
+    )
     body_lines = [
         "## Wiki Page\n",
-        paired["page_content"],
+        capped_page_content,
         "\n---\n",
     ]
     _render_sources(
@@ -391,14 +424,25 @@ def build_consistency_context(
                 if auto_mode:
                     fm_match = _FRONTMATTER_RE.match(content)
                     content = fm_match.group(2) if fm_match else content
-                    if len(content) > MAX_CONSISTENCY_PAGE_CONTENT_CHARS:
+                    # Cycle 72 AC04: cap by the WRAPPED budget so the
+                    # post-wrap per-page total stays within the original
+                    # 4096-char budget that downstream consumers expect.
+                    if len(content) > _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS:
                         content = (
-                            content[:MAX_CONSISTENCY_PAGE_CONTENT_CHARS]
-                            + f"\n\n[Truncated at {MAX_CONSISTENCY_PAGE_CONTENT_CHARS} "
+                            content[:_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS]
+                            + f"\n\n[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} "
                             "chars — run kb_lint_deep for full body]"
                         )
                 lines.append(f"### {pid}\n")
-                lines.append(content)
+                # Cycle 72 AC04: per-page wrap_wiki_context fence with the
+                # per-page assertion repetition (Approach A per design-
+                # decision condition 6). Consistency lint asks the LLM to
+                # compare ACROSS pages — per-page boundary signal is
+                # load-bearing. The cap at MAX_CONSISTENCY_PAGE_CONTENT_CHARS
+                # already reserves _FENCE_OVERHEAD per design-decision
+                # condition 5, so the wrapped per-page total stays within
+                # the original 4096-char budget.
+                lines.append(wrap_wiki_context(content))
                 lines.append("\n---\n")
             else:
                 lines.append(f"### {pid}\n*Page not found*\n---\n")

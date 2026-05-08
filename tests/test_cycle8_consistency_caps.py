@@ -36,6 +36,10 @@ def _write_page(wiki_dir: Path, page_id: str, source_ref: str, body: str) -> Non
 
 
 def test_config_consistency_cap_constants_are_exact():
+    # Cycle 72 AC04 keeps the public config constant at 4096 (option (b)
+    # per design-decision condition 5 — option (a) modify-in-place would
+    # cause a circular import). The wrapped per-page cap that reserves
+    # _FENCE_OVERHEAD lives in kb.lint.semantic._MAX_CONSISTENCY_WRAPPED_PAGE_CHARS.
     assert MAX_CONSISTENCY_GROUPS == 20
     assert MAX_CONSISTENCY_PAGE_CONTENT_CHARS == 4096
 
@@ -62,8 +66,13 @@ def test_auto_mode_caps_emitted_groups_after_chunking(tmp_wiki):
 
 
 def test_auto_mode_strips_frontmatter_before_body_truncation(tmp_wiki):
+    # Cycle 72 AC04: marker uses _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS
+    # (4096 - _FENCE_OVERHEAD) since the per-page content is wrapped in
+    # a wrap_wiki_context fence.
+    from kb.lint.semantic import _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS
+
     marker = (
-        f"[Truncated at {MAX_CONSISTENCY_PAGE_CONTENT_CHARS} chars "
+        f"[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} chars "
         "— run kb_lint_deep for full body]"
     )
     long_body = "body-start\n" + ("x" * (MAX_CONSISTENCY_PAGE_CONTENT_CHARS + 50))
@@ -78,6 +87,10 @@ def test_auto_mode_strips_frontmatter_before_body_truncation(tmp_wiki):
 
 
 def test_explicit_mode_does_not_truncate_page_body(tmp_wiki):
+    # Cycle 72 AC04: marker uses _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS
+    # in auto mode; explicit mode does not truncate.
+    from kb.lint.semantic import _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS
+
     long_body = "explicit-body\n" + ("y" * (MAX_CONSISTENCY_PAGE_CONTENT_CHARS + 50))
     _write_page(tmp_wiki, "concepts/explicit-a", "raw/articles/explicit.md", long_body)
     _write_page(tmp_wiki, "concepts/explicit-b", "raw/articles/explicit.md", "short body")
@@ -87,7 +100,10 @@ def test_explicit_mode_does_not_truncate_page_body(tmp_wiki):
         wiki_dir=tmp_wiki,
     )
 
-    assert f"[Truncated at {MAX_CONSISTENCY_PAGE_CONTENT_CHARS} chars" not in context
+    assert (
+        f"[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} chars"
+        not in context
+    )
     assert long_body in context
 
 

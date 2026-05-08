@@ -455,15 +455,24 @@ class TestAC04_ConsistencyContextMigration:
             f"output length {len(out)} exceeds upper bound {upper_bound}"
         )
 
-    def test_constant_reduced_by_fence_overhead(self):
-        """Condition 5: ``MAX_CONSISTENCY_PAGE_CONTENT_CHARS`` is now
-        ``4096 - _FENCE_OVERHEAD`` (not literal 4096)."""
+    def test_wrapped_constant_reserves_fence_overhead(self):
+        """Condition 5 (option (b)): the wrapped per-page cap
+        ``_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS`` is
+        ``MAX_CONSISTENCY_PAGE_CONTENT_CHARS - _FENCE_OVERHEAD``. The
+        public config constant stays at 4096 to avoid circular imports
+        (config → utils.text → utils.__init__ → utils.pages → config).
+        """
         from kb.config import MAX_CONSISTENCY_PAGE_CONTENT_CHARS
+        from kb.lint.semantic import _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS
         from kb.utils.text import _FENCE_OVERHEAD
 
-        assert MAX_CONSISTENCY_PAGE_CONTENT_CHARS == 4096 - _FENCE_OVERHEAD, (
-            f"MAX_CONSISTENCY_PAGE_CONTENT_CHARS expected {4096 - _FENCE_OVERHEAD}, "
-            f"got {MAX_CONSISTENCY_PAGE_CONTENT_CHARS}"
+        assert MAX_CONSISTENCY_PAGE_CONTENT_CHARS == 4096, (
+            "kb.config public constant must stay at 4096 (option (b))"
+        )
+        expected = MAX_CONSISTENCY_PAGE_CONTENT_CHARS - _FENCE_OVERHEAD
+        assert _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS == expected, (
+            f"_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS expected {expected}, "
+            f"got {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS}"
         )
 
 
