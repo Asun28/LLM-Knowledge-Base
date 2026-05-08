@@ -47,6 +47,11 @@ DELETED_ENTRIES = (
     "versioned-file `inspect.getsource` C11-L1 batch-filing",
     "test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1",
     "prompt-injection boundary gap",
+    # Cycle 71 cleanup (4 prompt-injection wrap surfaces shipped this cycle)
+    "_format_search_results` snippets prompt-injection wrap",   # AC01
+    "kb_read_page` body return prompt-injection wrap",           # AC02
+    "build_fidelity_context` prompt-injection wrap",             # AC03
+    "_relevance_score` prompt-injection wrap",                   # AC04
 )
 
 DELETED_SELF_REFS = ("AC03", "AC07", "AC12")
