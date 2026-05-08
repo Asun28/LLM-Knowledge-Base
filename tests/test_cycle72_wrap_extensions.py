@@ -97,8 +97,9 @@ class TestAC01_FidelityPageContentCap:
 
     def test_oversized_page_truncated_with_marker(self, monkeypatch):
         """Condition 2 + Condition 8: oversized page is capped AND the
-        truncation marker literal appears at the END of the capped page
-        region (position assertion per cycle-24 L1 + R1 DeepSeek M-2 fix).
+        truncation marker literal is at the END of the capped page region
+        (strict ``endswith`` per cycle-24 L1 + R1 DeepSeek M-2 + R2 Codex
+        M-2 fixes).
         """
         from kb.lint import semantic as semantic_mod
 
@@ -110,32 +111,44 @@ class TestAC01_FidelityPageContentCap:
 
         out = semantic_mod.build_fidelity_context("entities/test")
 
-        # R1 DeepSeek M-2 fix: position assertion (cycle-24 L1
-        # position-not-presence rule). The marker must immediately follow
-        # the capped page body, BEFORE the source-rendering segment. We
-        # verify by locating the marker and confirming the page-body region
-        # ends with it.
+        # R2 Codex M-2 fix: strict endswith on the page-body region.
+        # Extract the slice between "## Wiki Page" and the next "\n---\n"
+        # (which separates page from sources), then assert the slice
+        # rstrip().endswith(marker). This catches "marker mid-region with
+        # extra content after" regressions that find-index-based
+        # assertions miss.
         marker = "[truncated for context budget]"
-        assert marker in out, (
-            f"truncation marker missing from oversized output: {out[:500]!r}"
-        )
-        # The cap is applied INSIDE build_fidelity_context to
-        # paired["page_content"] BEFORE assembly, so the marker must appear
-        # AFTER the "## Wiki Page" heading and BEFORE the "\n---\n"
-        # separator (page region's trailing edge). Verify the marker
-        # position is BEFORE the next "---" separator (which separates
-        # page from sources).
-        marker_idx = out.find(marker)
         page_heading_idx = out.find("## Wiki Page")
-        sources_separator_idx = out.find("\n---\n", marker_idx)
         assert page_heading_idx >= 0, "## Wiki Page heading missing"
-        assert sources_separator_idx > marker_idx, (
-            "truncation marker NOT followed by page-body separator — "
-            "marker is not at end of capped page region"
+        sources_separator_idx = out.find("\n---\n", page_heading_idx)
+        assert sources_separator_idx > page_heading_idx, (
+            "page-region trailing separator missing"
         )
-        assert page_heading_idx < marker_idx, (
-            "truncation marker appears BEFORE the page heading; "
-            "must be at the END of the capped page region"
+        page_body = out[page_heading_idx:sources_separator_idx]
+        assert page_body.rstrip().endswith(marker), (
+            "truncation marker is NOT the LAST chars of the capped "
+            "page-body region (cycle-24 L1 strict endswith): "
+            f"page_body tail = {page_body[-200:]!r}"
+        )
+
+    def test_capped_content_length_within_budget(self, monkeypatch):
+        """R2 Codex M-1 fix: the cap helper now reserves marker length so
+        the returned content length is ≤ ``max_chars`` (was: ``max_chars
+        + len(marker)``, exceeding the cycle-71 fence-overhead reservation
+        and therefore the overall ``QUERY_CONTEXT_MAX_CHARS`` budget).
+        """
+        from kb.lint import semantic as semantic_mod
+        from kb.lint.semantic import _CAP_TRUNCATION_MARKER, _cap_page_content
+
+        # Capped content + marker MUST be ≤ max_chars.
+        oversized = "X" * 10000
+        capped = _cap_page_content(oversized, max_chars=1000)
+        assert len(capped) <= 1000, (
+            f"R2 Codex M-1 cap-math overshoot: capped length {len(capped)} "
+            f"exceeds max_chars=1000 (marker not reserved)"
+        )
+        assert capped.endswith(_CAP_TRUNCATION_MARKER), (
+            "marker not appended to capped content"
         )
 
     def test_under_cap_passes_through_unchanged(self, monkeypatch):
@@ -519,15 +532,25 @@ class TestAC04_ConsistencyContextMigration:
         # auto-mode: no page_ids= passed
         out = build_consistency_context(wiki_dir=wiki_dir)
 
-        # Auto-mode truncation marker must appear (cap fired).
-        assert (
-            f"[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} chars" in out
-        ), (
-            "auto-mode cap did not fire — _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS "
-            "truncation expected for oversized page bodies"
+        # R2 Codex M-3 fix: 2 oversized pages → both must be capped.
+        # Assert COUNT == 2 for the truncation marker, not just presence.
+        marker_prefix = f"[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} chars"
+        assert out.count(marker_prefix) == 2, (
+            f"auto-mode cap should fire for BOTH 2 oversized pages, got "
+            f"{out.count(marker_prefix)} truncation markers (expected 2)"
         )
-        # Per-page wrap fence must wrap the post-cap content.
-        assert "<wiki_context>" in out, "fence-open missing"
+        # R2 Sonnet N-1 + R2 Codex M-3 fix: per-page wrap fence MUST wrap
+        # both post-cap pages. Count == 2 + fence-balance equality.
+        fence_open_count = out.count("<wiki_context>")
+        fence_close_count = out.count("</wiki_context>")
+        assert fence_open_count == 2, (
+            f"expected 2 fence-opens for 2-page auto-mode fixture, got "
+            f"{fence_open_count}"
+        )
+        assert fence_open_count == fence_close_count, (
+            f"R2-F4 fence-balance: opens={fence_open_count} != "
+            f"closes={fence_close_count}"
+        )
 
     def test_wrapped_constant_reserves_fence_overhead(self):
         """Condition 5 (option (b)): the wrapped per-page cap

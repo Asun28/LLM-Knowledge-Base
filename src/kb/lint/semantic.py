@@ -31,6 +31,9 @@ def _truncate_source(content: str, budget: int) -> str:
     return content[:budget] + f"\n\n[... truncated from {len(content):,} to {budget:,} chars]\n"
 
 
+_CAP_TRUNCATION_MARKER = "\n…[truncated for context budget]"
+
+
 def _cap_page_content(text: str, max_chars: int) -> str:
     """Cycle 72 AC01: cap ``paired['page_content']`` at ``max_chars`` so an
     oversized wiki page body does not bypass the cycle-71 ``_FENCE_OVERHEAD``
@@ -38,13 +41,17 @@ def _cap_page_content(text: str, max_chars: int) -> str:
     under the cap; otherwise truncates with the marker
     ``"\\n…[truncated for context budget]"``.
 
+    Cycle 72 R2 Codex M-1 fix: reserve marker length within ``max_chars`` so
+    the returned content length is ≤ ``max_chars`` (was: ``max_chars +
+    len(marker)``, exceeding the cycle-71 fence-overhead reservation).
+
     Single-site cap (design-decision condition 1): only ``build_fidelity_context``
     calls this. ``build_completeness_context`` is deferred to cycle-73+
     per threat-model §T1.
     """
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + "\n…[truncated for context budget]"
+    return text[: max_chars - len(_CAP_TRUNCATION_MARKER)] + _CAP_TRUNCATION_MARKER
 
 
 _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
@@ -427,11 +434,17 @@ def build_consistency_context(
                     # Cycle 72 AC04: cap by the WRAPPED budget so the
                     # post-wrap per-page total stays within the original
                     # 4096-char budget that downstream consumers expect.
+                    # Cycle 72 R2 Codex M-1 fix: reserve marker length so
+                    # the post-cap content (including marker) is bounded
+                    # by _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS.
                     if len(content) > _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS:
-                        content = (
-                            content[:_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS]
-                            + f"\n\n[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} "
+                        marker = (
+                            f"\n\n[Truncated at {_MAX_CONSISTENCY_WRAPPED_PAGE_CHARS} "
                             "chars — run kb_lint_deep for full body]"
+                        )
+                        content = (
+                            content[: _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS - len(marker)]
+                            + marker
                         )
                 lines.append(f"### {pid}\n")
                 # Cycle 72 AC04: per-page wrap_wiki_context fence with the
