@@ -333,7 +333,7 @@ class TestAC03_FidelityContextWrap:
         fence_open = out.find("<wiki_context>")
         fence_close = out.find("</wiki_context>")
         heading_idx = out.find("# Source Fidelity Check:")
-        closing_idx = out.find("For each factual claim, identify whether it is:")
+        closing_idx = out.find("For each factual claim in the wiki page, identify whether it is:")
         wiki_page_marker_idx = out.find("## Wiki Page")
         source_marker_idx = out.find("## Source 1:")
 
