@@ -17,6 +17,83 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-08 — cycle 69 (dev-mimo-opus trial — backlog hygiene + test-quality + folds + snapshots, tenth trial cycle)
+
+**Theme:**
+Cycle 69 is a Tier 2 hygiene cycle with **zero `src/kb/` changes**. Three orthogonal threads: (1) cycle-68 lock-in retirement + 4 verified-stale BACKLOG entry deletions; (2) C11-L1 inspect.getsource batch upgrade (6 sites in 4 versioned test files) converted to behavioural assertions per cycle-11 L1; (3) snapshot subjects (cycle-64 deferred follow-up — 3 new subjects with paired non-vacuous negative-controls per cycle-67 AC09) plus 4 freeze-and-fold operations. Names disambiguated per `feedback_deepseek_doc_disambiguation`: cycle-69 modifies in-project test files and the in-project `_validate_page_id` helper / `kb.lint.checks.duplicate_slug` module — NO third-party library swaps, NO module migrations, NO dependency changes. The `diskcache` library (transitive, Phase 4.5 MEDIUM accepted CVE) is unchanged from cycle 68.
+
+**Per-AC detail (commit-order approximated):**
+
+- **AC01 — `tests/test_cycle68_backlog_cleanup_lockin.py` cycle-68 lock-in retirement + cumulative DELETED_ENTRIES extension**
+  Cycle-68 AC15b created two lock-in tests; cycle-69 retires the second invariant per the BACKLOG comment and EXTENDS `DELETED_ENTRIES` with three new substrings per amendments A4 + A5: AC03 substring, AC04 substring, AC22 substring. The first lock-in test now serves as the cumulative cross-cycle guard for ALL deletions. Same-commit landing per R3 risk mitigation in design.md.
+
+- **AC02 — `BACKLOG.md` cycle-68 carry-over section deletion**
+  Removed the entire `### CYCLE 68 carry-over` section + HTML comment + 3 self-reference bullets.
+
+- **AC03 — `BACKLOG.md` Phase 6 LOW path-validation entry deletion**
+  Verified-shipped: substring form was replaced by segment-aware check at `src/kb/mcp/app.py:291`. Lock-in test: AC05.
+
+- **AC04 — `BACKLOG.md` Phase 4.5 HIGH `graph/builder.py` non-lint callers entry deletion**
+  Verified-shipped: cycle-68 AC07/AC08a/AC08b migrated 3 of 5; remaining 2 (`evolve/analyzer.py:29,360`, `query/engine.py:408`) all supply `pages=` per FW-7. Lock-in test: AC06.
+
+- **AC05 — `tests/test_cycle69_app_segment_aware_lockin.py` (NEW)**
+  Parametrized 5-row matrix; rows 1, 3, 5 are substring traps that force divergence. Each row passes `wiki_dir=tmp_path / "wiki"` per A6. Mutation: revert `mcp/app.py:291` to substring form → rows 1, 3, 5 FAIL.
+
+- **AC06 — `tests/test_cycle69_graph_builder_intentional_bypasses.py` (NEW)**
+  AST guard parsing `query/engine.py` and `evolve/analyzer.py`; asserts every direct `build_graph` call supplies `pages=`. Sanity test pins `>=3 calls` baseline. Mutation: add bare `build_graph(wiki_dir)` → AST guard FAILs.
+
+- **AC07 / AC08 — `tests/test_lint_query_fixes_v092.py` C11-L1 upgrade**
+  Replaced 2 `inspect.getsource` source-grep tests with behavioural spy + entry-invocation assertions. AC07 parametrizes augment ∈ {False, True} per A7 (covers `mcp/health.py:87` default + `:129` augment). AC08 spy target is `kb.evolve.analyzer.generate_evolution_report` per A8 (NOT `analyze_evolution`). Both assert `caplog` ERROR record `exc_info is None` — locks out `logger.exception` regression.
+
+- **AC09 — `tests/test_v0911_phase392.py` C11-L1 upgrade (threshold-divergence)**
+  Replaced source-grep with behavioural divergent-threshold test per A1: 2-period verdicts list with delta ~0.27. Default threshold 0.1 → `"improving"`; monkeypatched 0.5 → `"stable"`. Mutation: hardcode 0.1 in trends.py:118,120 → high-threshold case still reports "improving" → FAIL.
+
+- **AC10 / AC11 — `tests/test_v0915_task01.py` C11-L1 upgrade (`WIKI_SUBDIRS`)**
+  AC10 builds tmp wiki with file inside subdir + stray top-level; asserts only inside file becomes graph node. AC11 creates all `WIKI_SUBDIRS` subdirs (empty); asserts `analyze_coverage` reports `under_covered_types` set equals `WIKI_SUBDIRS` (verified at `evolve/analyzer.py:21,57`).
+
+- **AC12 — `tests/test_v0915_task08.py` C11-L1 upgrade (FRONTMATTER_RE identity)**
+  Strengthened amendment A2 from CRLF+tab divergence to identity assertion: `kb.evolve.analyzer._FRONTMATTER_RE is kb.utils.markdown.FRONTMATTER_RE` (aliased import per `evolve/analyzer.py:19`). Identity check is strictly stronger — catches ANY inline-recompile mutation.
+
+- **AC13 — `tests/test_cycle69_snapshots.py` build_extraction_prompt snapshot (NEW)**
+  Pins `kb.ingest.extractors.build_extraction_prompt` for fixed inputs. Function verified deterministic at `extractors.py:276-333` (zero datetime/env/random refs). NO defensive monkeypatch (R2 hallucination rejected). Negative-control: purpose mutation.
+
+- **AC14 — `tests/test_cycle69_snapshots.py` _persist_contradictions snapshot**
+  Per A3: `monkeypatch.setattr(pipeline, "date", _FakeDate)` where `_FakeDate.today()` returns `date(2026, 5, 8)`. Negative-control: claim-text mutation.
+
+- **AC15 — `tests/test_cycle69_snapshots.py` _render_sources snapshot**
+  3 sources <100 chars per A9. Negative-control: monkeypatch `kb.lint.semantic.QUERY_CONTEXT_MAX_CHARS` to 100 (per cycle-18 L1: importing module's snapshot).
+
+- **AC16 — `tests/test_v0917_rewriter.py` fold (DELETED)** → `tests/test_query.py` as bare functions.
+- **AC17 — `tests/test_v0917_raw_fallback.py` fold (DELETED)** → `tests/test_query.py::TestSearchRawSources`.
+- **AC18 — `tests/test_v01002_consolidated_constants.py` fold (DELETED)** → `tests/test_config.py::TestConfigConstants`.
+- **AC19 — `tests/test_v0917_hybrid.py` fold (DELETED)** → `tests/test_query.py::TestHybridQuery`.
+
+- **AC20 — Doc sync** Per CLAUDE.md doc-checklist + `feedback_deepseek_doc_disambiguation`.
+- **AC21 — Decisions docs** 8 cycle-69 artifacts + Step 24 self-review at PR-merge.
+- **AC22 — `BACKLOG.md` Phase 4.5 MEDIUM duplicate_slug entry deletion (R2-promoted)**
+  R2 DeepSeek's only valid finding (1 of 4); verified shipped via cycle-68 AC04 (`wiki/_lint.yml` overlay live at `src/kb/lint/checks/duplicate_slug.py:64-78`).
+
+**Trial telemetry (May 2026 MiMo trial):**
+
+- Step 7 (`mimocoding-rescue @ mimo-v2.5-pro`): produced plan structure but file-write tool failed; primary-session lands plan to disk per cycle-12 L2 fallback (binding owner authorship preserved).
+- Step 8 (`mimocoding-rescue @ mimo-v2.5-pro` audit role): APPROVE, 0 binding gaps, 1 informational errata.
+- Step 9 implementation: primary-session per `project_cycle61_mimo_failure` memory.
+- Step 4 R1 Opus subagent: APPROVE-WITH-CONDITIONS, 4/4 MAJORs valid (100% precision).
+- Step 4 R2 DeepSeek V4 Pro: REJECT, 1/4 MAJORs valid (25% precision; 3 hallucinations corrected).
+- Step 5 Opus gate: APPROVE-WITH-AMENDMENTS, 10 amendments A1-A10.
+
+**Tests:** 3274 → 3288 (+14 net). 24 skipped unchanged. `pytest --collect-only`: 3312 collected.
+
+**Files:** 4 fold deletions + 3 new test files + 1 snapshot baseline + 9 decisions docs. Net stable ~232.
+
+**src/kb/ changes:** ZERO. Pure-test/doc/BACKLOG hygiene cycle.
+
+**Step 02 baseline + Step 12 SCA:** 1 vuln (`diskcache==5.6.3` CVE-2025-69872, accepted unchanged from cycle 68). 0 open Dependabot. PR-introduced CVE diff: empty.
+
+**Skip-eligibility:** Steps 06, 09.5, 11, 13, 15, 16, 22, 23 SKIP per design.md skip-eligibility table.
+
+---
+
 ### 2026-05-08 — cycle 68 (dev-mimo-opus trial — CLI hardening, lint/deps hygiene, automated docstring gate, backlog lock-in)
 
 **Theme:**
