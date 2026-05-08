@@ -24,60 +24,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 ---
 
-## Phase 6 R2 — Wider mimo-v2.5-pro audit (2026-05-04)
-
-<!-- 6 parallel mimo-v2.5-pro CLI calls (arch / tests / docs / security-wide / env / deps).
-     Items already covered by SECURITY.md or earlier BACKLOG entries OMITTED.
-     Source tag: (mimo r{N}).
-
-     CYCLE 67 (2026-05-07) cleanup pass — many entries shipped or verified stale:
-     - GitPython unpinned (mimo r6 Q1) → cycle 67 Step 15 bumped to >=3.1.49,<3.2 (CVE-2026-44244).
-     - SSRF on URL → external CLI argv (mimo r4 B) → VERIFIED STALE: lint/fetcher.py has DNS-resolve + IP-allowlist + scheme-allowlist + per-hop redirect validation; crawl4ai/yt-dlp not imported in src/kb/.
-     - KB_PROJECT_ROOT call-time (mimo r5 Q1) → SHIPPED cycle 65 AC1 as get_project_root().
-     - AUGMENT_ALLOWED_DOMAINS call-time (mimo r5 Q5) → SHIPPED cycle 65 AC3 as get_allowed_domains().
-     - _autouse_kb_path_sandbox no-drop guard (mimo r2 Q1) → SHIPPED cycle 67 AC08 (AST meta-test).
-     - hardcoded lru_cache list (mimo r2 Q2) → SHIPPED cycle 17 AC16 (auto-discovery in conftest).
-     - trafilatura cache disable (mimo r6 Q5) → SHIPPED cycle 65 (TRAFILATURA_DOWNLOAD_NO_CACHE=1).
-     - _DEFAULT_MODEL_TIERS dual mechanism (mimo r5 Q1+Q2) → SHIPPED cycle 67 AC01 (actual surface was MODEL_TIERS, replaced with _ModelTiersView(Mapping)).
-     - MCP error response raw tracebacks (mimo r4 E) → SHIPPED cycle 65 AC21 (_mcp_error_boundary).
-     - _check_no_secrets_on_argv self-DoS (mimo r4 A) → VERIFIED INCORRECT: cycle 67 AC15 added 6 lock-in tests proving the substring scan is correct (no regex on argv).
-     - graph/cache 6th-caller drift (mimo r1 Q4) → SHIPPED cycle 67 AC02 (AST guard test) on top of cycle 64 __all__=[].
-     - tests/test_cycle64_snapshots.py tautology (mimo r2 Q4) → SHIPPED cycle 67 AC09 (non-vacuous paired negative-controls).
-     - CI sk-ant-dummy grep (mimo r5 Q7) → SHIPPED cycle 67 AC11 (broadened cycle-65 src-only scan to all tracked files with allowlist).
-     - docs/reference/ INDEX.md (mimo r3 NEW) → cycle-65 AC20 forward + cycle 67 AC14 inverse both shipped.
-
-
-     CYCLE 67 CARRY-OVER to cycle 68 (design-locked, deferred for time/risk):
-     - cli_backend.py:241 pre-cap stdout buffering → SHIPPED cycle 68 AC01 (Popen refactor + chunked stdout cap with platform-aware kill).
-     - kb/__init__.py public API docstring audit (mimo r3 Q7) → SHIPPED cycle 68 AC05 (scripts/audit_docstrings.py with Args/Returns/Raises gate).
-     - duplicate-slug allowlist externalization (Phase 4.5 MEDIUM) → SHIPPED cycle 68 AC04 (wiki/_lint.yml lazy YAML loader with safe_load).
-     - mcp_server.py + mcp/__init__.py PEP-562 redundancy (mimo r1 Q5) → still LOW; deferred indefinitely (low-value churn). -->
-
-
-### HIGH
-
-### MEDIUM
-
-### LOW
-
-
-- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-08. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
-- `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
-  (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
-
----
-
-## Phase 6 — Cross-LLM cycle-64 audit (mimo-v2.5-pro, 2026-05-04)
-
-<!-- f-string-in-SQL concern was REJECTED by both runs (fully closed by integer
-     validation, query/embeddings.py:651). Underlying weights behind the
-     mimo-v2.5-pro endpoint self-identify as GLM-4 / Zhipu AI; Token Plan
-     billing is genuinely mimo-v2.5-pro at 2x credits. -->
-
-### LOW
-
----
-
 ## Phase 4.5 — Multi-agent post-v0.10.0 audit (2026-04-13)
 
 <!-- Discovered by 5 specialist reviewers (Python, security, code-review, architecture, performance)
@@ -356,6 +302,60 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 - **Model collapse (Shumailov 2024, Nature)** — cite in "known limitations": LLM-written pages feeding next LLM ingest degrade across generations; counter is evidence-trail provenance + two-vault promotion gate.
 - **Enterprise ceiling (Epsilla)** — document explicit scope: personal-scale research KB, not multi-user enterprise; no RBAC, no compliance audit log, file-I/O limits at millions-of-docs scale.
 - **Vibe-thinking critique (HN)** — *"Deep writing means coming up with things through the process of producing"*; defend with mandatory human-review gates on promotion.
+
+---
+
+## Phase 6 R2 — Wider mimo-v2.5-pro audit (2026-05-04)
+
+<!-- 6 parallel mimo-v2.5-pro CLI calls (arch / tests / docs / security-wide / env / deps).
+     Items already covered by SECURITY.md or earlier BACKLOG entries OMITTED.
+     Source tag: (mimo r{N}).
+
+     CYCLE 67 (2026-05-07) cleanup pass — many entries shipped or verified stale:
+     - GitPython unpinned (mimo r6 Q1) → cycle 67 Step 15 bumped to >=3.1.49,<3.2 (CVE-2026-44244).
+     - SSRF on URL → external CLI argv (mimo r4 B) → VERIFIED STALE: lint/fetcher.py has DNS-resolve + IP-allowlist + scheme-allowlist + per-hop redirect validation; crawl4ai/yt-dlp not imported in src/kb/.
+     - KB_PROJECT_ROOT call-time (mimo r5 Q1) → SHIPPED cycle 65 AC1 as get_project_root().
+     - AUGMENT_ALLOWED_DOMAINS call-time (mimo r5 Q5) → SHIPPED cycle 65 AC3 as get_allowed_domains().
+     - _autouse_kb_path_sandbox no-drop guard (mimo r2 Q1) → SHIPPED cycle 67 AC08 (AST meta-test).
+     - hardcoded lru_cache list (mimo r2 Q2) → SHIPPED cycle 17 AC16 (auto-discovery in conftest).
+     - trafilatura cache disable (mimo r6 Q5) → SHIPPED cycle 65 (TRAFILATURA_DOWNLOAD_NO_CACHE=1).
+     - _DEFAULT_MODEL_TIERS dual mechanism (mimo r5 Q1+Q2) → SHIPPED cycle 67 AC01 (actual surface was MODEL_TIERS, replaced with _ModelTiersView(Mapping)).
+     - MCP error response raw tracebacks (mimo r4 E) → SHIPPED cycle 65 AC21 (_mcp_error_boundary).
+     - _check_no_secrets_on_argv self-DoS (mimo r4 A) → VERIFIED INCORRECT: cycle 67 AC15 added 6 lock-in tests proving the substring scan is correct (no regex on argv).
+     - graph/cache 6th-caller drift (mimo r1 Q4) → SHIPPED cycle 67 AC02 (AST guard test) on top of cycle 64 __all__=[].
+     - tests/test_cycle64_snapshots.py tautology (mimo r2 Q4) → SHIPPED cycle 67 AC09 (non-vacuous paired negative-controls).
+     - CI sk-ant-dummy grep (mimo r5 Q7) → SHIPPED cycle 67 AC11 (broadened cycle-65 src-only scan to all tracked files with allowlist).
+     - docs/reference/ INDEX.md (mimo r3 NEW) → cycle-65 AC20 forward + cycle 67 AC14 inverse both shipped.
+
+
+     CYCLE 67 CARRY-OVER to cycle 68 (design-locked, deferred for time/risk):
+     - cli_backend.py:241 pre-cap stdout buffering → SHIPPED cycle 68 AC01 (Popen refactor + chunked stdout cap with platform-aware kill).
+     - kb/__init__.py public API docstring audit (mimo r3 Q7) → SHIPPED cycle 68 AC05 (scripts/audit_docstrings.py with Args/Returns/Raises gate).
+     - duplicate-slug allowlist externalization (Phase 4.5 MEDIUM) → SHIPPED cycle 68 AC04 (wiki/_lint.yml lazy YAML loader with safe_load).
+     - mcp_server.py + mcp/__init__.py PEP-562 redundancy (mimo r1 Q5) → still LOW; deferred indefinitely (low-value churn). -->
+
+
+### HIGH
+
+### MEDIUM
+
+### LOW
+
+
+- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-08. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
+- `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
+  (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
+
+---
+
+## Phase 6 — Cross-LLM cycle-64 audit (mimo-v2.5-pro, 2026-05-04)
+
+<!-- f-string-in-SQL concern was REJECTED by both runs (fully closed by integer
+     validation, query/embeddings.py:651). Underlying weights behind the
+     mimo-v2.5-pro endpoint self-identify as GLM-4 / Zhipu AI; Token Plan
+     billing is genuinely mimo-v2.5-pro at 2x credits. -->
+
+### LOW
 
 ---
 
