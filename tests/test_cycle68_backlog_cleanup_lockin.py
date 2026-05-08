@@ -38,12 +38,15 @@ DELETED_ENTRIES = (
     "graph/builder.py` non-lint `build_graph` callers",  # AC04
     "lint/checks/duplicate_slug.py` `check_duplicate_slugs`",  # AC22
     # Cycle 70 cleanup (verified-shipped previous-cycle features per Step-1 grep)
-    "httpx constraint mismatch",  # cycle-70 AC01: shipped cycle-68 AC09
-    "package-install `KB_PROJECT_ROOT` bootstrap undocumented",  # cycle-70 AC02: shipped cycle-67 AC13
-    "auto_publish_after_compile` exceptions swallowed",  # cycle-70 AC03: shipped cycle-67 AC04 (KB_STRICT_PUBLISH)
-    "versioned-file `inspect.getsource` C11-L1 batch-filing",  # cycle-70 AC04: shipped cycle-69 AC07-AC12
-    "test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1",  # cycle-70 AC10: replaced inline this cycle
-    "prompt-injection boundary gap",  # cycle-70 AC11: shipped this cycle
+    # AC01 shipped cycle-68 AC09; AC02 shipped cycle-67 AC13;
+    # AC03 shipped cycle-67 AC04 (KB_STRICT_PUBLISH); AC04 shipped cycle-69 AC07-AC12;
+    # AC10 replaced inline this cycle; AC11 shipped this cycle.
+    "httpx constraint mismatch",
+    "package-install `KB_PROJECT_ROOT` bootstrap undocumented",
+    "auto_publish_after_compile` exceptions swallowed",
+    "versioned-file `inspect.getsource` C11-L1 batch-filing",
+    "test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1",
+    "prompt-injection boundary gap",
 )
 
 DELETED_SELF_REFS = ("AC03", "AC07", "AC12")
