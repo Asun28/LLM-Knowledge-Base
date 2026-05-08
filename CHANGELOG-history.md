@@ -13,9 +13,37 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 ---
 
-## Active-unreleased archive — 2026-04-16 to 2026-05-08
+## Active-unreleased archive — 2026-04-16 to 2026-05-09
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
+
+### 2026-05-09 — cycle 71 (dev-mimo-opus trial — wrap_wiki_context sibling-surface completion, twelfth trial cycle)
+
+**Theme:**
+Cycle 71 is a Tier 2 sibling-surface security extension: completes the cycle-70 `wrap_wiki_context()` prompt-injection boundary across 4 surfaces deferred from cycle-70 AC11 (Phase 4.5 LOW carry-over). No new helper, no new attack surface — all 4 sites consume the existing `kb.utils.text.wrap_wiki_context`. R2 DeepSeek cross-family adversarial review surfaced 2 critical wrap-field omissions R1 Opus missed (R2-F1 `r["title"]` + R2-F2 `source["path"]`) — both folded into existing AC envelope (AC01/AC03) without scope expansion. Same-class peer scan revealed 4 cycle-72+ deferred peers (H1 `build_review_context`, H2 `orchestrator.py:365-372` pre-extract, H6 `build_consistency_context`, R2-cumulative `stub_title`); all filed as Phase 4.5 LOW BACKLOG entries with explicit cycle-7 L3 same-class-peer-rule rationale. Names disambiguated per `feedback_deepseek_doc_disambiguation`: cycle-71 reuses in-project `kb.utils.text.wrap_wiki_context` from cycle 70; not any third-party library.
+
+**Per-AC detail:**
+
+- **AC01 — `mcp/browse.py:_format_search_results` per-snippet + R2-F1 title wrap.** Wraps both `r["content"][:200]` snippet AND `r["title"]` via `wrap_wiki_context` BEFORE f-string interpolation. Surrounding labels (`Found N matching page(s)`, `- **{id}**`, `Title:`, `Snippet:`) stay UNFENCED — controlled scaffolding per cycle-70 `mcp/core.py:417-432` precedent. R2-F1 caught the title injection vector R1 Opus missed.
+
+- **AC02 — `mcp/browse.py:kb_read_page` char-cap reservation + body wrap.** Char-cap (line 151+157) reduced by `_FENCE_OVERHEAD + _MAX_TRUNCATION_FOOTER_BYTES=200`; byte-cap (line 133) UNCHANGED (UTF-8 multi-byte slack, fence-independent). Truncation footer constructed BEFORE `wrap_wiki_context(body)` on line 162 (R2 ordering lock — wrap is the LAST operation pre-return; footer ends up inside fence per T8). The `_MAX_TRUNCATION_FOOTER_BYTES=200` reservation is a slight design amendment — pre-cycle-71 the footer always overshot `QUERY_CONTEXT_MAX_CHARS` by ~100 chars on the truncation path; cycle-71 makes the reservation explicit to honor design.md C2's SHARP-cap intent.
+
+- **AC03 — `lint/semantic.py:build_fidelity_context` single-fence + budget plumb + R2-F2 path sanitization.** Restructured into 3 segments: `header_lines` OUTSIDE fence; `body_lines` (`## Wiki Page` + `paired["page_content"]` + `## Source N:` + source bodies) INSIDE single `wrap_wiki_context` fence (Q2 A1 lock — page+sources together, NOT whole-joined-lines per threat-model G1); `closing` instructions OUTSIDE fence. `_render_sources` signature gains keyword-only `budget` arg with default `QUERY_CONTEXT_MAX_CHARS` (back-compatible); caller passes `QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD`. R2-F2: `source['path']` sanitized via `sanitize_extraction_field(path, max_len=500)` before header interpolation — blocks newline+`##`-header injection.
+
+- **AC04 — `lint/augment/proposer.py:_relevance_score` early-return + wrap.** R2-F3 (R2 disagreed with R1; R2 prevailed): early-return guard at top of function body — `if not extracted_text or not extracted_text.strip(): return 0.0` — saves ~50 tokens per invocation on empty/whitespace input AND makes the empty-input contract explicit. Then wraps `extracted_text[:2000]` via `wrap_wiki_context` before f-string interpolation. Cycle-23 L1: early-return placed AFTER docstring closing `"""`.
+
+- **AC05-AC08 — Lock-in tests in `tests/test_cycle71_wrap_extensions.py`.** 4 positive lock-in test classes (one per AC) + 4 paired `TestACNN_Mutation::test_xfail_under_identity_wrap` classes decorated `@pytest.mark.xfail(strict=True)` per cycle-24 L1. All mutation tests monkeypatch the IMPORTED BINDING in the call-site module's namespace (`kb.mcp.browse.wrap_wiki_context`, `kb.lint.semantic.wrap_wiki_context`, `kb.lint.augment.proposer.wrap_wiki_context`) — NOT `kb.utils.text.wrap_wiki_context` — per cycle-18 L1 / cycle-20 L1 reload-leak discipline. AC02/AC02_Mutation tests use explicit `monkeypatch.setattr(browse_mod, "WIKI_DIR", tmp_path/"wiki")` to defeat cross-test ordering pollution (cycle-18 L1 hardening). R2-F4 fence-balance equality + R2-F5 `_FENCE_OVERHEAD == len(wrap_wiki_context("X")) - len("X")` runtime invariant assertions.
+
+- **AC09 — BACKLOG hygiene + cycle-68 lock-in fold.** 4 deletions (one per AC01-AC04) + 5 NEW Phase 4.5 LOW BACKLOG entries (page-content overshoot Q3 carry; H1 `build_review_context` XML-sentinel migration; H2 `orchestrator.py:365-372` pre-extract migration; H6 `build_consistency_context` migration; R2-cumulative `stub_title` field) + `tests/test_cycle68_backlog_cleanup_lockin.py` `DELETED_ENTRIES` tuple extended with 4 substrings + diskcache CVE timestamp refreshed 2026-05-08 → 2026-05-09. Tasks 09 + 10 land atomically per plan R-Plan-5.
+
+- **AC10-AC12 — Doc artifacts.** 8 decision docs under `docs/superpowers/decisions/` + this CHANGELOG entry + CLAUDE.md sync (test count + dedupe duplicate Wiki-context boundary fence bullet — pre-existing minor doc drift cleaned up; updated surviving bullet to reflect 6 in-scope sites + R2-F2 path sanitization + cycle-72+ deferred peers).
+
+**Trial telemetry (May 2026 trial cycle 12):**
+R1 Opus design eval (10.8 min) caught Q2/Q3/Q4/Q7/Q8 amendments + flagged 2 hidden gaps (H1, H2). R2 DeepSeek design eval (~11.6 min) caught 2 CRITICAL wrap-field omissions R1 missed (F1 title, F2 path) + 3 LOW/MEDIUM findings (F3 empty-input, F4 fence-balance, F5 invariant). DeepSeek's own `Write` tool was Fact-Forcing-Gate-blocked (subagent lacks priming context for the project hook); primary-session transcribed R2's structured summary into the canonical R2 file per cycle-20 L4 manual-verify discipline. Step 7 mimocoding-rescue dispatch failure (cycle-12 L2 "described but not implemented" pattern) → primary-session fallback per cycle-13 sizing heuristic. Step 8 plan-gate SUCCEEDED in 3.4 min. Step 9 implementation: primary session per cycle-13 + cycle-12 L2 fallback discipline. R3 skipped per Q6 (12 ACs below 25-threshold).
+
+**Tests:** ~3288 → ~3306 (+18 net).
+**Files:** ~234 → ~235 (+1 new test file).
+**src/kb/ changes:** 3 files (`mcp/browse.py`, `lint/semantic.py`, `lint/augment/proposer.py`).
 
 ### 2026-05-08 — cycle 70 (dev-mimo-opus trial — MCP prompt-injection boundary + snapshot subjects + cycle-69 carry-over + BACKLOG hygiene, eleventh trial cycle)
 

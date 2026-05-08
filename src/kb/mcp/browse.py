@@ -15,6 +15,7 @@ from kb.config import (
 from kb.mcp.app import _validate_page_id, _validate_wiki_dir, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.sanitize import sanitize_error_text
+from kb.utils.text import _FENCE_OVERHEAD, wrap_wiki_context
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,19 @@ def _format_search_results(results: list[dict]) -> str:
         return "No matching pages found."
     lines = [f"Found {len(results)} matching page(s):\n"]
     for r in results:
-        snippet = r["content"][:200].replace("\n", " ").strip()
+        # Cycle 71 AC01 + R2-F1 — wrap user-controllable snippet AND title
+        # via wrap_wiki_context before f-string interpolation. The Found N
+        # header + ID label + Title:/Snippet: labels stay UNFENCED — they
+        # are controlled scaffolding from our code. Per cycle-70 precedent
+        # at mcp/core.py:417-432 (header outside, content inside).
+        snippet = wrap_wiki_context(r["content"][:200].replace("\n", " ").strip())
+        wrapped_title = wrap_wiki_context(r["title"])
         # G2 (Phase 4.5 R4 HIGH): surface staleness alongside score so
         # discoverability matches kb_query's [STALE] treatment.
         stale_marker = " [STALE]" if r.get("stale") else ""
         lines.append(
             f"- **{r['id']}** (type: {r['type']}, score: {r['score']}){stale_marker}\n"
-            f"  Title: {r['title']}\n"
+            f"  Title: {wrapped_title}\n"
             f"  Snippet: {snippet}..."
         )
     return "\n".join(lines)
@@ -146,20 +153,37 @@ def kb_read_page(page_id: str) -> str:
     except UnicodeDecodeError:
         # Last incomplete UTF-8 sequence at the read boundary — drop it.
         body = raw.decode("utf-8", errors="ignore")
-    # Apply character-level cap on top of byte-level cap so the response
-    # is always <= QUERY_CONTEXT_MAX_CHARS regardless of multibyte content.
-    if truncated_at_read or len(body) > QUERY_CONTEXT_MAX_CHARS:
+    # Cycle 71 AC02 + R2-Q4 ordering — reserve _FENCE_OVERHEAD AND a
+    # truncation-footer overhead from the CHAR-cap (not the byte-cap on
+    # line above; byte-cap is for UTF-8 multi-byte slack and is independent
+    # of fence overhead) so the wrapped response stays <=
+    # QUERY_CONTEXT_MAX_CHARS total even when the truncation footer is
+    # appended. The truncation footer is appended BEFORE wrap_wiki_context
+    # (T8 argued benign: footer ends up inside the fence, which is
+    # documented scaffolding metadata about the fenced data).
+    #
+    # Pre-cycle-71 the code already overshot QUERY_CONTEXT_MAX_CHARS by
+    # the footer length (~100 chars) on the truncation path; cycle 71's
+    # SHARP-cap design intent (per design.md C2) requires reserving footer
+    # bytes too. Worst-case footer with 10-digit ``omitted`` and 6-digit
+    # ``effective_cap`` is ~120 chars; 200 is a comfortable upper bound.
+    _MAX_TRUNCATION_FOOTER_BYTES = 200
+    effective_cap = (
+        QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD - _MAX_TRUNCATION_FOOTER_BYTES
+    )
+    if truncated_at_read or len(body) > effective_cap:
         omitted = max(
             file_bytes - len(body.encode("utf-8")),
-            len(body) - QUERY_CONTEXT_MAX_CHARS,
+            len(body) - effective_cap,
             0,
         )
-        body = body[:QUERY_CONTEXT_MAX_CHARS] + (
+        body = body[:effective_cap] + (
             f"\n\n[Truncated: ~{omitted} chars omitted; "
-            f"cap={QUERY_CONTEXT_MAX_CHARS}. Use kb_list_pages + targeted tools for "
+            f"cap={effective_cap}. Use kb_list_pages + targeted tools for "
             "very large pages.]"
         )
-    return body
+    # Wrap is the LAST operation pre-return — footer is now INSIDE fence.
+    return wrap_wiki_context(body)
 
 
 @mcp.tool()

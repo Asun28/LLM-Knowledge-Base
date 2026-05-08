@@ -95,17 +95,19 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 - `tests/test_capture.py::TestWriteItemFiles` POSIX off-by-one + creates_dir investigation (cycle-53+) — cycle 36 ubuntu-probe surfaced 2 test failures: `test_creates_dir_if_missing`, `test_pre_existing_file_collision`. The latter expected slug `decision-foo-2` becomes `decision-foo-3` on POSIX. Currently `@_WINDOWS_ONLY` skipif'd. Root cause needs direct POSIX shell access to instrument `_scan_existing_slugs` / `_build_slug` / `_reserve_hidden_temp`.
 
-- `mcp/browse.py:31-56` `_format_search_results` snippets prompt-injection wrap (cycle-71+) — `kb_search` returns 200-char content snippets to Claude Code without the cycle-70 `wrap_wiki_context()` fence. Low risk per AC11 design (200 chars), but completes the prompt-injection defense across all wiki-content surfaces. (Fix: wrap each `r["content"]` snippet via `wrap_wiki_context` in `_format_search_results`.)
-
-- `mcp/browse.py:147-162` `kb_read_page` body return prompt-injection wrap (cycle-71+) — `kb_read_page` returns full page body up to `QUERY_CONTEXT_MAX_CHARS` to Claude Code without the cycle-70 `wrap_wiki_context()` fence. By-id read of an already-validated page; lower risk than synthesis-prompt path, but in-scope for the same defense. (Fix: wrap return body via `wrap_wiki_context`.)
-
-- `lint/semantic.py:76-95` `build_fidelity_context` prompt-injection wrap (cycle-71+) — injects `paired["page_content"]` + `_render_sources(paired["source_contents"])` into a Claude Code prompt without the cycle-70 `wrap_wiki_context()` fence. Untrusted source content reaches the lint LLM. (Fix: wrap the constructed context via `wrap_wiki_context` before returning.)
-
-- `lint/augment/proposer.py:142` `_relevance_score` prompt-injection wrap (cycle-71+) — injects `extracted_text[:2000]` (untrusted source extract) into the scan-tier LLM prompt without the cycle-70 `wrap_wiki_context()` fence. Separate scope from cycle-70 (lint-time augment proposal, not query synthesis). (Fix: wrap `extracted_text` via `wrap_wiki_context` before prompt construction.)
-
 ### LOW
 
 - `tests/` mutmut mutation-coverage analysis on cycle-64 regression suite (cycle-65+) — run `mutmut` (or `cosmic-ray`) over the 6 new cycle-64 test files (`test_cycle64_conftest_leak.py`, `test_cycle64_dim_mismatch_autorebuild.py`, `test_cycle64_graph_cache.py`, `test_cycle64_auto_publish.py`, `test_cycle64_publish_manifest.py`, `test_cycle64_snapshots.py`) to identify mutants that survive — i.e., production-code mutations no test catches.
+
+- `lint/semantic.py:82` `build_fidelity_context` `paired['page_content']` uncapped truncation (cycle-72+) — page content is appended unconditionally without per-page char-cap; large pages exceeding `QUERY_CONTEXT_MAX_CHARS` bypass `_render_sources` budget reservation. Pre-existing risk surfaced by cycle-71 AC03 wrap (the budget reservation cannot defend against an already-oversize page body). (Fix: cap `paired["page_content"]` at `QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD` before assembly.)
+
+- `review/context.py:195-209` `build_review_context` migrate from `<wiki_page_body>` / `<raw_source_N>` XML sentinels to `wrap_wiki_context` (cycle-72+) — semantically equivalent defense via older H14-fix XML pattern. Migration deferred for clean theme separation. Coupling note: `build_review_checklist:148-154` assertion text references the OLD tags and must be updated atomically when migration ships. (Cycle-71 R1 Opus same-class peer scan H1.)
+
+- `lint/augment/orchestrator.py:365-372` pre-extract migrate from `<untrusted_source>` XML sentinels to `wrap_wiki_context` (cycle-72+) — direct sibling of `_relevance_score` (cycle-71 AC04). Same scan-tier `_call_llm_json` injection pattern; should adopt the same defense for consistency. (Cycle-71 R1 Opus same-class peer scan H2.)
+
+- `lint/semantic.py:271-364` `build_consistency_context` `wrap_wiki_context` migration (cycle-72+) — wired via `kb_lint_consistency` (`mcp/quality.py:177-187`). DIFFERENT structural shape from cycle-71 AC03 (per-group page interleaving at line 339-359, no `_render_sources` budget loop). Requires per-page `MAX_CONSISTENCY_PAGE_CONTENT_CHARS` reservation by `_FENCE_OVERHEAD` when migrated. Cycle-71 RESOLVED-defer per H6 disposition (c) AMBIGUOUS-defer rule.
+
+- `lint/augment/proposer.py:140` `_relevance_score` `stub_title` field unsanitized (cycle-72+) — prompt template uses `{stub_title!r}` (repr-quoting provides partial isolation), but a sufficiently long or specifically crafted stub_title could still bypass quoting and escape. Defer cycle-72+ for full `wrap_wiki_context` or `sanitize_extraction_field` treatment. Surfaced by cycle-71 R2 DeepSeek same-class peer scan.
 
 ---
 
@@ -342,7 +344,7 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 ### LOW
 
 
-- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-08. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
+- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-09. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
 - `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
   (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
 

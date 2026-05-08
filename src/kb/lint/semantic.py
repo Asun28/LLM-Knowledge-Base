@@ -19,6 +19,7 @@ from kb.config import (
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
+from kb.utils.text import _FENCE_OVERHEAD, sanitize_extraction_field, wrap_wiki_context
 
 logger = logging.getLogger(__name__)
 
@@ -33,23 +34,41 @@ def _truncate_source(content: str, budget: int) -> str:
 _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
 
 
-def _render_sources(sources: list[dict], lines: list[str]) -> None:
+def _render_sources(
+    sources: list[dict], lines: list[str], *, budget: int | None = None
+) -> None:
     """Append source sections to lines with budget-aware truncation.
 
     Mutates `lines` in place. Tracks cumulative size so later sources
     get progressively less budget — prevents LLM context overflow.
+
     Phase 4.5 HIGH L6: enforces minimum floor per source so large wiki pages
     don't starve source context entirely (budget=0 previously passed through).
+
+    Cycle 71 AC03 + R2-F2: ``budget`` keyword-only parameter (default
+    ``None`` -> resolves to ``QUERY_CONTEXT_MAX_CHARS`` at CALL TIME per
+    cycle-18 L1; explicit non-None value lets callers reserve
+    ``_FENCE_OVERHEAD`` when the assembled output will be wrapped in
+    ``<wiki_context>`` tags). Each ``source['path']`` is sanitized via
+    ``sanitize_extraction_field`` before header interpolation to block
+    newline-plus-`##`-header injection (R2-F2).
     """
+    # Cycle-18 L1: resolve QUERY_CONTEXT_MAX_CHARS at call time (default
+    # arg captured at def time would defeat monkeypatch tests like
+    # cycle-69 _render_sources truncation negative-control).
+    if budget is None:
+        budget = QUERY_CONTEXT_MAX_CHARS
     used = sum(len(line) for line in lines) + max(0, len(lines) - 1)
     for i, source in enumerate(sources, 1):
-        if used >= QUERY_CONTEXT_MAX_CHARS:
+        if used >= budget:
             break  # PR review fix: prevent MIN_SOURCE_CHARS from overflowing total cap
-        header = f"## Source {i}: {source['path']}\n"
+        # Cycle 71 R2-F2: sanitize path before header interpolation.
+        safe_path = sanitize_extraction_field(source["path"], max_len=500)
+        header = f"## Source {i}: {safe_path}\n"
         if source.get("content"):
             remaining = max(
                 _MIN_SOURCE_CHARS,
-                QUERY_CONTEXT_MAX_CHARS - used - len(header) - 20,
+                budget - used - len(header) - 20,
             )
             body = _truncate_source(source["content"], remaining)
         else:
@@ -67,32 +86,55 @@ def build_fidelity_context(
 
     Returns formatted text for Claude Code to evaluate whether each claim
     in the wiki page traces to a specific passage in the raw source(s).
+
+    Cycle 71 AC03 + Q2 A1: page+sources are wrapped as ONE
+    ``<wiki_context>...</wiki_context>`` fence between the heading and
+    the closing instructions. Heading + framing + section markers
+    (``## Wiki Page`` / ``## Source N:``) and closing instructions stay
+    OUTSIDE the fence per cycle-70 ``mcp/core.py:417-432`` precedent
+    (header outside, content inside). The ``_render_sources`` budget
+    is reduced by ``_FENCE_OVERHEAD`` to keep the wrapped total within
+    ``QUERY_CONTEXT_MAX_CHARS``.
     """
     paired = pair_page_with_sources(page_id_str, wiki_dir, raw_dir)
 
     if "error" in paired and "page_content" not in paired:
         return f"Error: {paired['error']}"
 
-    lines = [
+    # Cycle 71 AC03: split into 3 segments — header (outside fence),
+    # body (page + sources, inside fence), closing instructions (outside).
+    header_lines = [
         f"# Source Fidelity Check: {page_id_str}\n",
         "Evaluate whether each factual claim in the wiki page can be traced "
         "to a specific passage in the raw source(s).\n",
         "---\n",
+    ]
+
+    body_lines = [
         "## Wiki Page\n",
         paired["page_content"],
         "\n---\n",
     ]
+    _render_sources(
+        paired["source_contents"],
+        body_lines,
+        budget=QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD,
+    )
 
-    _render_sources(paired["source_contents"], lines)
-
-    lines.append(
+    closing = (
         "For each factual claim in the wiki page, identify whether it is:\n"
         "- **Traced**: directly supported by a passage in the source\n"
         "- **Inferred**: reasonably deduced from the source but not stated\n"
         "- **Unsourced**: not found in the source material\n"
     )
 
-    return "\n".join(lines)
+    return (
+        "\n".join(header_lines)
+        + "\n"
+        + wrap_wiki_context("\n".join(body_lines))
+        + "\n"
+        + closing
+    )
 
 
 def _group_by_shared_sources(wiki_dir: Path, *, pages: list[dict] | None = None) -> list[list[str]]:
