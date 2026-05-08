@@ -329,8 +329,13 @@ def test_h13_persist_contradictions_sanitizes_claim(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_h14_build_review_context_wraps_body_in_xml_sentinels(tmp_path):
-    """Regression: Phase 4.5 HIGH item H14 (wiki_page_body XML sentinel)."""
+def test_h14_build_review_context_wraps_body_in_wiki_context_fence(tmp_path):
+    """Regression: Phase 4.5 HIGH H14 + Cycle 72 AC02 — assembled context
+    is wrapped in the cycle-70/72 ``<wiki_context>`` fence (replaces the
+    cycle-1 ``<wiki_page_body>`` XML literal). The fence escapes attacker
+    closers and prepends an assertion sentence reminding the LLM that
+    fenced content is data not instructions.
+    """
     from kb.review.context import build_review_context
 
     wiki_dir = tmp_path / "wiki"
@@ -349,12 +354,24 @@ def test_h14_build_review_context_wraps_body_in_xml_sentinels(tmp_path):
     src.write_text("# Source\n\nSource content.\n", encoding="utf-8")
 
     result = build_review_context("concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir)
-    assert "<wiki_page_body>" in result, "Missing <wiki_page_body> opening sentinel"
-    assert "</wiki_page_body>" in result, "Missing </wiki_page_body> closing sentinel"
+    assert "<wiki_context>" in result, (
+        "Missing <wiki_context> opening fence (cycle-72 AC02 migration)"
+    )
+    assert "</wiki_context>" in result, (
+        "Missing </wiki_context> closing fence (cycle-72 AC02 migration)"
+    )
+    # OLD literal sentinels MUST be gone post-cycle-72.
+    assert "<wiki_page_body>" not in result, (
+        "OLD <wiki_page_body> sentinel still present — AC02 migration incomplete"
+    )
 
 
-def test_h14_build_review_context_wraps_sources_in_xml_sentinels(tmp_path):
-    """Regression: Phase 4.5 HIGH item H14 (raw_source_N XML sentinels)."""
+def test_h14_build_review_context_old_raw_source_sentinel_removed(tmp_path):
+    """Regression: Phase 4.5 HIGH H14 + Cycle 72 AC02 — the cycle-1
+    ``<raw_source_N>`` XML literal sentinel is REMOVED in favor of the
+    single outer ``<wiki_context>`` fence. Sources appear inside the
+    fence with markdown sub-headers (``## Raw Source N: <path>``).
+    """
     from kb.review.context import build_review_context
 
     wiki_dir = tmp_path / "wiki"
@@ -373,8 +390,15 @@ def test_h14_build_review_context_wraps_sources_in_xml_sentinels(tmp_path):
     src.write_text("# Source\n\nContent.\n", encoding="utf-8")
 
     result = build_review_context("concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir)
-    assert "<raw_source_1>" in result, "Missing <raw_source_1> opening sentinel"
-    assert "</raw_source_1>" in result, "Missing </raw_source_1> closing sentinel"
+    # OLD literal sentinels MUST be gone post-cycle-72.
+    assert "<raw_source_1>" not in result, (
+        "OLD <raw_source_1> sentinel still present — AC02 migration incomplete"
+    )
+    # Markdown sub-header for the source MUST be present inside the fence.
+    assert "## Raw Source 1:" in result, (
+        "Per-source markdown sub-header missing (sources inside fence "
+        "should still be enumerated)"
+    )
 
 
 def test_h14_build_review_checklist_has_untrusted_data_instruction():
