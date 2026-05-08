@@ -9,7 +9,7 @@ from typing import Any
 from kb import config
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.llm import call_llm_json
-from kb.utils.text import wrap_purpose
+from kb.utils.text import wrap_purpose, wrap_wiki_context
 
 logger = logging.getLogger(__name__)
 
@@ -134,12 +134,27 @@ _RELEVANCE_SCHEMA = {
 
 
 def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
-    """Scan-tier relevance score (0.0-1.0) for extracted text vs stub topic."""
+    """Scan-tier relevance score (0.0-1.0) for extracted text vs stub topic.
+
+    Cycle 71 AC04 + R2-F3: early-return guard skips the LLM call entirely
+    when ``extracted_text`` is empty/whitespace (saves ~50 tokens per
+    invocation; makes empty-input contract explicit). Cycle 71 AC04 also
+    wraps ``extracted_text[:2000]`` via ``wrap_wiki_context`` before f-string
+    interpolation so the scan-tier LLM sees an instruction-boundary fence
+    (defense-in-depth against prompt injection from the fetched URL body).
+    """
+    # Cycle 71 R2-F3 — early-return for empty input.
+    if not extracted_text or not extracted_text.strip():
+        return 0.0
+    # Cycle 71 AC04 — wrap user-controllable extracted_text BEFORE f-string
+    # interpolation. wrap_wiki_context already prepends a newline + the
+    # assertion sentence, so do NOT add an extra '\n' before the variable.
+    wrapped_text = wrap_wiki_context(extracted_text[:2000])
     prompt = (
         f"Score how relevant the following extracted text is to the topic "
         f"{stub_title!r}.\n"
         f'Return JSON: {{"score": <0.0-1.0>}}.\n\n'
-        f"Extracted text (first 2000 chars):\n{extracted_text[:2000]}"
+        f"Extracted text (first 2000 chars):{wrapped_text}"
     )
     try:
         response = _call_llm_json(prompt, tier="scan", schema=_RELEVANCE_SCHEMA)
