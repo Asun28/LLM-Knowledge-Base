@@ -9,7 +9,7 @@ from typing import Any
 from kb import config
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.llm import call_llm_json
-from kb.utils.text import wrap_purpose, wrap_wiki_context
+from kb.utils.text import sanitize_extraction_field, wrap_purpose, wrap_wiki_context
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +150,17 @@ def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
     # interpolation. wrap_wiki_context already prepends a newline + the
     # assertion sentence, so do NOT add an extra '\n' before the variable.
     wrapped_text = wrap_wiki_context(extracted_text[:2000])
+    # Cycle 72 AC05: sanitize stub_title (header-strip + frontmatter-fence
+    # strip + length-cap at 2000 chars) BEFORE repr-quote. The repr-quote
+    # `!r` STAYS as defense-in-depth. Surfaced as cycle-71 R2 same-class
+    # peer of cycle-71 AC04 (extracted_text wrap) — stub_title was the
+    # remaining unsanitized field on the same _call_llm_json scan-tier
+    # surface. Per design-decision Approach B (sanitize, not wrap-fence)
+    # — short-field shape matches sanitize_extraction_field semantics.
+    safe_stub_title = sanitize_extraction_field(stub_title)
     prompt = (
         f"Score how relevant the following extracted text is to the topic "
-        f"{stub_title!r}.\n"
+        f"{safe_stub_title!r}.\n"
         f'Return JSON: {{"score": <0.0-1.0>}}.\n\n'
         f"Extracted text (first 2000 chars):{wrapped_text}"
     )
