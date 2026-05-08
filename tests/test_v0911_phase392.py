@@ -236,15 +236,53 @@ class TestVerdictTrendThreshold:
 
         assert VERDICT_TREND_THRESHOLD == 0.1
 
-    def test_trends_module_imports_threshold_from_config(self):
-        """compute_verdict_trends uses the config constant (not hardcoded 0.1)."""
-        import inspect
+    def test_compute_verdict_trends_uses_config_threshold(self, monkeypatch):
+        """Cycle 69 AC09 — C11-L1 upgrade per amendment A1.
 
-        from kb.lint import trends as trends_module
+        compute_verdict_trends respects the monkeypatched
+        VERDICT_TREND_THRESHOLD, not a hardcoded constant. Replaced
+        inspect.getsource source-grep with behavioural divergent-threshold
+        assertion.
 
-        source = inspect.getsource(trends_module)
-        assert "VERDICT_TREND_THRESHOLD" in source, (
-            "trends.py must reference VERDICT_TREND_THRESHOLD, not hardcode 0.1"
+        Build a 2-period verdicts list with pass_rate delta ~0.27. Default
+        threshold 0.1: delta > threshold -> trend="improving". Monkeypatched
+        threshold 0.5: delta < threshold -> trend="stable".
+
+        Mutation: revert trends.py:118,120 from
+        `previous + VERDICT_TREND_THRESHOLD` to hardcoded `previous + 0.1`
+        -> monkeypatch is bypassed -> high-threshold case still returns
+        "improving" (because 0.27 > 0.1) -> second assertion FAILs.
+        """
+        from kb.lint import trends
+
+        # Period A (2026-04-06 week): pass_rate = 2/5 = 0.40
+        # Period B (2026-04-13 week): pass_rate = 4/6 = 0.67 (delta 0.27)
+        verdicts = [
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "fail"},
+        ]
+
+        # Default threshold (0.1): delta 0.27 > 0.1 -> improving
+        result_default = trends.compute_verdict_trends(path=verdicts)
+        assert result_default["trend"] == "improving", (
+            f"Expected 'improving' with default threshold 0.1, "
+            f"got {result_default['trend']!r} for {result_default['periods']}"
         )
-        assert "previous + 0.1" not in source, "Hardcoded 0.1 must be removed"
-        assert "previous - 0.1" not in source, "Hardcoded 0.1 must be removed"
+
+        # Monkeypatched threshold (0.5): delta 0.27 < 0.5 -> stable
+        monkeypatch.setattr(trends, "VERDICT_TREND_THRESHOLD", 0.5)
+        result_high = trends.compute_verdict_trends(path=verdicts)
+        assert result_high["trend"] == "stable", (
+            f"Expected 'stable' with monkeypatched threshold 0.5, "
+            f"got {result_high['trend']!r} (a hardcoded 0.1 regression "
+            f"would still report 'improving' here)"
+        )
