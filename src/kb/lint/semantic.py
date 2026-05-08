@@ -35,7 +35,7 @@ _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
 
 
 def _render_sources(
-    sources: list[dict], lines: list[str], *, budget: int = QUERY_CONTEXT_MAX_CHARS
+    sources: list[dict], lines: list[str], *, budget: int | None = None
 ) -> None:
     """Append source sections to lines with budget-aware truncation.
 
@@ -46,12 +46,18 @@ def _render_sources(
     don't starve source context entirely (budget=0 previously passed through).
 
     Cycle 71 AC03 + R2-F2: ``budget`` keyword-only parameter (default
-    ``QUERY_CONTEXT_MAX_CHARS``) lets callers reserve ``_FENCE_OVERHEAD``
-    when the assembled output will be wrapped in ``<wiki_context>`` tags.
-    Each ``source['path']`` is sanitized via ``sanitize_extraction_field``
-    before header interpolation to block newline-plus-`##`-header
-    injection (R2-F2).
+    ``None`` -> resolves to ``QUERY_CONTEXT_MAX_CHARS`` at CALL TIME per
+    cycle-18 L1; explicit non-None value lets callers reserve
+    ``_FENCE_OVERHEAD`` when the assembled output will be wrapped in
+    ``<wiki_context>`` tags). Each ``source['path']`` is sanitized via
+    ``sanitize_extraction_field`` before header interpolation to block
+    newline-plus-`##`-header injection (R2-F2).
     """
+    # Cycle-18 L1: resolve QUERY_CONTEXT_MAX_CHARS at call time (default
+    # arg captured at def time would defeat monkeypatch tests like
+    # cycle-69 _render_sources truncation negative-control).
+    if budget is None:
+        budget = QUERY_CONTEXT_MAX_CHARS
     used = sum(len(line) for line in lines) + max(0, len(lines) - 1)
     for i, source in enumerate(sources, 1):
         if used >= budget:
