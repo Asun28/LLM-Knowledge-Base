@@ -137,7 +137,6 @@ class TestAC01_FidelityPageContentCap:
         + len(marker)``, exceeding the cycle-71 fence-overhead reservation
         and therefore the overall ``QUERY_CONTEXT_MAX_CHARS`` budget).
         """
-        from kb.lint import semantic as semantic_mod
         from kb.lint.semantic import _CAP_TRUNCATION_MARKER, _cap_page_content
 
         # Capped content + marker MUST be ≤ max_chars.
@@ -477,7 +476,7 @@ class TestAC04_ConsistencyContextMigration:
             f"{out.count('<wiki_context>')}"
         )
         assert out.count("</wiki_context>") == 4, (
-            f"expected exactly 4 fence-closes (R2-F4 fence-balance)"
+            "expected exactly 4 fence-closes (R2-F4 fence-balance)"
         )
 
     def test_per_page_content_bounded(self, tmp_path):
