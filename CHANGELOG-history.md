@@ -17,6 +17,73 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-05-08 — cycle 70 (dev-mimo-opus trial — MCP prompt-injection boundary + snapshot subjects + cycle-69 carry-over + BACKLOG hygiene, eleventh trial cycle)
+
+**Theme:**
+Cycle 70 is a Tier 2 multi-AC fold targeting 6 buckets: BACKLOG hygiene (verify already-shipped previous-cycle features), 3 deferred snapshot subjects from cycle-64 R3, 1 cycle-69 R2 Codex post-merge carry-over (AC14 date-contingent edge case audit), 1 test-quality C41-L1 behavioural upgrade, 2 ACs hardening the MCP synthesis-prompt boundary (NEW `wrap_wiki_context()` helper + 2 in-scope wiring sites + 4 out-of-scope BACKLOG entries), and 4 doc artifacts. Names disambiguated per `feedback_deepseek_doc_disambiguation`: the cycle-70 boundary fence wraps in-project `kb.utils.text.wrap_wiki_context()` (newly added, mirroring cycle-7 AC23 `wrap_purpose` precedent) — NOT any third-party library; the new helper colocates with `wrap_purpose` in the same module per design.md Q1 N1 counter-proposal accepted at Step 5.
+
+**Per-AC detail (commit-order approximated):**
+
+- **AC01 — `BACKLOG.md` Phase 4.5 HIGH httpx constraint mismatch entry deletion**
+  Verified-shipped: cycle-68 AC09 pinned `httpx>=0.28,<0.29` at `pyproject.toml:30` matching the runtime assertion at `lint/fetcher.py:51`. Lock-in: AC05 substring `"httpx constraint mismatch"`.
+
+- **AC02 — `BACKLOG.md` Phase 4.5 MEDIUM README KB_PROJECT_ROOT bootstrap entry deletion**
+  Verified-shipped: cycle-67 AC13 added the "Non-clone install" section at `README.md:137-148` documenting `export KB_PROJECT_ROOT=/path/to/your/kb` for pip-installed users. Lock-in: AC05 substring `"package-install KB_PROJECT_ROOT bootstrap undocumented"`.
+
+- **AC03 — `BACKLOG.md` Phase 4.5 MEDIUM auto_publish_after_compile entry deletion**
+  Verified-shipped: cycle-67 AC04 added `KB_STRICT_PUBLISH=1` env var at `src/kb/compile/compiler.py:619,624` + `src/kb/query/hybrid.py:21` to re-raise `auto_publish_after_compile` failures instead of swallowing. Lock-in: AC05 substring `"auto_publish_after_compile exceptions swallowed"`.
+
+- **AC04 — `BACKLOG.md` Phase 4.5 MEDIUM versioned-file inspect.getsource batch entry deletion**
+  Verified-shipped: cycle-69 AC07-AC12 converted all 5 `inspect.getsource` patterns in 4 versioned test files (`test_lint_query_fixes_v092.py`, `test_v0911_phase392.py`, `test_v0915_task01.py`, `test_v0915_task08.py`) to behavioural assertions per cycle-11 L1. Step-1 grep confirms ZERO function-call hits remain (only docstring/comment references documenting the conversion). Lock-in: AC05 substring `"versioned-file `inspect.getsource` C11-L1 batch-filing"`.
+
+- **AC05 — `tests/test_cycle68_backlog_cleanup_lockin.py` cumulative DELETED_ENTRIES extension**
+  Extended the cumulative cross-cycle lock-in tuple with 6 cycle-70 substrings per design.md C1 (uniqueness for narrative-drift resistance): `"httpx constraint mismatch"`, `"package-install KB_PROJECT_ROOT bootstrap undocumented"`, `"auto_publish_after_compile exceptions swallowed"`, `"versioned-file `inspect.getsource` C11-L1 batch-filing"`, `"test_prune_base_uses_canonical_rel_path_at_both_sites C41-L1"`, `"prompt-injection boundary gap"`. Mutation budget: re-adding any deleted entry to BACKLOG.md fails ≥1 lock-in assertion. 2 tests pass.
+
+- **AC06 — `kb.ingest.pipeline._build_summary_content` snapshot subject (cycle-64 R3 deferred)**
+  Per design.md amendment A1 (R1 Opus MAJOR 1 — fixture spec error): `_build_summary_content` does NOT process contradictions; the function reads `entities_mentioned`, `concepts_mentioned`, `key_claims`/`key_points`/`key_arguments`, `authors`, plus `core_argument`/`abstract`/`description`/`problem_solved`. Cycle-70 fixture: 3 entities + 2 concepts + 2 key_claims + 2 authors + core_argument. Negative-control varies first entity name. Determinism: no datetime/random/dict-iteration vectors. Snapshot pinned at `tests/__snapshots__/test_cycle70_snapshots.ambr`.
+
+- **AC07 — `kb.compile.publish.build_llms_full_txt` snapshot subject (cycle-64 R3 deferred)**
+  Per design.md C3: shared `_build_fixture_wiki(tmp_path)` helper (cycle-50 helper-homing pattern) builds a deterministic 3-page wiki (`concepts/transformer`, `concepts/attention`, `entities/google`) with explicit-date frontmatter (no autopopulation), no body timestamps, fixed wikilink graph; `incremental=False` forces full rebuild. Negative-control changes one page body. Determinism: pages sorted by page_id via `_sort_pages`; UTF-8 byte counts deterministic; `LLMS_FULL_MAX_BYTES` is a config constant.
+
+- **AC08 — `kb.compile.publish.build_graph_jsonld` snapshot subject (cycle-64 R3 deferred)**
+  Per design.md amendment A4 (R1 Opus MAJOR 4 — canonicalization wording): `build_graph_jsonld` at `publish.py:366` does NOT use `sort_keys=True` (production output is insertion-order). Cycle-70 assertion re-parses production JSON via `json.loads` then canonicalizes via `json.dumps(parsed, sort_keys=True, indent=2)` — robust against future production-side dict-key reordering. Production code unchanged. Negative-control removes one wikilink.
+
+- **AC09 — cycle-69 AC14 date-coverage audit + forward-looking date-string lock-in**
+  Per design.md Q5-C: audit verdict `_persist_contradictions` transitive closure for `date.today()` coverage. Verdict: COVERED. `from datetime import UTC, date, datetime` at `pipeline.py:8` makes `date` module-global; `monkeypatch.setattr(pipeline, "date", _FakeDate)` at `test_cycle69_snapshots.py:98` covers ALL 4 sites (207, 216, 351, 664) via Python module-namespace lookup, regardless of which sites the test exercises. R1 Opus verified `_persist_contradictions` transitive closure does NOT reach lines 351 or 664. NO production change. Forward-looking lock-in test at `tests/test_cycle70_snapshots.py::test_persist_contradictions_date_string_lock_in` asserts persisted block contains `2026-05-08`; future code adding a non-patched `date.today()` call site reachable from `_persist_contradictions` would shift the date in output and trip the assertion. R2 DeepSeek MAJOR-09-DATES rejected as false-positive: claim was "2 of 4 sites uncovered" but actually all 4 are covered module-globally.
+
+- **AC10 — `tests/test_compile.py::test_prune_base_uses_canonical_rel_path_at_both_sites` C41-L1 behavioural upgrade**
+  Per design.md Q6-B + C5: replaced `inspect.getsource(compiler)` source-grep (cycle-19 AC14 anchor) with parametrized behavioural spy. `Mock(wraps=compiler._canonical_rel_path)` (per C5 — bare `Mock()` would break downstream `set` and `affected_pages` lookups). Two parametrized branches: `drift_detect` (calls `compiler.detect_source_drift` covering call sites at compiler.py:292, 312, 373) + `full_mode` (calls `compiler.compile_wiki(incremental=False)` covering line 466 with `ingest_source` stubbed). Mutation budget: removing `_canonical_rel_path(...)` from EITHER call site fails its parametrized branch. `inspect` import dropped (sole consumer was the replaced test).
+
+- **AC11 — `kb.utils.text.wrap_wiki_context()` helper + 2 in-scope wiring sites**
+  Per design.md amendments A2 + A2-bis + A3 (R1 Opus MAJOR 2 + 3 — call-site enumeration + fence-overhead reservation site). Helper at `src/kb/utils/text.py:329+` mirrors the cycle-7 AC23 `wrap_purpose` pattern: `_WIKI_CONTEXT_CLOSE_FENCE_RE` regex, `_escape_wiki_context_close()` (T3 escape), `wrap_wiki_context()` short-circuits empty input to `""` (T4 / C6) before fence-tag computation, then wraps with `\n{ASSERTION}\n<wiki_context>\n{escaped}\n</wiki_context>\n`. `_FENCE_OVERHEAD` constant computed at import time from assertion + tag lengths so callers can reserve budget. Two in-scope wiring sites: (1) `src/kb/query/engine.py:1063` — wraps combined `ctx["context"] + raw_context` BEFORE interpolation at line 1078; engine.py:1054 raw_context budget reserves `_FENCE_OVERHEAD` per A3; engine.py:1112 system prompt strengthened with assertion suffix. (2) `src/kb/mcp/core.py:417-432` — Claude Code mode response separates header (instructions) from page-sections (data); only the data is fenced. R2 DeepSeek MAJOR-11-INTS rejected as category error: claimed `_build_summary_content`/`build_llms_full_txt`/`build_graph_jsonld` were injection points, but those are static-artifact builders (markdown/llms-full.txt/graph.jsonld), NOT LLM prompts.
+
+- **AC12 — wrap_wiki_context lock-in tests (unit + integration)**
+  Per design.md Q7-C + amendment A3. New file `tests/test_cycle70_prompt_safety.py` ships 6 tests: 3 unit (T1 fence+assertion, T4 empty short-circuit, T3 escape `</wiki_context>`), 2 integration (engine.py + mcp/core.py spy on `wrap_wiki_context`), 1 T5 `_FENCE_OVERHEAD` constant lock-in. Mutation budgets enumerated per plan-gate PA-5: removing fence in helper / removing escape / returning non-empty for empty / removing `wrap_wiki_context()` call at engine.py:1063 OR mcp/core.py:417-432 each fails ≥1 lock-in assertion.
+
+- **AC13 — Cycle-70 decision artifacts**
+  9 files under `docs/superpowers/decisions/`: `2026-05-08-cycle-70-{requirements, threat-model, brainstorm, design-eval-R1-opus, design-eval-R2-deepseek, design, plan, plan-gate}.md` + (post-merge) `step24-self-review.md`.
+
+- **AC14 — `CHANGELOG.md` `[Unreleased]` Quick Reference + this `CHANGELOG-history.md` cycle-70 entry**
+
+- **AC15 — `CLAUDE.md` Quick Reference sync**
+  Test count `3288 → 3302`; cycle-70 narrative; new `Wiki-context boundary fence` bullet citing `wrap_wiki_context` + 2 in-scope sites + `_FENCE_OVERHEAD` reservation.
+
+- **AC16 — `BACKLOG.md` final hygiene + 4 NEW Phase 4.5 LOW BACKLOG entries**
+  6 cycle-70 deletions per AC01-AC04 + AC10 + AC11. 4 NEW Phase 4.5 LOW forward-looking entries per design.md A2 out-of-scope handling: `mcp/browse.py:31-56` `_format_search_results` snippets (cycle-71+); `mcp/browse.py:147-162` `kb_read_page` body return (cycle-71+); `lint/semantic.py:76-95` `build_fidelity_context` (cycle-71+); `lint/augment/proposer.py:142` `_relevance_score` (cycle-71+).
+
+**Trial telemetry (May 2026 dev-mimo-opus, eleventh cycle):**
+- R1 Opus subagent (Step 4): 100% precision (4/4 valid MAJORs after fact-check); latency 12.5 min (past 10-min cycle-20 L4 cap; primary-session manual-fallback dispatched in parallel).
+- R2 DeepSeek V4 Pro (Step 4): 0% precision (2/2 hallucinations: MAJOR-09-DATES claimed sites uncovered when actually module-global; MAJOR-11-INTS named static-artifact builders as injection points). Worse than cycle-69's 25% — pattern continues.
+- Step 7 plan: mimocoding-rescue mimo-v2.5-pro 11 min latency (file write succeeded; agent finalization summary returned post 10-min cap).
+- Step 8 plan-gate: mimocoding-rescue ran past 10-min cap; primary-session fallback wrote APPROVE-WITH-INFORMATIONAL-ERRATA verdict per cycle-20 L4; mimo agent returned with same verdict + 5 PA-1..PA-5 amendments which were sub-step granularity specs already handled inline. mimocoding audit role continues to work (cycle-67/68/69/70 affirmation).
+
+**Stats:**
+- ACs: 16 / src/kb/ files: 3 (utils/text.py +67 lines, query/engine.py 3 wiring changes, mcp/core.py 1 wiring change) / new test files: 2 / commits: 7 (initial) + doc-update commits.
+- Tests: 3288 → 3302 (+14 net).
+- Files: ~232 → ~234.
+- CI: full suite 3302 passed + 24 skipped in 175.01s; ruff clean; pip-audit SCA diff 0 NEW vs Step-2 baseline.
+- 0 open Dependabot alerts.
+
 ### 2026-05-08 — cycle 69 (dev-mimo-opus trial — backlog hygiene + test-quality + folds + snapshots, tenth trial cycle)
 
 **Theme:**
