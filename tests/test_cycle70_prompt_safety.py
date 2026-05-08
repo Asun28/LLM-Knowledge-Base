@@ -230,3 +230,84 @@ def test_fence_overhead_constant_exposed():
         f"_FENCE_OVERHEAD={_FENCE_OVERHEAD} outside reasonable range "
         "(50, 500). Update test if assertion sentence length changes."
     )
+
+
+def test_query_engine_budget_arithmetic_exercises_fence_overhead(
+    tmp_path, monkeypatch
+):
+    """R1 Sonnet PR #98 M1 + M2 fix — budget-arithmetic test (PA-3 T5).
+
+    Plan-gate PA-3 required asserting len(final_prompt) <= context cap.
+    The original test_fence_overhead_constant_exposed only checked the
+    constant; it did NOT exercise the engine.py:1054 budget arithmetic.
+    This test stubs search_raw_sources to return non-empty results so
+    the raw_fallback branch fires, then asserts the wrapped synthesis
+    prompt's WIKI CONTEXT block fits within QUERY_CONTEXT_MAX_CHARS.
+
+    M2 negative-budget edge case: also probes near-full context so the
+    M2 max(0, ...) clamp prevents truthy-but-negative-slice overshoot.
+    """
+    import kb.query.engine as engine
+    from kb.config import QUERY_CONTEXT_MAX_CHARS
+    from kb.utils.text import _FENCE_OVERHEAD
+
+    captured: dict = {}
+
+    def _fake_call_llm(prompt, **kwargs):
+        captured["prompt"] = prompt
+        return "stub answer"
+
+    monkeypatch.setattr(engine, "call_llm", _fake_call_llm)
+
+    # Non-empty wiki page so _build_query_context returns non-empty ctx.
+    fake_pages = [
+        {
+            "id": "summaries/long-page",
+            "type": "summary",
+            "confidence": "stated",
+            "title": "Long",
+            # Body sized to push ctx near QUERY_CONTEXT_MAX_CHARS so the
+            # M2 max(0, ...) clamp at engine.py:1054 actually fires.
+            "content": "x" * (QUERY_CONTEXT_MAX_CHARS - 200),
+            "score": 0.9,
+        }
+    ]
+    monkeypatch.setattr(engine, "search_pages", lambda *a, **kw: fake_pages)
+    # Force the raw_fallback branch (summary-only context) to enter the
+    # budget arithmetic path at engine.py:1051-1058.
+    monkeypatch.setattr(
+        engine,
+        "search_raw_sources",
+        lambda *a, **kw: [
+            {"id": "raw/articles/long.md", "content": "y" * 5000}
+        ],
+    )
+
+    wiki_dir = tmp_path / "wiki"
+    for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki_dir / sub).mkdir(parents=True)
+
+    engine.query_wiki("what is x?", wiki_dir=wiki_dir)
+
+    prompt = captured["prompt"]
+    # Locate WIKI CONTEXT block bounded by `WIKI CONTEXT:\n` and
+    # `\n\nINSTRUCTIONS:` (the synthesis prompt template at
+    # engine.py:1077-1085).
+    wiki_start = prompt.find("WIKI CONTEXT:")
+    wiki_end = prompt.find("INSTRUCTIONS:")
+    assert wiki_start >= 0 and wiki_end > wiki_start
+    wiki_block = prompt[wiki_start:wiki_end]
+
+    # M1 + M2 lock-in: the fenced wiki block must fit within
+    # QUERY_CONTEXT_MAX_CHARS + a small label allowance for "WIKI
+    # CONTEXT:\n" header. Reverting the max(0, ...) clamp at
+    # engine.py:1054 OR removing the _FENCE_OVERHEAD subtraction would
+    # push the fenced block past this cap on near-full context.
+    label_overhead = len("WIKI CONTEXT:\n") + len("\n\n")
+    assert len(wiki_block) <= QUERY_CONTEXT_MAX_CHARS + label_overhead, (
+        f"WIKI CONTEXT block ({len(wiki_block)} chars) overshot "
+        f"QUERY_CONTEXT_MAX_CHARS ({QUERY_CONTEXT_MAX_CHARS}) "
+        f"+ label overhead ({label_overhead}). Fence overhead "
+        f"({_FENCE_OVERHEAD}) reservation at engine.py:1054 likely "
+        "reverted; M2 max(0, ...) clamp likely missing."
+    )

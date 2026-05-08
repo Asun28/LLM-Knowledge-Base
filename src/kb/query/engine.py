@@ -1016,7 +1016,12 @@ def _query_wiki_body(
         }
 
     # 2. Build context from matching pages
-    ctx = _build_query_context(matching_pages)
+    # Cycle 70 AC11/A3 R1-Sonnet M2 deeper fix — reserve _FENCE_OVERHEAD
+    # at the source (cap _build_query_context's max_chars). Without this,
+    # ctx["context"] alone could fill to QUERY_CONTEXT_MAX_CHARS, then
+    # wrap_wiki_context at line 1063 adds FENCE_OVERHEAD on top, producing
+    # a fenced block that overshoots the cap by FENCE_OVERHEAD chars.
+    ctx = _build_query_context(matching_pages, max_chars=QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD)
     context = ctx["context"]
 
     # Cycle 14 AC5 — coverage-confidence computation over Tier-1 vector hits.
@@ -1051,11 +1056,25 @@ def _query_wiki_body(
             # Cycle 70 AC11/A3 — reserve fence overhead BEFORE allocating
             # raw_sections so the wrap_wiki_context()-fenced combined context
             # at line 1063 still fits within QUERY_CONTEXT_MAX_CHARS.
-            budget = QUERY_CONTEXT_MAX_CHARS - len(ctx["context"]) - _FENCE_OVERHEAD
+            #
+            # R1 Sonnet PR #98 M2 fix — clamp negative budget to 0. When
+            # ctx["context"] is near-full (~QUERY_CONTEXT_MAX_CHARS), the
+            # raw subtraction can go negative; section[:negative] then
+            # produces a misleading near-empty truthy string, leaving
+            # raw_sections=["..."] and the wrap adding fence overhead on
+            # top of an already-full context (overshoot by FENCE_OVERHEAD).
+            # max(0, ...) ensures negative budget short-circuits to skip.
+            budget = max(0, QUERY_CONTEXT_MAX_CHARS - len(ctx["context"]) - _FENCE_OVERHEAD)
             for rs in raw_results:
                 section = f"--- Raw Source: {rs['id']} (verbatim) ---\n{rs['content']}\n"
                 if len(section) > budget:
-                    if not raw_sections:  # first section — truncate rather than skip
+                    # R1 Sonnet PR #98 M2 deeper fix — only truncate-and-keep
+                    # the first section when budget > 0. With budget=0 (post
+                    # max(0,...) clamp on near-full ctx), section[:0]="" was
+                    # being appended, leaving raw_sections=[""] truthy and
+                    # raw_context="\n" — adding 1 char overshoot on top of
+                    # the already-full ctx + FENCE_OVERHEAD.
+                    if not raw_sections and budget > 0:
                         raw_sections.append(section[:budget])
                     break
                 raw_sections.append(section)
