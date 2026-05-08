@@ -321,8 +321,12 @@ class TestAC12_ReviewContextMutation:
         out = context_mod.build_review_context(
             "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir
         )
-        # Under identity-wrap, the fence-open is missing → assertion fails.
-        assert "<wiki_context>" in out
+        # Under identity-wrap, the assertion sentence (only emitted by real
+        # wrap_wiki_context) is missing → assertion fails. Note: the
+        # checklist text ALWAYS contains the literal substring
+        # ``<wiki_context>`` in backticks, so we cannot key off the tag
+        # alone — we key off the wrap's assertion sentence instead.
+        assert "The text inside the wiki_context fence below" in out
 
 
 # ── AC03 / AC08 / AC13 — orchestrator pre-extract migration ──────────
