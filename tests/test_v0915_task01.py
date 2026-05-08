@@ -351,30 +351,33 @@ class TestWikiSubdirsFromConfig:
             "build_graph should skip files outside WIKI_SUBDIRS subdirs"
         )
 
-    def test_analyzer_coverage_uses_wiki_subdir_to_type(self, tmp_path):
+    def test_analyzer_coverage_uses_wiki_subdirs(self, tmp_path):
         """Cycle 69 AC11 — C11-L1 upgrade.
 
         Replaces inspect.getsource source-grep with behavioural assertion:
-        analyze_coverage iterates WIKI_SUBDIR_TO_TYPE.values() to determine
-        the set of types it reports on (rather than a hardcoded list).
+        analyze_coverage iterates WIKI_SUBDIRS (verified at
+        ``evolve/analyzer.py:21,57``) to seed its by_type dict, so an
+        empty wiki with all WIKI_SUBDIRS subdirs created reports each
+        of those subdirs in under_covered_types.
 
-        Mutation budget: hardcode a wrong types literal in
-        evolve/analyzer.analyze_coverage -> reported set != expected ->
-        FAIL.
+        Mutation budget: hardcode a wrong subdirs literal in
+        evolve/analyzer.analyze_coverage (e.g. drop one subdir) ->
+        reported set != expected -> FAIL.
         """
-        from kb.config import WIKI_SUBDIR_TO_TYPE
         from kb.evolve.analyzer import analyze_coverage
+        from kb.utils.pages import WIKI_SUBDIRS
 
         wiki_dir = tmp_path / "wiki"
-        for subdir in WIKI_SUBDIR_TO_TYPE.keys():
+        for subdir in WIKI_SUBDIRS:
             (wiki_dir / subdir).mkdir(parents=True)
 
         result = analyze_coverage(wiki_dir=wiki_dir)
         reported_types = set(result["under_covered_types"])
-        expected_types = set(WIKI_SUBDIR_TO_TYPE.values())
+        expected_types = set(WIKI_SUBDIRS)
         assert reported_types == expected_types, (
             f"analyze_coverage reported {reported_types!r}, "
-            f"expected {expected_types!r} drawn from WIKI_SUBDIR_TO_TYPE"
+            f"expected {expected_types!r} drawn from WIKI_SUBDIRS "
+            f"(used at analyzer.py:21,57)"
         )
 
 
