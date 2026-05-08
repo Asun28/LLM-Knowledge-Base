@@ -329,15 +329,13 @@ class TestWikiSubdirsFromConfig:
         inside_path = wiki_dir / inside_subdir / "valid-page.md"
         inside_path.parent.mkdir(parents=True)
         inside_path.write_text(
-            "---\ntitle: Valid\ntype: concept\nconfidence: stated\n---\n\n"
-            "# Valid page\n",
+            "---\ntitle: Valid\ntype: concept\nconfidence: stated\n---\n\n# Valid page\n",
             encoding="utf-8",
         )
         # Stray file at top level (outside WIKI_SUBDIRS)
         stray_path = wiki_dir / "stray-top-level.md"
         stray_path.write_text(
-            "---\ntitle: Stray\ntype: concept\nconfidence: stated\n---\n\n"
-            "# Stray\n",
+            "---\ntitle: Stray\ntype: concept\nconfidence: stated\n---\n\n# Stray\n",
             encoding="utf-8",
         )
 

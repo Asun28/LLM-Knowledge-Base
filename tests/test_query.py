@@ -427,7 +427,7 @@ def test_tier1_budget_for_is_called(monkeypatch):
     )
 
 
-# ── Cycle 69 AC16 — folded from test_v0917_rewriter.py (4 tests, bare-function host shape per Step-5 Q5) ─
+# ── Cycle 69 AC16 — fold from test_v0917_rewriter.py (4 tests, bare-fn shape per Q5) ─
 
 
 def test_rewrite_query_standalone_query_unchanged():
@@ -497,12 +497,8 @@ class TestSearchRawSources:
     def test_result_has_expected_keys(self, tmp_project, create_raw_source):
         from kb.query.engine import search_raw_sources
 
-        create_raw_source(
-            "raw/articles/test.md", "Test content about transformers.", tmp_project
-        )
-        results = search_raw_sources(
-            "transformers", raw_dir=tmp_project / "raw", max_results=5
-        )
+        create_raw_source("raw/articles/test.md", "Test content about transformers.", tmp_project)
+        results = search_raw_sources("transformers", raw_dir=tmp_project / "raw", max_results=5)
         if results:
             r = results[0]
             assert "id" in r
@@ -511,7 +507,7 @@ class TestSearchRawSources:
             assert r["id"].startswith("raw/")
 
 
-# ── Cycle 69 AC19 — folded from test_v0917_hybrid.py::TestRRFFusion (renamed TestHybridQuery per Q5) ─
+# ── Cycle 69 AC19 — fold from test_v0917_hybrid.py::TestRRFFusion (-> TestHybridQuery, Q5) ─
 
 
 class TestHybridQuery:

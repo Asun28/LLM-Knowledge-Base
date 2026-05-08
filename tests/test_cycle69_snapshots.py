@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from datetime import date
 
-
 # ── AC13: build_extraction_prompt deterministic snapshot ──────────
 
 
@@ -104,9 +103,7 @@ def test_contradictions_append_snapshot(tmp_path, monkeypatch, snapshot):
         {"claim": "Transformers use recurrence"},
         {"claim": "Transformers eliminate recurrence"},
     ]
-    pipeline._persist_contradictions(
-        contradictions, "raw/articles/example.md", wiki_dir
-    )
+    pipeline._persist_contradictions(contradictions, "raw/articles/example.md", wiki_dir)
     rendered = (wiki_dir / "contradictions.md").read_text(encoding="utf-8")
     assert rendered.splitlines() == snapshot
 

@@ -46,9 +46,7 @@ def test_build_graph_calls_supply_pages_kwarg():
             kwargs = {kw.arg for kw in call.keywords if kw.arg is not None}
             if "pages" not in kwargs:
                 rel = module_path.relative_to(PROJECT_ROOT)
-                violations.append(
-                    f"{rel}:{call.lineno} — build_graph(...) missing pages= kwarg"
-                )
+                violations.append(f"{rel}:{call.lineno} — build_graph(...) missing pages= kwarg")
     assert not violations, (
         "AC06 violation — build_graph call without pages= (FW-7 bypass requirement):\n"
         + "\n".join(f"  - {v}" for v in violations)
@@ -66,6 +64,5 @@ def test_in_scope_modules_have_at_least_one_build_graph_call():
         tree = ast.parse(module_path.read_text(encoding="utf-8"))
         total += sum(1 for _ in _walk_build_graph_calls(tree))
     assert total >= 3, (
-        f"Expected >=3 build_graph calls across query/engine + evolve/analyzer, "
-        f"got {total}"
+        f"Expected >=3 build_graph calls across query/engine + evolve/analyzer, got {total}"
     )

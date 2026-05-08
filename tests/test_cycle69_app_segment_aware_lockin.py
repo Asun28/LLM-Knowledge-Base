@@ -38,9 +38,7 @@ from kb.mcp.app import _validate_page_id
         (r"foo\..\bar", True),
     ],
 )
-def test_validate_page_id_segment_aware_not_substring(
-    page_id, expect_error, tmp_path
-):
+def test_validate_page_id_segment_aware_not_substring(page_id, expect_error, tmp_path):
     """AC05 lock-in: segment-aware `..` check, not substring match.
 
     Production guard at ``src/kb/mcp/app.py:291`` uses

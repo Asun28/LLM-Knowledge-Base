@@ -341,6 +341,4 @@ def test_health_evolve_logs_error_not_exception(monkeypatch, caplog):
     assert result.startswith("Error:"), f"Expected error response, got: {result!r}"
     error_records = [r for r in caplog.records if r.levelname == "ERROR"]
     assert error_records
-    assert all(r.exc_info is None for r in error_records), (
-        "logger.error must not include exc_info"
-    )
+    assert all(r.exc_info is None for r in error_records), "logger.error must not include exc_info"
