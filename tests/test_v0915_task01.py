@@ -310,27 +310,71 @@ class TestWikiSubdirsFromConfig:
 
         assert set(WIKI_SUBDIRS) == set(WIKI_SUBDIR_TO_TYPE.keys())
 
-    def test_graph_builder_uses_shared_subdirs(self):
-        """graph/builder.py imports WIKI_SUBDIRS from utils.pages."""
-        import inspect
+    def test_graph_builder_skips_files_outside_wiki_subdirs(self, tmp_path):
+        """Cycle 69 AC10 — C11-L1 upgrade.
 
-        from kb.graph import builder
+        Replaces inspect.getsource source-grep with behavioural assertion:
+        build_graph only includes files inside WIKI_SUBDIRS subdirs (a
+        stray top-level wiki file does NOT become a graph node).
 
-        # Should NOT contain a hardcoded tuple of subdirs
-        assert "WIKI_SUBDIRS" in inspect.getsource(builder), (
-            "graph/builder.py should import WIKI_SUBDIRS"
+        Mutation budget: comment out the WIKI_SUBDIRS scan filter in
+        graph/builder.py -> stray top-level file becomes a node -> FAIL.
+        """
+        from kb.config import WIKI_SUBDIR_TO_TYPE
+        from kb.graph.builder import build_graph
+
+        wiki_dir = tmp_path / "wiki"
+        # Pick a known-valid subdir (e.g., 'concepts')
+        inside_subdir = next(iter(WIKI_SUBDIR_TO_TYPE.keys()))
+        inside_path = wiki_dir / inside_subdir / "valid-page.md"
+        inside_path.parent.mkdir(parents=True)
+        inside_path.write_text(
+            "---\ntitle: Valid\ntype: concept\nconfidence: stated\n---\n\n"
+            "# Valid page\n",
+            encoding="utf-8",
+        )
+        # Stray file at top level (outside WIKI_SUBDIRS)
+        stray_path = wiki_dir / "stray-top-level.md"
+        stray_path.write_text(
+            "---\ntitle: Stray\ntype: concept\nconfidence: stated\n---\n\n"
+            "# Stray\n",
+            encoding="utf-8",
         )
 
-    def test_evolve_analyzer_uses_shared_subdirs(self):
-        """evolve/analyzer.py imports WIKI_SUBDIRS from utils.pages."""
-        import inspect
+        graph = build_graph(wiki_dir=wiki_dir)
+        node_ids = set(graph.nodes())
+        expected_inside = f"{inside_subdir}/valid-page"
+        assert expected_inside in node_ids, (
+            f"Expected {expected_inside!r} in graph nodes; got {node_ids}"
+        )
+        assert "stray-top-level" not in node_ids, (
+            "build_graph should skip files outside WIKI_SUBDIRS subdirs"
+        )
 
-        from kb.evolve import analyzer
+    def test_analyzer_coverage_uses_wiki_subdir_to_type(self, tmp_path):
+        """Cycle 69 AC11 — C11-L1 upgrade.
 
-        # The hardcoded dict should reference WIKI_SUBDIRS or WIKI_SUBDIR_TO_TYPE
-        analyzer_src = inspect.getsource(analyzer)
-        assert "WIKI_SUBDIRS" in analyzer_src or "WIKI_SUBDIR_TO_TYPE" in analyzer_src, (
-            "evolve/analyzer.py should use WIKI_SUBDIRS from config"
+        Replaces inspect.getsource source-grep with behavioural assertion:
+        analyze_coverage iterates WIKI_SUBDIR_TO_TYPE.values() to determine
+        the set of types it reports on (rather than a hardcoded list).
+
+        Mutation budget: hardcode a wrong types literal in
+        evolve/analyzer.analyze_coverage -> reported set != expected ->
+        FAIL.
+        """
+        from kb.config import WIKI_SUBDIR_TO_TYPE
+        from kb.evolve.analyzer import analyze_coverage
+
+        wiki_dir = tmp_path / "wiki"
+        for subdir in WIKI_SUBDIR_TO_TYPE.keys():
+            (wiki_dir / subdir).mkdir(parents=True)
+
+        result = analyze_coverage(wiki_dir=wiki_dir)
+        reported_types = set(result["under_covered_types"])
+        expected_types = set(WIKI_SUBDIR_TO_TYPE.values())
+        assert reported_types == expected_types, (
+            f"analyze_coverage reported {reported_types!r}, "
+            f"expected {expected_types!r} drawn from WIKI_SUBDIR_TO_TYPE"
         )
 
 
