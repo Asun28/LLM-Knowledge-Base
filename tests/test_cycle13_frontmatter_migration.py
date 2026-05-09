@@ -514,9 +514,12 @@ class TestRunAugmentVerdictGuardIntegration:
             ),
         )
 
+        # Cycle 73 AC03: schema-conformant keys only (article template
+        # has core_argument, NOT summary — extra keys rejected by
+        # _validate_tier_boundary at orchestrator.py:394).
         fake_extraction = {
             "title": "MoE",
-            "summary": "Mixture of experts is a neural architecture.",
+            "core_argument": "Mixture of experts is a neural architecture.",
             "key_claims": ["gating routes inputs", "expert subnetworks"],
             "entities_mentioned": [],
             "concepts_mentioned": ["moe"],
@@ -627,9 +630,12 @@ class TestRunAugmentVerdictGuardIntegration:
             ),
         )
 
+        # Cycle 73 AC03: schema-conformant keys only (article template
+        # has core_argument, NOT summary — extra keys rejected by
+        # _validate_tier_boundary at orchestrator.py:394).
         fake_extraction = {
             "title": "MoE",
-            "summary": "Mixture of experts is a neural architecture.",
+            "core_argument": "Mixture of experts is a neural architecture.",
             "key_claims": ["gating routes inputs", "expert subnetworks"],
             "entities_mentioned": [],
             "concepts_mentioned": ["moe"],

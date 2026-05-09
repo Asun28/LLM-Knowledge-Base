@@ -71,8 +71,11 @@ def test_summary_counts_per_stub_not_per_url(tmp_project, monkeypatch):
             side_effect=[
                 {"score": 0.95},
                 {
+                    # Cycle 73 AC03: schema-conformant keys only — article
+                    # template has core_argument, NOT summary
+                    # (_validate_tier_boundary rejects extras).
                     "title": "Per URL Summary",
-                    "summary": "Source text for the per URL summary stub.",
+                    "core_argument": "Source text for the per URL summary stub.",
                     "key_claims": ["summary counts are per stub"],
                     "entities_mentioned": [],
                     "concepts_mentioned": ["per-url-summary"],

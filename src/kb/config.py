@@ -474,6 +474,18 @@ MAX_CONSISTENCY_GROUPS = 20
 # fallback.
 MAX_CONSISTENCY_PAGE_CONTENT_CHARS = 4096
 
+# ── Cycle 73 AC02: forensic prompt-shape stamp on verdict-store entries.
+# Investigators reading verdict JSON can distinguish:
+#   - ``prompt_version=0``  pre-cycle-70 H14 literal-sentinel family
+#                            (``<wiki_page_body>`` / ``<raw_source_N>`` /
+#                            ``<untrusted_source>``).
+#   - ``prompt_version=1``  post-cycle-70 ``wrap_wiki_context`` fenced
+#                            family. Cycle-71 / 72 / 73 expansions add new
+#                            SITES, not new SHAPES — all stamp 1.
+# A future structural revision (e.g. cycle-80+ with role markers / ``##``
+# sub-headers) would justifiably bump to 2.
+CURRENT_PROMPT_VERSION = 1
+
 # ── Lint tuning ──────────────────────────────────────────────
 STALENESS_MAX_DAYS = 90
 UNDER_COVERED_TYPE_THRESHOLD = 3

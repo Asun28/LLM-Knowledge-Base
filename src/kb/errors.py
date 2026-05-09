@@ -26,6 +26,7 @@ __all__ = [
     "CompileError",
     "QueryError",
     "ValidationError",
+    "TierBoundaryError",
     "StorageError",
 ]
 
@@ -51,6 +52,24 @@ class QueryError(KBError):
 
 class ValidationError(KBError):
     """Input-validation failure (page_id, wiki_dir, manifest_key, notes length, etc.)."""
+
+
+class TierBoundaryError(ValidationError):
+    """Cycle 73 AC04: scan-tier → orchestrate-tier output rejected at the
+    cross-tier verification boundary.
+
+    Raised by ``kb.lint.augment.orchestrator._validate_tier_boundary`` when
+    a scan-tier ``_call_llm_json`` response fails the orchestrate-tier
+    consumption rules (extra key, oversize string, deep nesting,
+    unsupported value type, non-dict root). Subclasses ``ValidationError``
+    so legacy ``except ValidationError`` catch sites still catch it; a
+    more-specific ``except TierBoundaryError`` handler in the orchestrator
+    distinguishes the failure forensically (``manifest.advance(stub_id,
+    'failed', payload={'reason': 'tier_boundary_rejected: ...'})``).
+
+    Threat-model: T4 (EscalationOfPrivilege — bounds the blast radius of
+    cycle-72's prompt-injection probability reduction).
+    """
 
 
 class StorageError(KBError):
