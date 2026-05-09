@@ -470,27 +470,61 @@ def build_completeness_context(
 
     Returns formatted text for Claude Code to identify key claims from the
     source that are NOT represented in the wiki page.
+
+    Cycle 73 AC01: page+sources are wrapped as ONE
+    ``<wiki_context>...</wiki_context>`` fence between the heading and
+    the closing instructions. Heading + framing + section markers
+    (``## Wiki Page`` / ``## Source N:``) and closing instructions stay
+    OUTSIDE the fence per the cycle-71 / cycle-72 pattern (header outside,
+    content inside). Mirrors ``build_fidelity_context`` to close the
+    same-class peer that cycle-72 deferred per threat-model §T1 OOS.
+
+    The page-content is capped via ``_cap_page_content`` BEFORE assembly
+    so an oversized wiki body cannot bypass the cycle-71 ``_FENCE_OVERHEAD``
+    reservation. ``_render_sources`` budget is reduced by ``_FENCE_OVERHEAD``
+    to keep the wrapped total within ``QUERY_CONTEXT_MAX_CHARS``.
     """
     paired = pair_page_with_sources(page_id_str, wiki_dir, raw_dir)
 
     if "error" in paired and "page_content" not in paired:
         return f"Error: {paired['error']}"
 
-    lines = [
+    # Cycle 73 AC01: split into 3 segments — header (outside fence),
+    # body (page + sources, inside fence), closing instructions (outside).
+    header_lines = [
         f"# Completeness Check: {page_id_str}\n",
         "Evaluate whether key claims from the raw source(s) are represented "
         "in the wiki page. Identify important omissions.\n",
         "---\n",
-        "## Wiki Page\n",
-        paired["page_content"],
-        "\n---\n",
     ]
 
-    _render_sources(paired["source_contents"], lines)
+    # Cycle 73 AC01: cap page_content BEFORE assembly so an oversized page
+    # body does not bypass the cycle-71 _FENCE_OVERHEAD reservation. Reuses
+    # the same ``_cap_page_content`` helper as ``build_fidelity_context``
+    # — inherits the cycle-72 R2 Codex M-1 marker-reservation fix.
+    capped_page_content = _cap_page_content(
+        paired["page_content"], QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD
+    )
+    body_lines = [
+        "## Wiki Page\n",
+        capped_page_content,
+        "\n---\n",
+    ]
+    _render_sources(
+        paired["source_contents"],
+        body_lines,
+        budget=QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD,
+    )
 
-    lines.append(
+    closing = (
         "List any key claims, facts, or arguments from the source(s) that are "
         "NOT represented in the wiki page.\n"
     )
 
-    return "\n".join(lines)
+    return (
+        "\n".join(header_lines)
+        + "\n"
+        + wrap_wiki_context("\n".join(body_lines))
+        + "\n"
+        + closing
+    )
