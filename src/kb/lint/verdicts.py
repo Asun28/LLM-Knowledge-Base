@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kb.config import (
+    CURRENT_PROMPT_VERSION,
     MAX_NOTES_LEN,
     MAX_VERDICTS,
     VALID_SEVERITIES,
@@ -56,6 +57,36 @@ def _invalidate_verdicts_cache(path: Path) -> None:
     """Drop the cache entry for `path` (called after every save)."""
     with _VERDICTS_CACHE_LOCK:
         _VERDICTS_CACHE.pop(str(path), None)
+
+
+def get_prompt_version(entry: dict) -> int:
+    """Cycle 73 AC02: read-side accessor for ``entry['prompt_version']``.
+
+    Returns 0 for any legacy entry that pre-dates the prompt-shape stamp
+    (i.e., entries written before cycle 73 — semantically "pre-cycle-70
+    unknown shape"). Defensive type-handling per design-decision Q1 +
+    R2 F-1: any non-dict input OR missing key OR non-int value returns 0
+    rather than raising or propagating bad data.
+
+    Threat-model T7 (Tampering — cache fidelity): this is a READ
+    accessor. ``load_verdicts`` does NOT mutate cached entries to inject
+    a back-fill key; cache contents byte-for-byte mirror the on-disk
+    JSON file. Callers that need the prompt version use this accessor.
+
+    Investigators reading verdicts:
+        - returns 0 → entry pre-dates the cycle-70 wrap_wiki_context family
+          (literal-sentinel prompts).
+        - returns 1 → post-cycle-70 wrap_wiki_context family (the current
+          shape; cycle-71/72/73 expansions all stamp 1).
+    """
+    if not isinstance(entry, dict):
+        return 0
+    value = entry.get("prompt_version", 0)
+    if not isinstance(value, int) or isinstance(value, bool):
+        # bool is a subclass of int; reject explicitly so True/False can't
+        # masquerade as 1/0 forensic stamps.
+        return 0
+    return value
 
 
 def load_verdicts(path: Path | None = None) -> list[dict]:
@@ -202,6 +233,13 @@ def add_verdict(
                 "verdict": verdict,
                 "issues": issues or [],
                 "notes": notes,
+                # Cycle 73 AC02: forensic prompt-shape stamp. Investigators
+                # reading post-cycle-73 verdicts can confirm which prompt
+                # family (literal-sentinel vs wrap_wiki_context) produced
+                # the underlying LLM verdict. Read via ``get_prompt_version``
+                # accessor for back-compat with pre-cycle-73 entries
+                # (which lack the key — accessor defaults to 0).
+                "prompt_version": CURRENT_PROMPT_VERSION,
             }
             verdicts.append(entry)
             # Retain only the most recent verdicts to prevent unbounded growth
