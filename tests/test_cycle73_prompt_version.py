@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ── AC02 lock-in ──────────────────────────────────────────────────────
 
 
@@ -179,9 +178,7 @@ class TestAC02_NoCacheReadSideMutation:
 
         # And the on-disk file is unchanged byte-for-byte.
         on_disk = json.loads(verdicts_path.read_text(encoding="utf-8"))
-        assert on_disk == legacy_entries, (
-            "load_verdicts mutated the on-disk JSON file"
-        )
+        assert on_disk == legacy_entries, "load_verdicts mutated the on-disk JSON file"
 
     def test_load_verdicts_preserves_existing_post_cycle73_entries(self, tmp_path):
         """When entries DO have ``prompt_version`` key (e.g., written by

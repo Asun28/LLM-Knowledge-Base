@@ -180,19 +180,29 @@ class TestAC01_FidelityPageContentCap:
             f"or fence shape changed without updating the constant"
         )
 
-    def test_completeness_context_untouched(self):
-        """Condition 1: cap ONLY at L115 (build_fidelity_context). The
-        sibling ``build_completeness_context`` MUST still emit uncapped
-        page_content (deferred to cycle-73+)."""
+    def test_completeness_context_capped_post_cycle73(self):
+        """Cycle 72 Condition 1 SUPERSEDED by cycle-73 AC01: the
+        same-class peer ``build_completeness_context`` was deferred at
+        cycle-72 per threat-model §T1 OOS. Cycle-73 AC01 closed that
+        deferral by adding ``_cap_page_content`` + ``wrap_wiki_context``
+        to the completeness path. Both fidelity and completeness now
+        share the cap+wrap defense.
+
+        This test now asserts the OPPOSITE invariant: the cap is
+        present in completeness too (cycle-73 AC01 lock-in lives in
+        ``tests/test_cycle73_completeness_wrap.py``; this test is the
+        cycle-72 anchor confirming the deferral was honoured AND
+        subsequently closed).
+        """
         import inspect
 
         from kb.lint import semantic as semantic_mod
 
         src = inspect.getsource(semantic_mod.build_completeness_context)
-        # The cycle-72 cap helper name MUST NOT appear in completeness.
-        assert "_cap_page_content" not in src, (
-            "AC01 was over-applied to build_completeness_context; condition 1 "
-            "requires single-site scope (build_fidelity_context only)"
+        # Cycle-73 AC01: cap helper MUST appear (deferral closed).
+        assert "_cap_page_content" in src, (
+            "Cycle-73 AC01 was reverted; build_completeness_context "
+            "should call _cap_page_content per the closed cycle-72 deferral"
         )
 
 

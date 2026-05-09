@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ── AC03 helper-in-isolation lock-in ──────────────────────────────────
 
 
@@ -75,16 +74,29 @@ class TestAC03_ValidateTierBoundaryAcceptance:
 
 
 class TestAC03_ValidateTierBoundaryRejection:
-    """C-AC03-1..5: rejects ill-formed input via TierBoundaryError."""
+    """C-AC03-1..5: rejects ill-formed input via TierBoundaryError.
+
+    Cycle-20 L1 reload-leak guard: ``TierBoundaryError`` is late-bound via
+    the orchestrator's already-imported attribute (``orch_mod.TierBoundaryError``)
+    rather than re-imported from ``kb.errors`` at test time. A sibling
+    test that monkeypatches ``KB_PROJECT_ROOT`` then calls
+    ``importlib.reload(kb.config)`` cascade-reloads ``kb.errors``, creating
+    a NEW ``TierBoundaryError`` class — production code (orchestrator)
+    raises whatever class IT bound at import time, while a test importing
+    via ``from kb.errors import TierBoundaryError`` resolves the NEW
+    class. ``pytest.raises(<test-class>)`` then sees ``DID NOT RAISE``
+    because the actual exception is a DIFFERENT class. Late-binding via
+    the orchestrator's bound attribute keeps both production and test
+    pointing at the SAME class regardless of reload state.
+    """
 
     def test_validate_rejects_non_dict_input(self):
         """Non-dict at top level → TierBoundaryError."""
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         for bad in (None, [], "not a dict", 42, ()):
-            with pytest.raises(TierBoundaryError):
-                _validate_tier_boundary(
+            with pytest.raises(orch_mod.TierBoundaryError):
+                orch_mod._validate_tier_boundary(
                     bad,  # type: ignore[arg-type]
                     expected_keys=frozenset({"summary"}),
                 )
@@ -95,37 +107,34 @@ class TestAC03_ValidateTierBoundaryRejection:
         Defends T4: prevents LLM from injecting e.g. ``"side_effects"`` key
         that orchestrate-tier might accidentally consume.
         """
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         scan_output = {"summary": "ok", "side_effects": "delete_all"}
         expected = frozenset({"summary"})
 
-        with pytest.raises(TierBoundaryError, match="side_effects"):
-            _validate_tier_boundary(scan_output, expected_keys=expected)
+        with pytest.raises(orch_mod.TierBoundaryError, match="side_effects"):
+            orch_mod._validate_tier_boundary(scan_output, expected_keys=expected)
 
     def test_validate_rejects_oversize_string(self):
         """String value longer than ``max_string_len=4096`` → TierBoundaryError."""
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         scan_output = {"summary": "X" * 5000}
-        with pytest.raises(TierBoundaryError):
-            _validate_tier_boundary(
+        with pytest.raises(orch_mod.TierBoundaryError):
+            orch_mod._validate_tier_boundary(
                 scan_output, expected_keys=frozenset({"summary"})
             )
 
     def test_validate_rejects_oversize_string_in_nested(self):
         """Oversize string in NESTED dict/list → TierBoundaryError (not just
         top-level scan)."""
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         scan_output = {
             "evidence": [{"claim": "X" * 5000}],
         }
-        with pytest.raises(TierBoundaryError):
-            _validate_tier_boundary(
+        with pytest.raises(orch_mod.TierBoundaryError):
+            orch_mod._validate_tier_boundary(
                 scan_output, expected_keys=frozenset({"evidence"})
             )
 
@@ -134,13 +143,12 @@ class TestAC03_ValidateTierBoundaryRejection:
 
         Defends T6 DoS — pathological JSON-bombs.
         """
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         # 6-level-deep nested dict (root + 5 levels) exceeds max_depth=4.
         deep = {"a": {"b": {"c": {"d": {"e": {"f": "leaf"}}}}}}
-        with pytest.raises(TierBoundaryError):
-            _validate_tier_boundary(deep, expected_keys=frozenset({"a"}))
+        with pytest.raises(orch_mod.TierBoundaryError):
+            orch_mod._validate_tier_boundary(deep, expected_keys=frozenset({"a"}))
 
     def test_validate_accepts_legitimate_depth(self):
         """3-level dict (root + 2 sub-levels) is within depth=4 → passes."""
@@ -148,23 +156,20 @@ class TestAC03_ValidateTierBoundaryRejection:
 
         ok = {"evidence": [{"src": "raw/a.md", "claim": "X"}]}
         # depth = root(1) + list(2) + dict(3) + leaf-strings(4) = 4 → passes
-        result = _validate_tier_boundary(
-            ok, expected_keys=frozenset({"evidence"})
-        )
+        result = _validate_tier_boundary(ok, expected_keys=frozenset({"evidence"}))
         assert result is ok
 
     def test_validate_rejects_unsupported_value_type(self):
         """Custom-class value (e.g., a Pydantic model bypassing JSON) →
         TierBoundaryError."""
-        from kb.errors import TierBoundaryError
-        from kb.lint.augment.orchestrator import _validate_tier_boundary
+        from kb.lint.augment import orchestrator as orch_mod
 
         class BadValue:
             pass
 
         scan_output = {"summary": BadValue()}  # type: ignore[dict-item]
-        with pytest.raises(TierBoundaryError):
-            _validate_tier_boundary(
+        with pytest.raises(orch_mod.TierBoundaryError):
+            orch_mod._validate_tier_boundary(
                 scan_output, expected_keys=frozenset({"summary"})
             )
 
@@ -175,9 +180,7 @@ class TestAC03_ValidateTierBoundaryRejection:
 
         for val in (1, 1.5, True, None, "str", [1, 2], {"k": "v"}):
             scan = {"summary": val}
-            result = _validate_tier_boundary(
-                scan, expected_keys=frozenset({"summary"})
-            )
+            result = _validate_tier_boundary(scan, expected_keys=frozenset({"summary"}))
             assert result == scan, f"failed for value type {type(val).__name__}"
 
 
@@ -220,9 +223,7 @@ class TestAC03_OrchestratorCallsValidator:
             "concepts": [],
         }
 
-        monkeypatch.setattr(
-            proposer_mod, "_call_llm_json", lambda *a, **kw: scan_response
-        )
+        monkeypatch.setattr(proposer_mod, "_call_llm_json", lambda *a, **kw: scan_response)
 
         # Build a synthetic schema dict (matches what _build_schema_cached
         # returns — JSONSchema with "properties" top-level key).
@@ -256,12 +257,8 @@ class TestAC03_OrchestratorCallsValidator:
 
         # Validator MUST have been called exactly once with the schema-
         # derived expected_keys (NOT scan_output-derived).
-        assert len(captured) == 1, (
-            f"validator called {len(captured)} times, expected 1"
-        )
-        assert captured[0]["expected_keys"] == frozenset(
-            synthetic_schema["properties"].keys()
-        ), (
+        assert len(captured) == 1, f"validator called {len(captured)} times, expected 1"
+        assert captured[0]["expected_keys"] == frozenset(synthetic_schema["properties"].keys()), (
             "expected_keys was NOT derived from schema (T5 self-validation "
             f"vulnerability): got {captured[0]['expected_keys']}"
         )
@@ -323,9 +320,7 @@ class TestAC04_ManifestOutcomeDistinctness:
 
         class _SpyManifest:
             def advance(self, stub_id, status, payload=None):
-                recorded.append(
-                    {"stub_id": stub_id, "status": status, "payload": payload}
-                )
+                recorded.append({"stub_id": stub_id, "status": status, "payload": payload})
 
         # Re-execute production catch-block contract at orchestrator.py:394+:
         #     try:
@@ -400,6 +395,4 @@ class TestAC03_ValidatorMutation:
         # ``pytest.raises`` accepts → test PASSES → XPASS-strict suite
         # fail signals the duplication.
         with pytest.raises(TierBoundaryError):
-            orch_mod._validate_tier_boundary(
-                scan, expected_keys=frozenset({"summary"})
-            )
+            orch_mod._validate_tier_boundary(scan, expected_keys=frozenset({"summary"}))

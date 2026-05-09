@@ -48,9 +48,7 @@ def test_kb_disable_vectors_stale_entry_absent():
     BACKLOG.md (already shipped cycle 67 AC06)."""
     backlog = (_repo_root() / "BACKLOG.md").read_text(encoding="utf-8")
 
-    stale_marker = (
-        "`KB_DISABLE_VECTORS=1` runtime kill-switch (cycle-N+1 if requested)"
-    )
+    stale_marker = "`KB_DISABLE_VECTORS=1` runtime kill-switch (cycle-N+1 if requested)"
     assert stale_marker not in backlog, (
         "Stale BACKLOG entry still present:\n"
         f"  '{stale_marker}'\n"
@@ -101,12 +99,8 @@ def test_backlog_header_intact():
         "BACKLOG.md top-level header missing or corrupted by AC06 cleanup"
     )
     # Cross-reference table preserved.
-    assert "## Cross-reference" in backlog, (
-        "BACKLOG.md ## Cross-reference section missing"
-    )
-    assert "## Phase 4.5" in backlog, (
-        "BACKLOG.md ## Phase 4.5 section missing"
-    )
+    assert "## Cross-reference" in backlog, "BACKLOG.md ## Cross-reference section missing"
+    assert "## Phase 4.5" in backlog, "BACKLOG.md ## Phase 4.5 section missing"
 
 
 def test_changelog_references_backlog_hygiene():

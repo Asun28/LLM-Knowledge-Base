@@ -30,7 +30,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-
 _AC05_FIXED_DATE = date(2026, 5, 9)
 _AC05_CONTRADICTIONS = [
     {"claim": "X states that Y is true."},
@@ -82,9 +81,7 @@ def test_persist_contradictions_snapshot(tmp_path: Path, monkeypatch, snapshot):
     )
 
     contradictions_path = wiki_dir / "contradictions.md"
-    assert contradictions_path.exists(), (
-        "_persist_contradictions did not write contradictions.md"
-    )
+    assert contradictions_path.exists(), "_persist_contradictions did not write contradictions.md"
 
     content = contradictions_path.read_text(encoding="utf-8")
     # Snapshot the lines (line-list comparison is more diff-readable than
@@ -92,9 +89,7 @@ def test_persist_contradictions_snapshot(tmp_path: Path, monkeypatch, snapshot):
     assert content.splitlines() == snapshot
 
 
-def test_persist_contradictions_negative_control_different_source(
-    tmp_path: Path, monkeypatch
-):
+def test_persist_contradictions_negative_control_different_source(tmp_path: Path, monkeypatch):
     """C-AC05-3 non-vacuous control: same contradictions list + DIFFERENT
     source_ref produce DIFFERENT output (proves snapshot test is sensitive
     to inputs)."""
@@ -119,9 +114,7 @@ def test_persist_contradictions_negative_control_different_source(
     )
 
 
-def test_persist_contradictions_dedup_skip_duplicate_block(
-    tmp_path: Path, monkeypatch
-):
+def test_persist_contradictions_dedup_skip_duplicate_block(tmp_path: Path, monkeypatch):
     """Production at ``pipeline.py:212`` skips dup blocks: calling twice
     with identical args MUST emit ONE block, not two (defends against
     cron-trigger doubling)."""
@@ -132,9 +125,7 @@ def test_persist_contradictions_dedup_skip_duplicate_block(
     wiki_dir = tmp_path / "wiki"
     wiki_dir.mkdir()
 
-    _persist_contradictions(
-        _AC05_CONTRADICTIONS, _AC05_SOURCE_REF, wiki_dir
-    )
+    _persist_contradictions(_AC05_CONTRADICTIONS, _AC05_SOURCE_REF, wiki_dir)
     _persist_contradictions(  # duplicate call
         _AC05_CONTRADICTIONS, _AC05_SOURCE_REF, wiki_dir
     )

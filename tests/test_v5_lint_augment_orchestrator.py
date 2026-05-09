@@ -729,9 +729,11 @@ def test_auto_ingest_creates_wiki_page_with_speculative_confidence(
         ),
     )
 
+    # Cycle 73 AC03: schema-conformant keys (article template has
+    # core_argument, NOT summary — _validate_tier_boundary rejects extras).
     fake_extraction = {
         "title": "MoE",
-        "summary": "Mixture of experts is a neural architecture using gating + experts.",
+        "core_argument": "Mixture of experts is a neural architecture using gating + experts.",
         "key_claims": ["gating network routes inputs", "expert subnetworks"],
         "entities_mentioned": [],
         "concepts_mentioned": ["moe"],

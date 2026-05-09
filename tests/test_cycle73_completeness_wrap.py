@@ -58,17 +58,13 @@ class TestAC01_CompletenessPageContentCap:
         oversized_body = "X" * (QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD + 1000)
         return {
             "page_content": oversized_body,
-            "source_contents": [
-                {"path": "raw/clean.md", "content": "small source content"}
-            ],
+            "source_contents": [{"path": "raw/clean.md", "content": "small source content"}],
         }
 
     def _stub_paired_under_cap(self) -> dict:
         return {
             "page_content": "small body",
-            "source_contents": [
-                {"path": "raw/clean.md", "content": "small source content"}
-            ],
+            "source_contents": [{"path": "raw/clean.md", "content": "small source content"}],
         }
 
     def _stub_paired_with_attacker(self) -> dict:
@@ -98,8 +94,7 @@ class TestAC01_CompletenessPageContentCap:
             f"expected exactly 1 <wiki_context> open, got {out.count('<wiki_context>')}"
         )
         assert out.count("</wiki_context>") == 1, (
-            f"expected exactly 1 </wiki_context> close, got "
-            f"{out.count('</wiki_context>')}"
+            f"expected exactly 1 </wiki_context> close, got {out.count('</wiki_context>')}"
         )
 
     def test_completeness_oversized_page_truncated_with_marker(self, monkeypatch):
@@ -125,9 +120,7 @@ class TestAC01_CompletenessPageContentCap:
         page_heading_idx = out.find("## Wiki Page")
         assert page_heading_idx >= 0, "## Wiki Page heading missing"
         sources_separator_idx = out.find("\n---\n", page_heading_idx)
-        assert sources_separator_idx > page_heading_idx, (
-            "page-region trailing separator missing"
-        )
+        assert sources_separator_idx > page_heading_idx, "page-region trailing separator missing"
         page_body = out[page_heading_idx:sources_separator_idx]
         assert page_body.rstrip().endswith(marker), (
             "marker is NOT the LAST chars of the capped page-body region "
@@ -251,9 +244,7 @@ class TestAC01_CompletenessCapMutation:
             },
         )
         # Replace _cap_page_content with identity (no truncation).
-        monkeypatch.setattr(
-            semantic_mod, "_cap_page_content", lambda text, _max: text
-        )
+        monkeypatch.setattr(semantic_mod, "_cap_page_content", lambda text, _max: text)
 
         out = semantic_mod.build_completeness_context("entities/test")
         # Without the cap, marker should be missing. xfail-strict expects
@@ -285,9 +276,7 @@ class TestAC01_CompletenessWrapMutation:
             },
         )
         # Replace wrap_wiki_context with identity (no fence).
-        monkeypatch.setattr(
-            semantic_mod, "wrap_wiki_context", lambda text: text
-        )
+        monkeypatch.setattr(semantic_mod, "wrap_wiki_context", lambda text: text)
 
         out = semantic_mod.build_completeness_context("entities/test")
         # Without the wrap, fence tag must be absent. xfail-strict expects
