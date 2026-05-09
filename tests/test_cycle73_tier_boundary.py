@@ -121,9 +121,7 @@ class TestAC03_ValidateTierBoundaryRejection:
 
         scan_output = {"summary": "X" * 5000}
         with pytest.raises(orch_mod.TierBoundaryError):
-            orch_mod._validate_tier_boundary(
-                scan_output, expected_keys=frozenset({"summary"})
-            )
+            orch_mod._validate_tier_boundary(scan_output, expected_keys=frozenset({"summary"}))
 
     def test_validate_rejects_oversize_string_in_nested(self):
         """Oversize string in NESTED dict/list → TierBoundaryError (not just
@@ -134,9 +132,7 @@ class TestAC03_ValidateTierBoundaryRejection:
             "evidence": [{"claim": "X" * 5000}],
         }
         with pytest.raises(orch_mod.TierBoundaryError):
-            orch_mod._validate_tier_boundary(
-                scan_output, expected_keys=frozenset({"evidence"})
-            )
+            orch_mod._validate_tier_boundary(scan_output, expected_keys=frozenset({"evidence"}))
 
     def test_validate_rejects_deep_nesting(self):
         """Nested structure deeper than ``max_depth=4`` → TierBoundaryError.
@@ -169,9 +165,7 @@ class TestAC03_ValidateTierBoundaryRejection:
 
         scan_output = {"summary": BadValue()}  # type: ignore[dict-item]
         with pytest.raises(orch_mod.TierBoundaryError):
-            orch_mod._validate_tier_boundary(
-                scan_output, expected_keys=frozenset({"summary"})
-            )
+            orch_mod._validate_tier_boundary(scan_output, expected_keys=frozenset({"summary"}))
 
     def test_validate_accepts_int_float_bool_none(self):
         """Allowlist: ``str | int | float | bool | None | list | dict``.
@@ -355,6 +349,267 @@ class TestAC04_ManifestOutcomeDistinctness:
 
 
 # ── AC03 paired xfail-strict mutation control ─────────────────────────
+
+
+# ── AC03+AC04 production-call-site integration lock-ins ──────────────
+# Cycle 73 R2 Codex M-1 + M-2: replace the manually-replayed
+# call-sequence tests with end-to-end ``run_augment(mode="auto_ingest")``
+# integration tests so that removing the production validator call site
+# OR removing the production split-catch handler MAKES THE TEST FAIL.
+# Pattern lifted from tests/test_cycle13_frontmatter_migration.py
+# TestRunAugmentVerdictGuardIntegration (the same end-to-end pattern
+# already proven to drive the auto_ingest path).
+
+
+class TestAC03_OrchestratorIntegration:
+    """R2 Codex M-1 fix: integration test that exercises the
+    production ``run_augment(mode='auto_ingest')`` path. A spy on
+    ``orch_mod._validate_tier_boundary`` confirms the validator is
+    called from the production code path between ``_call_llm_json``
+    and the manifest-advance. If the call site at
+    ``orchestrator.py:512-515`` is removed, the spy records ZERO
+    invocations and this test FAILS — the desired regression-detection
+    behaviour."""
+
+    @staticmethod
+    def _patch_ingest_dirs(monkeypatch, tmp_project):
+        wiki = tmp_project / "wiki"
+        raw = tmp_project / "raw"
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw)
+        monkeypatch.setattr(
+            "kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json"
+        )
+        monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
+        monkeypatch.setattr(
+            "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        )
+
+    @staticmethod
+    def _setup_wiki(tmp_project, create_wiki_page):
+        wiki_dir = tmp_project / "wiki"
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Entities\n\n## Concepts\n\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+        (wiki_dir / "_categories.md").write_text("# Categories\n\n", encoding="utf-8")
+        # Stub page that augment will target.
+        create_wiki_page(
+            page_id="concepts/moe",
+            title="MoE",
+            content="Brief.",
+            wiki_dir=wiki_dir,
+            page_type="concept",
+            confidence="stated",
+        )
+        # Inbound link from a non-stub page to satisfy G2.
+        create_wiki_page(
+            page_id="entities/transformer",
+            title="Transformer",
+            content="See [[concepts/moe]] " * 5,
+            wiki_dir=wiki_dir,
+            page_type="entity",
+        )
+        return wiki_dir
+
+    @staticmethod
+    def _setup_httpx(httpx_mock):
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/robots.txt",
+            content=b"User-agent: *\nAllow: /\n",
+            headers={"content-type": "text/plain"},
+        )
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/wiki/MoE",
+            headers={"content-type": "text/html"},
+            content=(
+                b"<html><body><article><h1>MoE</h1><p>"
+                + b"Mixture of experts is a neural arch. " * 30
+                + b"</p></article></body></html>"
+            ),
+        )
+
+    def test_run_augment_calls_validator_on_extraction(
+        self, tmp_project, create_wiki_page, httpx_mock, monkeypatch
+    ):
+        """End-to-end: real ``run_augment(mode='auto_ingest')`` with a
+        spy on ``_validate_tier_boundary`` confirms the validator is
+        called at the production call site (orchestrator.py:512-515).
+
+        Removing the call site → spy.calls == 0 → assertion FAILS →
+        regression detected.
+        """
+        from unittest.mock import patch as mock_patch
+
+        from kb.lint import augment
+        from kb.lint.augment import orchestrator as orch_mod
+
+        wiki_dir = self._setup_wiki(tmp_project, create_wiki_page)
+        raw_dir = tmp_project / "raw"
+        self._patch_ingest_dirs(monkeypatch, tmp_project)
+        self._setup_httpx(httpx_mock)
+
+        fake_extraction = {
+            "title": "MoE",
+            "core_argument": "Mixture of experts.",
+            "key_claims": ["gating routes inputs"],
+            "entities_mentioned": [],
+            "concepts_mentioned": ["moe"],
+        }
+        fake_propose = {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/MoE"],
+            "rationale": "wp",
+        }
+        # Seed propose-mode (gate 1) to satisfy gate 2/3 contract.
+        with mock_patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
+
+        # Spy on the production validator (call-site at L512-515).
+        validator_calls: list = []
+        real_validator = orch_mod._validate_tier_boundary
+
+        def _spy(scan_output, *, expected_keys, **kw):
+            validator_calls.append({"scan_output": scan_output, "expected_keys": expected_keys})
+            return real_validator(scan_output, expected_keys=expected_keys, **kw)
+
+        monkeypatch.setattr(orch_mod, "_validate_tier_boundary", _spy)
+
+        with mock_patch(
+            "kb.lint.augment.proposer.call_llm_json",
+            side_effect=[
+                {"score": 0.95},  # relevance
+                fake_extraction,  # pre-extract
+            ],
+        ):
+            augment.run_augment(
+                wiki_dir=wiki_dir,
+                raw_dir=raw_dir,
+                mode="auto_ingest",
+                max_gaps=5,
+            )
+
+        # R2 Codex M-1 fix: the production call site MUST have been
+        # exercised. Removing the line at orchestrator.py:512-515 → 0
+        # calls → assertion fails. (NB: spy fires once per ingested
+        # stub; max_gaps=5 + 1 stub fixture → exactly 1 call.)
+        assert len(validator_calls) >= 1, (
+            "_validate_tier_boundary was NOT called from run_augment's "
+            f"auto_ingest path (got {len(validator_calls)} invocations). "
+            "If the production call site at orchestrator.py:512-515 was "
+            "removed, this is the desired failure."
+        )
+        # T5 anti-spoofing: expected_keys MUST be derived from the local
+        # schema (not from scan_output). Article schema has 10 fields;
+        # extraction has 5. Verify expected_keys is the schema-derived
+        # superset.
+        first_call = validator_calls[0]
+        assert "title" in first_call["expected_keys"]
+        assert "core_argument" in first_call["expected_keys"]
+        # Schema has more keys than the (non-conformant subset)
+        # extraction; if expected_keys was scan_output-derived, it
+        # would only have 5 keys.
+        assert len(first_call["expected_keys"]) > len(first_call["scan_output"]), (
+            "expected_keys appears to be derived from scan_output (T5 "
+            "self-validation vulnerability) — should be schema-derived"
+        )
+
+
+class TestAC04_OrchestratorRejectionIntegration:
+    """R2 Codex M-2 fix: integration test that exercises the
+    production split-catch at ``orchestrator.py:516-530``. Force
+    ``_validate_tier_boundary`` to raise; verify manifest records
+    reason with ``tier_boundary_rejected:`` literal prefix.
+
+    Removing the ``except TierBoundaryError`` branch (or changing the
+    prefix string) MAKES THIS TEST FAIL — the desired regression-
+    detection behaviour."""
+
+    def test_run_augment_records_distinct_reason_on_validator_reject(
+        self, tmp_project, create_wiki_page, httpx_mock, monkeypatch
+    ):
+        from unittest.mock import patch as mock_patch
+
+        from kb.lint import augment
+        from kb.lint.augment import orchestrator as orch_mod
+
+        # Reuse fixture pattern from TestAC03_OrchestratorIntegration.
+        TestAC03_OrchestratorIntegration._patch_ingest_dirs(monkeypatch, tmp_project)
+        wiki_dir = TestAC03_OrchestratorIntegration._setup_wiki(tmp_project, create_wiki_page)
+        raw_dir = tmp_project / "raw"
+        TestAC03_OrchestratorIntegration._setup_httpx(httpx_mock)
+
+        fake_propose = {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/MoE"],
+            "rationale": "wp",
+        }
+        with mock_patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
+
+        # Force the validator to ALWAYS raise. Production split-catch
+        # at orchestrator.py:516-530 MUST handle this.
+        def _always_reject(scan_output, *, expected_keys, **kw):
+            raise orch_mod.TierBoundaryError("extra key 'malicious_side_effect' not allowed")
+
+        monkeypatch.setattr(orch_mod, "_validate_tier_boundary", _always_reject)
+
+        # Provide a passing extraction (validator never accepts it
+        # because we forced raise — so extraction shape doesn't matter).
+        fake_extraction = {"title": "X"}
+
+        with mock_patch(
+            "kb.lint.augment.proposer.call_llm_json",
+            side_effect=[
+                {"score": 0.95},  # relevance
+                fake_extraction,  # pre-extract (validator rejects)
+            ],
+        ):
+            result = augment.run_augment(
+                wiki_dir=wiki_dir,
+                raw_dir=raw_dir,
+                mode="auto_ingest",
+                max_gaps=5,
+            )
+
+        # The production split-catch MUST have routed the
+        # TierBoundaryError to the distinct manifest-reason branch.
+        # Read result["ingests"] for the failed stub's reason.
+        ingests = result.get("ingests", [])
+        assert len(ingests) >= 1, (
+            "run_augment did not emit any ingest entries; cannot verify the rejection path"
+        )
+        # Find the failed entry.
+        failed_ingests = [i for i in ingests if i.get("status") == "failed"]
+        assert len(failed_ingests) >= 1, (
+            f"expected at least 1 failed ingest, got 0 (ingests={ingests})"
+        )
+
+        # R2 Codex M-2 fix: the literal forensic-distinct prefix MUST
+        # appear in the failed ingest's reason. If the production
+        # split-catch is removed (TierBoundaryError caught by generic
+        # `except Exception`), the reason would start with "pre-extract
+        # failed:" — assertion FAILS, regression detected.
+        rejection_reasons = [
+            r
+            for r in (i.get("reason", "") for i in failed_ingests)
+            if r.startswith("tier_boundary_rejected:")
+        ]
+        observed_reasons = [i.get("reason") for i in failed_ingests]
+        assert len(rejection_reasons) >= 1, (
+            "None of the failed ingests have the forensic-distinct "
+            f"'tier_boundary_rejected:' prefix; reasons={observed_reasons!r}. "
+            "If the production split-catch at orchestrator.py:516-530 "
+            "was removed/reordered, this is the desired failure."
+        )
+        # Anti-overlap: the legacy "pre-extract failed:" prefix MUST
+        # NOT appear on the rejected stub.
+        assert "pre-extract failed:" not in rejection_reasons[0], (
+            "rejection reason still uses the generic legacy prefix"
+        )
 
 
 class TestAC03_ValidatorMutation:
