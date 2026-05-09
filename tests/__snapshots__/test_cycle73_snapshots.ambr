@@ -1,0 +1,14 @@
+# serializer version: 1
+# name: test_persist_contradictions_snapshot
+  list([
+    '# Contradictions',
+    '',
+    'Append-only log of conflicts detected during ingest.',
+    '',
+    '',
+    '## raw/articles/example.md — 2026-05-09',
+    '- X states that Y is true.',
+    '- Z says Y is false.',
+    "- W disputes Z's grounding.",
+  ])
+# ---
