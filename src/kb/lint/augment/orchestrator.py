@@ -36,9 +36,8 @@ def _build_pre_extract_prompt(raw_content: str) -> str:
     (b) prepends the system-prompt-style assertion sentence reminding the
     LLM that fenced content is data not instructions.
     """
-    return (
-        "Extract structured data from this article per the schema."
-        + wrap_wiki_context(raw_content)
+    return "Extract structured data from this article per the schema." + wrap_wiki_context(
+        raw_content
     )
 
 
@@ -512,9 +511,7 @@ def run_augment(
                 # otherwise the validator self-validates (T5 spoofing).
                 _validate_tier_boundary(
                     extraction,
-                    expected_keys=frozenset(
-                        schema.get("properties", {}).keys()
-                    ),
+                    expected_keys=frozenset(schema.get("properties", {}).keys()),
                 )
             except TierBoundaryError as e:
                 # Cycle 73 AC04: forensic-distinct manifest reason.

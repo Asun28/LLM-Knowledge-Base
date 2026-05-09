@@ -67,9 +67,7 @@ _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
 _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS = MAX_CONSISTENCY_PAGE_CONTENT_CHARS - _FENCE_OVERHEAD
 
 
-def _render_sources(
-    sources: list[dict], lines: list[str], *, budget: int | None = None
-) -> None:
+def _render_sources(sources: list[dict], lines: list[str], *, budget: int | None = None) -> None:
     """Append source sections to lines with budget-aware truncation.
 
     Mutates `lines` in place. Tracks cumulative size so later sources
@@ -169,11 +167,7 @@ def build_fidelity_context(
     )
 
     return (
-        "\n".join(header_lines)
-        + "\n"
-        + wrap_wiki_context("\n".join(body_lines))
-        + "\n"
-        + closing
+        "\n".join(header_lines) + "\n" + wrap_wiki_context("\n".join(body_lines)) + "\n" + closing
     )
 
 
@@ -443,8 +437,7 @@ def build_consistency_context(
                             "chars — run kb_lint_deep for full body]"
                         )
                         content = (
-                            content[: _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS - len(marker)]
-                            + marker
+                            content[: _MAX_CONSISTENCY_WRAPPED_PAGE_CHARS - len(marker)] + marker
                         )
                 lines.append(f"### {pid}\n")
                 # Cycle 72 AC04: per-page wrap_wiki_context fence with the
@@ -522,9 +515,5 @@ def build_completeness_context(
     )
 
     return (
-        "\n".join(header_lines)
-        + "\n"
-        + wrap_wiki_context("\n".join(body_lines))
-        + "\n"
-        + closing
+        "\n".join(header_lines) + "\n" + wrap_wiki_context("\n".join(body_lines)) + "\n" + closing
     )
