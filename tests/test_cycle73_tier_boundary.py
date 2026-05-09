@@ -366,11 +366,17 @@ class TestAC03_ValidatorMutation:
     """Paired xfail-strict mutation control: identity-patching
     ``_validate_tier_boundary`` MUST break the extra-key rejection
     (proves the validator is load-bearing in the call chain).
+
+    Pattern (cycle-72 AC11): monkeypatch the helper to identity, then
+    assert the production-WITH-defense behavior. Under the patch, defense
+    is gone → assertion fails → xfail accepts. If defense was duplicated
+    elsewhere (architecture drift), assertion passes → XPASS-strict
+    fails the suite.
     """
 
     @pytest.mark.xfail(
         strict=True,
-        reason="cycle-73 AC03 mutation pin — passing means validator removed",
+        reason="cycle-73 AC03 mutation pin — XPASS means defense duplicated outside the helper",
     )
     def test_xfail_under_identity_validator(self, monkeypatch):
         from kb.errors import TierBoundaryError
@@ -385,15 +391,15 @@ class TestAC03_ValidatorMutation:
 
         scan = {"summary": "ok", "side_effects": "delete"}
 
-        raised = False
-        try:
+        # Assertion expects PRODUCTION-WITH-DEFENSE behaviour: extra key
+        # raises TierBoundaryError. Under identity patch, no exception
+        # → ``pytest.raises(TierBoundaryError)`` block fails with "DID
+        # NOT RAISE" → test FAILS → xfail accepts. If defense is
+        # somehow duplicated outside the helper (e.g. inline check at
+        # the call site), monkeypatch becomes a no-op, exception raised,
+        # ``pytest.raises`` accepts → test PASSES → XPASS-strict suite
+        # fail signals the duplication.
+        with pytest.raises(TierBoundaryError):
             orch_mod._validate_tier_boundary(
                 scan, expected_keys=frozenset({"summary"})
             )
-        except TierBoundaryError:
-            raised = True
-        # Production validator raises → raised=True. xfail expects FAIL →
-        # assert raised is False → with raised=True the assert FAILS →
-        # xfail-strict accepts. Under identity patch raised=False → assert
-        # passes → xfail-strict fails the suite.
-        assert raised is False
