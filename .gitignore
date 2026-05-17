@@ -69,3 +69,6 @@ feature-dev-Opus4.6.md
 cycle-*-scratch/
 
 tmp/
+
+# claude-mem local placeholder stub (auto-generated per session)
+.github/copilot-instructions.md
