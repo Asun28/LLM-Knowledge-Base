@@ -277,9 +277,16 @@ def test_ci_workflow_yaml_parses():
         "AC50 dedicated install step missing"
     )
 
-    # AC14: pip-audit invocation with the remaining documented ignore-vuln flags.
-    for cve_id in ("CVE-2025-69872",):
-        assert cve_id in raw, f"pip-audit must ignore {cve_id} (T4 mitigation)"
+    # AC14 (INVERTED cycle 76): the pip-audit step carries ZERO ignore-vuln
+    # flags — the last accepted advisory (diskcache CVE-2025-69872) left the
+    # dependency tree when the unused dspy pin was removed. Set-parity with
+    # the (now empty) SECURITY.md table is enforced by
+    # tests/test_cycle36_ci_hardening.py; here we pin the workflow side.
+    assert "--ignore-vuln=" not in raw, (
+        "ci.yml pip-audit gained an --ignore-vuln flag; accepted advisories "
+        "require a SECURITY.md table row + maintainer sign-off (cycle-76 "
+        "empty-state lock-in)"
+    )
 
     # T2 amendment: actions/checkout@v6 + actions/setup-python@v6 (not @v4/@v5)
     assert "actions/checkout@v6" in raw, "Step-6 amendment: bump checkout to @v6"
@@ -302,13 +309,10 @@ def test_pip_audit_invocation_audits_live_env():
     spinning up a fresh venv install that fails resolution.
     """
     raw = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    # Cycle 36: workflow switched from PowerShell backtick continuation to
-    # bash backslash continuation when CI matrix added ubuntu-latest (bash
-    # treats backtick as command-substitution start — broke pip-audit on
-    # POSIX). Accept either form for forward-compatibility.
-    audit_step_idx = raw.find("pip-audit \\")
-    if audit_step_idx < 0:
-        audit_step_idx = raw.find("pip-audit `")
+    # Cycle 76: the invocation is a bare `run: pip-audit` — the last
+    # ignore-vuln flag was dropped when diskcache left the dependency tree,
+    # so the cycle-36 backslash/backtick continuation forms no longer exist.
+    audit_step_idx = raw.find("run: pip-audit")
     assert audit_step_idx >= 0, "pip-audit invocation not found"
     audit_step_end = raw.find("\n\n", audit_step_idx)
     audit_step = raw[
@@ -319,9 +323,11 @@ def test_pip_audit_invocation_audits_live_env():
         f"pip-audit must audit live env, not requirements.txt (cycle-22 L1 trap); "
         f"audit step: {audit_step!r}"
     )
-    # Must still carry all documented ignore-vuln flags.
-    for cve in ("CVE-2025-69872",):
-        assert cve in audit_step, f"pip-audit step missing {cve} ignore"
+    # Cycle 76: exception-free audit — no ignore flags of any kind.
+    assert "--ignore-vuln" not in audit_step, (
+        "pip-audit step gained an ignore flag; see the cycle-76 empty-state "
+        "lock-in rationale in test_ci_workflow_yaml_parses"
+    )
     assert "CVE-2026-3219" not in audit_step, (
         "pip is upgraded to the fixed floor before audit; do not keep stale pip ignores"
     )

@@ -133,34 +133,29 @@ jobs:
         # public surface is clean, drop --warn-only in a follow-up cycle.
         run: python scripts/audit_docstrings.py --warn-only
 
-      - name: Pip resolver check (soft-fail per cycle 34 T5)
-        # T5 mitigation: three known conflicts (arxiv/requests, crawl4ai/lxml,
-        # instructor/rich) would fail strict pip check. continue-on-error is on
-        # THIS STEP ONLY (verified by cycle 34 Step-11 grep) — it does NOT
-        # propagate to ruff/pytest/pip-audit/build steps.
+      - name: Pip resolver check (STRICT — cycle 76 closure)
+        # Cycle 76 drops the cycle-34 T5 `continue-on-error: true` soft-fail.
+        # All four conflicts it tolerated are resolved: cycle 75 cleared
+        # arxiv/requests (arxiv 4.0.0), crawl4ai/lxml (Crawl4AI 0.9.2), and
+        # instructor/rich (venv drift — manifest already pinned rich 14.3.3);
+        # cycle 76 removed the unused dspy pin (the litellm gap) entirely.
+        # Any NEW resolver conflict now fails CI loudly.
         run: pip check
-        continue-on-error: true
 
-      - name: Pip-audit (live environment with documented narrow-role exceptions)
-        # cycle 34 fix-after-CI-failure-4: pip-audit's `--no-deps` flag does
-        # NOT prevent its underlying `pip install --dry-run` resolution step
-        # — it only suppresses transitive auditing.  The dry-run still trips
-        # cycle-22 L1's ResolutionImpossible on arxiv 2.4.1 vs requests 2.33.0.
-        # Fix: drop `-r requirements.txt` and audit the LIVE installed env
-        # instead.  Since the previous step installed every extra (`[dev,
-        # formats,augment,hybrid,eval]`), the live env IS the audit surface,
-        # and pip-audit just walks `pip list` without spinning up a fresh
-        # venv install.  Audit coverage equivalent; no resolution conflict.
-        # The --ignore-vuln ID matches SECURITY.md's "Known Advisories"
-        # table 1:1. ANY new CVE on this or other packages will fail this step.
-        # Cycle 36 fix — use bash backslash line-continuation (works on both
-        # ubuntu-latest bash and windows-latest pwsh shell-parsing modes).
-        # Previous PowerShell backtick `\`` worked on windows-latest but
-        # ubuntu-latest bash treats backtick as command-substitution start
-        # and misparsed the --ignore-vuln args as commands.
-        run: |
-          pip-audit \
-            --ignore-vuln=CVE-2025-69872
+      - name: Pip-audit (live environment — ZERO accepted advisories since cycle 76)
+        # cycle 34 fix-after-CI-failure-4: audit the LIVE installed env (no
+        # `-r requirements.txt`) — pip-audit's `--no-deps` flag does NOT
+        # prevent its underlying `pip install --dry-run` resolution step.
+        # Since the previous step installed every extra (`[dev,formats,
+        # augment,hybrid,eval]`), the live env IS the audit surface.
+        # Cycle 76: the last ignore flag (for CVE-2025-69872) DROPPED —
+        # diskcache left the dependency tree entirely (it was pulled only by
+        # the removed dspy pin; trafilatura 2.0.0 does not use it), so the
+        # SECURITY.md "Known Advisories" table is now EMPTY and this list
+        # mirrors it 1:1 (set-parity enforced by
+        # tests/test_cycle36_ci_hardening.py). ANY CVE on any installed
+        # package now fails this step — no exceptions.
+        run: pip-audit
 
 
       - name: dummy-key-leak-guard

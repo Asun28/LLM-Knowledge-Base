@@ -100,10 +100,22 @@ class TestSecurityMdIgnoreVulnParity:
             f"Cycle-36 Q17: Dependabot-only IDs belong in BACKLOG, not SECURITY.md."
         )
 
-    def test_workflow_ignore_vuln_nonempty(self):
-        # Sanity: regression guard against accidentally dropping the entire
-        # ignore list (would silently fail pip-audit on production CVEs).
-        assert len(self._workflow_ignore_vuln_ids()) >= 1
+    def test_workflow_ignore_vuln_empty_since_cycle76(self):
+        # INVERTED cycle-76 lock-in (was `test_workflow_ignore_vuln_nonempty`).
+        # Cycle 76 removed the unused dspy pin, which was the ONLY
+        # reverse-dependency of diskcache — eliminating the last accepted
+        # advisory (CVE-2025-69872) from the dependency tree and emptying
+        # the SECURITY.md Known Advisories table. The workflow ignore list
+        # mirrors that table 1:1, so it must now be EMPTY: pip-audit runs
+        # exception-free. If a future cycle accepts a new advisory, update
+        # this assertion alongside the SECURITY.md row + ci.yml flag (the
+        # set-equality test above keeps the two surfaces synchronized).
+        assert self._workflow_ignore_vuln_ids() == set(), (
+            "ci.yml pip-audit gained an --ignore-vuln flag; accepted "
+            "advisories require a SECURITY.md table row + maintainer "
+            "sign-off, and this cycle-76 empty-state lock-in must be "
+            "updated deliberately, not incidentally"
+        )
 
 
 class TestCycle23MultiprocessingSkipifMarker:

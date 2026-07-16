@@ -17,6 +17,23 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-17 — cycle 76 (dspy removal — accepted-advisory table emptied, CI fully strict)
+
+**Theme:**
+Finisher for the cycle-75 dep-hygiene lane. Removing the one unused pin (`dspy`) cascades into three closures: the last pip-check resolver conflict, the last accepted CVE (diskcache pickle-RCE), and both CI dependency gates going strict. Zero `src/kb/` changes.
+
+**What was done:**
+
+- **Removal set derivation.** `pip show dspy` → Required-by EMPTY (nothing needs it); zero `dspy` imports repo-wide (src, tests, scripts). Reverse-dependency walk over dspy's requires: `diskcache`, `gepa`, `optuna`, `asyncer`, `cloudpickle`, `json_repair` each have Required-by = dspy ONLY → removed with it (7 pins total dropped from requirements.txt + uninstalled from the venv). `xxhash` retained (also required by Crawl4AI, datasets, langgraph, langsmith).
+- **The diskcache discovery.** The SECURITY.md accepted-advisory rationale ("transitive of trafilatura's robots.txt cache") was STALE — trafilatura 2.0.0 neither declares nor imports diskcache (site-packages grep + Requires check). Its only dependent was dspy. Removing dspy therefore eliminates CVE-2025-69872 / PYSEC-2026-2447 (pickle-deserialization RCE, fix-less upstream since 2026-04) from the environment entirely — resolution by removal, not by patch.
+- **CI strictness.** `pip check` step: `continue-on-error: true` DROPPED (cycle-34 T5 soft-fail; all four tolerated conflicts resolved — three in cycle 75, the dspy→litellm gap here). `pip-audit` step: last `--ignore-vuln` flag DROPPED; invocation is now a bare `run: pip-audit` — ANY advisory on ANY installed package fails CI. Verification: local `pip check` → "No broken requirements found" (first fully-clean state since cycle 34); local `pip-audit` → 1 finding (nltk, fix-less, not installed in CI's pyproject-extras env).
+- **SECURITY.md.** diskcache row deleted per FORMAT GUIDE (resolved advisories become prose notes); "Known Advisories" table now EMPTY with an explicit empty-state banner; resolution note uses plain-text advisory IDs (no markdown-link form) so the cycle-36 set-parity regex correctly parses zero accepted IDs; stale arxiv-conflict rationale in the live-env-audit paragraph rewritten as historical.
+- **Test lock-ins (atomic per cycle-2 L1).** `test_cycle36_ci_hardening.py::test_workflow_ignore_vuln_nonempty` INVERTED → `test_workflow_ignore_vuln_empty_since_cycle76` (old guard defended against ACCIDENTAL ignore-list emptying; the empty state is now intentional and the inversion makes re-adding a flag a deliberate act requiring a SECURITY.md row). `test_cycle34_release_hygiene.py::test_ci_workflow_yaml_parses` AC14 block inverted (`--ignore-vuln=` must be ABSENT); `test_pip_audit_invocation_audits_live_env` locator reworked for the bare invocation (backslash/backtick continuation forms are gone), `-r requirements.txt` prohibition + stale-pip-ignore checks retained. ci.yml comment wording deliberately avoids the literal `--ignore-vuln=<ID>` token so the parity regex cannot false-positive on documentation.
+- **BACKLOG:** diskcache CVE entry DELETED (resolved by removal) + resolver-conflicts entry DELETED (cycle-34 AC52 fully closed).
+
+**src/kb/ changes:** ZERO. Files touched: requirements.txt (−7 pins), .github/workflows/ci.yml (2 steps), SECURITY.md, BACKLOG.md, tests/test_cycle34_release_hygiene.py, tests/test_cycle36_ci_hardening.py, CHANGELOG{,-history}.md, docs/reference/implementation-status.md.
+**Detail:** see CHANGELOG.md cycle-76.
+
 ### 2026-07-17 — cycle 75 (dep-hygiene re-check)
 
 **Theme:**
