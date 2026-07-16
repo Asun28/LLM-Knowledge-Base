@@ -17,6 +17,22 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-17 — cycle 75 (dep-hygiene re-check)
+
+**Theme:**
+Backlog-mandated upstream re-check of the tracked dependency CVEs and resolver conflicts ("track upstream for patched release / re-check at next cycle"). Zero `src/kb/` changes — manifests, venv, and security docs only.
+
+**What was checked and what changed:**
+
+- **pip-audit baseline (before):** 8 findings across 5 packages — diskcache PYSEC-2026-2447 (no fix), joserfc PYSEC-2026-2528/-2530 (fix 1.6.8), msgpack GHSA-6v7p-g79w-8964 (fix 1.2.1), nltk PYSEC-2026-597 (no fix), pip PYSEC-2026-196 (fix 26.1.2). **After:** 2 findings — only the two fix-less advisories (diskcache, nltk) remain.
+- **Patched:** `joserfc==1.6.8` (orphan dist — `pip show` Required-by is empty; pinned in requirements.txt anyway so Dependabot tracks it), `msgpack==1.2.1` (transitive via CacheControl; pinned), local `.venv` pip → 26.1.2 (tooling; CI already installs `pip>=26.1` since 2026-05-06 per SECURITY.md).
+- **Resolver conflicts (cycle-34 AC52 follow-up): 3 of 4 cleared.** PyPI metadata checks: instructor 1.15.4 still pins `rich<15` (no help), but crawl4ai 0.9.2 relaxed to `lxml<7,>=5.3` and arxiv 4.0.0 relaxed to `requests<2.34,>=2.32`; arxiv-mcp-server 0.4.11 allows `arxiv>=2.1.0` so the major bump is safe. Bumped `arxiv==4.0.0` + `Crawl4AI==0.9.2` in requirements.txt + venv. The instructor/rich conflict turned out to be **venv drift**: the manifest already pins `rich==14.3.3` (satisfying instructor's `<15`) while the venv had 15.0.0; an installed-distributions scan confirmed nothing requires `rich>=15`, so the venv was synced back to the manifest. `pip check` now reports only `dspy 3.1.3 requires litellm` — deliberate (litellm removed 2026-05-05 for its own CVE cascade; dspy has zero imports repo-wide). BACKLOG entry rewritten to the single remaining item with two removal options (drop the dspy pin, or await a dspy release making litellm optional), after which CI's `pip check` `continue-on-error: true` can be dropped.
+- **Still fix-less upstream:** diskcache 5.6.3 (still the latest release; SECURITY.md row + BACKLOG timestamp refreshed to 2026-07-17) and nltk (3.10.0 released, but the advisory lists NO fixed version — pip-audit's Fix-Versions column is empty — so a bump would be unverified churn; BACKLOG entry updated with the finding).
+- **BACKLOG deletion:** stale `.venv pip==26.0.1` CVE-2026-3219 entry — SECURITY.md had already resolved it on 2026-05-06 (CI `pip>=26.1` floor); the local venv is now 26.1.2 and pip-audit is clean for pip.
+
+**src/kb/ changes:** ZERO. Files touched: requirements.txt (4 bumps/pins), BACKLOG.md, SECURITY.md, CHANGELOG{,-history}.md.
+**Detail:** see CHANGELOG.md cycle-75.
+
 ### 2026-07-17 — cycle 74 (tier-boundary verifier hardening — closes all 3 cycle-74+ deferred entries)
 
 **Theme:**
