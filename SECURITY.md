@@ -22,19 +22,20 @@ We aim to acknowledge reports within 72 hours and to land a fix or documented mi
 
 ## Known Advisories
 
-The package below carries an open advisory with no installable upstream patch and remains in the transitive optional-dependency surface. It is tracked with a re-check cadence and a verification grep confirming the package is not used by `src/kb/` runtime.
+**The accepted-advisory table is currently EMPTY** — as of cycle 76 (2026-07-17) no installed package carries an accepted open advisory, and the CI `pip-audit` step runs with zero `--ignore-vuln=` exceptions. When a new advisory must be accepted, restore a row per the FORMAT GUIDE above.
 
 | Package | Version | Advisory | Fix? | Narrow role | Verification grep |
 |---|---|---|---|---|---|
-| `diskcache` | 5.6.3 | [CVE-2025-69872](https://nvd.nist.gov/vuln/detail/CVE-2025-69872) (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in cache files. | None as of 2026-07-17, cycle-75 re-check (`pip-audit` reports empty `fix_versions`; 5.6.3 is still the latest PyPI release). | Transitive of `trafilatura`'s robots.txt cache. Exploit requires local write access to the cache directory. | `grep -rnE "diskcache\|DiskCache\|FanoutCache" src/kb` → zero direct imports. |
+
+Resolved 2026-07-17 (cycle 76): the `diskcache` 5.6.3 pickle-deserialization RCE row (CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v) is gone because `diskcache` left the dependency tree entirely. Its ONLY reverse-dependency was the unused `dspy` pin (`pip show diskcache` → Required-by: dspy; zero `dspy`/`diskcache` imports repo-wide); the former "transitive of trafilatura's robots.txt cache" rationale was stale — `trafilatura` 2.0.0 neither declares nor imports it. Cycle 76 removed `dspy` and its six orphan-only transitive pins (`diskcache`, `gepa`, `optuna`, `asyncer`, `cloudpickle`, `json_repair`) from `requirements.txt` and the venv, dropped the last `--ignore-vuln=CVE-2025-69872` flag from CI, and made the CI `pip check` step strict (the dspy→litellm gap was the last tolerated resolver conflict). `diskcache` imports in `src/kb/` remain forbidden by the CVE-banned-imports guard test.
 
 Resolved 2026-05-05: the optional eval harness no longer declares `ragas` or the `litellm` distribution. Dependabot alerts #12 through #15 were closed by removing both package names from `pyproject.toml` `[eval]` and `requirements.txt`. RAGAS had no patched release (`0.4.3` was still latest on PyPI), and patched LiteLLM releases still required `click==8.1.8`, conflicting with this repo's `click==8.3.2` pin. The separate `unclecode-litellm` distribution remains a `crawl4ai` devtime dependency in `requirements.txt`; production `src/kb/` imports of the top-level `litellm` module remain forbidden by `tests/test_security_cve_greps.py`.
 
 Resolved 2026-05-06: CI now upgrades `pip` to `>=26.1` before dependency installs and before the live-environment audit. This removes the prior accepted `CVE-2026-3219` `pip` row and also clears the later `CVE-2026-6357` finding reported against runner-provided `pip 26.0.1`.
 
-The advisory ID above is explicitly listed in `.github/workflows/ci.yml` `pip-audit` step via `--ignore-vuln=` so the CI gate's green-checkmark means "no NEW CVE since cycle 34." Adding any new advisory to the ignore list requires (a) a verification grep, (b) a row in this table, (c) sign-off from the maintainer.
+The `--ignore-vuln=` list in the `.github/workflows/ci.yml` `pip-audit` step mirrors this table 1:1 (set-parity enforced by `tests/test_cycle36_ci_hardening.py`) — both are empty since cycle 76, so the CI gate's green-checkmark means "no CVE on any installed package, no exceptions." Adding any new advisory to the ignore list requires (a) a verification grep, (b) a row in this table, (c) sign-off from the maintainer.
 
-The CI pip-audit step audits the **live installed environment** (no `-r requirements.txt`) — see cycle-34 fix-after-CI-failure-4 in `.github/workflows/ci.yml`. Audit coverage is equivalent because the previous CI step installs every extra (`[dev,formats,augment,hybrid,eval]`), so the live env carries the full pin set. Auditing the live env avoids pip-audit's underlying `pip install --dry-run` step, which trips ResolutionImpossible on `arxiv 2.4.1` ↔ `requests 2.33.0` (cycle-22 L1).
+The CI pip-audit step audits the **live installed environment** (no `-r requirements.txt`) — see cycle-34 fix-after-CI-failure-4 in `.github/workflows/ci.yml`. Audit coverage is equivalent because the previous CI step installs every extra (`[dev,formats,augment,hybrid,eval]`), so the live env carries the full pin set. Auditing the live env avoids pip-audit's underlying `pip install --dry-run` resolution step (the historical trigger was the since-resolved `arxiv 2.4.1` ↔ `requests 2.33.0` conflict — cycle-22 L1; the live-env form remains the safer default).
 
 ## Re-check Cadence
 
@@ -62,4 +63,4 @@ This policy does NOT cover:
 
 ---
 
-*Last reviewed: 2026-07-17 (cycle 75 dep-hygiene re-check: joserfc 1.6.8 + msgpack 1.2.1 + local pip 26.1.2 patched; arxiv 4.0.0 + Crawl4AI 0.9.2 bumps + venv rich sync cleared 3 of 4 pip-check resolver conflicts; diskcache + nltk advisories remain fix-less upstream).*
+*Last reviewed: 2026-07-17 (cycle 76: dspy + 6 orphan pins removed → diskcache CVE-2025-69872 eliminated from the tree, accepted-advisory table now EMPTY, CI pip-audit runs exception-free, CI pip check strict. Cycle 75 earlier the same day: joserfc 1.6.8 + msgpack 1.2.1 + local pip 26.1.2 patched; arxiv 4.0.0 + Crawl4AI 0.9.2 + venv rich sync. Remaining fix-less upstream advisory: nltk GHSA-p4gq-832x-fm9v — transitive, not installed in CI, tracked in BACKLOG.)*

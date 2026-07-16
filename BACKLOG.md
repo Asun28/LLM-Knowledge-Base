@@ -57,9 +57,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write. Cycle 24 AC9 added exponential backoff to `file_lock`; the JSONL-migration part remains open. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
-- `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 / PYSEC-2026-2447 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE. No patched upstream as of 2026-07-17 (cycle 75 re-check: 5.6.3 is still the latest PyPI release).
-  (mitigation: diskcache used only by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports; track upstream for patched release)
-
 - `requirements.txt` `nltk==3.9.4` — GHSA-p4gq-832x-fm9v / PYSEC-2026-597 (CVSS 7.5): URL-encoded path-traversal in `nltk.data.load()` — `%2f`/`%2e` sequences pass the `_UNSAFE_NO_PROTOCOL_RE` check before decoding (decode-after-check), enabling arbitrary local file reads. Cycle-75 re-check (2026-07-17): nltk 3.10.0 released BUT the advisory still lists NO fixed version — pip-audit flags 3.9.4 with an empty Fix-Versions column, so a 3.10.0 bump would be unverified churn, not a remediation. Re-check whether the advisory gains a fixed-version stamp next cycle.
   (mitigation: nltk is TRANSITIVE only (pulled by Crawl4AI + textstat); `grep -rnE "import nltk|from nltk" src/kb` confirms zero direct imports; exploit requires attacker-controlled resource names reaching `nltk.data.load()`, which no kb code path invokes. Track upstream for patched release.)
 
@@ -80,8 +77,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
   (cycle-74+: identify NEW snapshot candidates as the diff surface evolves; `mutmut` mutation-coverage analysis below tracks the regression-strength side.)
 
 - `tests/` N=40 FastMCP-realistic dim-mismatch concurrency stress (cycle-65+) — cycle 64 AC8's `test_concurrent_query_during_rebuild_idempotent` exercises N=4 threads and proves idempotency via embeddings.py:302+307 double-checked locking. N=40 deferred per R2-F6 (test-harness infrastructure complexity without proportional cycle-64 win).
-
-- `requirements.txt` resolver conflicts (cycle-34 AC52 follow-up; cycle-75 re-check 2026-07-17 cleared 3 of 4) — `pip check` now reports ONE known conflict that CI accepts via `continue-on-error: true`: `dspy 3.1.3` requires `litellm`, which is deliberately NOT installed (litellm distribution removed 2026-05-05 for its own CVE cascade; dspy is not imported by `src/kb/`). Cleared in cycle 75: (a) arxiv bumped 2.4.1→4.0.0 (`requests<2.34` now accepts 2.33.0); (b) Crawl4AI bumped 0.9.0→0.9.2 (`lxml<7,>=5.3` now accepts 6.1.1); (c) venv `rich` synced back to the manifest pin 14.3.3 (the 15.0.0 install was venv drift — instructor's `rich<15` is satisfied by the manifest; nothing installed requires `rich>=15`). Remaining options for (d): remove the `dspy==3.1.3` pin entirely (nothing in src/kb/ or scripts/ imports it), or wait for a dspy release that makes litellm optional. Then drop the `continue-on-error: true` directive from the `pip check` CI step.
 
 - `ingest/pipeline.py` real PDF text extraction (cycle-N+1 if requested) — cycle 34 AC24 removed `.pdf` from `SUPPORTED_SOURCE_EXTENSIONS`; user-facing message points at `markitdown` / `docling` for conversion. If in-process extraction is requested: integrate `pypdf` or `pdfplumber` as a `[pdf]` extra with size + page caps; or add a `kb convert <pdf>` CLI subcommand wrapping markitdown.
 
