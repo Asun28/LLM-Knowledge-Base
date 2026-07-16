@@ -144,7 +144,7 @@ marko==2.2.2
 MarkupSafe==3.0.3
 marshmallow==3.26.2
 matplotlib-inline==0.2.1
-mcp==1.27.0
+mcp==1.28.1
 mcp-server-sqlite==2025.4.25
 mdurl==0.1.2
 model2vec==0.8.1

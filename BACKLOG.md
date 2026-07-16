@@ -60,6 +60,9 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `lint/fetcher.py` `diskcache==5.6.3` — CVE-2025-69872 (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE. No patched upstream as of last re-check.
   (mitigation: diskcache used only by trafilatura's robots.txt cache; exploit requires local write access to the cache directory; `grep -rnE "diskcache|DiskCache|FanoutCache" src/kb` confirms zero direct imports; track upstream for patched release)
 
+- `requirements.txt` `nltk==3.9.4` — GHSA-p4gq-832x-fm9v (CVSS 7.5): URL-encoded path-traversal in `nltk.data.load()` — `%2f`/`%2e` sequences pass the `_UNSAFE_NO_PROTOCOL_RE` check before decoding (decode-after-check), enabling arbitrary local file reads. No patched upstream as of 2026-07-17.
+  (mitigation: nltk is TRANSITIVE only (pulled by Crawl4AI + textstat); `grep -rnE "import nltk|from nltk" src/kb` confirms zero direct imports; exploit requires attacker-controlled resource names reaching `nltk.data.load()`, which no kb code path invokes. Track upstream for patched release.)
+
 - `.venv` `pip==26.0.1` — CVE-2026-3219 (GHSA-58qw-9mgm-455v): pip handles concatenated tar+ZIP files as ZIP regardless of filename. No confirmed patched upstream.
   (mitigation: pip is TOOLING, not runtime; advisory affects `pip install` of adversarial payloads which requires local shell access. Production `kb` runtime never shells out to pip. Track upstream.)
 
