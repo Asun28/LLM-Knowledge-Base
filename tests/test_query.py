@@ -337,7 +337,9 @@ class TestFlagStaleResultsEdgeCases:
         source.parent.mkdir()
         source.write_text("source\n", encoding="utf-8")
 
-        source_date = date(2026, 4, 1)
+        # date.today(), not a fixed date — the Signal-2 decay gate flags pages
+        # older than SOURCE_DECAY_DEFAULT_DAYS, so a hardcoded date ages out.
+        source_date = date.today()
         source_time = datetime.combine(source_date, time.min, tzinfo=UTC).timestamp()
         os.utime(source, (source_time, source_time))
 
@@ -346,7 +348,9 @@ class TestFlagStaleResultsEdgeCases:
             project_root=tmp_path,
         )
 
-        assert results == [{"updated": "2026-04-01", "sources": ["raw/source.md"], "stale": False}]
+        assert results == [
+            {"updated": source_date.isoformat(), "sources": ["raw/source.md"], "stale": False}
+        ]
 
 
 # ── Tier-1 budget wiring (cycle 52 fold) ─
