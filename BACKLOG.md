@@ -129,6 +129,19 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 
 **Recommended next target:** #1 (`wiki/_schema.md` + `AGENTS.md` thin shim). Low effort, opens portability to non-Claude coding agents. Contained blast radius in `kb.schema.load()` + `kb_lint` integration.
 
+### HIGH LEVERAGE — OpenWiki-inspired automation (2026-07-16)
+
+<!-- Sourced from a comparative review of langchain-ai/openwiki (TypeScript, LangChain/DeepAgents, ~11.7k stars).
+     Openwiki validates the compile-not-retrieve bet; these two items port its automation plumbing.
+     Deliberately NOT adopted: frontmatter-less pages (loses provenance), prompt-only quality rules
+     (flywheel mechanizes these via lint/verdicts), unfenced connector→LLM content flow (injection surface). -->
+
+- `.github/workflows/` scheduled wiki-maintenance PR workflow — cron GHA workflow that runs drift detection (`kb_detect_drift`) → refine sweep (`kb_refine_sweep`) → `kb lint` and opens a reviewable PR with the resulting page updates. Adopt openwiki's update contract in the maintenance prompt: build a docs-impact plan before editing; only touch pages made inaccurate by source changes; no formatting-only edits; a no-op run ends without a PR. Operationalizes the flywheel; low-risk subset of the deferred "autonomous research loop". Source: langchain-ai/openwiki CI workflow templates.
+  (effort: Medium — headless `kb maintain` CLI entrypoint wrapping drift-detect/refine-sweep + GHA workflow + PR body formatter with per-page change summary)
+
+- `ingest/connectors/` pluggable connector framework — deterministic per-source fetchers (local git repo, web search, Hacker News; RSS/mail later) each writing raw content + a fetch manifest under `raw/connectors/<name>/`, with multi-instance config (`web-search-1`, `web-search-2`) and selective runs (`kb ingest-connector <name>|all`). Synthesis stays in the existing ingest pipeline — connectors only fetch. Supersets the URL-aware `kb_ingest` adapter entry under "Ingest & Query Convenience" below. Hard requirement: all connector output passes the `wrap_wiki_context` fence + `.llmwikiignore`/secret-scanner rail before any LLM call — openwiki itself ships no such boundary and this is flywheel's differentiator. Source: langchain-ai/openwiki connector architecture.
+  (effort: High — connector ABC + manifest schema + 2 reference connectors + config plumbing + secret-scanner integration)
+
 ### HIGH LEVERAGE — Epistemic Integrity 2.0
 
 - `ingest/pipeline.py` subsection-level provenance — allow `source: raw/file.md#heading` or `raw/file.md:L42-L58` deep-links in frontmatter; ingest extractor captures heading context. Source: Agent-Wiki (kkollsga, gist).
