@@ -100,12 +100,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 - `tests/` mutmut mutation-coverage analysis on cycle-64 regression suite (cycle-65+) — run `mutmut` (or `cosmic-ray`) over the 6 new cycle-64 test files (`test_cycle64_conftest_leak.py`, `test_cycle64_dim_mismatch_autorebuild.py`, `test_cycle64_graph_cache.py`, `test_cycle64_auto_publish.py`, `test_cycle64_publish_manifest.py`, `test_cycle64_snapshots.py`) to identify mutants that survive — i.e., production-code mutations no test catches.
 
-- `lint/augment/orchestrator.py` `_validate_tier_boundary` `max_keys` DoS bound (deferred — file BACKLOG entry post-cycle-73) — surfaced by cycle-73 R2 DeepSeek F-2. Cycle-73 AC03 ships `max_depth=4` + `max_string_len=4096` bounds but does NOT cap the NUMBER of top-level keys. An LLM-injected scan-tier response with `expected_keys=frozenset({"summary"})` plus 100k legitimate-key-named entries would be REJECTED by the extra-key check at top-level — but a scan-tier-with-broad-schema (e.g. allowing 50+ key types) could legitimately receive a 1k-key dict that exhausts memory in the depth walker. Defense-in-depth complement; cycle-74+ to add `max_keys: int = 500` default with override path.
-
-- `lint/augment/proposer.py:91, :168` same-class peer `_validate_tier_boundary` application (deferred — file BACKLOG entry post-cycle-73) — surfaced by cycle-73 R1 Opus C2. Cycle-73 AC03 scopes the validator to `orchestrator.py:394` (auto_ingest pre-extract path). The two `_call_llm_json(tier="scan", schema=...)` peer call sites in `proposer.py` (`_propose_urls` at L91, `_relevance_score` at L168) flow into the proposer-tier persister WITHOUT the same re-gate. Forensic blast-radius for these two paths is narrower (proposer outcomes are written to a manifest, not directly executed as side effects), but the same-class discipline applies. Cycle-74+ to extend the validator to both peers with site-specific `expected_keys` derivation.
-
-- `lint/augment/orchestrator.py` `_validate_tier_boundary` enforcement-on-output schema (cycle-74+ defense-in-depth idea, surfaced by cycle-73 R2 F-3) — cycle-73 AC03 rejects EXTRA keys but accepts MISSING keys (downstream consumers use `.get(...)` for optional fields). A future defense could optionally enforce REQUIRED keys per JSONSchema's `"required": [...]` list — separately from `expected_keys`. Pure additive; non-blocking for cycle-73 ship.
-
 ---
 
 ## Phase 5 — Community followup proposals (2026-04-12)
