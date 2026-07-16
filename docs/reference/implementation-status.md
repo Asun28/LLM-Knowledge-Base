@@ -13,7 +13,7 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Metric | Value |
 |--------|-------|
-| Tests | 3394 passed + 24 skipped + 16 xfailed (3434 collected) |
+| Tests | 3397 passed + 24 skipped + 16 xfailed (3437 collected) |
 | Test files | ~241 |
 | Version | v0.12.0 |
 | CI | ubuntu-latest strict-gated (cycle 36+); windows-latest deferred to cycle-53+ |
@@ -22,7 +22,7 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Cycle | Date | Theme | Tests | Files |
 |-------|------|-------|-------|-------|
-| 74 | 2026-07-17 | Tier-boundary verifier hardening (max_keys + proposer re-gates + required_keys) | 3413→3434 (+21) | 239→241 |
+| 74 | 2026-07-17 | Tier-boundary verifier hardening (max_keys + proposer/capture re-gates + required_keys) | 3413→3437 (+24) | 239→241 |
 | 73 | 2026-05-09 | Completeness wrap + verdict prompt-version + tier-boundary verifier + hygiene | 3369→3411 (+42) | 234→239 |
 | 72 | 2026-05-09 | wrap_wiki_context residual-surface completion | ~3345→~3369 (+24) | ~233→~234 |
 | 71 | 2026-05-09 | wrap_wiki_context sibling-surface completion | ~3288→~3306 (+18) | ~234→~235 |

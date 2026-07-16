@@ -277,15 +277,29 @@ class TestAC02_RelevanceScoreRegate:
     """The scan-tier relevance response is validated before consumption;
     rejection fails closed to 0.0 (below any sane threshold)."""
 
-    def test_extra_key_response_returns_zero(self):
+    def test_extra_key_response_returns_zero(self, caplog):
+        """R1 Codex MINOR-3 fix: 0.0 alone is ambiguous (the generic
+        handler also returns it) — the distinct ``tier_boundary_rejected``
+        log marker proves the SPLIT-CATCH branch handled the rejection,
+        not the generic ``except Exception`` fallback."""
+        import logging
+
         from kb.lint.augment import _relevance_score
 
-        with patch(
-            "kb.lint.augment.proposer.call_llm_json",
-            return_value={"score": 0.9, "side_effects": "delete_all"},
-        ):
-            score = _relevance_score(stub_title="X", extracted_text="some text")
+        with caplog.at_level(logging.WARNING, logger="kb.lint.augment.proposer"):
+            with patch(
+                "kb.lint.augment.proposer.call_llm_json",
+                return_value={"score": 0.9, "side_effects": "delete_all"},
+            ):
+                score = _relevance_score(stub_title="X", extracted_text="some text")
         assert score == 0.0
+        assert "tier_boundary_rejected" in caplog.text, (
+            "rejection was not routed through the TierBoundaryError "
+            "split-catch (distinct log marker missing)"
+        )
+        assert "LLM call failed" not in caplog.text, (
+            "rejection fell through to the generic exception handler"
+        )
 
     def test_non_dict_response_returns_zero_without_crash(self):
         """Latent-crash closure: a non-dict response previously reached
@@ -354,54 +368,210 @@ class TestAC02_RelevanceScoreRegate:
 class TestAC03_OrchestratorRequiredKeysPlumb:
     """The auto_ingest call site (orchestrator.py L512 region) now passes
     ``required_keys=frozenset(schema.get('required', []))`` alongside the
-    cycle-73 ``expected_keys``. Spy replay of the production 2-line
-    sequence with the PRODUCTION article schema (via
-    ``_build_schema_cached``) — the schema-derivation expressions are
-    asserted verbatim against the captured kwargs."""
+    cycle-73 ``expected_keys``.
 
-    def test_required_keys_derived_from_article_schema(self, monkeypatch):
+    R1 Codex MINOR-2 fix: exercised through the REAL
+    ``run_augment(mode='auto_ingest')`` path (fixture pattern lifted from
+    cycle-73's ``TestAC03_OrchestratorIntegration``) — a replay-style test
+    would keep passing even if the production call site dropped the
+    ``required_keys`` kwarg."""
+
+    @staticmethod
+    def _patch_ingest_dirs(monkeypatch, tmp_project):
+        wiki = tmp_project / "wiki"
+        raw = tmp_project / "raw"
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw)
+        monkeypatch.setattr(
+            "kb.compile.compiler.HASH_MANIFEST", tmp_project / ".data" / "hashes.json"
+        )
+        monkeypatch.setattr("kb.lint.augment.manifest.MANIFEST_DIR", tmp_project / ".data")
+        monkeypatch.setattr(
+            "kb.lint.augment.rate.RATE_PATH", tmp_project / ".data" / "augment_rate.json"
+        )
+
+    @staticmethod
+    def _setup_wiki(tmp_project, create_wiki_page):
+        wiki_dir = tmp_project / "wiki"
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Entities\n\n## Concepts\n\n", encoding="utf-8"
+        )
+        (wiki_dir / "_sources.md").write_text("# Sources\n\n", encoding="utf-8")
+        (wiki_dir / "_categories.md").write_text("# Categories\n\n", encoding="utf-8")
+        create_wiki_page(
+            page_id="concepts/moe",
+            title="MoE",
+            content="Brief.",
+            wiki_dir=wiki_dir,
+            page_type="concept",
+            confidence="stated",
+        )
+        create_wiki_page(
+            page_id="entities/transformer",
+            title="Transformer",
+            content="See [[concepts/moe]] " * 5,
+            wiki_dir=wiki_dir,
+            page_type="entity",
+        )
+        return wiki_dir
+
+    @staticmethod
+    def _setup_httpx(httpx_mock):
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/robots.txt",
+            content=b"User-agent: *\nAllow: /\n",
+            headers={"content-type": "text/plain"},
+        )
+        httpx_mock.add_response(
+            url="https://en.wikipedia.org/wiki/MoE",
+            headers={"content-type": "text/html"},
+            content=(
+                b"<html><body><article><h1>MoE</h1><p>"
+                + b"Mixture of experts is a neural arch. " * 30
+                + b"</p></article></body></html>"
+            ),
+        )
+
+    def test_run_augment_passes_required_keys_to_validator(
+        self, tmp_project, create_wiki_page, httpx_mock, monkeypatch
+    ):
+        from unittest.mock import patch as mock_patch
+
         from kb.ingest.extractors import _build_schema_cached
+        from kb.lint import augment
         from kb.lint.augment import orchestrator as orch_mod
-        from kb.lint.augment import proposer as proposer_mod
+
+        wiki_dir = self._setup_wiki(tmp_project, create_wiki_page)
+        raw_dir = tmp_project / "raw"
+        self._patch_ingest_dirs(monkeypatch, tmp_project)
+        self._setup_httpx(httpx_mock)
+
+        fake_extraction = {
+            "title": "MoE",
+            "core_argument": "Mixture of experts.",
+            "key_claims": ["gating routes inputs"],
+            "entities_mentioned": [],
+            "concepts_mentioned": ["moe"],
+        }
+        fake_propose = {
+            "action": "propose",
+            "urls": ["https://en.wikipedia.org/wiki/MoE"],
+            "rationale": "wp",
+        }
+        with mock_patch("kb.lint.augment.proposer.call_llm_json", return_value=fake_propose):
+            augment.run_augment(wiki_dir=wiki_dir, raw_dir=raw_dir, mode="propose", max_gaps=5)
 
         captured: list[dict] = []
+        real_validator = orch_mod._validate_tier_boundary
 
         def _spy(scan_output, *, expected_keys, required_keys=frozenset(), **kw):
             captured.append(
                 {"expected_keys": expected_keys, "required_keys": required_keys}
             )
-            return scan_output
+            return real_validator(
+                scan_output,
+                expected_keys=expected_keys,
+                required_keys=required_keys,
+                **kw,
+            )
 
         monkeypatch.setattr(orch_mod, "_validate_tier_boundary", _spy)
 
+        with mock_patch(
+            "kb.lint.augment.proposer.call_llm_json",
+            side_effect=[
+                {"score": 0.95},  # relevance
+                fake_extraction,  # pre-extract
+            ],
+        ):
+            augment.run_augment(
+                wiki_dir=wiki_dir,
+                raw_dir=raw_dir,
+                mode="auto_ingest",
+                max_gaps=5,
+            )
+
+        # The production auto_ingest call site MUST pass the schema-derived
+        # required_keys. If the kwarg is dropped, the spy default
+        # (frozenset()) records empty → assertion fails.
+        assert len(captured) >= 1, (
+            "_validate_tier_boundary was not called from run_augment's "
+            "auto_ingest path"
+        )
         schema = _build_schema_cached("article")
-        scan_response = {"title": "X"}
-        monkeypatch.setattr(
-            proposer_mod, "_call_llm_json", lambda *a, **kw: scan_response
+        assert captured[0]["required_keys"] == frozenset(schema.get("required", [])), (
+            "production call site did not pass the schema-derived "
+            f"required_keys; got {captured[0]['required_keys']!r}"
         )
-
-        # Replay the production sequence at the orchestrator call site.
-        extraction = proposer_mod._call_llm_json(
-            orch_mod._build_pre_extract_prompt("Synthetic raw content"),
-            tier="scan",
-            schema=schema,
-        )
-        orch_mod._validate_tier_boundary(
-            extraction,
-            expected_keys=frozenset(schema.get("properties", {}).keys()),
-            required_keys=frozenset(schema.get("required", [])),
-        )
-
-        assert len(captured) == 1
-        assert captured[0]["required_keys"] == frozenset(schema.get("required", []))
         # Fix 2.6 in build_extraction_schema guarantees a non-empty
-        # required list whenever properties exist — so this plumb is
-        # never vacuous for the article schema.
-        assert captured[0]["required_keys"], (
-            "article schema 'required' list is empty — the required_keys "
-            "plumb would be vacuous; check build_extraction_schema Fix 2.6"
-        )
+        # required list whenever properties exist — never vacuous.
+        assert captured[0]["required_keys"]
         assert captured[0]["required_keys"] <= captured[0]["expected_keys"]
+
+
+# ── R1 Codex M-1 — capture.py `_extract_items_via_llm` re-gate ────────
+
+
+class TestR1M1_CaptureRegate:
+    """Cycle-74 R1 Codex MAJOR-1 fix: `capture.py:_extract_items_via_llm`
+    was the last scan-tier ``call_llm_json`` site in src/kb/ without the
+    tier-boundary re-gate — and its response drives capture FILE
+    CREATION. Rejection is loud (TierBoundaryError propagates), matching
+    the function's existing raises-on-failure contract."""
+
+    def test_extra_key_response_raises_tier_boundary_error(self, monkeypatch):
+        from kb import capture as capture_mod
+        from kb.lint.augment import tier_boundary as tb_mod
+
+        monkeypatch.setattr(
+            capture_mod,
+            "call_llm_json",
+            lambda *a, **kw: {
+                "items": [],
+                "filtered_out_count": 0,
+                "side_effects": "delete_all",
+            },
+        )
+        with pytest.raises(tb_mod.TierBoundaryError, match="side_effects"):
+            capture_mod._extract_items_via_llm("some content")
+
+    def test_missing_required_key_raises_tier_boundary_error(self, monkeypatch):
+        """``_CAPTURE_SCHEMA['required'] == ['items', 'filtered_out_count']``
+        — a response missing either is a clean rejection instead of the
+        former downstream ``KeyError`` at ``response['items']``."""
+        from kb import capture as capture_mod
+        from kb.lint.augment import tier_boundary as tb_mod
+
+        monkeypatch.setattr(
+            capture_mod, "call_llm_json", lambda *a, **kw: {"items": []}
+        )
+        with pytest.raises(tb_mod.TierBoundaryError, match="required key"):
+            capture_mod._extract_items_via_llm("some content")
+
+    def test_well_formed_response_passes_through(self, monkeypatch):
+        """Positive control: a schema-conformant response (realistic item
+        shape at the production nesting depth root→items→dict→str) passes
+        the re-gate unchanged."""
+        from kb import capture as capture_mod
+
+        good = {
+            "items": [
+                {
+                    "title": "T",
+                    "kind": "decision",
+                    "body": "some content",
+                    "one_line_summary": "s",
+                    "confidence": "stated",
+                }
+            ],
+            "filtered_out_count": 0,
+        }
+        monkeypatch.setattr(capture_mod, "call_llm_json", lambda *a, **kw: dict(good))
+        result = capture_mod._extract_items_via_llm("some content")
+        assert result == good
 
 
 # ── Paired xfail-strict mutation controls (cycle-72 AC11 pattern) ─────
