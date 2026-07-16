@@ -7,6 +7,8 @@ import sys
 from typing import Any
 
 from kb import config
+from kb.errors import TierBoundaryError
+from kb.lint.augment.tier_boundary import _validate_tier_boundary
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.llm import call_llm_json
 from kb.utils.text import sanitize_extraction_field, wrap_purpose, wrap_wiki_context
@@ -85,10 +87,31 @@ def _build_proposer_prompt(stub: dict[str, Any], purpose_text: str) -> str:
 
 
 def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
-    """Call scan-tier LLM proposer with eligibility-filtered stub."""
+    """Call scan-tier LLM proposer with eligibility-filtered stub.
+
+    Cycle 74 AC02 — same-class peer of the cycle-73 AC03 orchestrator
+    re-gate (closes cycle-73 R1 Opus C2): the scan-tier response is
+    validated by ``_validate_tier_boundary`` before the proposer-tier
+    persister consumes it. ``expected_keys`` / ``required_keys`` are
+    derived from the LOCAL ``_PROPOSER_SCHEMA`` (T5 anti-spoofing — never
+    from the response itself). Rejection is fail-closed: abstain with the
+    forensic-distinct ``tier_boundary_rejected:`` reason prefix (split-
+    catch BEFORE the generic handler, mirroring the orchestrator's AC04
+    manifest-reason discipline).
+    """
     prompt = _build_proposer_prompt(stub, purpose_text)
     try:
         response = _call_llm_json(prompt, tier="scan", schema=_PROPOSER_SCHEMA)
+        _validate_tier_boundary(
+            response,
+            expected_keys=frozenset(_PROPOSER_SCHEMA["properties"].keys()),
+            required_keys=frozenset(_PROPOSER_SCHEMA["required"]),
+        )
+    except TierBoundaryError as e:
+        logger.warning(
+            "Proposer tier_boundary_rejected for %s: %s", stub.get("page_id"), e
+        )
+        return {"action": "abstain", "reason": f"tier_boundary_rejected: {e}"}
     except Exception as e:
         logger.warning("Proposer LLM call failed for %s: %s", stub.get("page_id"), e)
         return {"action": "abstain", "reason": f"proposer LLM error: {type(e).__name__}"}
@@ -164,8 +187,23 @@ def _relevance_score(*, stub_title: str, extracted_text: str) -> float:
         f'Return JSON: {{"score": <0.0-1.0>}}.\n\n'
         f"Extracted text (first 2000 chars):{wrapped_text}"
     )
+    # Cycle 74 AC02 — same-class peer of the cycle-73 AC03 orchestrator
+    # re-gate: validate the scan-tier response before consumption.
+    # Fail-closed: rejection returns 0.0 (below any sane relevance
+    # threshold → fetch skipped) with the forensic-distinct
+    # ``tier_boundary_rejected`` log marker. This also closes a latent
+    # crash path: a non-dict response previously reached
+    # ``response.get(...)`` outside the try block (AttributeError).
     try:
         response = _call_llm_json(prompt, tier="scan", schema=_RELEVANCE_SCHEMA)
+        _validate_tier_boundary(
+            response,
+            expected_keys=frozenset(_RELEVANCE_SCHEMA["properties"].keys()),
+            required_keys=frozenset(_RELEVANCE_SCHEMA["required"]),
+        )
+    except TierBoundaryError as e:
+        logger.warning("Relevance score tier_boundary_rejected: %s", e)
+        return 0.0
     except Exception as e:
         logger.warning("Relevance score LLM call failed: %s", e)
         return 0.0

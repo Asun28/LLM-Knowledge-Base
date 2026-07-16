@@ -371,7 +371,29 @@ def _extract_items_via_llm(content: str) -> dict:
             f"capture prompt too long ({len(prompt)} chars > {MAX_PROMPT_CHARS} max); "
             f"CAPTURE_MAX_BYTES={CAPTURE_MAX_BYTES} should prevent this — file a bug"
         )
-    return call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
+    response = call_llm_json(prompt, tier="scan", schema=_CAPTURE_SCHEMA)
+    # Cycle 74 R1 Codex M-1: same-class tier-boundary re-gate — this was
+    # the last scan-tier call_llm_json site in src/kb/ without one. The
+    # response drives capture FILE CREATION, so rejection must be loud:
+    # TierBoundaryError propagates (consistent with this function's
+    # existing raises-LLMError-on-failure contract; the MCP error
+    # boundary sanitizes it for kb_capture callers). Keysets derived
+    # from the LOCAL _CAPTURE_SCHEMA (T5 anti-spoofing); required_keys
+    # also converts the former KeyError at response["items"] /
+    # response["filtered_out_count"] into a distinct clean rejection.
+    # Depth fits the default bound: root(1) → items(2) → item dict(3) →
+    # leaf strings(4); body maxLength 2000 < max_string_len 4096.
+    # Lazy import per the orchestrator's kb.ingest.pipeline precedent —
+    # a module-level import would be a genuine circular import:
+    # kb.capture → kb.lint.augment.__init__ → proposer →
+    # kb.lint.fetcher → kb.capture.
+    from kb.lint.augment.tier_boundary import _validate_tier_boundary
+
+    return _validate_tier_boundary(
+        response,
+        expected_keys=frozenset(_CAPTURE_SCHEMA["properties"].keys()),
+        required_keys=frozenset(_CAPTURE_SCHEMA["required"]),
+    )
 
 
 def _verify_body_is_verbatim(items: list[dict], content: str) -> tuple[list[dict], int]:

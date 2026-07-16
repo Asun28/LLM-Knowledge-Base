@@ -15,6 +15,19 @@ from kb.lint.augment import persister as persister_mod
 from kb.lint.augment import proposer as proposer_mod
 from kb.lint.augment import quality as quality_mod
 from kb.lint.augment.fetcher import _url_is_allowed
+
+# Cycle 73 AC03 verifier — cycle 74 AC02 moved the implementation to the
+# leaf module ``kb.lint.augment.tier_boundary`` so ``proposer.py``
+# (imported by this module at load time) can apply the same re-gate
+# without a circular import. This re-export preserves the cycle-73 patch
+# surface: tests monkeypatch ``orch_mod._validate_tier_boundary`` and
+# the auto_ingest call site resolves through THIS module's global, so
+# both keep working unchanged. Full rationale, bounds, and the T5
+# anti-spoofing contract live in the tier_boundary module docstring.
+from kb.lint.augment.tier_boundary import (  # noqa: F401 — re-export (cycle-73 back-compat)
+    _TBV_ALLOWED_VALUE_TYPES,
+    _validate_tier_boundary,
+)
 from kb.utils.io import atomic_text_write
 from kb.utils.pages import load_purpose
 from kb.utils.text import wrap_wiki_context
@@ -39,113 +52,6 @@ def _build_pre_extract_prompt(raw_content: str) -> str:
     return "Extract structured data from this article per the schema." + wrap_wiki_context(
         raw_content
     )
-
-
-# Cycle 73 AC03 — Scan-tier → orchestrate-tier boundary verifier.
-#
-# Purpose: bound the BLAST RADIUS of cycle-72's prompt-injection
-# probability reduction (T4 EscalationOfPrivilege per cycle-73 threat
-# model). The cycle-7..72 wrap_wiki_context family REDUCES the
-# probability that an LLM follows attacker instructions, but does NOT
-# stop a successful injection from propagating malformed JSON into the
-# orchestrate-tier persister. This validator re-gates the scan-tier
-# output against orchestrate-tier consumption rules — a stricter pass
-# than the JSON-schema validation already performed inside
-# ``_call_llm_json``.
-#
-# Default bounds (per design-decision Q3):
-#   - max_depth=4    — root + 3 sub-levels covers article-extraction
-#                       schemas with 1 level of slack (extraction →
-#                       evidence list → claim dict → leaf strings).
-#   - max_string_len=4096 — near-neighbour of MAX_ISSUE_DESCRIPTION_LEN
-#                            (4000) with 96-char slack for IDs/timestamps.
-#
-# Anti-spoofing (T5): callers MUST derive ``expected_keys`` from the
-# locally-built JSONSchema (e.g. ``frozenset(schema['properties'].keys())``)
-# — NEVER from ``scan_output.keys()`` itself. The Step-14 verify step
-# greps the call site to confirm.
-#
-# A future ``max_keys`` bound (R2 F-2 deferred → cycle-74+ BACKLOG) will
-# reject objects with > N keys; today's depth+string-len bounds dominate
-# the realistic DoS surface.
-_TBV_ALLOWED_VALUE_TYPES = (str, int, float, type(None), list, dict)
-
-
-def _validate_tier_boundary(
-    scan_output: object,
-    *,
-    expected_keys: frozenset[str],
-    max_depth: int = 4,
-    max_string_len: int = 4096,
-) -> dict:
-    """Re-gate a scan-tier ``_call_llm_json`` output before orchestrate-tier
-    consumption. Raises ``TierBoundaryError`` on any rejection; returns
-    ``scan_output`` unchanged on acceptance.
-
-    Rejections (per design-decision §3 + threat-model T4/T5/T6):
-        1. Top-level not a ``dict``.
-        2. Any key not in ``expected_keys`` (rejects LLM-injected
-           ``side_effects`` / ``__proto__`` / etc.).
-        3. Any string value longer than ``max_string_len`` (length bound).
-        4. Any nested structure deeper than ``max_depth`` (DoS bound).
-        5. Any value not in ``_TBV_ALLOWED_VALUE_TYPES`` (rejects custom
-           classes if Pydantic / pickle is bypassed). ``bool`` is
-           explicitly accepted via the int branch (it's a Python bool
-           subclass) — JSON true/false round-trip cleanly.
-
-    Missing keys (subset of ``expected_keys``) are NOT a rejection cause —
-    schema-level optional fields are allowed. Downstream consumers use
-    ``.get(...)`` to handle missing.
-    """
-    if not isinstance(scan_output, dict):
-        raise TierBoundaryError(
-            "tier-boundary verification failed: scan_output is "
-            f"{type(scan_output).__name__}, expected dict"
-        )
-
-    extra = set(scan_output.keys()) - set(expected_keys)
-    if extra:
-        raise TierBoundaryError(
-            "tier-boundary verification failed: extra key(s) not in "
-            f"expected_keys: {sorted(extra)!r}"
-        )
-
-    # Walk values for depth + length + type. Depth counts the root dict
-    # as level 1 — so max_depth=4 admits root → list → dict → str (4).
-    def _walk(value: object, depth: int, key_path: str) -> None:
-        if depth > max_depth:
-            raise TierBoundaryError(
-                "tier-boundary verification failed: nested structure "
-                f"deeper than max_depth={max_depth} at {key_path!r}"
-            )
-        # bool is a subclass of int — handle it via the int branch (no
-        # extra check needed; True/False are valid JSON literals).
-        if isinstance(value, bool):
-            return
-        if not isinstance(value, _TBV_ALLOWED_VALUE_TYPES):
-            raise TierBoundaryError(
-                "tier-boundary verification failed: unsupported value "
-                f"type {type(value).__name__} at {key_path!r}"
-            )
-        if isinstance(value, str):
-            if len(value) > max_string_len:
-                raise TierBoundaryError(
-                    "tier-boundary verification failed: string at "
-                    f"{key_path!r} exceeds max_string_len={max_string_len}"
-                    f" (len={len(value)})"
-                )
-        elif isinstance(value, dict):
-            for k, v in value.items():
-                _walk(v, depth + 1, f"{key_path}.{k}")
-        elif isinstance(value, list):
-            for i, v in enumerate(value):
-                _walk(v, depth + 1, f"{key_path}[{i}]")
-        # int / float / None — leaf, no further checks.
-
-    for key, val in scan_output.items():
-        _walk(val, 2, key)  # root dict is level 1; values start at 2
-
-    return scan_output
 
 
 logger = logging.getLogger(__name__)
@@ -509,9 +415,13 @@ def run_augment(
                 # derived from the LOCAL ``schema`` (built by
                 # ``_build_schema_cached``), NOT from the LLM's response —
                 # otherwise the validator self-validates (T5 spoofing).
+                # Cycle 74 AC03: required_keys derived from the LOCAL
+                # schema's "required" list (same T5 anti-spoofing rule
+                # as expected_keys — never from the LLM's response).
                 _validate_tier_boundary(
                     extraction,
                     expected_keys=frozenset(schema.get("properties", {}).keys()),
+                    required_keys=frozenset(schema.get("required", [])),
                 )
             except TierBoundaryError as e:
                 # Cycle 73 AC04: forensic-distinct manifest reason.

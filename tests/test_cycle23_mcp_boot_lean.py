@@ -22,10 +22,17 @@ from pathlib import Path
 _REPO_SRC = Path(__file__).resolve().parent.parent / "src"
 
 
-def _run_probe(code: str, timeout: float = 10.0) -> dict:
+def _run_probe(code: str, timeout: float = 30.0) -> dict:
     """Run ``code`` in a fresh subprocess with PYTHONPATH pointing at repo src.
 
     The probe must print a single JSON object on stdout and nothing else.
+
+    Cycle-74 flake fix: default timeout bumped 10s → 30s. Cold-start
+    probes take 6-8s on a Windows dev box (kb.query.engine /
+    kb.ingest.pipeline import chains), so 10s spuriously expired under
+    concurrent machine load (e.g. a parallel review-agent pytest run).
+    These tests assert boot-LEANNESS via sys.modules contents, not
+    wall-clock speed — a generous timeout loses nothing.
     """
     env = {
         **os.environ,
