@@ -26,7 +26,7 @@ The package below carries an open advisory with no installable upstream patch an
 
 | Package | Version | Advisory | Fix? | Narrow role | Verification grep |
 |---|---|---|---|---|---|
-| `diskcache` | 5.6.3 | [CVE-2025-69872](https://nvd.nist.gov/vuln/detail/CVE-2025-69872) (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in cache files. | None as of 2026-04-25 (`pip-audit` reports empty `fix_versions`). | Transitive of `trafilatura`'s robots.txt cache. Exploit requires local write access to the cache directory. | `grep -rnE "diskcache\|DiskCache\|FanoutCache" src/kb` → zero direct imports. |
+| `diskcache` | 5.6.3 | [CVE-2025-69872](https://nvd.nist.gov/vuln/detail/CVE-2025-69872) (GHSA-w8v5-vhqr-4h9v): pickle-deserialization RCE in cache files. | None as of 2026-07-17, cycle-75 re-check (`pip-audit` reports empty `fix_versions`; 5.6.3 is still the latest PyPI release). | Transitive of `trafilatura`'s robots.txt cache. Exploit requires local write access to the cache directory. | `grep -rnE "diskcache\|DiskCache\|FanoutCache" src/kb` → zero direct imports. |
 
 Resolved 2026-05-05: the optional eval harness no longer declares `ragas` or the `litellm` distribution. Dependabot alerts #12 through #15 were closed by removing both package names from `pyproject.toml` `[eval]` and `requirements.txt`. RAGAS had no patched release (`0.4.3` was still latest on PyPI), and patched LiteLLM releases still required `click==8.1.8`, conflicting with this repo's `click==8.3.2` pin. The separate `unclecode-litellm` distribution remains a `crawl4ai` devtime dependency in `requirements.txt`; production `src/kb/` imports of the top-level `litellm` module remain forbidden by `tests/test_security_cve_greps.py`.
 
@@ -62,4 +62,4 @@ This policy does NOT cover:
 
 ---
 
-*Last reviewed: 2026-05-06 (pip toolchain CVE repair).*
+*Last reviewed: 2026-07-17 (cycle 75 dep-hygiene re-check: joserfc 1.6.8 + msgpack 1.2.1 + local pip 26.1.2 patched; arxiv 4.0.0 + Crawl4AI 0.9.2 bumps + venv rich sync cleared 3 of 4 pip-check resolver conflicts; diskcache + nltk advisories remain fix-less upstream).*
