@@ -340,7 +340,6 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 ### LOW
 
 
-- **diskcache 5.6.3 / CVE-2025-69872** — pickle-deserialization RCE in transitive dep. No fix published as of 2026-05-09. Risk acceptance: KB never reads diskcache from an untrusted directory; cache lives under `.venv/` which is user-owned. Re-check at next cycle's Step 02 baseline.
 - `mcp_server.py` shim + `mcp/__init__.py` PEP-562 lazy loader — two bootstrap paths for the same `mcp.app:main`. Redundancy with split test responsibility. (mimo r1 Q5)
   (fix: delete `mcp_server.py`, point `pyproject.toml [project.scripts]` at `kb.mcp.app:main` directly; preserve legacy import path via `kb/__init__.py.__getattr__` if external consumers depend on it.)
 

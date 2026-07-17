@@ -1152,3 +1152,24 @@ class TestKbCompileScan:
         result = kb_compile_scan(wiki_dir=str(tmp_kb_env / "wiki"))
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task01.py
+# (mcp/core.py exception-guard part). No deviations (receiver already
+# imports `patch`).
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestKbQueryExceptionGuard:
+    """mcp/core.py kb_query non-API path must catch exceptions."""
+
+    def test_kb_query_catches_search_exception(self):
+        """kb_query should return Error string when search_pages raises."""
+        # Cycle 19 AC15 — patch owner module.
+        with patch("kb.query.engine.search_pages", side_effect=RuntimeError("BM25 index failed")):
+            from kb.mcp.core import kb_query
+
+            result = kb_query("test question")
+            assert result.startswith("Error:")
+            assert "BM25 index failed" in result or "Search failed" in result

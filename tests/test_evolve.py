@@ -256,3 +256,44 @@ def test_generate_evolution_report_handles_oserror(monkeypatch):
         raise AssertionError("OSError should have been caught by generate_evolution_report")
     except Exception:
         pass  # Other exceptions are acceptable
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task06.py
+# (evolve/analyzer.py parts). No deviations.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvolveFrontmatterCRLF:
+    """find_connection_opportunities must strip CRLF frontmatter."""
+
+    def test_crlf_frontmatter_stripped(self, tmp_wiki):
+        page = tmp_wiki / "concepts" / "crlf-evolve.md"
+        # Write with CRLF line endings
+        page.write_bytes(
+            b"---\r\ntitle: CRLF Test\r\nsource: []\r\ncreated: 2026-01-01\r\n"
+            b"updated: 2026-01-01\r\ntype: concept\r\nconfidence: stated\r\n---\r\n\r\n"
+            b"Some unique content about special algorithms.\r\n"
+        )
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        # Should not crash and frontmatter fields should not appear as terms
+        opps = find_connection_opportunities(tmp_wiki)
+        assert isinstance(opps, list)
+
+
+class TestEvolveReportExceptionHandler:
+    """generate_evolution_report stub check must catch broad exceptions."""
+
+    def test_os_error_in_stub_check(self, tmp_wiki):
+        from unittest.mock import patch
+
+        from kb.evolve.analyzer import generate_evolution_report
+
+        with patch(
+            "kb.evolve.analyzer.check_stub_pages",
+            side_effect=OSError("disk error"),
+        ):
+            report = generate_evolution_report(tmp_wiki)
+            assert isinstance(report, dict)

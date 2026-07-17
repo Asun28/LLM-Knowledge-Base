@@ -79,3 +79,38 @@ class TestConfigConstants:
         assert hasattr(_v, "VALID_VERDICT_TYPES")
         expected = {"fidelity", "consistency", "completeness", "review", "augment"}
         assert set(_v.VALID_VERDICT_TYPES) == expected
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task02.py
+# (config.py part). Only deviation: class renamed TestConfigConstants →
+# TestConfigConstantsV0916 (receiver already defines TestConfigConstants).
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestConfigConstantsV0916:
+    """New config constants exist and have correct values."""
+
+    def test_supported_source_extensions_exists(self):
+        from kb.config import SUPPORTED_SOURCE_EXTENSIONS
+
+        assert isinstance(SUPPORTED_SOURCE_EXTENSIONS, frozenset)
+        assert ".md" in SUPPORTED_SOURCE_EXTENSIONS
+        assert ".txt" in SUPPORTED_SOURCE_EXTENSIONS
+
+    def test_valid_source_types_includes_comparison_synthesis(self):
+        from kb.config import VALID_SOURCE_TYPES
+
+        assert "comparison" in VALID_SOURCE_TYPES
+        assert "synthesis" in VALID_SOURCE_TYPES
+        assert "article" in VALID_SOURCE_TYPES
+
+    def test_under_covered_type_threshold(self):
+        from kb.config import UNDER_COVERED_TYPE_THRESHOLD
+
+        assert UNDER_COVERED_TYPE_THRESHOLD == 3
+
+    def test_stub_min_content_chars(self):
+        from kb.config import STUB_MIN_CONTENT_CHARS
+
+        assert STUB_MIN_CONTENT_CHARS == 100

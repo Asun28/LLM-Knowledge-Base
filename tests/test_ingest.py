@@ -1081,3 +1081,283 @@ def test_contradictions_written_to_file(tmp_wiki, tmp_path, monkeypatch):
     text = contra_path.read_text(encoding="utf-8")
     assert "## raw/articles/test.md" in text
     assert "X causes Y" in text
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from
+# tests/test_v0917_contradiction.py, tests/test_v0917_evidence_trail.py,
+# and tests/test_v0916_task03.py. Only deviation: fold-site imports below.
+# ═══════════════════════════════════════════════════════════════════════
+
+import hashlib  # noqa: E402  — fold-site import (cycle 78)
+
+from kb.ingest.contradiction import detect_contradictions  # noqa: E402  — fold-site (cycle 78)
+from kb.ingest.evidence import (  # noqa: E402  — fold-site import (cycle 78)
+    append_evidence_trail,
+    build_evidence_entry,
+)
+
+# ── tests/test_v0917_contradiction.py — auto-contradiction detection (Phase 4) ──
+
+
+class TestDetectContradictions:
+    def test_no_contradictions_empty_wiki(self):
+        new_claims = ["Transformers use self-attention."]
+        result = detect_contradictions(new_claims, existing_pages=[])
+        assert result == []
+
+    def test_no_false_positives_on_unrelated(self):
+        # Use genuinely disjoint vocabularies to prevent heuristic false-positives.
+        new_claims = ["The Eiffel Tower stands in Paris."]
+        existing = [
+            {
+                "id": "concepts/qcd",
+                "content": "Quantum chromodynamics describes quark interactions.",
+                "title": "QCD",
+            }
+        ]
+        result = detect_contradictions(new_claims, existing_pages=existing)
+        assert result == []
+
+    def test_respects_max_claims(self):
+        claims = [f"Claim {i}" for i in range(20)]
+        result = detect_contradictions(claims, existing_pages=[], max_claims=5)
+        # Should not error even with many claims
+        assert isinstance(result, list)
+
+
+def test_returns_empty_list_when_no_contradiction(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (empty-path explicitly tested, no silent loop-skip)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    result = detect_contradictions(new_claims=["unrelated topic"], existing_pages=[])
+    assert result == []
+
+
+def test_returns_contradiction_dict_when_heuristic_fires(tmp_project):
+    """Regression: Phase 4.5 CRITICAL item 2 (fired path: verify dict shape)."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    existing_pages = [
+        {
+            "id": "concepts/latency",
+            "content": "Network latency is always high in mobile networks.",
+        }
+    ]
+    result = detect_contradictions(
+        new_claims=["Network latency is never high in mobile networks."],
+        existing_pages=existing_pages,
+    )
+    assert len(result) >= 1, "heuristic should catch 'always' vs 'never'"
+    item = result[0]
+    for key in ("new_claim", "existing_page", "existing_text", "reason"):
+        assert key in item
+
+
+# ── tests/test_v0917_evidence_trail.py — evidence trail sections (Phase 4) ──
+
+
+class TestBuildEvidenceEntry:
+    def test_basic_entry(self):
+        # Use fixed date to avoid midnight boundary flake (cycle 5 fix).
+        entry = build_evidence_entry(
+            source_ref="raw/articles/example.md",
+            action="Initial extraction: core concept definition",
+            entry_date="2026-01-01",
+        )
+        assert entry.startswith("- 2026-01-01")
+        assert "raw/articles/example.md" in entry
+        assert "Initial extraction" in entry
+
+    def test_custom_date(self):
+        entry = build_evidence_entry(
+            source_ref="raw/papers/paper.md",
+            action="Updated: added formulation",
+            entry_date="2026-01-15",
+        )
+        assert entry.startswith("- 2026-01-15")
+
+    def test_entry_is_single_line(self):
+        entry = build_evidence_entry(
+            source_ref="raw/articles/a.md",
+            action="Some action",
+        )
+        assert "\n" not in entry.strip()
+
+
+class TestAppendEvidenceTrail:
+    def test_adds_section_to_page_without_trail(self, tmp_path):
+        page = tmp_path / "test.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "# Test\n\nSome content.\n",
+            encoding="utf-8",
+        )
+        append_evidence_trail(page, "raw/articles/a.md", "Initial extraction: definition")
+        text = page.read_text(encoding="utf-8")
+        assert "## Evidence Trail" in text
+        assert "raw/articles/a.md" in text
+        assert "Initial extraction: definition" in text
+        # Content above trail is preserved
+        assert "# Test" in text
+        assert "Some content." in text
+
+    def test_appends_to_existing_trail(self, tmp_path):
+        page = tmp_path / "test.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "# Test\n\nContent.\n\n## Evidence Trail\n"
+            "- 2026-04-10 | raw/articles/a.md | First entry\n",
+            encoding="utf-8",
+        )
+        append_evidence_trail(page, "raw/articles/b.md", "Updated: new info")
+        text = page.read_text(encoding="utf-8")
+        # New entry at top (reverse chronological)
+        trail_idx = text.index("## Evidence Trail")
+        trail = text[trail_idx:]
+        lines = [line for line in trail.split("\n") if line.startswith("- ")]
+        assert len(lines) == 2
+        assert "raw/articles/b.md" in lines[0]  # Newest first
+        assert "raw/articles/a.md" in lines[1]
+
+    def test_preserves_frontmatter(self, tmp_path):
+        page = tmp_path / "test.md"
+        original = (
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-04-12\nupdated: 2026-04-12\n"
+            "type: concept\nconfidence: stated\n---\n\n"
+            "Body content.\n"
+        )
+        page.write_text(original, encoding="utf-8")
+        append_evidence_trail(page, "raw/articles/a.md", "action")
+        text = page.read_text(encoding="utf-8")
+        assert text.startswith("---\n")
+        assert 'title: "Test"' in text
+
+
+# ── tests/test_v0916_task03.py — Phase 3.97 Task 03 ingest pipeline fixes ──
+
+
+class TestUpdateIndexBatchPrefixMatch:
+    """_update_index_batch must use wikilink-boundary match, not substring."""
+
+    def test_shorter_slug_not_blocked_by_longer(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_index_batch
+
+        index = tmp_wiki / "index.md"
+        index.write_text(
+            "## Entities\n\n- [[entities/openai-corporation|OpenAI Corporation]]\n",
+            encoding="utf-8",
+        )
+        _update_index_batch([("entity", "openai", "OpenAI")], wiki_dir=tmp_wiki)
+        content = index.read_text(encoding="utf-8")
+        assert "[[entities/openai|OpenAI]]" in content
+
+
+class TestUpdateIndexBatchTitleSanitization:
+    """_update_index_batch must sanitize pipe and newline in titles."""
+
+    def test_pipe_in_title_sanitized(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_index_batch
+
+        index = tmp_wiki / "index.md"
+        index.write_text("## Concepts\n\n", encoding="utf-8")
+        _update_index_batch([("concept", "rag-search", "RAG | Vector Search")], wiki_dir=tmp_wiki)
+        content = index.read_text(encoding="utf-8")
+        assert "||" not in content  # no double pipe
+        assert "RAG" in content
+
+
+class TestIngestSourceBinaryPDF:
+    """ingest_source must handle binary PDF gracefully."""
+
+    def test_binary_file_raises_clear_error(self, tmp_project):
+        raw_dir = tmp_project / "raw"
+        pdf = raw_dir / "papers" / "binary.pdf"
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        pdf.write_bytes(b"%PDF-1.4\x00\x01\x02binary content")
+
+        from kb.ingest.pipeline import ingest_source
+
+        with pytest.raises((UnicodeDecodeError, ValueError)):
+            ingest_source(pdf, "paper")
+
+
+class TestBuildExtractionSchemaNoneGuard:
+    """build_extraction_schema must reject template with extract: None."""
+
+    def test_none_extract_raises_value_error(self):
+        from kb.ingest.extractors import build_extraction_schema
+
+        template = {"name": "test", "extract": None}
+        with pytest.raises(ValueError, match="extract"):
+            build_extraction_schema(template)
+
+
+class TestBuildItemContentNameSanitization:
+    """_build_item_content must sanitize newlines in entity/concept names."""
+
+    def test_newline_in_name_stripped(self):
+        from kb.ingest.pipeline import _build_item_content
+
+        content = _build_item_content("Test\nEntity", "raw/articles/test.md", "", "Mentioned")
+        lines = content.split("\n")
+        assert lines[0] == "# Test Entity"
+
+
+class TestBuildSummaryContentTitleSanitization:
+    """_build_summary_content must sanitize newlines in title."""
+
+    def test_newline_in_title_stripped(self):
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {"title": "Test\nTitle", "core_argument": "Arg"}
+        content = _build_summary_content(extraction, "article")
+        assert "# Test Title" in content
+        assert "# Test\n" not in content
+
+
+class TestDetectSourceTypeCustomRawDir:
+    """detect_source_type must accept custom raw_dir parameter."""
+
+    def test_custom_raw_dir(self, tmp_path):
+        custom_raw = tmp_path / "custom_raw"
+        articles = custom_raw / "articles"
+        articles.mkdir(parents=True)
+        source = articles / "test.md"
+        source.write_text("content", encoding="utf-8")
+
+        from kb.ingest.pipeline import detect_source_type
+
+        result = detect_source_type(source, raw_dir=custom_raw)
+        assert result == "article"
+
+
+class TestTemplateCacheClear:
+    """Template cache clear helper must exist."""
+
+    def test_clear_template_cache_exists(self):
+        from kb.ingest.extractors import clear_template_cache
+
+        clear_template_cache()  # should not raise
+
+
+class TestIngestSourceUsesContentHash:
+    """ingest_source should use content_hash utility, not inline hashlib."""
+
+    def test_hash_matches_utility(self, tmp_project):
+        from kb.utils.hashing import content_hash
+
+        raw_dir = tmp_project / "raw"
+        source = raw_dir / "articles" / "hash-test.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("test content for hash", encoding="utf-8")
+
+        expected = content_hash(source)
+        raw_bytes = source.read_bytes()
+        inline = hashlib.sha256(raw_bytes).hexdigest()[:32]
+        assert expected == inline  # both should match

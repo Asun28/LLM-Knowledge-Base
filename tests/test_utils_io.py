@@ -340,3 +340,30 @@ def test_file_lock_timeout_does_not_steal_live_pid_lock(tmp_path, monkeypatch):
 
     assert lock_path.exists()
     assert lock_path.read_text(encoding="ascii").strip() == str(live_pid)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task02.py
+# (utils/io.py CRLF part). No deviations.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestAtomicWriteLF:
+    """atomic_text_write must write LF line endings, not CRLF."""
+
+    def test_atomic_text_write_uses_lf(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        test_file = tmp_path / "test.md"
+        atomic_text_write("line1\nline2\n", test_file)
+        raw = test_file.read_bytes()
+        assert b"\r\n" not in raw
+        assert b"\n" in raw
+
+    def test_atomic_json_write_uses_lf(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        test_file = tmp_path / "test.json"
+        atomic_json_write({"key": "value"}, test_file)
+        raw = test_file.read_bytes()
+        assert b"\r\n" not in raw

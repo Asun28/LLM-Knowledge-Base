@@ -707,3 +707,344 @@ def test_mcp_core_logs_trust_merge_failure(monkeypatch, caplog):
     assert "logger.debug" in src_text, "Expected logger.debug call in core.py"
     # The specific trust-merge error path — verify it's present
     assert "Trust score" in src_text or "trust" in src_text.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0917_dedup.py,
+# tests/test_v0917_embeddings.py, tests/test_v0917_layered_context.py,
+# tests/test_v0917_stale_query.py, and tests/test_v0916_task05.py
+# (query/engine + query/citations parts).
+# Only deviations: fold-site imports below; one function-local `import time`
+# (receiver's module-level `time` is datetime.time).
+# ═══════════════════════════════════════════════════════════════════════
+
+import re  # noqa: E402  — fold-site import (cycle 78)
+from datetime import timedelta  # noqa: E402  — fold-site import (cycle 78)
+
+from kb.query.dedup import dedup_results  # noqa: E402  — fold-site import (cycle 78)
+from kb.query.embeddings import VectorIndex, embed_texts  # noqa: E402  — fold-site (cycle 78)
+from kb.query.engine import _build_query_context  # noqa: E402  — fold-site import (cycle 78)
+
+# ── tests/test_v0917_dedup.py — 4-layer search dedup pipeline (Phase 4) ──
+
+
+def _result(page_id, score, page_type="concept", text="some content here"):
+    return {"id": page_id, "score": score, "type": page_type, "content_lower": text}
+
+
+class TestDedupBySource:
+    def test_keeps_highest_score_per_page(self):
+        results = [
+            _result("concepts/a", 5.0),
+            _result("concepts/a", 3.0),
+            _result("concepts/b", 4.0),
+        ]
+        deduped = dedup_results(results)
+        ids = [r["id"] for r in deduped]
+        assert ids.count("concepts/a") == 1
+        assert deduped[0]["score"] == 5.0
+
+    def test_preserves_order_by_score(self):
+        results = [
+            _result("concepts/a", 5.0),
+            _result("concepts/b", 3.0),
+            _result("concepts/c", 1.0),
+        ]
+        deduped = dedup_results(results)
+        scores = [r["score"] for r in deduped]
+        assert scores == sorted(scores, reverse=True)
+
+
+class TestDedupByTextSimilarity:
+    def test_removes_near_duplicate_text(self):
+        results = [
+            _result("concepts/a", 5.0, text="the transformer architecture uses attention"),
+            _result(
+                "concepts/b", 4.0, text="the transformer architecture uses attention mechanisms"
+            ),
+        ]
+        deduped = dedup_results(results, jaccard_threshold=0.7)
+        assert len(deduped) == 1
+        assert deduped[0]["id"] == "concepts/a"  # Higher score kept
+
+    def test_keeps_different_content(self):
+        results = [
+            _result("concepts/a", 5.0, text="transformers use self-attention mechanisms"),
+            _result("concepts/b", 4.0, text="recurrent neural networks process sequences"),
+        ]
+        deduped = dedup_results(results)
+        assert len(deduped) == 2
+
+
+class TestDedupByTypeDiversity:
+    def test_caps_single_type(self):
+        results = [_result(f"entities/e{i}", 10 - i, "entity") for i in range(10)]
+        results.append(_result("concepts/c1", 0.5, "concept"))
+        deduped = dedup_results(results, max_type_ratio=0.6)
+        entity_count = sum(1 for r in deduped if r["type"] == "entity")
+        total = len(deduped)
+        assert entity_count <= int(total * 0.6) + 1  # Allow rounding
+
+
+class TestDedupPerPageCap:
+    def test_caps_results_per_page(self):
+        results = [
+            _result("concepts/a", 5.0, text="first chunk about topic"),
+            _result("concepts/a", 4.5, text="second chunk about topic"),
+            _result("concepts/a", 4.0, text="third chunk about topic"),
+        ]
+        deduped = dedup_results(results, max_per_page=2)
+        a_count = sum(1 for r in deduped if r["id"] == "concepts/a")
+        assert a_count <= 2
+
+
+class TestDedupEndToEnd:
+    def test_empty_input(self):
+        assert dedup_results([]) == []
+
+    def test_single_result(self):
+        results = [_result("concepts/a", 5.0)]
+        assert len(dedup_results(results)) == 1
+
+
+# ── tests/test_v0917_embeddings.py — embedding wrapper + vector index (Phase 4) ──
+
+
+class TestEmbedTexts:
+    def test_returns_array_for_single_text(self):
+        vecs = embed_texts(["hello world"])
+        assert len(vecs) == 1
+        assert len(vecs[0]) > 0
+
+    def test_returns_consistent_dims(self):
+        vecs = embed_texts(["first text", "second text", "third text"])
+        assert len(vecs) == 3
+        dims = {len(v) for v in vecs}
+        assert len(dims) == 1  # All same dimension
+
+    def test_empty_input(self):
+        vecs = embed_texts([])
+        assert vecs == []
+
+
+class TestVectorIndex:
+    def test_build_and_query(self, tmp_path):
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build(
+            [
+                ("concepts/a", [1.0, 0.0, 0.0]),
+                ("concepts/b", [0.0, 1.0, 0.0]),
+                ("concepts/c", [0.9, 0.1, 0.0]),
+            ]
+        )
+        results = idx.query([1.0, 0.0, 0.0], limit=2)
+        assert len(results) == 2
+        # Closest match first
+        assert results[0][0] == "concepts/a"
+        # Second should be concepts/c (most similar to [1,0,0])
+        assert results[1][0] == "concepts/c"
+
+    def test_query_returns_page_id_and_distance(self, tmp_path):
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build([("concepts/a", [1.0, 0.0])])
+        results = idx.query([1.0, 0.0], limit=1)
+        assert len(results) == 1
+        page_id, distance = results[0]
+        assert isinstance(page_id, str)
+        assert isinstance(distance, float)
+
+    def test_empty_index(self, tmp_path):
+        db_path = tmp_path / "test_vec.db"
+        idx = VectorIndex(db_path)
+        idx.build([])
+        results = idx.query([1.0, 0.0], limit=5)
+        assert results == []
+
+
+# ── tests/test_v0917_layered_context.py — layered context assembly (Phase 4) ──
+
+
+def _page(pid, content, ptype="concept"):
+    return {
+        "id": pid,
+        "title": pid.split("/")[-1].replace("-", " ").title(),
+        "type": ptype,
+        "confidence": "stated",
+        "content": content,
+    }
+
+
+class TestLayeredContextAssembly:
+    def test_short_content_fits_entirely(self):
+        pages = [_page("concepts/a", "Short content.")]
+        ctx = _build_query_context(pages, max_chars=10000)
+        assert "concepts/a" in ctx["context"]
+        assert "Short content." in ctx["context"]
+
+    def test_summaries_prioritized_in_tier1(self):
+        pages = [
+            _page("concepts/big", "x" * 5000, "concept"),
+            _page("summaries/small", "summary text", "summary"),
+        ]
+        ctx = _build_query_context(pages, max_chars=6000)
+        # Both should fit within 6000 chars
+        assert "summaries/small" in ctx["context_pages"]
+
+    def test_budget_respected(self):
+        pages = [_page(f"concepts/p{i}", "x" * 2000) for i in range(20)]
+        ctx = _build_query_context(pages, max_chars=5000)
+        assert len(ctx["context"]) <= 5500  # Allow small header overhead
+
+    def test_empty_pages(self):
+        ctx = _build_query_context([], max_chars=10000)
+        assert ctx["context_pages"] == []
+
+    def test_returns_context_pages_list(self):
+        pages = [_page("concepts/a", "Content A"), _page("concepts/b", "Content B")]
+        ctx = _build_query_context(pages, max_chars=10000)
+        assert "concepts/a" in ctx["context_pages"]
+        assert "concepts/b" in ctx["context_pages"]
+
+
+# ── tests/test_v0917_stale_query.py — stale truth flagging at query time (Phase 4) ──
+
+
+class TestFlagStaleResults:
+    def test_flags_page_with_newer_source(self, tmp_project, create_wiki_page, create_raw_source):
+        old_date = (date.today() - timedelta(days=30)).isoformat()
+        create_wiki_page(
+            page_id="concepts/stale-topic",
+            title="Stale Topic",
+            content="Old content.",
+            source_ref="raw/articles/new-source.md",
+            updated=old_date,
+            wiki_dir=tmp_project / "wiki",
+        )
+        # Create a raw source that is "newer" (mtime is now)
+        create_raw_source("raw/articles/new-source.md", "Updated content.", tmp_project)
+
+        results = [
+            {
+                "id": "concepts/stale-topic",
+                "sources": ["raw/articles/new-source.md"],
+                "updated": old_date,
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results, project_root=tmp_project)
+        assert flagged[0].get("stale") is True
+
+    def test_does_not_flag_fresh_page(self, tmp_project, create_wiki_page, create_raw_source):
+        import time  # fold-site local import: receiver's module-level `time` is datetime.time
+
+        today = date.today().isoformat()
+        create_wiki_page(
+            page_id="concepts/fresh-topic",
+            title="Fresh Topic",
+            content="Fresh content.",
+            source_ref="raw/articles/old-source.md",
+            updated=today,
+            wiki_dir=tmp_project / "wiki",
+        )
+        source_path = create_raw_source("raw/articles/old-source.md", "Source.", tmp_project)
+        # Backdate the source file mtime to before the page updated date
+        old_ts = time.time() - 86400 * 60
+        os.utime(source_path, (old_ts, old_ts))
+
+        results = [
+            {
+                "id": "concepts/fresh-topic",
+                "sources": ["raw/articles/old-source.md"],
+                "updated": today,
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results, project_root=tmp_project)
+        assert flagged[0].get("stale") is False
+
+    def test_handles_missing_source_gracefully(self):
+        results = [
+            {
+                "id": "concepts/orphan",
+                "sources": ["raw/articles/nonexistent.md"],
+                "updated": date.today().isoformat(),
+                "score": 5.0,
+            }
+        ]
+        flagged = _flag_stale_results(results)
+        assert flagged[0].get("stale") is False
+
+    def test_handles_no_sources(self):
+        results = [{"id": "concepts/no-src", "sources": [], "updated": "2026-04-12", "score": 1.0}]
+        flagged = _flag_stale_results(results)
+        assert flagged[0].get("stale") is False
+
+
+# ── tests/test_v0916_task05.py — query/engine PageRank + query/citations parts ──
+
+
+class TestPageRankEdgeFreeGraph:
+    """_compute_pagerank_scores must return {} for graphs with no edges."""
+
+    def test_edge_free_graph_returns_empty(self, tmp_wiki):
+        """A wiki with pages but no wikilinks should get empty pagerank."""
+        # Create two pages with no wikilinks between them
+        for name in ("page-a", "page-b"):
+            page = tmp_wiki / "concepts" / f"{name}.md"
+            page.write_text(
+                f'---\ntitle: "{name}"\nsource: []\ncreated: 2026-01-01\n'
+                "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+                f"Content for {name}.\n",
+                encoding="utf-8",
+            )
+
+        from kb.query.engine import _compute_pagerank_scores
+
+        scores = _compute_pagerank_scores(tmp_wiki)
+        assert scores == {}
+
+
+class TestPageRankOSErrorCaught:
+    """_compute_pagerank_scores must catch OSError from build_graph."""
+
+    def test_os_error_returns_empty(self):
+        from unittest.mock import patch
+
+        from kb.query.engine import _compute_pagerank_scores
+
+        with patch("kb.query.engine.build_graph", side_effect=OSError("disk error")):
+            result = _compute_pagerank_scores()
+            assert result == {}
+
+
+class TestExtractCitationsTypeOverride:
+    """extract_citations must override cite_type based on path prefix."""
+
+    def test_source_keyword_with_raw_path(self):
+        from kb.query.citations import extract_citations
+
+        text = "According to [source: raw/papers/test.pdf] the model works."
+        cites = extract_citations(text)
+        assert len(cites) == 1
+        assert cites[0]["type"] == "raw"  # overridden from "wiki"
+        assert cites[0]["path"] == "raw/papers/test.pdf"
+
+    def test_source_keyword_with_wiki_path(self):
+        from kb.query.citations import extract_citations
+
+        text = "According to [source: concepts/rag] the model works."
+        cites = extract_citations(text)
+        assert len(cites) == 1
+        assert cites[0]["type"] == "wiki"  # stays as wiki
+
+
+class TestExtractCitationsModuleLevel:
+    """_CITATION_PATTERN should be a module-level compiled regex."""
+
+    def test_pattern_is_module_level(self):
+        from kb.query import citations
+
+        assert hasattr(citations, "_CITATION_PATTERN")
+        assert isinstance(citations._CITATION_PATTERN, re.Pattern)

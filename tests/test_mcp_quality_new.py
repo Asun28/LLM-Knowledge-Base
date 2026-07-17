@@ -425,3 +425,69 @@ def test_kb_affected_pages_surfaces_shared_sources_error_on_failure(
 
     assert "[warn] shared_sources_error:" in response
     assert "page load failed" in response
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task01.py
+# (mcp/quality.py parts). No deviations (receiver already imports `patch`).
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestKbCreatePageAtomicWrite:
+    """mcp/quality.py kb_create_page must write atomically.
+
+    Phase 4.5 backlog-by-file cycle 1 replaced the prior
+    `exists()`+`atomic_text_write` pattern with `os.open(O_EXCL)` + inline
+    fdopen write to close the TOCTOU + signal-race windows. The new write
+    path is still atomic (O_EXCL creates the file in one step; fdopen write
+    fills it; any failure unlinks).
+    """
+
+    def test_kb_create_page_creates_new_file_atomically(self, tmp_wiki, monkeypatch):
+        """kb_create_page should create the target file with the expected
+        frontmatter + body, and leave no half-written file on FileExistsError."""
+        # Ensure the comparisons subdir exists so the call doesn't error
+        (tmp_wiki / "comparisons").mkdir(exist_ok=True)
+        # PROJECT_ROOT patch is required so the new source_refs=[] path
+        # doesn't try to resolve against the real repo.
+        monkeypatch.setattr("kb.mcp.quality.WIKI_DIR", tmp_wiki)
+        monkeypatch.setattr("kb.mcp.quality.PROJECT_ROOT", tmp_wiki.parent)
+        from kb.mcp.quality import kb_create_page
+
+        result = kb_create_page(
+            page_id="comparisons/test-comp",
+            title="Test Comparison",
+            content="Some comparison content.",
+        )
+        assert "Error" not in result, f"Unexpected error: {result}"
+        page_path = tmp_wiki / "comparisons" / "test-comp.md"
+        assert page_path.is_file()
+        text = page_path.read_text(encoding="utf-8")
+        assert 'title: "Test Comparison"' in text
+        assert "Some comparison content." in text
+
+        # Second create must be rejected with an "already exists" error,
+        # proving O_EXCL is enforced.
+        second = kb_create_page(
+            page_id="comparisons/test-comp",
+            title="Duplicate",
+            content="body 2",
+        )
+        assert "already exists" in second.lower()
+
+
+class TestKbSaveLintVerdictOSError:
+    """mcp/quality.py kb_save_lint_verdict must catch OSError."""
+
+    def test_kb_save_lint_verdict_catches_os_error(self):
+        """kb_save_lint_verdict should return Error string on disk write failure."""
+        with patch("kb.mcp.quality.add_verdict", side_effect=OSError("Disk full")):
+            from kb.mcp.quality import kb_save_lint_verdict
+
+            result = kb_save_lint_verdict(
+                page_id="concepts/test",
+                verdict_type="fidelity",
+                verdict="pass",
+            )
+            assert "Error" in result
+            assert "Disk full" in result

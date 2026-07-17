@@ -256,3 +256,19 @@ def test_bm25_empty_docs_no_division_by_zero():
     scores = index.score(["test"])
     assert len(scores) == 3
     assert all(s == 0.0 for s in scores)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task05.py
+# (query/bm25.py tokenize part). No deviations.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestTokenizeDeadBranchRemoved:
+    """tokenize regex should not have dead second branch."""
+
+    def test_two_char_tokens_still_work(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("AI is great")
+        assert "ai" in result  # 2-char token should still match

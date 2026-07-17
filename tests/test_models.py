@@ -505,3 +505,57 @@ def test_from_post_strips_title_controls_and_traversal_sources():
 
     assert page.title == "RAG Notes"
     assert page.sources == ["raw/articles/rag.md"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task02.py
+# (models/frontmatter.py + models/page.py parts). Only deviation:
+# fold-site `Path` import (receiver only has the _Path_cycle54 alias).
+# ═══════════════════════════════════════════════════════════════════════
+
+from pathlib import Path  # noqa: E402  — fold-site import (cycle 78)
+
+
+class TestIsValidDate:
+    """_is_valid_date must reject non-ISO strings."""
+
+    def test_valid_iso_date_string(self):
+        from kb.models.frontmatter import _is_valid_date
+
+        assert _is_valid_date("2026-04-11") is True
+
+    def test_empty_string_invalid(self):
+        from kb.models.frontmatter import _is_valid_date
+
+        assert _is_valid_date("") is False
+
+    def test_non_date_string_invalid(self):
+        from kb.models.frontmatter import _is_valid_date
+
+        assert _is_valid_date("not-a-date") is False
+
+    def test_date_object_valid(self):
+        from kb.models.frontmatter import _is_valid_date
+
+        assert _is_valid_date(date(2026, 4, 11)) is True
+
+    def test_integer_invalid(self):
+        from kb.models.frontmatter import _is_valid_date
+
+        assert _is_valid_date(2024) is False
+
+
+class TestPageModelConsistency:
+    """RawSource and WikiPage content_hash must use same sentinel."""
+
+    def test_raw_source_default_hash_is_none(self):
+        from kb.models.page import RawSource
+
+        rs = RawSource(path=Path("test"), source_type="article")
+        assert rs.content_hash is None
+
+    def test_wiki_page_default_hash_is_none(self):
+        from kb.models.page import WikiPage
+
+        wp = WikiPage(path=Path("test"), title="T", page_type="entity")
+        assert wp.content_hash is None

@@ -831,3 +831,45 @@ def test_rotate_if_oversized_ordinal_collision(tmp_path: Path) -> None:
     assert (tmp_path / f"{stem}.2.jsonl").exists(), (
         f"Expected ordinal .2 archive; got {list(tmp_path.iterdir())}"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task02.py
+# (utils/pages.py parts). No deviations.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestLoadAllPagesIntTitle:
+    """load_all_pages must coerce integer titles to strings."""
+
+    def test_integer_title_coerced_to_string(self, tmp_wiki):
+        page = tmp_wiki / "concepts" / "year-2024.md"
+        page.write_text(
+            "---\ntitle: 2024\nsource: []\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            "Content about 2024.\n",
+            encoding="utf-8",
+        )
+
+        from kb.utils.pages import load_all_pages
+
+        pages = load_all_pages(tmp_wiki)
+        assert len(pages) == 1
+        assert isinstance(pages[0]["title"], str)
+        assert pages[0]["title"] == "2024"
+
+
+class TestNormalizeSources:
+    """normalize_sources edge cases."""
+
+    def test_empty_string_filtered(self):
+        from kb.utils.pages import normalize_sources
+
+        assert normalize_sources("") == []
+
+    def test_list_with_empty_string_filtered(self):
+        from kb.utils.pages import normalize_sources
+
+        result = normalize_sources(["raw/a.md", "", "raw/b.md"])
+        assert "" not in result
+        assert len(result) == 2
