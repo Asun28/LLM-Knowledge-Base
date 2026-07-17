@@ -17,6 +17,25 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-17 — cycle 77 (freeze-and-fold — v0100x series completed)
+
+**Theme:**
+Pure freeze-and-fold cycle advancing the Phase 4.5 HIGH coverage-visibility item. Completes the `test_v0100x` family: cycles 52/55 folded v01003/v01007/v01009/v01011; this cycle folds the remaining five. Zero `src/kb/` changes.
+
+**Folds (26 tests moved verbatim, names preserved):**
+
+- `tests/test_v01004_query_correctness.py` (6 tests — citation path validation, query-rewriter fallback + deictic heuristic, BM25 empty-corpus log level) → `tests/test_query.py`
+- `tests/test_v01005_query_perf_docs.py` (5 tests — `get_vector_index` existence/caching, `_reset_model`, dedup wikilink stripping, mcp core trust-merge logging) → `tests/test_query.py`
+- `tests/test_v01006_compile_fixes.py` (4 tests — tilde-fence code masking, template-hash backup-file skip, `inject_wikilinks` smoke + fence-exclusion) → `tests/test_compile.py`
+- `tests/test_v01008_ingest_pipeline_fixes.py` (8 tests — `_process_item_batch` type guard, References-block regex, frontmatter-missing early return, `WIKI_CONTRADICTIONS` config, summary-exists branch, `_SOURCE_BLOCK_RE` 4-space indent, H6 wiki_dir isolation, contradictions persistence) → `tests/test_ingest.py`
+- `tests/test_v01010_lint_fixes.py` (3 tests — orphan-check index links, nested source-coverage scan, date-only verdict timestamps) → `tests/test_lint.py`
+
+**Mechanics:** pre-flight collision grep over all 26 incoming names against the 4 receivers → zero hits. Source files use function-local imports throughout, so bodies moved verbatim; only the module docstring, `from __future__ import annotations`, and (ingest source only) a duplicate top-level `import pytest` were stripped. Each receiver gains a fold-provenance section header. Receiver runs green (158 passed across the 4 files incl. parametrize expansion); full suite preserved at 3437 collected.
+
+**State:** versioned `test_v0*` files 36 → 31; test files ~241 → ~236.
+**src/kb/ changes:** ZERO. Files touched: 4 receivers edited, 5 sources deleted, docs.
+**Detail:** see CHANGELOG.md cycle-77.
+
 ### 2026-07-17 — cycle 76 (dspy removal — accepted-advisory table emptied, CI fully strict)
 
 **Theme:**

@@ -568,3 +568,142 @@ class TestHybridQuery:
         results = [{"id": "a", "score": 1.0}]
         fused = rrf_fusion([results])
         assert all(r["score"] > 0 for r in fused)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Folded from tests/test_v01004_query_correctness.py
+# (cycle 77 freeze-and-fold) — Phase 4 query/ correctness fixes.
+# Tests moved VERBATIM; names preserved; provenance in CHANGELOG-history cycle-77.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_citation_rejects_double_dot_midcomponent():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw/a..b/page]."
+    cites = extract_citations(text)
+    assert cites == [], f"Expected empty but got {cites}"
+
+
+def test_citation_rejects_empty_component():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw//page]."
+    assert extract_citations(text) == []
+
+
+def test_citation_accepts_valid_path():
+    from kb.query.citations import extract_citations
+
+    text = "See [source: raw/articles/my-paper.md]."
+    cites = extract_citations(text)
+    assert len(cites) == 1
+
+
+def test_rewrite_query_falls_back_on_overlong_output(monkeypatch):
+    from kb.query import rewriter as _rw
+
+    def _fake_llm(prompt, tier="scan", **kwargs):
+        return "The question asks about X. Standalone version: What is RAG?"
+
+    monkeypatch.setattr(_rw, "call_llm", _fake_llm)
+    out = _rw.rewrite_query("What is RAG?", conversation_context="user: earlier\nassistant: ok")
+    # Fallback: output is > 3x len of original, so use original
+    assert out == "What is RAG?"
+
+
+def test_rewrite_query_skip_heuristic_detects_deictic():
+    from kb.query import rewriter as _rw
+
+    assert _rw._should_rewrite("Tell me more about that approach") is True
+    assert _rw._should_rewrite("What is retrieval augmented generation system") is False
+
+
+def test_bm25_empty_corpus_logs_debug_not_warning(caplog):
+    import logging
+
+    from kb.query.bm25 import BM25Index
+
+    # BM25Index takes list of token lists; pass one doc with no tokens → avgdl=0
+    with caplog.at_level(logging.DEBUG, logger="kb.query.bm25"):
+        BM25Index(documents=[[]])
+
+    # Must have no WARNING records about avgdl
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    avgdl_warnings = [
+        r for r in warning_records if "avgdl" in r.message.lower() or "avg" in r.message.lower()
+    ]
+    assert avgdl_warnings == [], f"Unexpected avgdl warning: {avgdl_warnings}"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Folded from tests/test_v01005_query_perf_docs.py
+# (cycle 77 freeze-and-fold) — Phase 4 query/ perf and doc fixes.
+# Tests moved VERBATIM; names preserved; provenance in CHANGELOG-history cycle-77.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_get_vector_index_function_exists():
+    from kb.query import embeddings as _em
+
+    assert callable(getattr(_em, "get_vector_index", None)), "get_vector_index must exist"
+
+
+def test_reset_model_function_exists():
+    from kb.query import embeddings as _em
+
+    assert callable(getattr(_em, "_reset_model", None)), "_reset_model must exist"
+
+
+def test_get_vector_index_caches_instance(monkeypatch, tmp_path):
+    from kb.query import embeddings as _em
+
+    build_count = {"n": 0}
+
+    class _FakeIdx:
+        def __init__(self, path):
+            build_count["n"] += 1
+
+        def query(self, vec, top_k=10):
+            return []
+
+    monkeypatch.setattr(_em, "VectorIndex", _FakeIdx)
+    _em._reset_model()  # clear cache
+
+    vec_path = str(tmp_path / "fake.vec")
+    _em.get_vector_index(vec_path)
+    _em.get_vector_index(vec_path)
+    assert build_count["n"] == 1, f"Expected 1 VectorIndex build, got {build_count['n']}"
+
+
+def test_dedup_jaccard_strips_wikilinks():
+    from kb.query.dedup import _dedup_by_text_similarity
+
+    # Both pages share wikilinks but have different actual content
+    pages = [
+        {
+            "id": "p1",
+            "content_lower": "[[entities/foo]] [[concepts/bar]] quantum computing entanglement",
+            "bm25_score": 10,
+        },
+        {
+            "id": "p2",
+            "content_lower": "[[entities/foo]] [[concepts/bar]] classical ml gradient descent",
+            "bm25_score": 9,
+        },
+    ]
+    out = _dedup_by_text_similarity(pages, threshold=0.85)
+    # After stripping wikilink tokens, content is different — both should be kept
+    assert len(out) == 2, f"Expected 2 pages, got {len(out)}: {[p['id'] for p in out]}"
+
+
+def test_mcp_core_logs_trust_merge_failure(monkeypatch, caplog):
+    from pathlib import Path
+
+    from kb.mcp import core as _core
+
+    src_text = Path(_core.__file__).read_text(encoding="utf-8")
+    # Verify there's a debug log call in the vicinity of the trust merge except block
+    assert "logger.debug" in src_text, "Expected logger.debug call in core.py"
+    # The specific trust-merge error path — verify it's present
+    assert "Trust score" in src_text or "trust" in src_text.lower()
