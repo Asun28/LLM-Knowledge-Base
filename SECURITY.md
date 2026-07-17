@@ -63,4 +63,4 @@ This policy does NOT cover:
 
 ---
 
-*Last reviewed: 2026-07-17 (cycle 76: dspy + 6 orphan pins removed → diskcache CVE-2025-69872 eliminated from the tree, accepted-advisory table now EMPTY, CI pip-audit runs exception-free, CI pip check strict. Cycle 75 earlier the same day: joserfc 1.6.8 + msgpack 1.2.1 + local pip 26.1.2 patched; arxiv 4.0.0 + Crawl4AI 0.9.2 + venv rich sync. Remaining fix-less upstream advisory: nltk GHSA-p4gq-832x-fm9v — transitive, not installed in CI, tracked in BACKLOG.)*
+*Last reviewed: 2026-07-17 (cycle 79: nltk 3.9.4 → 3.10.0 — GHSA-p4gq-832x-fm9v / CVE-2026-54293 advisory gained its fixed-version stamp (3.10.0), closing the last tracked upstream advisory and Dependabot alert #63; local `pip-audit` now reports ZERO findings and `pip check` is clean. Cycle 76 earlier: dspy + 6 orphan pins removed → diskcache CVE-2025-69872 eliminated from the tree, accepted-advisory table now EMPTY, CI pip-audit runs exception-free, CI pip check strict. Cycle 75: joserfc 1.6.8 + msgpack 1.2.1 + local pip 26.1.2 patched; arxiv 4.0.0 + Crawl4AI 0.9.2 + venv rich sync.)*

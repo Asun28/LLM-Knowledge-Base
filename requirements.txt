@@ -153,7 +153,7 @@ mypy_extensions==1.1.0
 nest-asyncio==1.6.0
 networkx==3.6.1
 nbformat>=5.0,<6.0
-nltk==3.9.4
+nltk==3.10.0
 numpy==2.4.4
 obsidiantools==0.11.0
 omegaconf==2.3.0
