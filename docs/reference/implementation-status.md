@@ -14,7 +14,7 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 | Metric | Value |
 |--------|-------|
 | Tests | 3397 passed + 24 skipped + 16 xfailed (3437 collected) |
-| Test files | ~241 |
+| Test files | ~236 |
 | Version | v0.12.0 |
 | CI | ubuntu-latest strict-gated (cycle 36+); windows-latest deferred to cycle-53+ |
 
@@ -22,6 +22,7 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Cycle | Date | Theme | Tests | Files |
 |-------|------|-------|-------|-------|
+| 77 | 2026-07-17 | Freeze-and-fold: v0100x series completed (5 folds, 26 tests moved) | 3437 (preserved) | ~241→~236 |
 | 76 | 2026-07-17 | dspy removal — diskcache CVE eliminated, CI pip check + pip-audit strict; zero src changes | 3437 (preserved) | ~241 |
 | 75 | 2026-07-17 | Dep-hygiene re-check (6 pip-audit findings + 3 resolver conflicts cleared; zero src changes) | 3437 (preserved) | ~241 |
 | 74 | 2026-07-17 | Tier-boundary verifier hardening (max_keys + proposer/capture re-gates + required_keys) | 3413→3437 (+24) | 239→241 |
