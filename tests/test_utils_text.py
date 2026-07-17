@@ -310,3 +310,50 @@ class TestSanitizePathRedaction:
     def test_sanitize_text_empty_string(self) -> None:
         """Empty input returns empty output."""
         assert sanitize_text("") == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task02.py
+# (utils/text.py parts). No deviations.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSlugifySpecialChars:
+    """slugify must produce distinct slugs for C, C++, C#, .NET."""
+
+    def test_c_plus_plus_distinct_from_c(self):
+        from kb.utils.text import slugify
+
+        assert slugify("C") != slugify("C++")
+
+    def test_c_sharp_distinct_from_c(self):
+        from kb.utils.text import slugify
+
+        assert slugify("C") != slugify("C#")
+
+    def test_dotnet_distinct_from_net(self):
+        from kb.utils.text import slugify
+
+        slug = slugify(".NET")
+        assert slug and slug != "net"
+
+    def test_fsharp_distinct_from_f(self):
+        from kb.utils.text import slugify
+
+        assert slugify("F#") != slugify("F")
+
+    def test_normal_text_unchanged(self):
+        from kb.utils.text import slugify
+
+        assert slugify("OpenAI GPT-4") == "openai-gpt-4"
+
+
+class TestYamlEscapeNEL:
+    """yaml_escape must strip Unicode NEL (\\x85)."""
+
+    def test_nel_stripped(self):
+        from kb.utils.text import yaml_escape
+
+        result = yaml_escape("hello\x85world")
+        assert "\x85" not in result
+        assert result == "helloworld"

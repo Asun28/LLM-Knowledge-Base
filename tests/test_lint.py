@@ -770,3 +770,122 @@ def test_trends_accepts_date_only_timestamp(tmp_path, monkeypatch):
         assert result is not None
     finally:
         monkeypatch.setattr(_cfg, "VERDICTS_PATH", orig)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task01.py
+# (lint/checks part) and tests/test_v0916_task06.py (lint/checks +
+# lint/trends parts). Only deviation: fold-site imports below.
+# ═══════════════════════════════════════════════════════════════════════
+
+import json  # noqa: E402  — fold-site import (cycle 78)
+from unittest.mock import patch  # noqa: E402  — fold-site import (cycle 78)
+
+# ── tests/test_v0916_task01.py — CRITICAL atomic write (lint/checks part) ──
+
+
+class TestFixDeadLinksAtomicWrite:
+    """lint/checks.py fix_dead_links must use atomic_text_write."""
+
+    def test_fix_dead_links_uses_atomic_write(self, tmp_wiki):
+        """fix_dead_links should call atomic_text_write, not page_path.write_text."""
+        from kb.lint.checks import fix_dead_links
+
+        # Create a page with a broken wikilink
+        page = tmp_wiki / "concepts" / "test-page.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource: []\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            "See [[concepts/nonexistent]] for details.\n",
+            encoding="utf-8",
+        )
+
+        broken = [{"source": "concepts/test-page", "target": "concepts/nonexistent"}]
+
+        with patch("kb.lint.checks.atomic_text_write") as mock_atw:
+            fix_dead_links(wiki_dir=tmp_wiki, broken_links=broken)
+            mock_atw.assert_called_once()
+            written_content = mock_atw.call_args[0][0]
+            assert "[[concepts/nonexistent]]" not in written_content
+
+
+# ── tests/test_v0916_task06.py — lint/checks + lint/trends parts ──
+
+
+class TestFixDeadLinksCodeBlockMasking:
+    """fix_dead_links must not modify wikilinks inside code blocks."""
+
+    def test_wikilink_in_code_block_preserved(self, tmp_wiki):
+        page = tmp_wiki / "concepts" / "tutorial.md"
+        page.write_text(
+            '---\ntitle: "Tutorial"\nsource: []\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            "Example:\n```\n[[concepts/old-name]]\n```\n"
+            "Also see [[concepts/old-name]] in text.\n",
+            encoding="utf-8",
+        )
+
+        from kb.lint.checks import fix_dead_links
+
+        broken = [{"source": "concepts/tutorial", "target": "concepts/old-name"}]
+        fix_dead_links(wiki_dir=tmp_wiki, broken_links=broken)
+        content = page.read_text(encoding="utf-8")
+        # The code block version should be preserved
+        assert "```\n[[concepts/old-name]]\n```" in content
+
+
+class TestCheckSourceCoverageSymlink:
+    """check_source_coverage must not crash on symlinks escaping raw_dir."""
+
+    def test_symlink_skipped_gracefully(self, tmp_path):
+        """A symlink that escapes raw_dir should log warning, not crash."""
+        raw_dir = tmp_path / "raw"
+        articles = raw_dir / "articles"
+        articles.mkdir(parents=True)
+        (articles / "real.md").write_text("content", encoding="utf-8")
+
+        wiki_dir = tmp_path / "wiki"
+        for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / subdir).mkdir(parents=True)
+
+        from kb.lint.checks import check_source_coverage
+
+        # Should not raise even if make_source_ref has edge cases
+        issues = check_source_coverage(wiki_dir=wiki_dir, raw_dir=raw_dir)
+        assert isinstance(issues, list)
+
+
+class TestVerdictTrendsTotalKey:
+    """compute_verdict_trends must not double-count verdict='total'."""
+
+    def test_total_verdict_not_counted(self, tmp_path):
+        from kb.lint.trends import compute_verdict_trends
+
+        verdicts_file = tmp_path / "verdicts.json"
+        verdicts_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "timestamp": "2026-04-07T10:00:00",
+                        "verdict": "pass",
+                        "page_id": "a",
+                        "verdict_type": "fidelity",
+                        "issues": [],
+                        "notes": "",
+                    },
+                    {
+                        "timestamp": "2026-04-07T11:00:00",
+                        "verdict": "total",
+                        "page_id": "b",
+                        "verdict_type": "fidelity",
+                        "issues": [],
+                        "notes": "",
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = compute_verdict_trends(verdicts_file)
+        # "total" verdict should not be counted in overall
+        assert result["overall"]["pass"] == 1

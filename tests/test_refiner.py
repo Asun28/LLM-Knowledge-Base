@@ -127,3 +127,78 @@ def test_refine_page_derives_history_path_from_wiki_dir(tmp_wiki, tmp_path, crea
     assert ts_before == ts_after, (
         f"refine_page(wiki_dir=tmp) wrote to production history: {prod_history}"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task06.py
+# (review/refiner.py parts). Only deviation: fold-site `Path` import.
+# ═══════════════════════════════════════════════════════════════════════
+
+from pathlib import Path  # noqa: E402  — fold-site import (cycle 78)
+
+
+class TestRefinePageReadError:
+    """refine_page must return error dict when read_text raises."""
+
+    def test_os_error_on_read(self, tmp_wiki):
+        page = tmp_wiki / "concepts" / "test-read.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource: []\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from unittest.mock import patch
+
+        from kb.review.refiner import refine_page
+
+        with patch.object(Path, "read_text", side_effect=OSError("Permission denied")):
+            result = refine_page("concepts/test-read", "new content", wiki_dir=tmp_wiki)
+            assert "error" in result
+
+
+class TestLoadReviewHistoryRobustness:
+    """load_review_history must handle corrupt files."""
+
+    def test_non_list_json_returns_empty(self, tmp_path):
+        history_file = tmp_path / "history.json"
+        history_file.write_text('{"key": "value"}', encoding="utf-8")
+
+        from kb.review.refiner import load_review_history
+
+        result = load_review_history(history_file)
+        assert result == []
+
+    def test_os_error_returns_empty(self, tmp_path):
+        history_file = tmp_path / "history.json"
+        history_file.write_text("[1, 2, 3]", encoding="utf-8")
+
+        from unittest.mock import patch
+
+        from kb.review.refiner import load_review_history
+
+        with patch.object(Path, "read_text", side_effect=OSError("read error")):
+            result = load_review_history(history_file)
+            assert result == []
+
+
+class TestRefinePageCRLFGuard:
+    """refine_page frontmatter guard must handle CRLF content."""
+
+    def test_crlf_frontmatter_rejected(self, tmp_wiki):
+        page = tmp_wiki / "concepts" / "crlf-test.md"
+        page.write_text(
+            '---\ntitle: "CRLF"\nsource: []\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from kb.review.refiner import refine_page
+
+        # Content that looks like a frontmatter block with CRLF
+        result = refine_page(
+            "concepts/crlf-test",
+            "---\r\ntitle: bad\r\n---\r\nContent",
+            wiki_dir=tmp_wiki,
+        )
+        assert "error" in result

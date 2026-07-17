@@ -17,6 +17,34 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-17 — cycle 78 (freeze-and-fold — v0916 + v0917 series completed)
+
+**Theme:**
+Pure freeze-and-fold cycle advancing the Phase 4.5 HIGH coverage-visibility item, continuing directly from cycle 77's v0100x completion. Completes BOTH the Phase 3.97 `test_v0916_task0{1..6}` task-file series (6 files) and the Phase 4 `test_v0917_*` module-file series (6 files). Zero `src/kb/` changes. Plus one BACKLOG hygiene deletion.
+
+**Folds (96 tests moved verbatim, 1 class renamed):**
+
+- `tests/test_v0917_dedup.py` (9 tests — 4-layer search dedup: per-page source dedup, Jaccard text-similarity, type-diversity cap, per-page cap, end-to-end) → `tests/test_query.py`
+- `tests/test_v0917_embeddings.py` (6 tests — `embed_texts` shape/dims/empty, `VectorIndex` build+query/tuple-shape/empty) → `tests/test_query.py`
+- `tests/test_v0917_layered_context.py` (5 tests — `_build_query_context` tiering, budget, empties) → `tests/test_query.py`
+- `tests/test_v0917_stale_query.py` (4 tests — `_flag_stale_results` newer-source flag, fresh page, missing source, no sources) → `tests/test_query.py`
+- `tests/test_v0916_task05.py` query parts (5 tests — `_compute_pagerank_scores` edge-free/OSError, `extract_citations` type-override, `_CITATION_PATTERN` module-level) → `tests/test_query.py`; graph parts (2 tests — `graph_stats` empty-graph + PageRank ValueError) → `tests/test_graph.py`; bm25 part (1 test — tokenize 2-char tokens) → `tests/test_bm25.py`
+- `tests/test_v0917_contradiction.py` (5 tests — `detect_contradictions` empty wiki, false-positive guard, max_claims, Phase 4.5 CRITICAL item-2 empty/fired paths) → `tests/test_ingest.py`
+- `tests/test_v0917_evidence_trail.py` (6 tests — `build_evidence_entry` + `append_evidence_trail` add/append/frontmatter-preserve) → `tests/test_ingest.py`
+- `tests/test_v0916_task03.py` (9 tests — `_update_index_batch` boundary-match + title sanitization, binary-PDF rejection, extraction-schema None guard, item/summary title sanitization, custom raw_dir, template-cache clear, content_hash parity) → `tests/test_ingest.py`
+- `tests/test_v0916_task01.py` split 4-way (6 tests): `TestFixDeadLinksAtomicWrite` → `tests/test_lint.py`; `TestInjectWikilinksAtomicWrite` → `tests/test_compile.py`; `TestKbQueryExceptionGuard` → `tests/test_mcp_core.py`; `TestKbCreatePageAtomicWrite` + `TestKbSaveLintVerdictOSError` → `tests/test_mcp_quality_new.py`
+- `tests/test_v0916_task02.py` split 6-way (21 tests): `TestConfigConstants` → **renamed `TestConfigConstantsV0916`** → `tests/test_config.py` (receiver already defines `TestConfigConstants` — the single pre-flight collision); slugify + yaml_escape NEL → `tests/test_utils_text.py`; atomic-write LF → `tests/test_utils_io.py`; `load_all_pages` int-title + `normalize_sources` → `tests/test_utils.py`; wikilink-embed exclusion + raw-ref case/lookbehind → `tests/test_utils_markdown.py`; `_is_valid_date` + page-model hash sentinel → `tests/test_models.py`
+- `tests/test_v0916_task04.py` (4 tests — `inject_wikilinks` pipe/newline title sanitization, frontmatter skip-guard, `scan_raw_sources` shared extensions) → `tests/test_compile.py`
+- `tests/test_v0916_task06.py` split (9 tests): `fix_dead_links` code-block masking + `check_source_coverage` symlink + `compute_verdict_trends` total-key → `tests/test_lint.py`; `refine_page` read-error/CRLF + `load_review_history` robustness → `tests/test_refiner.py`; evolve CRLF frontmatter + report exception handler → `tests/test_evolve.py`
+
+**Mechanics:** pre-flight top-level-name collision grep over all 59 incoming names against all 16 receivers → exactly 1 hit (`TestConfigConstants`, renamed with the `V0916` provenance suffix). Fold-site imports added per receiver convention (`# noqa: E402 — fold-site import (cycle 78)`): `test_query.py` gains `re`/`timedelta`/`dedup_results`/`VectorIndex, embed_texts`/`_build_query_context`; `test_ingest.py` gains `hashlib`/contradiction/evidence imports; `test_lint.py` gains `json`/`patch`; `test_models.py` + `test_refiner.py` gain plain `Path`; `test_graph.py` gains `networkx as nx`. One in-body deviation: `TestFlagStaleResults.test_does_not_flag_fresh_page` uses a function-local `import time` because the receiver's module-level `time` is `datetime.time` (commented at the site). Module-level helper functions `_result` and `_page` moved with their classes (no collisions). Receiver runs green: 536 passed + 1 pre-existing skip across the 16 files; ruff all-checks-passed; full suite preserved at 3437 collected.
+
+**BACKLOG hygiene:** Phase 6 R2 LOW `diskcache 5.6.3 / CVE-2025-69872` risk-acceptance entry DELETED — stale since cycle 76 removed dspy and its diskcache transitive from the tree entirely (verified this cycle: `pip show diskcache dspy` both empty). The entry's "re-check at next cycle" instruction is thereby discharged.
+
+**State:** versioned `test_v0*` files 31 → 19; test files ~236 → ~224.
+**src/kb/ changes:** ZERO. Files touched: 16 receivers edited, 12 sources deleted, BACKLOG.md, docs.
+**Detail:** see CHANGELOG.md cycle-78.
+
 ### 2026-07-17 — cycle 77 (freeze-and-fold — v0100x series completed)
 
 **Theme:**

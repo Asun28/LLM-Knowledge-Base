@@ -239,3 +239,39 @@ def test_graph_init_does_not_export_scan_wiki_pages():
     import kb.graph as _g
 
     assert "scan_wiki_pages" not in _g.__all__
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cycle 78 freeze-and-fold — moved verbatim from tests/test_v0916_task05.py
+# (graph/builder.py parts). Only deviation: fold-site networkx import.
+# ═══════════════════════════════════════════════════════════════════════
+
+import networkx as nx  # noqa: E402  — fold-site import (cycle 78)
+
+
+class TestGraphStatsNarrowException:
+    """graph_stats betweenness_centrality should use narrow exception."""
+
+    def test_graph_stats_on_empty_graph(self):
+        from kb.graph.builder import graph_stats
+
+        g = nx.DiGraph()
+        stats = graph_stats(g)
+        assert stats["nodes"] == 0
+        assert stats["bridge_nodes"] == []
+
+
+class TestGraphStatsPageRankValueError:
+    """graph_stats PageRank should catch ValueError."""
+
+    def test_pagerank_value_error_caught(self):
+        from unittest.mock import patch
+
+        from kb.graph.builder import graph_stats
+
+        g = nx.DiGraph()
+        g.add_node("a")
+
+        with patch("kb.graph.builder.nx.pagerank", side_effect=ValueError("test")):
+            stats = graph_stats(g)
+            assert stats["pagerank"] == []
