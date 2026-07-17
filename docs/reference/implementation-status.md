@@ -22,6 +22,7 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Cycle | Date | Theme | Tests | Files |
 |-------|------|-------|-------|-------|
+| 79 | 2026-07-17 | nltk 3.10.0 (CVE-2026-54293 fixed-version stamp fired; Dependabot #63 closed; local pip-audit ZERO findings; zero src changes) | 3437 (preserved) | ~224 |
 | 78 | 2026-07-17 | Freeze-and-fold: v0916+v0917 series completed (12 folds, 96 tests moved) + stale diskcache BACKLOG deletion | 3437 (preserved) | ~236→~224 |
 | 77 | 2026-07-17 | Freeze-and-fold: v0100x series completed (5 folds, 26 tests moved) | 3437 (preserved) | ~241→~236 |
 | 76 | 2026-07-17 | dspy removal — diskcache CVE eliminated, CI pip check + pip-audit strict; zero src changes | 3437 (preserved) | ~241 |

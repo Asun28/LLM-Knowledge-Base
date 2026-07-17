@@ -17,6 +17,21 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-17 — cycle 79 (nltk 3.10.0 — last tracked upstream advisory closed)
+
+**Theme:**
+Dep-hygiene finisher in the cycle-75/76 lane. The BACKLOG-tracked nltk advisory finally gained a fixed-version stamp; the bump closes the last open upstream advisory, Dependabot alert #63, and brings local `pip-audit` to ZERO findings. Zero `src/kb/` changes.
+
+**What changed and why now:**
+
+- **The re-check condition fired.** Cycle 75 (2026-07-17 morning) found nltk 3.10.0 released but advisory GHSA-p4gq-832x-fm9v / PYSEC-2026-597 listing NO fixed version — pip-audit's Fix-Versions column was empty, so a bump would have been unverified churn. The BACKLOG entry said "re-check whether the advisory gains a fixed-version stamp next cycle." This cycle's check (via the new Dependabot alert #63, CVE id now CVE-2026-54293, raised on the cycle-78 push) shows `first_patched_version: 3.10.0` — the bump is now a verified remediation.
+- **Bump:** `nltk==3.9.4` → `nltk==3.10.0` (requirements.txt:156 + venv install). nltk remains TRANSITIVE-only — pulled by Crawl4AI + textstat; `grep -rnE "import nltk|from nltk" src/kb` still zero direct imports. Import sanity: `nltk.__version__ == 3.10.0`; `import textstat` OK.
+- **Verification:** `pip check` → "No broken requirements found" (strict CI gate unaffected); `pip-audit` → **"No known vulnerabilities found"** — the first fully-clean local audit in project history (the only skips are the two local editable dists, not on PyPI). Full Windows suite re-run against the bumped venv.
+- **BACKLOG:** Phase 4.5 MEDIUM nltk entry DELETED (resolved). **SECURITY.md:** Last-reviewed footer refreshed — "remaining fix-less upstream advisory" clause removed; zero-findings state recorded.
+
+**src/kb/ changes:** ZERO. Files touched: requirements.txt (1 pin), BACKLOG.md, SECURITY.md, CHANGELOG{,-history}.md, docs/reference/implementation-status.md.
+**Detail:** see CHANGELOG.md cycle-79.
+
 ### 2026-07-17 — cycle 78 (freeze-and-fold — v0916 + v0917 series completed)
 
 **Theme:**

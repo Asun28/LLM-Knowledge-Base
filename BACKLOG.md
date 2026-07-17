@@ -57,9 +57,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `utils/io.py` `atomic_json_write` + `file_lock` pair — 6+ Windows filesystem syscalls per small write. Cycle 24 AC9 added exponential backoff to `file_lock`; the JSONL-migration part remains open. (R1)
   (fix: append-only JSONL with `msvcrt.locking` / `fcntl` locking; compact on read or via explicit `kb_verdicts_compact`)
 
-- `requirements.txt` `nltk==3.9.4` — GHSA-p4gq-832x-fm9v / PYSEC-2026-597 (CVSS 7.5): URL-encoded path-traversal in `nltk.data.load()` — `%2f`/`%2e` sequences pass the `_UNSAFE_NO_PROTOCOL_RE` check before decoding (decode-after-check), enabling arbitrary local file reads. Cycle-75 re-check (2026-07-17): nltk 3.10.0 released BUT the advisory still lists NO fixed version — pip-audit flags 3.9.4 with an empty Fix-Versions column, so a 3.10.0 bump would be unverified churn, not a remediation. Re-check whether the advisory gains a fixed-version stamp next cycle.
-  (mitigation: nltk is TRANSITIVE only (pulled by Crawl4AI + textstat); `grep -rnE "import nltk|from nltk" src/kb` confirms zero direct imports; exploit requires attacker-controlled resource names reaching `nltk.data.load()`, which no kb code path invokes. Track upstream for patched release.)
-
 - `compile/linker.py` cross-reference auto-linking — when ingesting a source mentioning entities A, B, C, add reciprocal wikilinks between co-mentioned entities (`[[B]]`/`[[C]]` on A's page and vice versa) as a post-ingest step after existing `inject_wikilinks`.
 
 - `ingest/pipeline.py` `IndexWriter` consolidation refactor — cycle 35 closed the immediate RMW concurrency hazard via `file_lock(target_path)`. Open: code-quality refactor — `IndexWriter` helper wrapping all four index-file writes (`_sources.md`, `index.md`, `_categories.md`, `log.md`) with documented lock-acquire order. Defer until a cycle adds a 4th caller.
