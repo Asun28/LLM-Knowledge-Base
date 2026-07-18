@@ -1,0 +1,54 @@
+name: pages
+
+# Migrates GitHub Pages off the legacy "deploy from a branch" build (which ran
+# GitHub's managed jekyll-build-pages pipeline on actions/checkout@v4 / Node 20)
+# onto a modern GitHub Actions source. This:
+#   1. Eliminates the Node.js 20 deprecation warning (managed legacy pipeline was
+#      not editable from the repo; a workflow lets us pin current action majors).
+#   2. Fixes the recurring Liquid syntax failure — a plain static upload does NOT
+#      run Jekyll, so `{{ ... }}` inside internal markdown (e.g.
+#      docs/superpowers/decisions/2026-04-20-cycle17-threat-model.md) is served
+#      verbatim instead of being parsed as a Liquid template.
+#
+# Requires Pages "Build and deployment > Source" set to "GitHub Actions"
+# (build_type: workflow). See PR body / migration notes.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Least privilege: only what Pages deployment needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel an in-flight production deployment; queue instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload static artifact (whole repo — matches legacy "/" source)
+        # No Jekyll step runs on this path, so `.nojekyll` in the repo root is a
+        # belt-and-suspenders signal rather than a strict requirement.
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
