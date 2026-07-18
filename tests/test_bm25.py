@@ -272,3 +272,50 @@ class TestTokenizeDeadBranchRemoved:
 
         result = tokenize("AI is great")
         assert "ai" in result  # 2-char token should still match
+
+
+# Cycle 80 freeze-and-fold — moved verbatim from tests/test_v0915_task04.py
+# (Phase 3.96 Task 4 — BM25 tokenize fixes; citation/query classes folded to test_query.py).
+class TestBM25TokenizeConsecutiveHyphens:
+    def test_consecutive_hyphens_normalized(self):
+        from kb.query.bm25 import tokenize
+
+        # "--" should be treated as a single hyphen separator
+        result = tokenize("pre--compiled model")
+        assert "pre-compiled" in result or ("pre" in result and "compiled" in result)
+
+    def test_triple_hyphen_normalized(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("fine---tuning")
+        # Should not produce "fine---tuning" — consecutive hyphens normalized
+        assert "fine---tuning" not in result
+
+    def test_normal_hyphen_preserved(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("fine-tuning is important")
+        assert "fine-tuning" in result
+
+
+class TestBM25TokenizeRegex:
+    def test_two_char_token_included(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("go is fast")
+        assert "go" in result
+
+    def test_single_char_excluded(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("a b c hello")
+        assert "a" not in result
+        assert "b" not in result
+        assert "c" not in result
+        assert "hello" in result
+
+    def test_hyphenated_word_kept(self):
+        from kb.query.bm25 import tokenize
+
+        result = tokenize("state-of-the-art systems")
+        assert "state-of-the-art" in result

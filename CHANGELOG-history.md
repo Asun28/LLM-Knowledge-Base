@@ -17,6 +17,30 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-18 — cycle 80 (freeze-and-fold — v0915 series batch 1)
+
+**Theme:**
+Pure freeze-and-fold cycle advancing the Phase 4.5 HIGH coverage-visibility item, continuing the cycle-77/78 cadence. Folds the first clean single-package batch of the Phase 3.96 `test_v0915_task*` series (task02/04/05/07 — the files that map to exactly one canonical module domain each). Zero `src/kb/` changes.
+
+**Folds (51 tests moved verbatim, names preserved, zero collisions):**
+
+- `test_v0915_task02.py` (7 — "Ingest pipeline fixes") → `test_ingest.py`: `TestAtomicWikiPageWrites`, `TestUpdateExistingPageSingleRead`, `TestSourceLinePatternPrecision`, `TestContextBlockDedup`, `TestBuildExtractionSchemaGuard`, `TestExtractionSchemaRequired`.
+- `test_v0915_task04.py` (19 — "Query, BM25, and Citation fixes") SPLIT across two receivers by sub-domain:
+  - → `test_query.py` (13): `TestExtractCitationsNoDeadCode` (3), `TestCitationPathTraversal` (4), `TestQueryMaxTokensConfig` (2), `TestBuildQueryContextOversize` (4).
+  - → `test_bm25.py` (6): `TestBM25TokenizeConsecutiveHyphens` (3), `TestBM25TokenizeRegex` (3).
+- `test_v0915_task05.py` (15 — "Graph module fixes") → `test_graph.py`: `TestBuildGraphNoSelfLoops`, `TestGraphStatsDeterminism`, `TestGraphStatsMostLinked`, `TestPageRankExceptionHandling`, `TestFrontmatterNotScannedForLinks`, `TestSanitizeLabel`, `TestSafeNodeId`.
+- `test_v0915_task07.py` (10 — "Review module fixes") → `test_refiner.py`: `TestRefinerFrontmatterGuard`, `TestRefinerEmptyContent`, `TestRefinerAtomicWrite`, `TestPairPageWithSourcesYAMLError`, `TestVerdictVocabulary`, `TestRefinerCRLF`, `TestRefinerLeadingWhitespaceStripped`.
+
+**Method / safety:**
+- Pre-flight class-name grep across all 5 receivers confirmed zero collisions before any edit; every fold is byte-verbatim (the only added text is the `# Cycle 80 freeze-and-fold — moved verbatim from …` provenance banner, matching the cycle-78 convention).
+- All moved tests use conftest-provided fixtures (`tmp_wiki`, `create_wiki_page`, `tmp_path`, `monkeypatch`) already used by the receivers, and function-local imports — so no top-level import changes or fixture migration were needed.
+- Verification: `pytest --collect-only` = **3437** both before and after (pure move, zero coverage loss); ruff clean; the 5 receiver files run 239 passed / 1 skipped; a targeted `-k` run of the 26 folded classes = exactly 51 passed / 189 deselected.
+
+**Cadence:** versioned `test_v0*` + `test_phase4_audit_*` files 24 → 20. Remaining for cycle 81+: the larger / multi-module v0915 files (`task01` foundation-57, `task03` compile-29, `task06` lint-25, `task08` feedback+evolve-22, `task09` mcp-37, `task11` coverage-gaps-34), plus the pre-v091 stragglers (`test_v070`, `test_v090`, `test_v098_fixes`, `test_v099_phase39`, `test_v09_cycle5_fixes`) and the 5 `test_phase4_audit_*` files.
+
+**src/kb/ changes:** ZERO. Files touched: 5 receiver test files (append-only), 4 versioned test files DELETED, BACKLOG.md, CHANGELOG{,-history}.md, CLAUDE.md, docs/reference/implementation-status.md.
+**Detail:** see CHANGELOG.md cycle-80.
+
 ### 2026-07-17 — cycle 79 (nltk 3.10.0 — last tracked upstream advisory closed)
 
 **Theme:**
