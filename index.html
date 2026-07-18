@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Wiki Flywheel — Compile, don't retrieve</title>
+  <meta name="description" content="A personal, LLM-maintained knowledge wiki. Drop a source in; Claude extracts entities, builds interlinked markdown pages, tracks trust, and flags contradictions. Markdown-first, Obsidian-native, MCP-first.">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1a1a;
+      --muted: #5c6370;
+      --accent: #6d28d9;
+      --accent-fg: #ffffff;
+      --card: #f6f7f9;
+      --border: #e4e6eb;
+      --code-bg: #f0f1f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115;
+        --fg: #e6e6e6;
+        --muted: #9aa0aa;
+        --accent: #a78bfa;
+        --accent-fg: #0f1115;
+        --card: #171a21;
+        --border: #262b34;
+        --code-bg: #1c2029;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--fg);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 4rem 1.25rem 5rem; }
+    header { text-align: center; margin-bottom: 3rem; }
+    h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0 0 .5rem; letter-spacing: -0.02em; }
+    .tagline { font-size: 1.25rem; color: var(--accent); font-weight: 600; margin: 0 0 1rem; }
+    .lead { font-size: 1.1rem; color: var(--muted); max-width: 620px; margin: 0 auto; }
+    .badges { margin: 1.5rem 0 0; display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+    .badge {
+      font-size: .8rem; padding: .2rem .6rem; border-radius: 999px;
+      background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    }
+    .cta { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; margin: 2rem 0 0; }
+    .btn {
+      display: inline-block; padding: .7rem 1.4rem; border-radius: 8px;
+      text-decoration: none; font-weight: 600; border: 1px solid var(--border);
+      transition: transform .08s ease, box-shadow .15s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+    .btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    .btn-secondary { background: var(--card); color: var(--fg); }
+    section { margin-top: 3.5rem; }
+    h2 { font-size: 1.4rem; margin: 0 0 1rem; letter-spacing: -0.01em; }
+    ul.features { list-style: none; padding: 0; margin: 0; display: grid; gap: .9rem; }
+    ul.features li {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: .9rem 1.1rem;
+    }
+    ul.features strong { color: var(--fg); }
+    pre {
+      background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.45;
+      font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .95rem; display: block; overflow-x: auto; }
+    th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: .9rem; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🌪️ LLM Wiki Flywheel</h1>
+      <p class="tagline">Compile, don't retrieve.</p>
+      <p class="lead">
+        A personal, LLM-maintained knowledge wiki. Drop a source in — Claude extracts entities,
+        builds interlinked markdown pages, injects wikilinks, tracks trust, and flags contradictions.
+        Pure markdown you own, browsable in Obsidian.
+      </p>
+      <div class="badges">
+        <span class="badge">Python 3.12+</span>
+        <span class="badge">MIT License</span>
+        <span class="badge">28 MCP tools</span>
+        <span class="badge">v0.12.0</span>
+      </div>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/asun28/llm-wiki-flywheel">View on GitHub</a>
+        <a class="btn btn-secondary" href="docs/architecture/architecture-diagram.html">Architecture Diagram</a>
+        <a class="btn btn-secondary" href="https://github.com/asun28/llm-wiki-flywheel/blob/main/README.md">Read the Docs</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>Why users pick this over RAG</h2>
+      <ul class="features">
+        <li>🧠 <strong>Structure first, optional vectors.</strong> Entities, concepts, and wikilinks form a real graph; hybrid BM25 + vector search is opt-in for recall.</li>
+        <li>⚡ <strong>Incremental by default.</strong> SHA-256 change detection; only new or changed sources are reprocessed.</li>
+        <li>🔗 <strong>Retroactive linking.</strong> Ingest a new topic and existing pages auto-gain <code>[[wikilinks]]</code> to it.</li>
+        <li>🧪 <strong>Self-healing.</strong> Bayesian trust scoring, contradiction detection, staleness flags, dead-link lint.</li>
+        <li>🦉 <strong>Obsidian-native.</strong> Open <code>wiki/</code> as a vault for a free graph view, backlinks, and hover preview.</li>
+        <li>🔌 <strong>MCP-first.</strong> 28 tools in Claude Code — <em>"ingest this"</em>, <em>"what do we know about X?"</em> No API key required.</li>
+        <li>📤 <strong>Publishable.</strong> One command emits <code>/llms.txt</code>, <code>/llms-full.txt</code>, <code>/graph.jsonld</code>, and a sitemap — the Karpathy Tier-1 machine-consumable stack.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>The full cycle</h2>
+      <pre>          raw/              ┌─────────────────────────────────────┐        Obsidian
+        articles/           │   Ingest ──→ Compile ──→ Query        │ ────→  Graph View
+        papers/    ───────→ │     │                       │        │        Browse
+        videos/             │     │     Evolve ←── Lint    │        │        Search
+        repos/              │     └───────┘←──────────┘←───┘        │
+                            │        continuous feedback loop        │
+                            └─────────────────────────────────────┘</pre>
+    </section>
+
+    <section>
+      <h2>Why not RAG?</h2>
+      <table>
+        <thead>
+          <tr><th></th><th>RAG</th><th>This project</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Storage</td><td>Vector embeddings you can't read</td><td>Markdown pages you can browse</td></tr>
+          <tr><td>Knowledge</td><td>Chunks with no relationships</td><td>Entities, concepts, and wikilinks forming a graph</td></tr>
+          <tr><td>Quality</td><td>Hope the top-K chunks are relevant</td><td>BM25 + PageRank ranking with trust scores</td></tr>
+          <tr><td>Maintenance</td><td>Re-embed when sources change</td><td>Incremental compile — only changed sources reprocessed</td></tr>
+          <tr><td>Contradictions</td><td>Silently returns conflicting chunks</td><td>Lint detects contradictions across sources</td></tr>
+          <tr><td>Gaps</td><td>No way to know what's missing</td><td>Evolve analyzes coverage gaps and suggests new pages</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      Inspired by
+      <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Knowledge Bases</a>
+      — then fully automated. ·
+      <a href="https://github.com/asun28/llm-wiki-flywheel">GitHub</a> ·
+      <a href="https://github.com/asun28/llm-wiki-flywheel/blob/main/CHANGELOG.md">Changelog</a>
+    </footer>
+  </div>
+</body>
+</html>
