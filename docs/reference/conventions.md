@@ -44,11 +44,21 @@ with sync_playwright() as p:
     context = browser.new_context(
         viewport={"width": 1440, "height": 900},
         device_scale_factor=3,
+        color_scheme="dark",       # see note below
+        reduced_motion="reduce",   # see note below
     )
     page = context.new_page()
     page.goto(html.as_uri(), wait_until="networkidle")
+    page.wait_for_timeout(600)
     page.screenshot(path=str(png), full_page=True, type="png")
     browser.close()
 ```
+
+**Both context flags are load-bearing.** Omitting either produces a broken PNG that still renders without raising:
+
+- `reduced_motion="reduce"` — the page's inline script sets `data-animate` on `<html>`, and `html[data-animate] .reveal{opacity:0}` hides every section until an IntersectionObserver scrolls it into view. A `full_page` screenshot never scrolls, so without this flag everything below the fold is captured at opacity 0 and the PNG comes out mostly blank. The page already forces `.reveal` visible under `@media (prefers-reduced-motion:reduce)`, so this uses its own accessibility path instead of patching the DOM.
+- `color_scheme="dark"` — the theme script falls back to the system preference, which is light in headless Chromium. Without this the PNG renders dark-on-light while the live site defaults to dark.
+
+After rendering, open the PNG and confirm the stats band and tier chips near the bottom are present and legible. A blank lower half means one of the two flags was dropped.
 
 Requires `playwright` installed in `.venv` plus `python -m playwright install chromium`. Only the non-`-detailed` HTML has a PNG sibling — the `-detailed` variant is HTML-only.
