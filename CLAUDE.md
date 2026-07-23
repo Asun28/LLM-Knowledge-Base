@@ -114,9 +114,9 @@ Ruff config: line length 100, Python 3.12+, rules E/F/I/W/UP (see `pyproject.tom
 
 | Tier | Model ID | Env Override | Use |
 |---|---|---|---|
-| `scan` | `claude-haiku-4-5-20251001` | `CLAUDE_SCAN_MODEL` | Index reads, link checks, file diffs — mechanical, low-reasoning |
-| `write` | `claude-sonnet-4-6` | `CLAUDE_WRITE_MODEL` | Article writing, extraction, summaries — quality at reasonable cost |
-| `orchestrate` | `claude-opus-4-7` | `CLAUDE_ORCHESTRATE_MODEL` | Orchestration, query answering, verification — highest reasoning |
+| `scan` | `claude-haiku-4-5` | `CLAUDE_SCAN_MODEL` | Index reads, link checks, file diffs — mechanical, low-reasoning |
+| `write` | `claude-sonnet-5` | `CLAUDE_WRITE_MODEL` | Article writing, extraction, summaries — quality at reasonable cost |
+| `orchestrate` | `claude-opus-4-8` | `CLAUDE_ORCHESTRATE_MODEL` | Orchestration, query answering, verification — highest reasoning |
 
 For Opus 4.7 behaviour notes (CoT scaffolding, instruction following, parallel tool calls, 1M context) and the 10 extraction templates, see [docs/reference/opus-47-notes.md](docs/reference/opus-47-notes.md).
 

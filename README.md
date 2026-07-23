@@ -348,9 +348,11 @@ Three Claude tiers balance cost and quality. Override via environment variables:
 
 | Tier | Model | Override | Used For |
 |------|-------|---------|----------|
-| `scan` | Haiku 4.5 | `CLAUDE_SCAN_MODEL` | Index reads, link checks, diffs |
-| `write` | Sonnet 4.6 | `CLAUDE_WRITE_MODEL` | Extraction, summaries, page writing |
-| `orchestrate` | Opus 4.7 | `CLAUDE_ORCHESTRATE_MODEL` | Query synthesis, orchestration |
+| `scan` | Haiku | `CLAUDE_SCAN_MODEL` | Index reads, link checks, diffs |
+| `write` | Sonnet | `CLAUDE_WRITE_MODEL` | Extraction, summaries, page writing |
+| `orchestrate` | Opus | `CLAUDE_ORCHESTRATE_MODEL` | Query synthesis, orchestration |
+
+Each tier tracks the current model in its family. The exact pinned IDs live in [`src/kb/config.py`](src/kb/config.py) (`_DEFAULT_MODEL_TIERS`), which is the single source of truth; set the env var above to override a tier without touching code.
 
 ## Vibe Coding CLI Backends
 

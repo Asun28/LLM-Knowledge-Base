@@ -890,7 +890,7 @@ class TestGetModelTierLazy:
         from kb.config import get_model_tier
 
         monkeypatch.delenv("CLAUDE_SCAN_MODEL", raising=False)
-        # Default for scan tier is claude-haiku-4-5-20251001.
+        # Default for scan tier is claude-haiku-4-5.
         result = get_model_tier("scan")
         assert "haiku" in result.lower()
 

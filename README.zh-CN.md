@@ -338,9 +338,11 @@ CLI 同时镜像了大部分 MCP 工具（`kb search`、`kb stats`、`kb read-pa
 
 | 层级 | 默认模型 | 环境变量覆盖 | 适用场景 |
 |---|---|---|---|
-| scan（扫描） | Haiku 4.5 | `CLAUDE_SCAN_MODEL` | 索引读取、链接检查、差异比对 |
-| write（撰写） | Sonnet 4.6 | `CLAUDE_WRITE_MODEL` | 信息提取、摘要生成、页面撰写 |
-| orchestrate（编排） | Opus 4.7 | `CLAUDE_ORCHESTRATE_MODEL` | 查询合成、复杂任务编排 |
+| scan（扫描） | Haiku | `CLAUDE_SCAN_MODEL` | 索引读取、链接检查、差异比对 |
+| write（撰写） | Sonnet | `CLAUDE_WRITE_MODEL` | 信息提取、摘要生成、页面撰写 |
+| orchestrate（编排） | Opus | `CLAUDE_ORCHESTRATE_MODEL` | 查询合成、复杂任务编排 |
+
+每一层始终跟随其模型家族的当前版本。具体固定的模型 ID 以 [`src/kb/config.py`](src/kb/config.py) 中的 `_DEFAULT_MODEL_TIERS` 为唯一准绳；如需覆盖某一层，设置上表中的环境变量即可，无需改动代码。
 
 ---
 
