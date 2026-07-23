@@ -194,13 +194,18 @@ def test_reingest_crash_does_not_leave_stale_complete_entry(tmp_kb_env, monkeypa
     assert "reingest-crash.md" in names, f"a crashed re-ingest must be re-selected; got {names!r}"
 
 
-def test_duplicate_is_recorded_and_not_reselected(tmp_kb_env):
-    """A detected duplicate records the bare hash and is not re-ingested forever.
+def test_duplicate_is_not_recorded_and_is_never_a_dedup_target(tmp_kb_env):
+    """A duplicate owns no pages, so it must own no manifest entry and never be a
+    dedup target — closing the R3 self-propagating false-target regression.
 
-    R2 Codex MAJOR: before this fix the duplicate path left the manifest entry
-    untouched, so a duplicate source with no entry was classified "new" and
-    re-ingested on every compile (→ dup again), and a leftover cycle-25
-    premarker was re-selected forever. Committing the bare hash makes it stable.
+    R3 Codex MAJOR (against the R2 attempt): committing the duplicate's bare hash
+    made its entry indistinguishable from the page-owning source's. Under a later
+    re-selection of both, each would treat the OTHER as a valid duplicate target
+    and neither would regenerate pages — self-propagating data loss. The fix is to
+    DELETE the duplicate's entry instead, so the invariant "a bare hash means this
+    source owns pages" holds. This test pins that the page-owning source can still
+    be re-ingested and regenerates pages even though an identical-content
+    duplicate exists — i.e. the duplicate is not accepted as A's dedup target.
     """
     raw_a = _seed_raw(tmp_kb_env, "dup-target", body=_SHARED_BODY)
     _ingest(tmp_kb_env, raw_a)
@@ -209,24 +214,21 @@ def test_duplicate_is_recorded_and_not_reselected(tmp_kb_env):
     result_b = _ingest(tmp_kb_env, raw_b)
     assert result_b.get("duplicate") is True, "fixture sanity: B is a duplicate"
 
+    # B (the duplicate) must NOT be recorded — it owns no pages.
     manifest = _manifest()
-    key_b = next((k for k in manifest if "dup-source" in k), None)
-    assert key_b is not None and manifest[key_b] == hash_bytes(raw_b.read_bytes()), (
-        f"a duplicate must be recorded at the bare hash so it is not re-ingested "
-        f"forever; got {manifest.get(key_b)!r}"
+    assert not any("dup-source" in k for k in manifest), (
+        f"a duplicate must not hold a manifest entry (it would become a false "
+        f"dedup target); manifest={manifest!r}"
     )
 
-    # A subsequent scan must NOT re-select the duplicate once template hashes are
-    # recorded. The first find_changed_sources call bootstraps template hashes
-    # into a fresh manifest (which flags all sources of that type once); the
-    # SECOND call is the steady-state check where only content-hash divergence
-    # matters. Before the dup-commit fix, dup-source had no bare-hash entry and
-    # stayed "new" on every call — including the second.
-    compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
-    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
-    names = {Path(p).name for p in (*new_sources, *changed_sources)}
-    assert "dup-source.md" not in names, (
-        f"an unchanged duplicate must not be re-selected on a steady-state scan; got {names!r}"
+    # Now re-ingest the page-OWNER A. With B unrecorded, A has no other bare-hash
+    # entry to be a duplicate of, so A regenerates its pages instead of being
+    # wrongly skipped as a duplicate of B. Under the R2 attempt (B recorded at H),
+    # A would have seen B=H and returned duplicate here.
+    result_a2 = _ingest(tmp_kb_env, raw_a)
+    assert not result_a2.get("duplicate"), (
+        "re-ingesting the page-owner must not be treated as a duplicate of an "
+        "identical-content source that owns no pages (R3 false-target regression)"
     )
 
 

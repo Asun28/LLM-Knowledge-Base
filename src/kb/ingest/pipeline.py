@@ -1448,16 +1448,21 @@ def ingest_source(
             # caller-supplied keys from compile_wiki match the commit key below.
             if _check_and_reserve_manifest(source_hash, manifest_ref):
                 logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
-                # Cycle 83 (R2 Codex MAJOR fix) — record this source as up-to-date
-                # at the bare hash. A duplicate owns no pages of its own (its
-                # content lives on the dup target's pages), but leaving its
-                # manifest entry as-is is wrong two ways: if absent, the source is
-                # "new" and re-ingested (→ dup again) on EVERY compile forever; if
-                # it still holds a cycle-25 `in_progress:` premarker, that value
-                # never equals the hash so the source is re-selected forever too.
-                # Committing the bare hash makes the duplicate a stable pointer
-                # that a subsequent unchanged-content scan skips.
-                _commit_ingest_manifest(manifest_ref, source_hash)
+                # Cycle 83 (R3 Codex MAJOR fix) — a duplicate owns NO pages of its
+                # own (its content lives on the dup target's pages), so it must
+                # NOT hold a bare-hash manifest entry. The invariant is: a bare
+                # hash means "this source owns pages for this content." Committing
+                # the duplicate's hash (the R2 attempt) broke that — the entry
+                # became a false dedup TARGET, so a later template-driven
+                # re-selection of both A and B would have each treat the other as
+                # a valid duplicate and neither regenerate pages (self-propagating
+                # data loss). Instead we DELETE the entry, which also clears any
+                # leftover cycle-25 `in_progress:` premarker for this source. The
+                # source is re-processed (and re-detected as a duplicate) on the
+                # next compile — wasteful re-extraction, tracked in BACKLOG as an
+                # optimization that needs real page-ownership tracking to close
+                # without reintroducing the false-target ambiguity.
+                _clear_ingest_manifest_entry(manifest_ref)
                 # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
                 # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
                 # correlation surface for duplicate/failure paths.
