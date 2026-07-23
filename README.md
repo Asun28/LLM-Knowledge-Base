@@ -2,7 +2,7 @@
 
 **Language / 语言：** **English** · [简体中文](README.zh-CN.md)
 
-> **Compile, don't retrieve.** Drop a source in. Claude does the rest — extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. Markdown-first; optional hybrid retrieval. Pure markdown you own, browsable in Obsidian.
+> **Compile, don't retrieve.** Drop a source in. Claude does the rest: extract entities, build wiki pages, inject wikilinks, track trust, flag contradictions. Markdown-first; optional hybrid retrieval. Pure markdown you own, browsable in Obsidian.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -10,17 +10,17 @@
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet)](#claude-code-integration-mcp-server)
 [![Version](https://img.shields.io/badge/version-v0.12.0-orange)](CHANGELOG.md)
 
-Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — then **fully automated**. Works natively inside Claude Code via 28 MCP tools — **no API key required**. Also runs on any local AI CLI tool (Ollama, Gemini CLI, OpenCode, Codex CLI, and more) via `KB_LLM_BACKEND`.
+Inspired by [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), then **fully automated**. Works natively inside Claude Code via 28 MCP tools, **no API key required**. Also runs on any local AI CLI tool (Ollama, Gemini CLI, OpenCode, Codex CLI, and more) via `KB_LLM_BACKEND`.
 
-### 🎯 Why users pick this over RAG
+### 🎯 What you get
 
 - 🧠 **Structure first, optional vectors.** Entities, concepts, wikilinks form a real graph; hybrid BM25 + vector search is opt-in for recall.
 - ⚡ **Incremental by default.** SHA-256 change detection; only new/changed sources reprocessed.
 - 🔗 **Retroactive linking.** Ingest a new topic → existing pages auto-gain `[[wikilinks]]` to it.
 - 🧪 **Self-healing.** Bayesian trust scoring, contradiction detection, staleness flags, dead-link lint.
-- 🦉 **Obsidian-native.** Open `wiki/` as a vault — free graph view, backlinks, hover preview.
+- 🦉 **Obsidian-native.** Open `wiki/` as a vault for a free graph view, backlinks, and hover preview.
 - 🔌 **MCP-first.** 28 tools in Claude Code. Talk to your wiki: *"ingest this"*, *"what do we know about X?"*
-- 📤 **Publishable.** One command emits `/llms.txt`, `/llms-full.txt`, `/graph.jsonld`, sitemap, per-page siblings — the Karpathy Tier-1 machine-consumable stack.
+- 📤 **Publishable.** One command emits `/llms.txt`, `/llms-full.txt`, `/graph.jsonld`, sitemap, and per-page siblings: the Karpathy Tier-1 machine-consumable stack.
 
 ## Why Not RAG?
 
@@ -31,13 +31,13 @@ RAG retrieves chunks. This system **understands structure**.
 | Storage | Vector embeddings you can't read | Markdown pages you can browse in Obsidian |
 | Knowledge | Chunks with no relationships | Entities, concepts, and wikilinks forming a graph |
 | Quality | Hope the top-K chunks are relevant | Hybrid BM25 + vector ranking, PageRank blending, per-page trust scores |
-| Maintenance | Re-embed when sources change | Incremental compile — only changed sources reprocessed |
+| Maintenance | Re-embed when sources change | Incremental compile, only changed sources reprocessed |
 | Contradictions | Silently returns conflicting chunks | Lint detects contradictions across sources |
 | Gaps | No way to know what's missing | Evolve analyzes coverage gaps and suggests new pages |
 
 ## What Makes This Different from [Karpathy's Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)?
 
-Karpathy described a pattern where you manually ask an LLM to compile pages. This is a **fully automated system** — drop a file in `raw/`, run `kb compile`, and the entire pipeline runs without human intervention: extraction, page creation, cross-linking, index updates, and quality checks. Add Claude Code and you don't even need the CLI — just say "ingest this."
+Karpathy described a pattern where you manually ask an LLM to compile pages. This is a **fully automated system**: drop a file in `raw/`, run `kb compile`, and the entire pipeline runs without human intervention: extraction, page creation, cross-linking, index updates, and quality checks. Add Claude Code and you don't even need the CLI, just say "ingest this."
 
 ```
                     ┌──────────────────────────────────────┐
@@ -56,12 +56,12 @@ Karpathy described a pattern where you manually ask an LLM to compile pages. Thi
 |---|---|
 | Manually ask LLM to write pages | **One command** → extraction, page creation, linking, indexing all automatic |
 | Flat list of pages | **Knowledge graph** with PageRank centrality and Mermaid export |
-| No change detection | **Incremental compile** — SHA-256 hashes detect changes, only reprocesses what's new |
-| No cross-linking | **Retroactive wikilink injection** — new topics auto-linked into existing pages |
-| No quality checks | **Self-healing** — lint catches problems, trust scoring flags bad pages, contradiction detection |
-| No gap awareness | **Evolve** — automatically identifies missing coverage and connection opportunities |
-| External LLM calls | **MCP-native** — 28 tools inside Claude Code, no API key needed |
-| Text-only | **Obsidian** — open `wiki/` as a vault, visual knowledge graph for free |
+| No change detection | **Incremental compile**: SHA-256 hashes detect changes, only reprocesses what's new |
+| No cross-linking | **Retroactive wikilink injection**: new topics auto-linked into existing pages |
+| No quality checks | **Self-healing**: lint catches problems, trust scoring flags bad pages, contradiction detection |
+| No gap awareness | **Evolve**: automatically identifies missing coverage and connection opportunities |
+| External LLM calls | **MCP-native**: 28 tools inside Claude Code, no API key needed |
+| Text-only | **Obsidian**: open `wiki/` as a vault, visual knowledge graph for free |
 
 ## The 30-Second Demo
 
@@ -69,7 +69,7 @@ Karpathy described a pattern where you manually ask an LLM to compile pages. Thi
 # 1. Grab an article
 trafilatura -u https://example.com/ai-article > raw/articles/ai-article.md
 
-# 2. Ingest it — Claude extracts entities, concepts, key claims
+# 2. Ingest it. Claude extracts entities, concepts, key claims
 kb ingest raw/articles/ai-article.md
 
 # 3. Watch the wiki grow
@@ -99,7 +99,7 @@ Or just talk to Claude Code:
 
 [Detailed architecture diagram](docs/architecture/architecture-diagram-detailed.html)
 
-**Human curates sources. Everything else is automated** — extraction, compilation, cross-linking, querying, health checks, and gap analysis all run without human intervention.
+**Human curates sources. Everything else is automated**: extraction, compilation, cross-linking, querying, health checks, and gap analysis all run without human intervention.
 
 | Layer | Path | Owner | Purpose |
 |-------|------|-------|---------|
@@ -120,7 +120,7 @@ source .venv/bin/activate     # Unix
 pip install -r requirements.txt && pip install -e .
 kb --version
 
-# OR — install via pyproject extras (lean / per-feature):
+# OR install via pyproject extras (lean / per-feature):
 #   pip install -e .                # runtime only (no extras)
 #   pip install -e '.[hybrid]'      # vector search via model2vec + sqlite-vec
 #   pip install -e '.[augment]'     # kb_lint --augment fetcher (httpx + trafilatura)
@@ -147,15 +147,15 @@ walk → installed-file-location heuristic (`config.py:get_project_root`),
 which can land inside the venv `site-packages/` and silently write
 `wiki/`/`raw/`/`.data/` there. Setting `KB_PROJECT_ROOT` makes the bootstrap
 explicit and stable across `cd` operations. The env var is read at call time
-(cycle 65 AC1), so a process-wide set is enough — no restart needed.
+(cycle 65 AC1), so a process-wide set is enough, no restart needed.
 
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
 
 **Obsidian:** Open `wiki/` as a vault. Press `Ctrl+G` for the knowledge graph. See the **[full Obsidian guide](docs/guides/quickstart-obsidian.md)** ([HTML version](docs/guides/quickstart-obsidian.html)).
 
-**Obsidian + remote storage (optional):** Install the [Remotely Save](https://github.com/remotely-save/remotely-save) community plugin (Apache 2.0) to sync your `wiki/` vault to S3, Azure Blob, OneDrive, or Dropbox. This lets non-technical users browse the compiled wiki on any device without touching the command line — your `kb` pipeline writes to the bucket, Remotely Save pulls it into Obsidian automatically.
+**Obsidian + remote storage (optional):** Install the [Remotely Save](https://github.com/remotely-save/remotely-save) community plugin (Apache 2.0) to sync your `wiki/` vault to S3, Azure Blob, OneDrive, or Dropbox. This lets non-technical users browse the compiled wiki on any device without touching the command line, your `kb` pipeline writes to the bucket, Remotely Save pulls it into Obsidian automatically.
 
-**New here?** Browse the [`demo/`](demo/) folder — a small working wiki compiled from Karpathy's [X post](https://x.com/karpathy/status/2039805659525644595) and [LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It shows the full folder structure plus a real compiled output — summaries, entities, concepts, a comparison, and a cross-source synthesis — so you can see exactly what the pipeline produces before adding your own sources.
+**New here?** Browse the [`demo/`](demo/) folder, a small working wiki compiled from Karpathy's [X post](https://x.com/karpathy/status/2039805659525644595) and [LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It shows the full folder structure plus a real compiled output, summaries, entities, concepts, a comparison, and a cross-source synthesis, so you can see exactly what the pipeline produces before adding your own sources.
 
 ## Supported File Formats
 
@@ -168,7 +168,7 @@ Place source files under the matching `raw/` subdirectory, then run `kb ingest <
 | reStructuredText | `.rst` | Useful for Python/project documentation |
 | Structured data | `.json`, `.yaml`, `.yml`, `.csv` | Useful for datasets, metadata, and exported records |
 
-> **PDF files:** convert with [`markitdown`](https://github.com/microsoft/markitdown) or [`docling`](https://github.com/DS4SD/docling) first, then place the `.md` output in `raw/papers/`. Direct `.pdf` ingest is not supported (the binary content can't be parsed without a real PDF extractor — cycle 34 removed `.pdf` from the supported-extensions list to surface this earlier with a clear error).
+> **PDF files:** convert with [`markitdown`](https://github.com/microsoft/markitdown) or [`docling`](https://github.com/DS4SD/docling) first, then place the `.md` output in `raw/papers/`. Direct `.pdf` ingest is not supported (the binary content can't be parsed without a real PDF extractor, cycle 34 removed `.pdf` from the supported-extensions list to surface this earlier with a clear error).
 
 For Office documents such as `.docx`, `.pptx`, or `.xlsx`, convert them to Markdown or CSV first, then place the converted file in `raw/`.
 
@@ -206,49 +206,49 @@ Plus two maintenance commands:
 | Command | What happens |
 |---------|-------------|
 | `kb publish [--format all]` | Emit `llms.txt`, `llms-full.txt`, `graph.jsonld`, `sitemap.xml`, and per-page siblings to `outputs/` (override with `--out-dir`) |
-| `kb rebuild-indexes [--yes]` | Clean-slate wipe — deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
+| `kb rebuild-indexes [--yes]` | Clean-slate wipe, deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
 
 The CLI also mirrors most MCP tools (`kb search`, `kb stats`, `kb read-page`, `kb lint-deep`, `kb detect-drift`, …) for scripting without Claude Code.
 
 ## Key Features
 
 ### Ingest Pipeline
-- 9 ingest source types: `article`, `paper`, `video`, `repo`, `podcast`, `book`, `dataset`, `conversation`, `capture` (`comparison` and `synthesis` are wiki page types — create them with `kb_create_page`)
-- Hash-based dedup — same content won't be ingested twice
-- **Retroactive wikilink injection** — when you ingest a new topic, existing pages that mention it get auto-linked
-- **Evidence Trail** — every page keeps a reverse-chronological, sentinel-guarded record of which source contributed what, and when
-- **Auto-contradiction detection** — a new source that conflicts with an existing page is flagged into `wiki/contradictions.md` at ingest time, not at query time
-- Cascade tracking — returns which existing pages might need review after the new ingest
-- Short-source tiering — small sources (<1000 chars) defer entity creation to prevent stubs
-- **Conversation capture** — `kb_capture` MCP tool atomizes chat / notes / session transcripts into typed knowledge items (decisions, discoveries, corrections, gotchas) with secret-scanner safety rails and a per-process rate limit
+- 9 ingest source types: `article`, `paper`, `video`, `repo`, `podcast`, `book`, `dataset`, `conversation`, `capture` (`comparison` and `synthesis` are wiki page types, create them with `kb_create_page`)
+- Hash-based dedup, same content won't be ingested twice
+- **Retroactive wikilink injection**: when you ingest a new topic, existing pages that mention it get auto-linked
+- **Evidence Trail**: every page keeps a reverse-chronological, sentinel-guarded record of which source contributed what, and when
+- **Auto-contradiction detection**: a new source that conflicts with an existing page is flagged into `wiki/contradictions.md` at ingest time, not at query time
+- Cascade tracking, returns which existing pages might need review after the new ingest
+- Short-source tiering, small sources (<1000 chars) defer entity creation to prevent stubs
+- **Conversation capture**: `kb_capture` MCP tool atomizes chat / notes / session transcripts into typed knowledge items (decisions, discoveries, corrections, gotchas) with secret-scanner safety rails and a per-process rate limit
 - Structured audit log at `.data/ingest_log.jsonl` with `request_id` correlation across the whole pipeline
 
 ### Search & Query
-- **Hybrid retrieval** — BM25 (title boosting + length normalization) fused with vector search via Reciprocal Rank Fusion; vectors are opt-in (`pip install -e '.[hybrid]'`) and degrade to BM25-only if unavailable
-- **PageRank blending** — well-connected pages rank higher; `status: mature|evergreen` and human-authored pages get a mild ranking boost
+- **Hybrid retrieval**: BM25 (title boosting + length normalization) fused with vector search via Reciprocal Rank Fusion; vectors are opt-in (`pip install -e '.[hybrid]'`) and degrade to BM25-only if unavailable
+- **PageRank blending**: well-connected pages rank higher; `status: mature|evergreen` and human-authored pages get a mild ranking boost
 - **4-layer dedup** so the same claim doesn't occupy three slots in your context window
-- **Multi-turn query rewriting** — follow-up questions inherit context from the previous turn
-- **Stale-truth flagging** — answers warn you when a cited page is older than its raw source
-- **Raw-source fallback** — if no wiki page covers the question, the engine searches `raw/` directly instead of answering from nothing
+- **Multi-turn query rewriting**: follow-up questions inherit context from the previous turn
+- **Stale-truth flagging**: answers warn you when a cited page is older than its raw source
+- **Raw-source fallback**: if no wiki page covers the question, the engine searches `raw/` directly instead of answering from nothing
 - Context capped at 80K chars with intelligent page selection; inline citations (`[source: concepts/attention]`) trace every claim
-- **Output adapters** — `kb query --format={markdown|marp|html|chart|jupyter}` writes the answer to `outputs/` as a doc, Marp deck, standalone HTML page, matplotlib script, or runnable notebook
+- **Output adapters**: `kb query --format={markdown|marp|html|chart|jupyter}` writes the answer to `outputs/` as a doc, Marp deck, standalone HTML page, matplotlib script, or runnable notebook
 
 ### Quality System
-- **Bayesian trust scoring** — query feedback builds per-page trust. "Wrong" penalized 2x vs "incomplete"
-- **Semantic lint** — deep fidelity checks (page vs source) and cross-page contradiction detection
-- **Actor-Critic review** — structured 6-item review checklist with audit trail
-- **Verdict trends** — weekly pass/fail/warning dashboard showing quality trajectory
-- **Epistemic integrity** — optional `belief_state` (confirmed / uncertain / contradicted / stale / retracted), `authored_by` (human / llm / hybrid), and `status` (seed → developing → mature → evergreen) frontmatter fields feed both ranking and publish filtering
-- **Reactive gap-fill** — `kb lint --augment` spots a stub, proposes authoritative URLs, fetches them over a DNS-rebind-safe transport, and ingests as `confidence: speculative`. Three gates (`propose` → `--execute` → `--auto-ingest`) keep a human in the loop; rate-limited 10/run, 60/hour, 3/host/hour
+- **Bayesian trust scoring**: query feedback builds per-page trust. "Wrong" penalized 2x vs "incomplete"
+- **Semantic lint**: deep fidelity checks (page vs source) and cross-page contradiction detection
+- **Actor-Critic review**: structured 6-item review checklist with audit trail
+- **Verdict trends**: weekly pass/fail/warning dashboard showing quality trajectory
+- **Epistemic integrity**: optional `belief_state` (confirmed / uncertain / contradicted / stale / retracted), `authored_by` (human / llm / hybrid), and `status` (seed → developing → mature → evergreen) frontmatter fields feed both ranking and publish filtering
+- **Reactive gap-fill**: `kb lint --augment` spots a stub, proposes authoritative URLs, fetches them over a DNS-rebind-safe transport, and ingests as `confidence: speculative`. Three gates (`propose` → `--execute` → `--auto-ingest`) keep a human in the loop; rate-limited 10/run, 60/hour, 3/host/hour
 
 ### Knowledge Graph
 - NetworkX-powered graph from wikilinks
 - PageRank and betweenness centrality
 - Mermaid diagram export (auto-prunes for large graphs)
-- **Obsidian-compatible** — native graph view from `wiki/` vault
+- **Obsidian-compatible**: native graph view from `wiki/` vault
 
 ### Publish
-`kb publish` emits the machine-consumable stack in one pass — and `kb compile` triggers it automatically on success:
+`kb publish` emits the machine-consumable stack in one pass, and `kb compile` triggers it automatically on success:
 
 | Artifact | What it is |
 |---|---|
@@ -263,14 +263,14 @@ Pages with `belief_state: retracted|contradicted` or `confidence: speculative` a
 `kb publish` writes to `outputs/` by default; the automatic post-compile run writes to `_publish/` alongside `wiki/` (kill-switch `KB_DISABLE_COMPILE_AUTO_PUBLISH=1`).
 
 ### Safety & Robustness
-- **Atomic, locked writes** — every wiki page mutation runs under a reentrant per-page lock; the manifest, log, and verdict store use their own file locks
-- **Path safety** — dual-anchor validation rejects traversal, Windows-illegal characters, and symlink escapes before any read or write
-- **Prompt-injection fence** — all wiki and raw content is wrapped in a `<wiki_context>` boundary before it reaches an LLM, and scan-tier outputs are re-validated at the tier boundary before an orchestrate-tier consumer sees them
-- **Crash-safe compile** — SHA-256 manifest + O_EXCL slug creation mean an interrupted run resumes instead of corrupting
+- **Atomic, locked writes**: every wiki page mutation runs under a reentrant per-page lock; the manifest, log, and verdict store use their own file locks
+- **Path safety**: dual-anchor validation rejects traversal, Windows-illegal characters, and symlink escapes before any read or write
+- **Prompt-injection fence**: all wiki and raw content is wrapped in a `<wiki_context>` boundary before it reaches an LLM, and scan-tier outputs are re-validated at the tier boundary before an orchestrate-tier consumer sees them
+- **Crash-safe compile**: SHA-256 manifest + O_EXCL slug creation mean an interrupted run resumes instead of corrupting
 
 ### Claude Code Integration (MCP Server)
 
-28 tools that work natively in Claude Code. **No API key needed** — Claude Code is the default LLM.
+28 tools that work natively in Claude Code. **No API key needed**: Claude Code is the default LLM.
 
 ```json
 {
@@ -337,7 +337,7 @@ Pages with `belief_state: retracted|contradicted` or `confidence: speculative` a
 | `kb_affected_pages` | Pages affected by a change (backlinks + shared sources) |
 | `kb_save_lint_verdict` | Record lint/review verdict for audit trail |
 | `kb_create_page` | Create comparison/synthesis/any wiki page directly |
-| `kb_refine_list_stale` | List pending refine rows stale beyond a threshold (hours) — no mutation |
+| `kb_refine_list_stale` | List pending refine rows stale beyond a threshold (hours), no mutation |
 | `kb_refine_sweep` | Mark stale pending rows as failed or delete them, with audit trail |
 
 </details>
@@ -354,7 +354,7 @@ Three Claude tiers balance cost and quality. Override via environment variables:
 
 ## Vibe Coding CLI Backends
 
-Run the full KB pipeline against **any locally-installed AI CLI tool** — no Anthropic API key needed. Set `KB_LLM_BACKEND` and every `call_llm` / `call_llm_json` call routes through that tool's subprocess via stdin (shell injection-safe; stdout/stderr redacted before logging):
+Run the full KB pipeline against **any locally-installed AI CLI tool**: no Anthropic API key needed. Set `KB_LLM_BACKEND` and every `call_llm` / `call_llm_json` call routes through that tool's subprocess via stdin (shell injection-safe; stdout/stderr redacted before logging):
 
 ```bash
 export KB_LLM_BACKEND=ollama    # pick one: ollama | gemini | opencode | codex | kimi | qwen | deepseek | zai
@@ -396,7 +396,7 @@ Unset `KB_LLM_BACKEND` (or set it to `anthropic`) to return to the default Claud
 | Book | Manual notes or `markitdown` |
 | Dataset | Schema documentation |
 | Conversation | Chat/interview transcript |
-| Capture | `kb_capture` MCP tool — atomizes a chat or session transcript into typed items |
+| Capture | `kb_capture` MCP tool, atomizes a chat or session transcript into typed items |
 
 Use the conversion commands above when the captured source is not already one of the supported text formats.
 
@@ -456,21 +456,21 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 | Phase | What landed |
 |---|---|
 | **4** (v0.10.0) | Hybrid search with RRF fusion, 4-layer dedup pipeline, evidence trails, stale-truth flagging at query time, auto-contradiction detection on ingest |
-| **4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}` — answers exported as docs, Marp decks, standalone HTML, plot scripts, or notebooks |
+| **4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}`: answers exported as docs, Marp decks, standalone HTML, plot scripts, or notebooks |
 | **5.0** | `kb lint --augment` reactive gap-fill: stub detected → propose authoritative URLs → safe fetch → ingest as `confidence: speculative`, behind a three-gate human approval flow |
 | **4.5** | 22-cycle post-release audit: `kb.errors` taxonomy, `kb publish` Tier-1 builders, Epistemic-Integrity 2.0, 8 alternative CLI LLM backends, 60+ security threats closed |
 | **Cycles 23-82** | Continued hardening: dual-anchor path safety, MCP error boundary, wiki-context boundary fence, tier-boundary verifier, reentrant per-page write lock |
 
 Per-cycle detail lives in [`CHANGELOG.md`](CHANGELOG.md) and [`CHANGELOG-history.md`](CHANGELOG-history.md).
 
-### Next — Phase 5 (deferred)
+### Next, Phase 5 (deferred)
 
-- **Grounding** — inline claim-level confidence tags + EXTRACTED lint; claim-to-source BM25 verification (retroactive hallucination detection); multi-source confirmation gate for `belief_state: confirmed`
-- **Retrieval** — chunk-level BM25 sub-page indexing, multi-hop retrieval, BM25 + LLM reranking
-- **Graph** — typed semantic relations, LLM-inferred implicit edges, interactive vis.js viewer, living overview page
-- **Ingest** — URL-aware `kb_ingest` (5-state adapter), two-phase compile pipeline, conversation→KB promotion, temporal claim tracking, autonomous research loop in `evolve`
+- **Grounding**: inline claim-level confidence tags + EXTRACTED lint; claim-to-source BM25 verification (retroactive hallucination detection); multi-source confirmation gate for `belief_state: confirmed`
+- **Retrieval**: chunk-level BM25 sub-page indexing, multi-hop retrieval, BM25 + LLM reranking
+- **Graph**: typed semantic relations, LLM-inferred implicit edges, interactive vis.js viewer, living overview page
+- **Ingest**: URL-aware `kb_ingest` (5-state adapter), two-phase compile pipeline, conversation→KB promotion, temporal claim tracking, autonomous research loop in `evolve`
 
-### Later — Phase 6
+### Later, Phase 6
 
 DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling.
 
@@ -479,19 +479,18 @@ DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling.
 
 | Version | Highlights | Tests |
 |---|---|---|
-| v0.3.0 | 5 operations + graph + CLI + MCP server (12 tools) | — |
-| v0.4.0 | Quality system — Bayesian trust, Actor-Critic review, semantic lint | — |
-| v0.5.0 | Robustness — YAML injection protection, path canonicalization | — |
-| v0.6.0 | DRY refactor — shared utilities, test fixtures | 180 |
+| v0.3.0 | 5 operations + graph + CLI + MCP server (12 tools) |, |
+| v0.4.0 | Quality system, Bayesian trust, Actor-Critic review, semantic lint |, |
+| v0.5.0 | Robustness, YAML injection protection, path canonicalization |, |
+| v0.6.0 | DRY refactor, shared utilities, test fixtures | 180 |
 | v0.7.0 | MCP server split, PageRank, entity enrichment, persistent verdicts | 234 |
 | v0.8.0 | BM25 search engine | 252 |
 | v0.9.0–v0.9.9 | Hardening, comprehensive audit, structured outputs, content growth | 564 |
 | v0.9.10–v0.9.13 | Citation fixes, compile scan, BM25 dedup, 54-item backlog fix | 651 |
-| v0.9.14 | Phase 3.95 — 38-item backlog remediation | 692 |
-| v0.9.15 | Phase 3.96 — 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW) | 952 |
-| v0.9.16 | Phase 3.97 — 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF, integer title coercion | 1033 |
-| v0.10.0 | Phase 4 — hybrid search, 4-layer dedup, evidence trails, layered context, raw-source fallback, multi-turn rewriting | 1177 (55 files) |
-| Phase 4.5 (unreleased) | Post-v0.10.0 audit, 22 cycles — exception taxonomy, O_EXCL slug collision, 2 new MCP tools, batch wikilink injection, Epistemic-Integrity 2.0, `kb publish`, 8-provider CLI backends | 2725 (230 files) |
+| v0.9.14 | Phase 3.95, 38-item backlog remediation | 692 |
+| v0.9.15 | Phase 3.96, 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW) | 952 |
+| v0.9.16 | Phase 3.97, 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF, integer title coercion | 1033 |
+| v0.10.0 | Phase 4, hybrid search, 4-layer dedup, evidence trails, layered context, raw-source fallback, multi-turn rewriting | 1177 (55 files) |
 
 </details>
 
@@ -528,15 +527,15 @@ DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling.
 
 ## Contributing
 
-This project is actively developed — **⭐ star the repo** to follow along. Each release ships meaningful new features (see [CHANGELOG.md](CHANGELOG.md)).
+This project is actively developed, **⭐ star the repo** to follow along. Each release ships meaningful new features (see [CHANGELOG.md](CHANGELOG.md)).
 
 - **Found a bug?** Open an issue on [GitHub](https://github.com/Asun28/llm-wiki-flywheel/issues)
-- **Have an idea?** Check the [Roadmap](#roadmap) first — if it's not there, open an issue to discuss
-- **Want to follow along?** Star the repo and watch for releases — each phase ships meaningful new features
+- **Have an idea?** Check the [Roadmap](#roadmap) first, if it's not there, open an issue to discuss
+- **Want to follow along?** Star the repo and watch for releases, each phase ships meaningful new features
 
 The codebase is intentionally readable: no magic frameworks, just Python + BM25 + NetworkX + FastMCP. If you've built knowledge systems, RAG pipelines, or LLM tooling before, the code should be familiar territory within 30 minutes.
 
-> **Not accepting PRs yet** — the architecture is still evolving quickly and merging external changes is expensive. Issues, feedback, and ideas are the best way to contribute right now.
+> **Not accepting PRs yet**: the architecture is still evolving quickly and merging external changes is expensive. Issues, feedback, and ideas are the best way to contribute right now.
 
 ## License
 

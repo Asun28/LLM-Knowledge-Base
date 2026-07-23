@@ -8,13 +8,13 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-3461-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet) ![Version](https://img.shields.io/badge/version-v0.12.0-orange)
 
 **编译知识，而非检索碎片。**
-丢入原始资料，剩下的交给 Claude——自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。以 Markdown 为核心，混合检索为可选项。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
+丢入原始资料，剩下的交给 Claude：自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。以 Markdown 为核心，混合检索为可选项。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
 
-灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具——无需配置 API Key 即可运行。同样支持通过 `KB_LLM_BACKEND` 接入本地 AI CLI 工具（Ollama、Gemini CLI、OpenCode、Codex CLI、Kimi Code、QWEN CODE CLI、DeepSeek Coder、GLM-4.5/ZAI CLI 等）。
+灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具：无需配置 API Key 即可运行。同样支持通过 `KB_LLM_BACKEND` 接入本地 AI CLI 工具（Ollama、Gemini CLI、OpenCode、Codex CLI、Kimi Code、QWEN CODE CLI、DeepSeek Coder、GLM-4.5/ZAI CLI 等）。
 
 ---
 
-## 🎯 为什么用户选择它而非传统 RAG？
+## 🎯 你能得到什么
 
 🧠 **结构优先，向量可选**：基于实体、概念与维基链接构建真实知识图谱；BM25 + 向量混合检索按需启用，用于提升召回。
 ⚡ **默认增量更新**：基于 SHA-256 变更检测，仅重新处理新增或修改的资料。
@@ -22,7 +22,7 @@
 🧪 **自我修复**：贝叶斯可信度评分、矛盾检测、内容过期标记、死链检查。
 🦉 **Obsidian 原生兼容**：将 `wiki/` 目录作为 Vault 打开，免费享受图谱视图、反向链接与悬浮预览。
 🔌 **MCP 优先**：在 Claude Code 中内置 28 个工具。用自然对话管理知识库："摄入这篇"、"关于 X 我们知道什么？"
-📤 **一键发布**：单条命令即可生成 `/llms.txt`、`/llms-full.txt`、`/graph.jsonld`、站点地图及关联页面——完整支持 Karpathy Tier-1 机器可读标准。
+📤 **一键发布**：单条命令即可生成 `/llms.txt`、`/llms-full.txt`、`/graph.jsonld`、站点地图及关联页面：完整支持 Karpathy Tier-1 机器可读标准。
 
 ### 为什么不用 RAG？
 RAG 检索的是文本块，而本系统理解的是知识结构。
@@ -32,7 +32,7 @@ RAG 检索的是文本块，而本系统理解的是知识结构。
 | 存储方式 | 不可读的向量嵌入 (Embeddings) | 可在 Obsidian 中直接浏览的 Markdown 页面 |
 | 知识形态 | 无关联的文本碎片 (Chunks) | 由实体、概念和维基链接构成的知识图谱 |
 | 检索质量 | 依赖 Top-K 相关性，结果不稳定 | BM25 + 向量混合排序，融合 PageRank 与页面可信度评分 |
-| 维护成本 | 资料变更需重新向量化 | 增量编译——仅处理变更部分 |
+| 维护成本 | 资料变更需重新向量化 | 增量编译：仅处理变更部分 |
 | 矛盾处理 | 静默返回冲突片段 | Lint 工具自动跨源检测矛盾 |
 | 知识盲区 | 无法感知缺失内容 | Evolve 工具自动分析覆盖盲区并建议新建页面 |
 
@@ -74,7 +74,7 @@ Karpathy 描述了一种手动让 LLM 编译页面的模式。而本项目是**�
 # 1. 抓取一篇文章
 trafilatura -u https://example.com/ai-article > raw/articles/ai-article.md
 
-# 2. 摄入资料 —— Claude 自动提取实体、概念与核心观点
+# 2. 摄入资料，Claude 自动提取实体、概念与核心观点
 kb ingest raw/articles/ai-article.md
 
 # 3. 观察知识库自动生长
@@ -105,7 +105,7 @@ kb evolve   # 分析缺失哪些主题？哪些内容应该建立关联？
 
 [查看详细架构图](docs/architecture/architecture-diagram-detailed.html)
 
-人类负责筛选资料，其余全自动化——提取、编译、交叉链接、查询、健康检查与缺口分析均无需人工干预。
+人类负责筛选资料，其余全自动化：提取、编译、交叉链接、查询、健康检查与缺口分析均无需人工干预。
 
 | 层级 | 路径 | 负责人 | 用途 |
 |---|---|---|---|
@@ -133,7 +133,7 @@ kb --version
 
 **🦉 Obsidian 集成**：将 `wiki/` 目录作为 Vault 打开。按 `Ctrl+G` 查看知识图谱。详见 [Obsidian 完整指南](docs/guides/quickstart-obsidian.md)（[HTML 版](docs/guides/quickstart-obsidian.html)）。
 
-**☁️ Obsidian + 远程存储（可选）**：安装 Obsidian 社区插件 [Remotely Save](https://github.com/remotely-save/remotely-save)（Apache 2.0 协议），可将 `wiki/` Vault 同步至 S3、Azure Blob、OneDrive 或 Dropbox。非技术用户无需命令行即可在任意设备上浏览已编译的知识库——`kb` 流水线写入存储桶，Remotely Save 自动同步至 Obsidian。
+**☁️ Obsidian + 远程存储（可选）**：安装 Obsidian 社区插件 [Remotely Save](https://github.com/remotely-save/remotely-save)（Apache 2.0 协议），可将 `wiki/` Vault 同步至 S3、Azure Blob、OneDrive 或 Dropbox。非技术用户无需命令行即可在任意设备上浏览已编译的知识库：`kb` 流水线写入存储桶，Remotely Save 自动同步至 Obsidian。
 
 **💡 新手建议**：先浏览 `demo/` 文件夹。这是一个基于 Karpathy 推文与 Gist 编译的小型示例知识库，完整展示了目录结构与编译输出（摘要、实体、概念、对比分析、跨源综合）。在添加你自己的资料前，可以直观了解流水线的实际效果。
 
@@ -190,7 +190,7 @@ KB ingest 仅支持 `.md`、`.txt`、`.json`、`.yaml`、`.yml`、`.rst` 和 `.c
 | 命令 | 功能说明 |
 |---|---|
 | `kb publish [--format all]` | 生成 `llms.txt`、`llms-full.txt`、`graph.jsonld`、`sitemap.xml` 与逐页关联文件至 `outputs/`（可用 `--out-dir` 覆盖） |
-| `kb rebuild-indexes [--yes]` | 全量重置——删除哈希清单、向量库与进程内 LRU 缓存，使下次 `kb compile` 从零重新摄入 |
+| `kb rebuild-indexes [--yes]` | 全量重置：删除哈希清单、向量库与进程内 LRU 缓存，使下次 `kb compile` 从零重新摄入 |
 
 CLI 同时镜像了大部分 MCP 工具（`kb search`、`kb stats`、`kb read-page`、`kb lint-deep`、`kb detect-drift` 等），便于脱离 Claude Code 编写脚本。
 
@@ -200,38 +200,38 @@ CLI 同时镜像了大部分 MCP 工具（`kb search`、`kb stats`、`kb read-pa
 
 ### 📥 摄入流水线 (Ingest Pipeline)
 - 支持 9 种摄入资料类型：`article`、`paper`、`video`、`repo`、`podcast`、`book`、`dataset`、`conversation`、`capture`（`comparison` 与 `synthesis` 属于维基页面类型，请用 `kb_create_page` 创建）
-- 基于哈希的去重机制——相同内容不会重复摄入
-- 回溯式维基链接注入——摄入新主题时，提及该主题的历史页面自动补全链接
-- 证据链 (Evidence Trail)——每个页面按倒序记录哪份资料在何时贡献了哪些内容，并由哨兵标记守护
-- 摄入时自动矛盾检测——新资料与既有页面冲突时，即时写入 `wiki/contradictions.md`，而非等到查询时才暴露
-- 级联追踪——返回受新摄入内容影响、可能需要复查的已有页面
-- 短内容分级处理——小型资料（<1000 字符）延迟创建实体，避免生成"残页"(stubs)
-- 对话捕获——`kb_capture` MCP 工具可将聊天/笔记/会话记录原子化为结构化知识项（决策、发现、修正、踩坑记录），内置密钥扫描安全拦截与进程级限流
+- 基于哈希的去重机制：相同内容不会重复摄入
+- 回溯式维基链接注入：摄入新主题时，提及该主题的历史页面自动补全链接
+- 证据链 (Evidence Trail)：每个页面按倒序记录哪份资料在何时贡献了哪些内容，并由哨兵标记守护
+- 摄入时自动矛盾检测：新资料与既有页面冲突时，即时写入 `wiki/contradictions.md`，而非等到查询时才暴露
+- 级联追踪：返回受新摄入内容影响、可能需要复查的已有页面
+- 短内容分级处理：小型资料（<1000 字符）延迟创建实体，避免生成"残页"(stubs)
+- 对话捕获：`kb_capture` MCP 工具可将聊天/笔记/会话记录原子化为结构化知识项（决策、发现、修正、踩坑记录），内置密钥扫描安全拦截与进程级限流
 - 结构化审计日志 `.data/ingest_log.jsonl`，全流程 `request_id` 关联
 
 ### 🔍 检索与查询 (Search & Query)
-- 混合检索——BM25（标题加权 + 文档长度归一化）与向量检索通过 RRF 倒数排名融合；向量为可选依赖（`pip install -e '.[hybrid]'`），缺失时自动降级为纯 BM25
-- PageRank 融合——连接度高的页面排名更靠前；`status: mature|evergreen` 与人工撰写的页面获得轻微加权
-- 4 层去重流水线——避免同一观点占据三份上下文预算
-- 多轮查询重写——追问自动继承上一轮的上下文
-- 过期事实标记——当引用页面比其原始资料更旧时，答案会给出提示
-- 原始资料回退——若没有维基页面覆盖该问题，引擎会直接检索 `raw/`，而不是凭空作答
+- 混合检索：BM25（标题加权 + 文档长度归一化）与向量检索通过 RRF 倒数排名融合；向量为可选依赖（`pip install -e '.[hybrid]'`），缺失时自动降级为纯 BM25
+- PageRank 融合：连接度高的页面排名更靠前；`status: mature|evergreen` 与人工撰写的页面获得轻微加权
+- 4 层去重流水线：避免同一观点占据三份上下文预算
+- 多轮查询重写：追问自动继承上一轮的上下文
+- 过期事实标记：当引用页面比其原始资料更旧时，答案会给出提示
+- 原始资料回退：若没有维基页面覆盖该问题，引擎会直接检索 `raw/`，而不是凭空作答
 - 上下文智能截断至 80K 字符；内联引用溯源 `[source: concepts/attention]` 确保每个观点有据可查
-- 输出适配器——`kb query --format={markdown|marp|html|chart|jupyter}` 将答案写入 `outputs/`，可为文档、Marp 幻灯片、独立 HTML、matplotlib 脚本或可执行 Notebook
+- 输出适配器：`kb query --format={markdown|marp|html|chart|jupyter}` 将答案写入 `outputs/`，可为文档、Marp 幻灯片、独立 HTML、matplotlib 脚本或可执行 Notebook
 
 ### 🛡️ 质量保障系统 (Quality System)
-- 贝叶斯可信度评分——基于查询反馈动态调整页面可信度。"错误"惩罚权重是"不完整"的 2 倍
-- 语义 Lint 检查——深度保真校验（页面对比原始来源）与跨页面矛盾检测
-- Actor-Critic 审查机制——结构化 6 项检查清单，完整审计追踪
-- 质量趋势看板——按周统计 pass/fail/warning，可视化质量演进轨迹
-- 认知完整性元数据——可选的 `belief_state`（confirmed / uncertain / contradicted / stale / retracted）、`authored_by`（human / llm / hybrid）与 `status`（seed → developing → mature → evergreen）字段同时参与排序与发布过滤
-- 响应式盲区填充——`kb lint --augment` 发现残页后推荐权威链接、经 DNS 重绑定安全传输抓取，并以 `confidence: speculative` 摄入。三道门控（`propose` → `--execute` → `--auto-ingest`）确保人工在环；限流 10 次/运行、60 次/小时、3 次/主机/小时
+- 贝叶斯可信度评分：基于查询反馈动态调整页面可信度。"错误"惩罚权重是"不完整"的 2 倍
+- 语义 Lint 检查：深度保真校验（页面对比原始来源）与跨页面矛盾检测
+- Actor-Critic 审查机制：结构化 6 项检查清单，完整审计追踪
+- 质量趋势看板：按周统计 pass/fail/warning，可视化质量演进轨迹
+- 认知完整性元数据：可选的 `belief_state`（confirmed / uncertain / contradicted / stale / retracted）、`authored_by`（human / llm / hybrid）与 `status`（seed → developing → mature → evergreen）字段同时参与排序与发布过滤
+- 响应式盲区填充：`kb lint --augment` 发现残页后推荐权威链接、经 DNS 重绑定安全传输抓取，并以 `confidence: speculative` 摄入。三道门控（`propose` → `--execute` → `--auto-ingest`）确保人工在环；限流 10 次/运行、60 次/小时、3 次/主机/小时
 
 ### 🕸️ 知识图谱 (Knowledge Graph)
 - 基于 NetworkX 从维基链接构建图谱
 - 支持 PageRank 与介数中心性 (Betweenness Centrality) 分析
 - Mermaid 图表导出（大图自动剪枝优化）
-- Obsidian 原生兼容——直接通过 `wiki/` Vault 使用内置图谱视图
+- Obsidian 原生兼容：直接通过 `wiki/` Vault 使用内置图谱视图
 
 ### 📤 发布 (Publish)
 `kb publish` 一次生成全部机器可读产物；`kb compile` 成功后也会自动触发：
@@ -249,10 +249,10 @@ CLI 同时镜像了大部分 MCP 工具（`kb search`、`kb stats`、`kb read-pa
 `kb publish` 默认写入 `outputs/`；编译成功后的自动发布则写入与 `wiki/` 同级的 `_publish/`（关闭开关 `KB_DISABLE_COMPILE_AUTO_PUBLISH=1`）。
 
 ### 🔒 安全与健壮性 (Safety & Robustness)
-- 原子化加锁写入——所有维基页面修改都在可重入的页面级锁内进行；清单、日志与判定存储各自持有独立文件锁
-- 路径安全——双锚点校验在任何读写前拦截路径穿越、Windows 非法字符与符号链接逃逸
-- 提示注入围栏——所有维基与原始内容在进入 LLM 前均被包裹在 `<wiki_context>` 边界内；扫描层输出在进入编排层消费前于层级边界重新校验
-- 崩溃安全编译——SHA-256 清单 + O_EXCL 建页，中断后可续跑而非损坏数据
+- 原子化加锁写入：所有维基页面修改都在可重入的页面级锁内进行；清单、日志与判定存储各自持有独立文件锁
+- 路径安全：双锚点校验在任何读写前拦截路径穿越、Windows 非法字符与符号链接逃逸
+- 提示注入围栏：所有维基与原始内容在进入 LLM 前均被包裹在 `<wiki_context>` 边界内；扫描层输出在进入编排层消费前于层级边界重新校验
+- 崩溃安全编译：SHA-256 清单 + O_EXCL 建页，中断后可续跑而非损坏数据
 
 ### 🤖 Claude Code 集成 (MCP Server)
 原生支持 28 个工具，无需 API Key（Claude Code 作为默认 LLM）。
@@ -390,7 +390,7 @@ export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
 | 书籍 (Book) | 手动笔记或 `markitdown` |
 | 数据集 (Dataset) | Schema 文档说明 |
 | 对话 (Conversation) | 聊天/访谈转录文本 |
-| 捕获 (Capture) | `kb_capture` MCP 工具——将聊天或会话记录原子化为结构化知识项 |
+| 捕获 (Capture) | `kb_capture` MCP 工具：将聊天或会话记录原子化为结构化知识项 |
 
 如果捕获到的资料不是受支持的文本格式，请先使用上面的转换命令。
 
@@ -455,21 +455,21 @@ ruff format src/ tests/         # 代码格式化
 | 阶段 | 核心内容 |
 |---|---|
 | **Phase 4**（v0.10.0） | RRF 融合混合检索、4 层去重流水线、证据追踪、查询时过期事实标记、摄入时自动矛盾检测 |
-| **Phase 4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}`——答案导出为文档、Marp 幻灯片、独立 HTML、绘图脚本或 Notebook |
+| **Phase 4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}`：答案导出为文档、Marp 幻灯片、独立 HTML、绘图脚本或 Notebook |
 | **Phase 5.0** | `kb lint --augment` 响应式盲区填充：发现残页 → 推荐权威链接 → 安全抓取 → 以 `confidence: speculative` 摄入，全程三阶段人工审核门控 |
 | **Phase 4.5** | 22 周期发布后审计：`kb.errors` 异常分类体系、`kb publish` Tier-1 发布格式、Epistemic-Integrity 2.0、8 个替代 LLM CLI 后端、60+ 安全威胁关闭 |
 | **Cycle 23-82** | 持续加固：双锚点路径安全、MCP 错误边界、wiki 上下文边界围栏、层级边界校验、可重入页面级写锁 |
 
 逐周期明细见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`CHANGELOG-history.md`](CHANGELOG-history.md)。
 
-### 下一步 — Phase 5（延期）
+### 下一步，Phase 5（延期）
 
-- **接地校验** — 内联观点级可信度标签 + EXTRACTED Lint；观点溯源 BM25 核验（事后幻觉检测）；多源确认门控（`belief_state: confirmed` 需 ≥ 2 个独立原始资料）
-- **检索** — 块级 BM25 子页索引、多跳检索、BM25 + LLM 重排序
-- **图谱** — 边类型化语义关系、LLM 隐式关系推断、交互式 vis.js 查看器、动态概览页
-- **摄入** — 支持 URL 的 `kb_ingest`（5 状态适配器）、两阶段编译流水线、对话→KB 提升、时间轴观点追踪、Evolve 自主研究循环
+- **接地校验**，内联观点级可信度标签 + EXTRACTED Lint；观点溯源 BM25 核验（事后幻觉检测）；多源确认门控（`belief_state: confirmed` 需 ≥ 2 个独立原始资料）
+- **检索**，块级 BM25 子页索引、多跳检索、BM25 + LLM 重排序
+- **图谱**，边类型化语义关系、LLM 隐式关系推断、交互式 vis.js 查看器、动态概览页
+- **摄入**，支持 URL 的 `kb_ingest`（5 状态适配器）、两阶段编译流水线、对话→KB 提升、时间轴观点追踪、Evolve 自主研究循环
 
-### 远期 — Phase 6
+### 远期，Phase 6
 
 DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
@@ -479,19 +479,18 @@ DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
 | 版本 | 核心内容 | 测试数 |
 |---|---|---|
-| v0.3.0 | 5大操作 + 图谱 + CLI + MCP (12 工具) | — |
-| v0.4.0 | 质量系统：贝叶斯可信度、Actor-Critic 审查、语义 Lint | — |
-| v0.5.0 | 鲁棒性：YAML 注入防护、路径规范化 | — |
+| v0.3.0 | 5大操作 + 图谱 + CLI + MCP (12 工具) |，|
+| v0.4.0 | 质量系统：贝叶斯可信度、Actor-Critic 审查、语义 Lint |，|
+| v0.5.0 | 鲁棒性：YAML 注入防护、路径规范化 |，|
 | v0.6.0 | DRY 重构：共享工具函数、测试夹具 | 180 |
 | v0.7.0 | MCP 拆包、PageRank、实体丰富、持久化审查记录 | 234 |
 | v0.8.0 | BM25 检索引擎 | 252 |
 | v0.9.0–v0.9.9 | 全面强化、综合审计、结构化输出、内容增长 | 564 |
 | v0.9.10–v0.9.13 | 引用修复、编译扫描、BM25 去重、54 条 Backlog 修复 | 651 |
-| v0.9.14 | Phase 3.95 — 38 条 Backlog 修复 | 692 |
-| v0.9.15 | Phase 3.96 — 153 条修复（4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW） | 952 |
-| v0.9.16 | Phase 3.97 — 62 条修复：原子写入、MCP 异常防护、slugify 符号映射、CRLF、整数标题强制转换 | 1033 |
-| v0.10.0 | Phase 4 — RRF 混合检索、4 层去重、证据追踪、查询时过期标记、分层上下文、原始资料回退、自动矛盾检测、多轮重写；发布后修复全部 HIGH/MEDIUM/LOW | 1177（55 文件）|
-| Phase 4.5（未发布） | v0.10.0 后持续审计，22 周期，异常分类体系、O_EXCL 防碰撞、新增 2 个 MCP 工具、批量链接注入、Epistemic-Integrity 2.0、`kb publish` 5 种格式、60+ 安全威胁关闭、8 提供商 CLI 子进程后端（Cycle 21）、wiki 路径摄入防护与提取接地提示（Cycle 22） | 2725（230 文件）|
+| v0.9.14 | Phase 3.95，38 条 Backlog 修复 | 692 |
+| v0.9.15 | Phase 3.96，153 条修复（4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW） | 952 |
+| v0.9.16 | Phase 3.97，62 条修复：原子写入、MCP 异常防护、slugify 符号映射、CRLF、整数标题强制转换 | 1033 |
+| v0.10.0 | Phase 4，RRF 混合检索、4 层去重、证据追踪、查询时过期标记、分层上下文、原始资料回退、自动矛盾检测、多轮重写；发布后修复全部 HIGH/MEDIUM/LOW | 1177（55 文件）|
 
 </details>
 
@@ -514,13 +513,13 @@ DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
 ## 🤝 参与贡献
 
-本项目正在积极开发中——⭐ **Star 仓库**以跟踪最新进展。每个版本都会带来实质性新功能（详见 [CHANGELOG.md](CHANGELOG.md)）。
+本项目正在积极开发中：⭐ **Star 仓库**以跟踪最新进展。每个版本都会带来实质性新功能（详见 [CHANGELOG.md](CHANGELOG.md)）。
 
 - 🐛 发现 Bug？请在 [GitHub Issues](https://github.com/Asun28/llm-wiki-flywheel/issues) 提交。
 - 💡 有新想法？先查看 [Roadmap](#️-路线图-roadmap)，若未涵盖，欢迎开 Issue 讨论。
 - 👀 想持续关注？Star 仓库并留意 Release 通知。
 - 📖 代码设计追求可读性：无魔法框架，纯 Python + BM25 + NetworkX + FastMCP。如果你有知识库、RAG 流水线或 LLM 工具链开发经验，30 分钟内即可熟悉代码结构。
-- ⚠️ **暂不接受 PR**——架构仍在快速演进，合并外部代码成本较高。目前提交 Issue、反馈与建议是最佳贡献方式。
+- ⚠️ **暂不接受 PR**：架构仍在快速演进，合并外部代码成本较高。目前提交 Issue、反馈与建议是最佳贡献方式。
 
 ---
 
