@@ -19,9 +19,13 @@ ingest of identical-content-different-files is deliberately NOT serialized; it
 degrades to the existing summary-collision merge (see the module docstring in
 `pipeline.py`).
 
-Every test here is written to FAIL if the Design C production change is reverted
-to the pre-cycle-83 behaviour (reserve-bare-hash-before-body) or to the rejected
-marker approach.
+Coverage is at the SUITE level, not per-test. The load-bearing invariants —
+no manifest entry after a first-ingest crash, no stale-but-equal entry after a
+RE-INGEST crash, re-selection of a crashed source, a crash not suppressing a
+different identical-content file, and commit-is-last ordering — each have a test
+that fails a revert to the pre-cycle-83 reserve-before-body behaviour. The
+remaining tests pin dedup, the in-process content lock, and the `file_lock(None)`
+fix, and are not all individually revert-sensitive.
 
 Manifest access goes through the default `HASH_MANIFEST` path patched by
 `tmp_kb_env`; no test passes `manifest_path=` (the Phase-2 confirmation that
@@ -146,6 +150,83 @@ def test_crashed_source_is_reselected_by_find_changed_sources(tmp_kb_env, monkey
     assert "reselect-after-crash.md" in names, (
         f"A source that crashed mid-ingest must be re-selected for ingest; "
         f"got new+changed={names!r}"
+    )
+
+
+def test_reingest_crash_does_not_leave_stale_complete_entry(tmp_kb_env, monkeypatch):
+    """A crashed RE-INGEST of an already-recorded source must not leave `H` behind.
+
+    R2 Codex MAJOR: Design C's completion-only commit closed the first-ingest
+    window, but re-ingesting a source whose manifest entry already equals the
+    current hash (forced re-ingest, or a same-content update that still rewrites
+    the page body + evidence trail) had a residual — a crash mid-body left the
+    pre-existing bare hash, so `find_changed_sources` saw `H == current_hash`,
+    skipped the source, and masked its half-rewritten pages.
+
+    The fix clears the entry before the body, so after a crashed re-ingest the
+    source is absent from the manifest and re-selected. This test fails if the
+    pre-body clear is removed.
+    """
+    raw = _seed_raw(tmp_kb_env, "reingest-crash")
+    # First ingest succeeds and records the bare hash.
+    _ingest(tmp_kb_env, raw)
+    committed_hash = hash_bytes(raw.read_bytes())
+    manifest = _manifest()
+    key = next((k for k in manifest if "reingest-crash" in k), None)
+    assert key is not None and manifest[key] == committed_hash, "fixture sanity"
+
+    # Re-ingest the SAME (unchanged) content, but crash mid-body.
+    _raise_in_body(monkeypatch, "crash during re-ingest")
+    with pytest.raises(IngestError):
+        _ingest(tmp_kb_env, raw)
+    _restore_body(monkeypatch)
+
+    manifest = _manifest()
+    key = next((k for k in manifest if "reingest-crash" in k), None)
+    assert key is None, (
+        f"a crashed re-ingest must not leave a stale-but-equal manifest entry "
+        f"({key!r} -> {manifest.get(key)!r}); it would mask half-rewritten pages"
+    )
+
+    # And the crashed re-ingest source must be re-selected for retry.
+    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+    names = {Path(p).name for p in (*new_sources, *changed_sources)}
+    assert "reingest-crash.md" in names, f"a crashed re-ingest must be re-selected; got {names!r}"
+
+
+def test_duplicate_is_recorded_and_not_reselected(tmp_kb_env):
+    """A detected duplicate records the bare hash and is not re-ingested forever.
+
+    R2 Codex MAJOR: before this fix the duplicate path left the manifest entry
+    untouched, so a duplicate source with no entry was classified "new" and
+    re-ingested on every compile (→ dup again), and a leftover cycle-25
+    premarker was re-selected forever. Committing the bare hash makes it stable.
+    """
+    raw_a = _seed_raw(tmp_kb_env, "dup-target", body=_SHARED_BODY)
+    _ingest(tmp_kb_env, raw_a)
+
+    raw_b = _seed_raw(tmp_kb_env, "dup-source", body=_SHARED_BODY)
+    result_b = _ingest(tmp_kb_env, raw_b)
+    assert result_b.get("duplicate") is True, "fixture sanity: B is a duplicate"
+
+    manifest = _manifest()
+    key_b = next((k for k in manifest if "dup-source" in k), None)
+    assert key_b is not None and manifest[key_b] == hash_bytes(raw_b.read_bytes()), (
+        f"a duplicate must be recorded at the bare hash so it is not re-ingested "
+        f"forever; got {manifest.get(key_b)!r}"
+    )
+
+    # A subsequent scan must NOT re-select the duplicate once template hashes are
+    # recorded. The first find_changed_sources call bootstraps template hashes
+    # into a fresh manifest (which flags all sources of that type once); the
+    # SECOND call is the steady-state check where only content-hash divergence
+    # matters. Before the dup-commit fix, dup-source had no bare-hash entry and
+    # stayed "new" on every call — including the second.
+    compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+    names = {Path(p).name for p in (*new_sources, *changed_sources)}
+    assert "dup-source.md" not in names, (
+        f"an unchanged duplicate must not be re-selected on a steady-state scan; got {names!r}"
     )
 
 

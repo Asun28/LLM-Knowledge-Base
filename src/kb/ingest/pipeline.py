@@ -342,6 +342,36 @@ def _commit_ingest_manifest(source_ref: str, source_hash: str) -> None:
         save_manifest(manifest)
 
 
+def _clear_ingest_manifest_entry(source_ref: str) -> None:
+    """Remove ``source_ref``'s manifest entry — the Design C pre-body clear.
+
+    Cycle 83 (R2 Codex MAJOR fix). The completion-only commit closes the
+    FIRST-ingest crash window, but a RE-INGEST of an already-recorded source
+    (`manifest[ref]` already equals the current hash — forced re-ingest, or a
+    same-content update that still rewrites the page body + evidence trail) had a
+    residual of the same bug: if the body crashed, the pre-existing bare hash
+    survived, so `find_changed_sources` saw `H == current_hash` and skipped the
+    source, masking its now-partial pages.
+
+    Clearing the entry before the body runs means a crash leaves NO
+    complete-looking value, so the source is re-selected and retried. The commit
+    restores the hash on success. Only writes when the key is actually present,
+    so a first-time ingest incurs no extra manifest write.
+
+    Safe under the caller's ``_content_ingest_lock(source_hash)``: any concurrent
+    same-content ingest is serialized on that lock, so it cannot observe the
+    transient "absent" window; and a different-content ingest can never key off
+    this source's hash anyway.
+    """
+    from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
+
+    with file_lock(HASH_MANIFEST):
+        manifest = load_manifest()
+        if source_ref in manifest:
+            del manifest[source_ref]
+            save_manifest(manifest)
+
+
 def _check_and_reserve_manifest(
     source_hash: str,
     source_ref: str,
@@ -1415,9 +1445,17 @@ def ingest_source(
             # AC12 — pass manifest_ref (= manifest_key or source_ref) so
             # caller-supplied keys from compile_wiki match the commit key below.
             if _check_and_reserve_manifest(source_hash, manifest_ref):
-                logger.warning(
-                    "Duplicate content detected: %s (hash: %s)", source_ref, source_hash
-                )
+                logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
+                # Cycle 83 (R2 Codex MAJOR fix) — record this source as up-to-date
+                # at the bare hash. A duplicate owns no pages of its own (its
+                # content lives on the dup target's pages), but leaving its
+                # manifest entry as-is is wrong two ways: if absent, the source is
+                # "new" and re-ingested (→ dup again) on EVERY compile forever; if
+                # it still holds a cycle-25 `in_progress:` premarker, that value
+                # never equals the hash so the source is re-selected forever too.
+                # Committing the bare hash makes the duplicate a stable pointer
+                # that a subsequent unchanged-content scan skips.
+                _commit_ingest_manifest(manifest_ref, source_hash)
                 # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
                 # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
                 # correlation surface for duplicate/failure paths.
@@ -1436,6 +1474,16 @@ def ingest_source(
                     "wikilinks_injected": [],  # fix item 6: contract key always present
                     "contradictions": [],  # fix item 6: contract key always present
                 }
+
+            # Cycle 83 (R2 Codex MAJOR fix) — clear any pre-existing manifest
+            # entry for this source BEFORE the body. On a RE-INGEST of an
+            # already-recorded source (manifest[ref] already equals the current
+            # hash), a crash mid-body would otherwise leave that stale-but-equal
+            # value behind, so find_changed_sources would skip the source and
+            # mask its half-rewritten pages — the same data-loss class this cycle
+            # closes, in the re-ingest case. Clearing it means a crash leaves no
+            # complete-looking value; the commit below restores it on success.
+            _clear_ingest_manifest_entry(manifest_ref)
 
             # PR #32 R1 Codex MAJOR fix: success emission stays OUT of
             # _run_ingest_body and IN ingest_source so all 4 JSONL stage calls
