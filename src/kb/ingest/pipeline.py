@@ -4,7 +4,9 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -251,49 +253,93 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     return False
 
 
-def _claims_content(stored_value: object, source_hash: str) -> bool:
-    """Cycle 83 — does this manifest value claim the given content hash?
+# Cycle 83 (redesign, Design C) — in-process serialization of same-content
+# ingests. Two threads in ONE process ingesting different files with identical
+# content must not both write pages; exactly one wins and the other sees a
+# duplicate. We hold a per-content-hash lock across the whole check -> body ->
+# commit span, so the second thread cannot run its duplicate check until the
+# first has committed its manifest entry (and is therefore visible as a
+# completed duplicate). This replaces the previous on-disk reservation, which
+# could not distinguish a live claim from a crashed one and so either suppressed
+# real sources forever (stale marker) or reopened the race (no marker).
+#
+# Cross-process concurrent ingest of identical-content-different-files is NOT
+# serialized by this lock (a separate process has its own registry). That case
+# degrades to both processes writing pages, where the summary-page `O_EXCL`
+# reservation (`_write_wiki_page(exclusive=True)` -> StorageError summary_collision
+# -> `_update_existing_page` pivot) turns the collision into a merge, not
+# corruption. Deliberate, documented scope decision: cross-process concurrent
+# ingestion of two distinct files with byte-identical content is vanishingly
+# rare and degrades safely, so it does not justify a durable cross-process claim
+# whose crash semantics reintroduced the data-loss bug.
+_content_ingest_locks: dict[str, threading.Lock] = {}
+_content_ingest_locks_guard = threading.Lock()
 
-    `.data/hashes.json` values are a tagged union of three shapes:
 
-    ==================  =========================================  =============
-    value               meaning                                    claims content
-    ==================  =========================================  =============
-    ``{hash}``          ingest COMPLETED; wiki pages exist         yes
-    ``in_progress:``    ingest ACTIVE (or hard-killed mid-run)      yes
-    ``failed:``         ingest raised and was handled; NO pages     no
-    ==================  =========================================  =============
+@contextmanager
+def _content_ingest_lock(content_hash: str):
+    """Yield while holding the process-local lock for ``content_hash``.
 
-    "Claims" drives duplicate detection only. The split matters in both
-    directions and each half is pinned by a regression test:
-
-    * `in_progress:` MUST claim. Cycle 83 changed the reservation from the bare
-      hash to a marker; if markers did not claim, two threads ingesting distinct
-      files with identical content would both pass the duplicate check and both
-      write pages, reopening the Phase 4.5 HIGH item Q_A RMW race that
-      `test_duplicate_content_concurrent_ingest` exists to prevent.
-    * `failed:` MUST NOT claim. A failed attempt produced no pages, so treating
-      it as a duplicate would suppress a genuinely different source with the same
-      content and leave that content in no page at all — the same silent
-      data-loss class this cycle closes.
-
-    Residual, accepted: a HARD-KILLED ingest leaves `in_progress:` behind, and
-    that stale marker does claim, so a different file with identical content is
-    skipped until the crashed source is retried. This self-heals — a marker never
-    equals the current hash, so `find_changed_sources` re-selects the crashed
-    source on the next compile and its pages get written. Distinguishing live
-    from stale needs process-liveness data that cycle-83 threat T13 forbids
-    encoding in the marker string; tracked in BACKLOG as threat T8.
+    Locks are created lazily and never evicted; the working set is bounded by
+    the number of distinct content hashes a single process ingests, which is
+    small for a CLI / MCP process lifetime.
     """
-    if not isinstance(stored_value, str):
-        # Defensive: a hand-edited or corrupted manifest can hold non-strings.
-        # Never claim on a value we cannot parse (threat T4).
-        return False
-    if stored_value.startswith("failed:"):
-        return False
-    if stored_value.startswith("in_progress:"):
-        return stored_value[len("in_progress:") :] == source_hash
-    return stored_value == source_hash
+    with _content_ingest_locks_guard:
+        lock = _content_ingest_locks.setdefault(content_hash, threading.Lock())
+    with lock:
+        yield
+
+
+def _is_duplicate_content_locked(source_hash: str, source_ref: str) -> bool:
+    """Read-only duplicate check under ``file_lock(HASH_MANIFEST)``.
+
+    A source is a duplicate iff some OTHER manifest key stores exactly this bare
+    content hash AND that source's file still exists on disk. Marker values
+    (``in_progress:``/``failed:`` from legacy manifests) are bare-hash-unequal,
+    so they never count as duplicates — a partially-ingested or failed source is
+    not a completed dedup target. This is the cycle-17 bare-hash comparison; the
+    cycle-83 marker vocabulary that briefly lived here is retired (Design C).
+
+    NOTE: this only READS the manifest. The Design C commit happens once, LAST,
+    in ``ingest_source`` after the body fully succeeds — so a crash mid-body
+    leaves no manifest entry and ``find_changed_sources`` re-selects the source.
+    """
+    try:
+        from kb.compile.compiler import HASH_MANIFEST, load_manifest
+
+        with file_lock(HASH_MANIFEST):
+            manifest = load_manifest()
+            for ref, stored_hash in manifest.items():
+                if ref.startswith("_template/"):
+                    continue
+                if stored_hash == source_hash and ref != source_ref:
+                    other_path = PROJECT_ROOT / ref
+                    if other_path.exists():
+                        return True
+    except Exception as e:
+        logger.warning("Duplicate check failed: %s", e)
+    return False
+
+
+def _commit_ingest_manifest(source_ref: str, source_hash: str) -> None:
+    """Write the bare content hash for ``source_ref`` — the Design C commit.
+
+    Called ONCE, as the last durable step of a successful ingest. Writing the
+    hash only on completion is the whole crash-atomicity guarantee: a crash
+    anywhere before this call leaves the manifest without the hash (or with an
+    older one), so ``find_changed_sources`` re-selects the source and it is
+    retried rather than silently skipped forever.
+
+    Held under ``file_lock(HASH_MANIFEST)`` with a re-read so a concurrent writer
+    between our load and save is not clobbered — the same RMW discipline the
+    reservation used, applied to the single completion write.
+    """
+    from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
+
+    with file_lock(HASH_MANIFEST):
+        manifest = load_manifest()
+        manifest[source_ref] = source_hash
+        save_manifest(manifest)
 
 
 def _check_and_reserve_manifest(
@@ -301,53 +347,15 @@ def _check_and_reserve_manifest(
     source_ref: str,
     manifest_path: "Path | None" = None,
 ) -> bool:
-    """Q_A fix (Phase 4.5 HIGH): Atomic duplicate check + manifest reservation.
+    """Back-compat shim — a read-only duplicate check.
 
-    Acquires file_lock(manifest_path) once, checks for duplicate hash, and if
-    not a duplicate, reserves the slot (manifest[source_ref] = source_hash) before
-    releasing the lock. This prevents the RMW race where two concurrent ingests of
-    the same content both pass the duplicate check and both write pages.
-
-    Returns True if the content is a duplicate (caller should return early).
-    Returns False if not a duplicate; the reservation has been written to manifest.
+    Retained because ``tests/test_cycle19_manifest_key_consistency.py`` spies on
+    this symbol and ``tests/test_ingest.py`` / ``tests/test_cycle64_graph_cache.py``
+    monkeypatch it. Under the Design C redesign it NO LONGER reserves anything —
+    it delegates to the read-only :func:`_is_duplicate_content_locked`. The
+    manifest is written once, on completion, by :func:`_commit_ingest_manifest`.
     """
-    try:
-        from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
-
-        effective_manifest_path = manifest_path or HASH_MANIFEST
-        with file_lock(effective_manifest_path):
-            manifest = load_manifest(effective_manifest_path)
-            for ref, stored_hash in manifest.items():
-                if ref.startswith("_template/"):
-                    continue
-                if _claims_content(stored_hash, source_hash) and ref != source_ref:
-                    other_path = PROJECT_ROOT / ref
-                    if other_path.exists():
-                        return True  # Duplicate detected — caller returns early
-            # Not a duplicate — reserve the slot atomically.
-            #
-            # Cycle 83 (Phase 4.5 HIGH R2): reserve as `in_progress:{hash}`, NOT the
-            # bare hash. A bare hash here is indistinguishable from a COMPLETED
-            # ingest, so a crash anywhere between this reservation and the Phase-2
-            # confirmation in `_run_ingest_body` left `.data/hashes.json` asserting
-            # the source was fully ingested while the wiki held zero or partial
-            # pages. `find_changed_sources` diffs stored-vs-current hash, so that
-            # source was then skipped PERMANENTLY on every later compile — silent,
-            # unrecoverable-without-`--full` data loss.
-            #
-            # `in_progress:` is the same producer string `compile_wiki` has written
-            # since cycle 25 (compiler.py), so the existing marker-aware consumers
-            # handle it already and no new manifest format is introduced. Written
-            # INSIDE the file_lock acquired above — no new lock target, so the
-            # documented lock order (io.py) is untouched.
-            manifest[source_ref] = f"in_progress:{source_hash}"
-            save_manifest(manifest, effective_manifest_path)
-    except Exception as e:
-        # Cycle 83 (threat T2): was `logger.debug`. A manifest that silently stopped
-        # recording reservations produced no operator signal at default log level,
-        # which is exactly the failure this cycle exists to make visible.
-        logger.warning("Duplicate check/reservation failed: %s", e)
-    return False
+    return _is_duplicate_content_locked(source_hash, source_ref)
 
 
 def detect_source_type(source_path: Path, raw_dir: Path | None = None) -> str:
@@ -1385,68 +1393,75 @@ def ingest_source(
     # extract_from_source or _pre_validate_extraction raised.
     _emit_ingest_jsonl("start", request_id, source_ref, source_hash, outcome={})
 
-    # Cycle 83 (C33-L2) — sentinel-init BEFORE the try. The `except BaseException`
-    # handler reads this flag; anything raised before the reservation point (e.g.
-    # `extract_from_source`, `_pre_validate_extraction`) would otherwise leave it
-    # unbound and turn a real ingest error into a NameError.
-    _reservation_point_passed = False
-
     try:
-        # Validate caller-provided extractions before manifest reservation. In
-        # Claude Code mode, extraction is produced here first, then validated
-        # before the same reservation point.
+        # Validate caller-provided extractions before the ingest body. In Claude
+        # Code mode, extraction is produced here first, then validated. This runs
+        # OUTSIDE the content lock — redundant extraction by two same-content
+        # threads is harmless; only the check -> body -> commit span must be
+        # serialized.
         if extraction is None:
             extraction = extract_from_source(raw_content, source_type, wiki_dir=effective_wiki_dir)
         _pre_validate_extraction(extraction)
 
-        # Q_A fix (Phase 4.5 HIGH) — Phase 1: atomic duplicate check + manifest reservation.
-        # Acquires file_lock(HASH_MANIFEST), checks for duplicate hash, and if not a duplicate,
-        # reserves manifest[manifest_ref] = source_hash before releasing. This prevents the RMW
-        # race where two concurrent ingests of the same content both pass the duplicate check.
-        # Cycle 19 AC12 — pass manifest_ref (= manifest_key or source_ref) so caller-supplied
-        # keys from compile_wiki (manifest_key_for) match the Phase-2 confirmation key below.
-        # Cycle 83 (design D5) — track whether we passed the reservation point so
-        # the exception handler below knows a marker may be outstanding. A local
-        # flag keeps `_check_and_reserve_manifest`'s bool return and signature
-        # intact; its docstring states tests call it directly.
-        _reservation_point_passed = True
-        if _check_and_reserve_manifest(source_hash, manifest_ref):
-            logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
-            # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
-            # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
-            # correlation surface for duplicate/failure paths.
-            _emit_ingest_jsonl("duplicate_skip", request_id, source_ref, source_hash, outcome={})
-            return {
-                "source_path": str(source_path),
-                "source_type": source_type,
-                "content_hash": source_hash,
-                "pages_created": [],
-                "pages_updated": [],
-                "pages_skipped": [],
-                "duplicate": True,
-                "affected_pages": [],  # fix item 6: contract key always present
-                "wikilinks_injected": [],  # fix item 6: contract key always present
-                "contradictions": [],  # fix item 6: contract key always present
-            }
+        # Cycle 83 (Design C) — hold the per-content-hash lock across the
+        # duplicate check, the body, AND the completion commit. A second thread
+        # ingesting a different file with identical content cannot run its own
+        # check until this one has committed, so it sees a completed duplicate.
+        # The manifest is written ONLY on success (after the body), so a crash
+        # anywhere inside this block leaves no manifest entry and the source is
+        # re-selected by find_changed_sources next compile.
+        with _content_ingest_lock(source_hash):
+            # Read-only duplicate check under file_lock(HASH_MANIFEST). Cycle 19
+            # AC12 — pass manifest_ref (= manifest_key or source_ref) so
+            # caller-supplied keys from compile_wiki match the commit key below.
+            if _check_and_reserve_manifest(source_hash, manifest_ref):
+                logger.warning(
+                    "Duplicate content detected: %s (hash: %s)", source_ref, source_hash
+                )
+                # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
+                # Per Q15 decision, wiki/log.md stays success-only; JSONL is the ONLY
+                # correlation surface for duplicate/failure paths.
+                _emit_ingest_jsonl(
+                    "duplicate_skip", request_id, source_ref, source_hash, outcome={}
+                )
+                return {
+                    "source_path": str(source_path),
+                    "source_type": source_type,
+                    "content_hash": source_hash,
+                    "pages_created": [],
+                    "pages_updated": [],
+                    "pages_skipped": [],
+                    "duplicate": True,
+                    "affected_pages": [],  # fix item 6: contract key always present
+                    "wikilinks_injected": [],  # fix item 6: contract key always present
+                    "contradictions": [],  # fix item 6: contract key always present
+                }
 
-        # PR #32 R1 Codex MAJOR fix: success emission moved OUT of
-        # _run_ingest_body and INTO ingest_source so all 4 JSONL stage calls
-        # are wired at the same level (start / duplicate_skip / success /
-        # failure), keeping the telemetry envelope symmetric.
-        result = _run_ingest_body(
-            source_path=source_path,
-            source_type=source_type,
-            source_ref=source_ref,
-            manifest_ref=manifest_ref,
-            source_hash=source_hash,
-            request_id=request_id,
-            raw_content=raw_content,
-            extraction=extraction,
-            effective_wiki_dir=effective_wiki_dir,
-            effective_raw_dir=effective_raw_dir,
-            defer_small=defer_small,
-            _skip_vector_rebuild=_skip_vector_rebuild,
-        )
+            # PR #32 R1 Codex MAJOR fix: success emission stays OUT of
+            # _run_ingest_body and IN ingest_source so all 4 JSONL stage calls
+            # are wired at the same level (start / duplicate_skip / success /
+            # failure), keeping the telemetry envelope symmetric.
+            result = _run_ingest_body(
+                source_path=source_path,
+                source_type=source_type,
+                source_ref=source_ref,
+                manifest_ref=manifest_ref,
+                source_hash=source_hash,
+                request_id=request_id,
+                raw_content=raw_content,
+                extraction=extraction,
+                effective_wiki_dir=effective_wiki_dir,
+                effective_raw_dir=effective_raw_dir,
+                defer_small=defer_small,
+                _skip_vector_rebuild=_skip_vector_rebuild,
+            )
+
+            # Cycle 83 (Design C) — THE commit. Write the bare content hash only
+            # now, as the last durable step, and still inside the content lock so
+            # a concurrent same-content thread observes it. Everything above can
+            # crash without leaving a false "ingested" claim in the manifest.
+            _commit_ingest_manifest(manifest_ref, source_hash)
+
         _emit_ingest_jsonl(
             "success",
             request_id,
@@ -1478,34 +1493,13 @@ def ingest_source(
             source_hash,
             outcome={"error_summary": err_summary},
         )
-        # Cycle 83 (design D3) — downgrade the `in_progress:` reservation to
-        # `failed:{hash}` so the marker vocabulary stays honest:
-        #   in_progress: -> ingest died without unwinding (suspected hard kill)
-        #   failed:      -> ingest raised and was handled; no pages were written
-        # Both differ from the bare content hash, so `find_changed_sources`
-        # re-selects the source either way and recovery is preserved. The
-        # distinction is load-bearing for `_claims_content`: `failed:` must not
-        # suppress a different source with identical content, whereas a live
-        # `in_progress:` must, to preserve the Q_A concurrent-ingest guarantee.
-        #
-        # Wrapped in its own try/except so a rollback failure can never replace
-        # the caller's original exception.
-        if _reservation_point_passed:
-            try:
-                from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
-
-                with file_lock(HASH_MANIFEST):
-                    _rollback_manifest = load_manifest()
-                    _rollback_manifest[manifest_ref] = f"failed:{source_hash}"
-                    save_manifest(_rollback_manifest)
-            except Exception as _downgrade_exc:  # noqa: BLE001 — must not mask `exc`
-                logger.warning(
-                    "Failed to downgrade in_progress marker for %s after ingest "
-                    "failure: %s. The marker remains and will be surfaced by "
-                    "compile_wiki's stale-marker scan.",
-                    manifest_ref,
-                    _downgrade_exc,
-                )
+        # Cycle 83 (Design C) — nothing to roll back. The manifest is written
+        # only by _commit_ingest_manifest AFTER the body fully succeeds, so a
+        # failure here means no manifest entry was written for this attempt (or
+        # an older, still-valid one remains). find_changed_sources therefore
+        # re-selects the source on the next compile — recovery is automatic, with
+        # no marker vocabulary and no downgrade write that could clobber a
+        # concurrently-completed value.
         # Cycle 20 AC5 / AC7 — wrap unexpected exceptions into IngestError so
         # callers get a stable taxonomy. Expected ingest-path kinds
         # (KBError subclasses, OSError, ValueError) pass through unchanged so
@@ -1691,24 +1685,13 @@ def _run_ingest_body(
         wiki_dir=effective_wiki_dir,
     )
 
-    # 6. Q_A fix (Phase 4.5 HIGH) — Phase 2: idempotent manifest confirmation.
-    # Re-acquires file_lock(HASH_MANIFEST) to write the final hash (Phase 1 already
-    # reserved it, but this re-confirms after all ingest work completes, consistent with C5).
-    # Cycle 19 AC12 — Phase 2 uses the SAME manifest_ref the Phase-1 reservation
-    # used (R2 M1 fix), so a caller-supplied manifest_key writes to a single key
-    # both times, eliminating the dual-write divergence under non-default raw_dir.
-    try:
-        from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
-
-        with file_lock(HASH_MANIFEST):
-            manifest = load_manifest()
-            manifest[manifest_ref] = source_hash  # idempotent — same value as Phase 1 reservation
-            save_manifest(manifest)
-    except (OSError, json.JSONDecodeError) as e:
-        # Fix 2.14: narrow bare except — log at WARNING, not DEBUG
-        logger.warning("Failed to update hash manifest: %s", e)
-    except Exception as e:
-        logger.debug("Failed to update hash manifest (unexpected): %s", e)
+    # 6. Cycle 83 (Design C) — the manifest hash is NO LONGER written here. It is
+    # committed once, by _commit_ingest_manifest, from ingest_source AFTER this
+    # body returns successfully. Writing it mid-body (the old Phase-2 confirmation)
+    # would record "ingested" before the remaining steps ran, so a crash in
+    # steps 7-9 could leave a false-complete manifest — the exact class this
+    # redesign closes. The single completion write also retires the dual-write
+    # divergence the old Phase-1/Phase-2 pair had under a non-default manifest path.
 
     # 7. Append to log (best-effort — page writes already succeeded; a log failure
     # must not crash the caller or hide the successful ingest result).

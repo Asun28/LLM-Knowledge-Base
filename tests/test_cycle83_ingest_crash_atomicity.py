@@ -1,25 +1,37 @@
-"""Cycle 83 — `ingest_source` crash-atomicity via `in_progress:` manifest markers.
+"""Cycle 83 (Design C) — `ingest_source` crash-atomicity via completion-only commit.
 
-Phase 4.5 HIGH (R2): `_check_and_reserve_manifest` wrote the bare content hash
-BEFORE any wiki page existed. A crash anywhere between that reservation and the
-end of `_run_ingest_body` left `.data/hashes.json` asserting the source was
-ingested while the wiki held zero or partial pages — and `find_changed_sources`
-then skipped that source permanently on every later compile.
+Phase 4.5 HIGH (R2): the manifest hash used to be reserved BEFORE any wiki page
+was written, and a bare hash is indistinguishable from a completed ingest. A
+crash mid-body left `.data/hashes.json` asserting the source was ingested while
+the wiki held zero or partial pages, and `find_changed_sources` then skipped
+that source permanently.
 
-Fix: reserve as `in_progress:{hash}` (the same producer string `compile_wiki`
-has used since cycle 25), promote to the bare hash at the Phase-2 confirmation,
-and downgrade to `failed:{hash}` on the handled-exception path.
+Design C closes it by writing the manifest hash exactly ONCE, as the last
+durable step of a successful ingest (`_commit_ingest_manifest`, called from
+`ingest_source` after `_run_ingest_body` returns). A crash anywhere before that
+leaves no manifest entry, so the source is re-selected and retried. There are no
+`in_progress:`/`failed:` marker values in the ingest path any more.
 
-Test strategy: behavioural assertions against the on-disk manifest via the
-default `HASH_MANIFEST` path patched by `tmp_kb_env`. No `manifest_path=`
-overrides anywhere in this file — the Phase-2 confirmation hardcodes
-`HASH_MANIFEST`, so a `manifest_path=` test would observe only `compile_wiki`'s
-cycle-25 marker and pass under revert (design doc CONDITION 7).
+Same-process concurrent ingest of identical content is serialized by an
+in-process per-content-hash lock (`_content_ingest_lock`), so exactly one thread
+writes pages and the other sees a completed duplicate. Cross-process concurrent
+ingest of identical-content-different-files is deliberately NOT serialized; it
+degrades to the existing summary-collision merge (see the module docstring in
+`pipeline.py`).
+
+Every test here is written to FAIL if the Design C production change is reverted
+to the pre-cycle-83 behaviour (reserve-bare-hash-before-body) or to the rejected
+marker approach.
+
+Manifest access goes through the default `HASH_MANIFEST` path patched by
+`tmp_kb_env`; no test passes `manifest_path=` (the Phase-2 confirmation that
+hardcoded HASH_MANIFEST is gone, but keeping the discipline avoids re-introducing
+the vacuity trap).
 """
 
 from __future__ import annotations
 
-import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -31,11 +43,13 @@ from kb.utils.hashing import hash_bytes
 
 _SHARED_BODY = "# Shared\n\nIdentical content across two distinct source files.\n"
 
+_ORIGINAL_RUN_INGEST_BODY = pipeline_mod._run_ingest_body
+
 
 def _stub_extraction() -> dict:
     return {
         "title": "Cycle 83 Crash Atomicity Source",
-        "summary": "Small test source used by cycle 83 manifest-marker tests.",
+        "summary": "Small test source used by cycle 83 crash-atomicity tests.",
         "entities_mentioned": [],
         "concepts_mentioned": [],
         "key_points": ["Trigger the ingest path."],
@@ -56,25 +70,15 @@ def _ingest(tmp_kb_env: Path, raw: Path) -> dict:
         extraction=_stub_extraction(),
         wiki_dir=tmp_kb_env / "wiki",
         raw_dir=tmp_kb_env / "raw",
-        # Nothing here exercises hybrid search, and the tail `rebuild_vector_index`
-        # is heavy sqlite I/O. Left enabled, twelve full rebuilds added enough load
-        # to the suite to intermittently tip the pre-existing timing-sensitive
-        # contradiction-concurrency tests past their `file_lock` timeout — the
-        # production change was innocent (the suite is green with this file
-        # excluded), the cost was purely this fixture's.
+        # Nothing here exercises hybrid search; skip the heavy vector rebuild so
+        # this file adds no measurable load to timing-sensitive concurrency tests
+        # elsewhere in the suite.
         _skip_vector_rebuild=True,
     )
 
 
 def _manifest() -> dict:
-    """Read the manifest through the compiler module so the tmp_kb_env patch applies."""
     return compiler_mod.load_manifest()
-
-
-def _entry_for(manifest: dict, slug: str) -> tuple[str, str]:
-    key = next((k for k in manifest if slug in k), None)
-    assert key is not None, f"No manifest entry for {slug!r}; manifest={manifest!r}"
-    return key, str(manifest[key])
 
 
 def _raise_in_body(monkeypatch, message: str = "simulated ingest failure") -> None:
@@ -89,234 +93,134 @@ def _restore_body(monkeypatch) -> None:
     """Undo ONLY the `_run_ingest_body` stub.
 
     Deliberately not a blanket `monkeypatch` undo — `tmp_kb_env` receives the same
-    `monkeypatch` instance, so a blanket undo also tears down the path sandbox
-    and lets the rest of the test write into the real `wiki/` and `.data/`.
+    `monkeypatch` instance, so undoing everything tears down the path sandbox and
+    lets the rest of the test write into the real `wiki/` and `.data/`.
     """
     monkeypatch.setattr(pipeline_mod, "_run_ingest_body", _ORIGINAL_RUN_INGEST_BODY)
 
 
-_ORIGINAL_RUN_INGEST_BODY = pipeline_mod._run_ingest_body
-
-
 # --------------------------------------------------------------------------
-# The core contract: a crash mid-body leaves a marker, not a bare hash.
+# Core contract: the manifest hash appears ONLY after the body succeeds.
 # --------------------------------------------------------------------------
 
 
-def test_crash_mid_ingest_leaves_in_progress_marker_not_bare_hash(tmp_kb_env, monkeypatch):
-    """At `_run_ingest_body` call time the manifest holds `in_progress:{hash}`.
+def test_crash_mid_body_leaves_no_manifest_entry(tmp_kb_env, monkeypatch):
+    """A crash inside `_run_ingest_body` must leave the source unrecorded.
 
-    This is the revert detector. Pre-cycle-83, `_check_and_reserve_manifest`
-    wrote the BARE hash at that moment, so the snapshot value would be 32 hex
-    chars and the `startswith("in_progress:")` assertion fails.
-
-    Snapshotting INSIDE the stub rather than asserting on final state is what
-    makes this non-vacuous: the failure path also writes a `failed:` value, so a
-    final-state-only assertion would pass even with the reservation reverted.
+    Revert detector. Pre-cycle-83 the bare hash was reserved BEFORE the body, so
+    after a crash the manifest held `manifest[ref] == source_hash` and this
+    assertion fails. Under Design C the commit is post-body, so a crash leaves no
+    entry.
     """
     raw = _seed_raw(tmp_kb_env, "crash-mid-body")
-    expected_hash = hash_bytes(raw.read_bytes())
 
-    snapshot: dict = {}
-
-    def _snapshot_then_raise(**kwargs):
-        snapshot.update(compiler_mod.load_manifest())
-        raise RuntimeError("simulated hard failure inside ingest body")
-
-    monkeypatch.setattr(pipeline_mod, "_run_ingest_body", _snapshot_then_raise)
-
+    _raise_in_body(monkeypatch, "hard failure inside ingest body")
     with pytest.raises(IngestError):
         _ingest(tmp_kb_env, raw)
 
-    _key, value = _entry_for(snapshot, "crash-mid-body")
-    assert value.startswith("in_progress:"), (
-        f"Cycle-83 revert detected: expected an in_progress marker in the manifest "
-        f"at _run_ingest_body call time, got {value!r}. A bare hash here means a "
-        f"crash would make find_changed_sources skip this source permanently."
-    )
-    assert value == f"in_progress:{expected_hash}", (
-        f"Marker payload must be the reserved content hash; got {value!r}"
+    manifest = _manifest()
+    key = next((k for k in manifest if "crash-mid-body" in k), None)
+    assert key is None, (
+        f"Cycle-83 revert detected: a crashed ingest left a manifest entry "
+        f"({key!r} -> {manifest.get(key)!r}). The hash must be written only on "
+        f"success, or a crash makes find_changed_sources skip the source forever."
     )
 
 
-def test_marker_payload_is_a_bare_hash(tmp_kb_env, monkeypatch):
-    """Ingest's marker string matches `compile_wiki`'s producer shape.
+def test_crashed_source_is_reselected_by_find_changed_sources(tmp_kb_env, monkeypatch):
+    """After a crash, `find_changed_sources` must re-select the source.
 
-    Design D2: do not invent a second prefix. `compile_wiki` writes
-    `in_progress:{pre_hash}` and `content_hash`/`hash_bytes` are the same
-    function, so both producers emit the same string for the same file.
+    This is the end-to-end recovery guarantee, and it is what the pre-cycle-83
+    bug broke: a reserved bare hash equalled the current hash, so the crashed
+    source was classified up-to-date and skipped.
     """
-    raw = _seed_raw(tmp_kb_env, "prefix-parity")
-    snapshot: dict = {}
+    raw = _seed_raw(tmp_kb_env, "reselect-after-crash")
 
-    def _snapshot_then_raise(**kwargs):
-        snapshot.update(compiler_mod.load_manifest())
-        raise RuntimeError("stop after reservation")
-
-    monkeypatch.setattr(pipeline_mod, "_run_ingest_body", _snapshot_then_raise)
+    _raise_in_body(monkeypatch, "crash before commit")
     with pytest.raises(IngestError):
         _ingest(tmp_kb_env, raw)
+    _restore_body(monkeypatch)
 
-    _key, value = _entry_for(snapshot, "prefix-parity")
-    prefix, _, payload = value.partition(":")
-    assert prefix == "in_progress"
-    assert len(payload) == 32 and all(c in "0123456789abcdef" for c in payload), (
-        f"Marker payload must be a bare 32-hex content hash so the manifest value "
-        f"namespace stays a tagged union of disjoint strings; got {payload!r}"
+    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+    names = {Path(p).name for p in (*new_sources, *changed_sources)}
+    assert "reselect-after-crash.md" in names, (
+        f"A source that crashed mid-ingest must be re-selected for ingest; "
+        f"got new+changed={names!r}"
     )
 
 
-# --------------------------------------------------------------------------
-# Terminal states: failure downgrades, success promotes.
-# --------------------------------------------------------------------------
-
-
-def test_handled_exception_downgrades_marker_to_failed(tmp_kb_env, monkeypatch):
-    """After a handled exception the value is `failed:`, never `in_progress:`.
-
-    Design D3 (load-bearing): without the downgrade, every ordinary ingest error
-    leaves an in_progress marker and the cycle-25 stale-marker warning becomes
-    noise operators learn to ignore. `in_progress:` must mean "suspected hard
-    kill", `failed:` must mean "handled exception".
-    """
-    raw = _seed_raw(tmp_kb_env, "downgrade-to-failed")
-    expected_hash = hash_bytes(raw.read_bytes())
-
-    _raise_in_body(monkeypatch, "handled ingest failure")
-    with pytest.raises(IngestError):
-        _ingest(tmp_kb_env, raw)
-
-    _key, value = _entry_for(_manifest(), "downgrade-to-failed")
-    assert value == f"failed:{expected_hash}", (
-        f"Handled exception must downgrade the marker to failed:{{hash}}; got {value!r}"
-    )
-    assert not value.startswith("in_progress:"), (
-        "in_progress must not survive a handled exception — it is reserved for hard kills"
-    )
-
-
-def test_downgrade_does_not_mask_the_original_exception(tmp_kb_env, monkeypatch):
-    """A failing downgrade must never replace the caller's exception.
-
-    Design D3: the downgrade is wrapped in its own try/except. If `save_manifest`
-    itself blows up during rollback, the caller still sees the real ingest error.
-    """
-    raw = _seed_raw(tmp_kb_env, "rollback-blows-up")
-
-    def _explode(*args, **kwargs):
-        raise OSError("manifest save failed during rollback")
-
-    _raise_in_body(monkeypatch, "the original failure the caller must see")
-    monkeypatch.setattr(compiler_mod, "save_manifest", _explode)
-
-    with pytest.raises(IngestError, match="the original failure the caller must see"):
-        _ingest(tmp_kb_env, raw)
-
-
-def test_successful_ingest_promotes_marker_to_bare_hash(tmp_kb_env):
-    """A completed ingest leaves the bare hash, with no marker residue.
-
-    Phase-2 confirmation must overwrite the reservation. If it did not, every
-    successful ingest would leave a permanent in_progress entry and re-ingest
-    forever (threat T14: absence of a marker means "assume complete").
-    """
-    raw = _seed_raw(tmp_kb_env, "promote-on-success")
+def test_successful_ingest_writes_the_bare_hash(tmp_kb_env):
+    """A completed ingest records exactly the bare content hash — no marker."""
+    raw = _seed_raw(tmp_kb_env, "commit-on-success")
     expected_hash = hash_bytes(raw.read_bytes())
 
     result = _ingest(tmp_kb_env, raw)
     assert not result.get("duplicate"), "fixture sanity: first ingest is not a duplicate"
 
-    _key, value = _entry_for(_manifest(), "promote-on-success")
-    assert value == expected_hash, (
-        f"Successful ingest must promote the marker to the bare hash; got {value!r}"
+    manifest = _manifest()
+    key = next((k for k in manifest if "commit-on-success" in k), None)
+    assert key is not None, "successful ingest must record the source in the manifest"
+    assert manifest[key] == expected_hash, (
+        f"completed ingest must store the bare content hash, not a marker; got {manifest[key]!r}"
+    )
+
+
+def test_no_marker_vocabulary_in_ingest_path(tmp_kb_env, monkeypatch):
+    """Neither success nor failure writes an `in_progress:`/`failed:` value.
+
+    Design C retired the marker state-machine entirely from the ingest path. A
+    revert to the marker approach writes one of these prefixes and fails here.
+    """
+    ok_raw = _seed_raw(tmp_kb_env, "no-marker-ok")
+    _ingest(tmp_kb_env, ok_raw)
+
+    bad_raw = _seed_raw(tmp_kb_env, "no-marker-fail")
+    _raise_in_body(monkeypatch, "fail after nothing committed")
+    with pytest.raises(IngestError):
+        _ingest(tmp_kb_env, bad_raw)
+    _restore_body(monkeypatch)
+
+    for key, value in _manifest().items():
+        assert not str(value).startswith(("in_progress:", "failed:")), (
+            f"ingest path must not write marker values; found {key!r} -> {value!r}"
+        )
+
+
+def test_commit_is_the_last_durable_step(tmp_kb_env, monkeypatch):
+    """The manifest entry is absent while the body runs and present only after.
+
+    Snapshots the manifest from INSIDE the body (the body has not returned yet,
+    so the commit has not run). Pre-cycle-83, the reservation had already written
+    the hash by this point, so the snapshot would be non-empty.
+    """
+    raw = _seed_raw(tmp_kb_env, "commit-ordering")
+
+    seen_during_body: dict = {}
+    real_body = pipeline_mod._run_ingest_body
+
+    def _snapshot_then_run(**kwargs):
+        seen_during_body.update(compiler_mod.load_manifest())
+        return real_body(**kwargs)
+
+    monkeypatch.setattr(pipeline_mod, "_run_ingest_body", _snapshot_then_run)
+    _ingest(tmp_kb_env, raw)
+
+    assert not any("commit-ordering" in k for k in seen_during_body), (
+        f"the manifest must NOT contain this source while its body is still "
+        f"running; a pre-body reservation is the reverted bug. Saw: {seen_during_body!r}"
+    )
+    assert any("commit-ordering" in k for k in _manifest()), (
+        "after a successful ingest the source must be committed to the manifest"
     )
 
 
 # --------------------------------------------------------------------------
-# `_claims_content` — the three-way manifest vocabulary. Both halves of the
-# split are load-bearing and each is pinned here.
+# Duplicate detection (bare-hash, cycle-17 semantics restored).
 # --------------------------------------------------------------------------
 
 
-def test_failed_marker_does_not_suppress_a_different_source(tmp_kb_env, monkeypatch):
-    """`failed:` MUST NOT claim content — the load-bearing negative contract.
-
-    A failed attempt wrote no pages. If it were treated as a duplicate, a
-    genuinely different source with identical content would be skipped and that
-    content would exist in NO page at all — the same silent data-loss class this
-    cycle closes.
-
-    Fails against an implementation that strips every prefix indiscriminately.
-    """
-    raw_a = _seed_raw(tmp_kb_env, "failed-source-a", body=_SHARED_BODY)
-
-    _raise_in_body(monkeypatch, "A fails")
-    with pytest.raises(IngestError):
-        _ingest(tmp_kb_env, raw_a)
-    _restore_body(monkeypatch)
-
-    _key_a, value_a = _entry_for(_manifest(), "failed-source-a")
-    assert value_a.startswith("failed:"), f"fixture sanity: expected failed:, got {value_a!r}"
-
-    raw_b = _seed_raw(tmp_kb_env, "recovering-source-b", body=_SHARED_BODY)
-    result_b = _ingest(tmp_kb_env, raw_b)
-
-    assert not result_b.get("duplicate"), (
-        "A `failed:` entry must NOT make a different file with identical content "
-        "look like a duplicate — the failed attempt wrote no pages, so suppressing "
-        "B would leave the content unrepresented entirely."
-    )
-    assert result_b.get("pages_created"), (
-        f"Source B must produce pages; got pages_created={result_b.get('pages_created')!r}"
-    )
-
-
-def test_live_in_progress_marker_still_claims_content(tmp_kb_env):
-    """`in_progress:` MUST claim content — preserves the Phase 4.5 Q_A guarantee.
-
-    Cycle 83 changed the reservation from a bare hash to a marker. If markers did
-    not claim, two threads ingesting distinct files with identical content would
-    both pass the duplicate check and both write pages, reopening the RMW race
-    that `tests/test_ingest.py::test_duplicate_content_concurrent_ingest` pins.
-
-    Asserted at the helper level because the race itself is exercised by that
-    existing threaded test; this pins the predicate the fix depends on.
-    """
-    content_hash = "a" * 32
-    assert pipeline_mod._claims_content(f"in_progress:{content_hash}", content_hash) is True
-    assert pipeline_mod._claims_content(content_hash, content_hash) is True
-    assert pipeline_mod._claims_content(f"failed:{content_hash}", content_hash) is False
-    # A marker for DIFFERENT content must not claim.
-    assert pipeline_mod._claims_content(f"in_progress:{'b' * 32}", content_hash) is False
-    # Threat T4 — a corrupt non-string manifest value must never claim, and must
-    # not raise (pre-fix, `stored.startswith` on an int killed the whole scan).
-    assert pipeline_mod._claims_content(12345, content_hash) is False
-    assert pipeline_mod._claims_content(None, content_hash) is False
-
-
-def test_stale_marker_does_not_block_reingest_of_same_key(tmp_kb_env, monkeypatch):
-    """The recovery path: re-ingesting the crashed source itself works.
-
-    The `ref != source_ref` guard protects this, and it is the case that matters
-    most for recovery, so it gets an explicit pin.
-    """
-    raw = _seed_raw(tmp_kb_env, "retry-after-crash")
-
-    _raise_in_body(monkeypatch, "first attempt dies")
-    with pytest.raises(IngestError):
-        _ingest(tmp_kb_env, raw)
-    _restore_body(monkeypatch)
-
-    result = _ingest(tmp_kb_env, raw)
-    assert not result.get("duplicate"), "Re-ingest of a crashed source must not be skipped"
-    _key, value = _entry_for(_manifest(), "retry-after-crash")
-    assert value == hash_bytes(raw.read_bytes()), (
-        f"Successful retry must leave the bare hash; got {value!r}"
-    )
-
-
-def test_completed_ingest_still_deduplicates_identical_content(tmp_kb_env):
-    """The dedup guarantee is preserved for COMPLETED ingests."""
+def test_completed_ingest_deduplicates_identical_content(tmp_kb_env):
+    """A completed ingest still dedups an identical-content source at another path."""
     raw_a = _seed_raw(tmp_kb_env, "dedup-original", body=_SHARED_BODY)
     _ingest(tmp_kb_env, raw_a)
 
@@ -324,81 +228,127 @@ def test_completed_ingest_still_deduplicates_identical_content(tmp_kb_env):
     result_b = _ingest(tmp_kb_env, raw_b)
 
     assert result_b.get("duplicate") is True, (
-        "A completed ingest must still deduplicate identical content from another path"
+        "a completed ingest must dedup identical content ingested from another path"
     )
 
 
-# --------------------------------------------------------------------------
-# The marker drives recovery through the existing compile machinery.
-# --------------------------------------------------------------------------
+def test_crashed_source_does_not_suppress_a_different_file(tmp_kb_env, monkeypatch):
+    """A crashed source must NOT make a different identical-content file a dup.
 
-
-def test_marker_valued_entry_is_reselected_as_changed(tmp_kb_env):
-    """`find_changed_sources` re-selects a marker-valued source.
-
-    This is why the marker approach needs no new recovery pass: the change diff
-    already treats any value != current hash as changed, so a crashed source
-    becomes eligible for re-ingest automatically. It is also what makes the
-    stale-`in_progress:` residual self-healing.
+    This is the failure mode the marker approach reintroduced (Codex BLOCKER): a
+    stale claim suppressing a genuinely different source, yielding zero pages for
+    that content. Under Design C the crashed source left no manifest entry, so B
+    is not a duplicate and gets ingested normally.
     """
-    raw = _seed_raw(tmp_kb_env, "reselect-me")
-    real_hash = hash_bytes(raw.read_bytes())
+    raw_a = _seed_raw(tmp_kb_env, "crashed-a", body=_SHARED_BODY)
+    _raise_in_body(monkeypatch, "A crashes")
+    with pytest.raises(IngestError):
+        _ingest(tmp_kb_env, raw_a)
+    _restore_body(monkeypatch)
 
-    compiler_mod.save_manifest({"raw/articles/reselect-me.md": f"in_progress:{real_hash}"})
+    raw_b = _seed_raw(tmp_kb_env, "healthy-b", body=_SHARED_BODY)
+    result_b = _ingest(tmp_kb_env, raw_b)
 
-    _new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
-    changed_names = {Path(c).name for c in changed_sources}
-    assert "reselect-me.md" in changed_names, (
-        f"A source whose manifest value is an in_progress marker must be re-selected "
-        f"for ingest; changed={changed_names!r}"
+    assert not result_b.get("duplicate"), (
+        "a crashed source (no pages, no manifest entry) must not suppress a "
+        "different file with identical content"
     )
+    assert result_b.get("pages_created"), (
+        f"source B must produce pages; got {result_b.get('pages_created')!r}"
+    )
+
+
+def test_reingest_of_crashed_source_succeeds(tmp_kb_env, monkeypatch):
+    """Re-ingesting the crashed source itself works and records the bare hash."""
+    raw = _seed_raw(tmp_kb_env, "retry-me")
+
+    _raise_in_body(monkeypatch, "first attempt dies")
+    with pytest.raises(IngestError):
+        _ingest(tmp_kb_env, raw)
+    _restore_body(monkeypatch)
+
+    result = _ingest(tmp_kb_env, raw)
+    assert not result.get("duplicate"), "re-ingest of a crashed source must not be skipped"
+    manifest = _manifest()
+    key = next((k for k in manifest if "retry-me" in k), None)
+    assert key is not None and manifest[key] == hash_bytes(raw.read_bytes()), (
+        f"successful retry must record the bare hash; got {manifest.get(key)!r}"
+    )
+
+
+# --------------------------------------------------------------------------
+# In-process serialization of identical content (same-process concurrency).
+# --------------------------------------------------------------------------
+
+
+def test_content_lock_serializes_identical_content_same_process(tmp_kb_env):
+    """Two threads ingesting different files with identical content: exactly one
+    creates pages, the other sees a duplicate — deterministically.
+
+    This is the same-process guarantee `_content_ingest_lock` provides. It does
+    not depend on timing: the second thread cannot run its duplicate check until
+    the first has committed.
+    """
+    raw_a = _seed_raw(tmp_kb_env, "concurrent-a", body=_SHARED_BODY)
+    raw_b = _seed_raw(tmp_kb_env, "concurrent-b", body=_SHARED_BODY)
+
+    results: dict[str, dict] = {}
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2)
+
+    def _run(name: str, raw: Path) -> None:
+        try:
+            barrier.wait()
+            results[name] = _ingest(tmp_kb_env, raw)
+        except BaseException as exc:  # noqa: BLE001 — surfaced via assertion below
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_run, args=("a", raw_a))
+    t2 = threading.Thread(target=_run, args=("b", raw_b))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, f"unexpected exceptions: {errors!r}"
+    dups = [r for r in results.values() if r.get("duplicate")]
+    non_dups = [r for r in results.values() if not r.get("duplicate")]
+    assert len(non_dups) == 1, f"exactly one thread must create pages; got {results!r}"
+    assert len(dups) == 1, f"exactly one thread must see a duplicate; got {results!r}"
+
+
+def test_content_lock_does_not_serialize_distinct_content(tmp_kb_env):
+    """Distinct content uses distinct locks — no false serialization or dedup."""
+    raw_a = _seed_raw(tmp_kb_env, "distinct-a", body="# A\n\nUnique content A.\n")
+    raw_b = _seed_raw(tmp_kb_env, "distinct-b", body="# B\n\nUnique content B.\n")
+
+    result_a = _ingest(tmp_kb_env, raw_a)
+    result_b = _ingest(tmp_kb_env, raw_b)
+
+    assert not result_a.get("duplicate")
+    assert not result_b.get("duplicate"), "distinct content must never dedup against each other"
+
+
+# --------------------------------------------------------------------------
+# The `file_lock(None)` crash fix (independent of the marker redesign).
+# --------------------------------------------------------------------------
 
 
 def test_find_changed_sources_default_manifest_path_does_not_crash(tmp_kb_env):
     """`find_changed_sources(save_hashes=True)` works with the default path.
 
-    Separate live bug found while writing the reselect test above.
     `find_changed_sources` resolved the manifest default for `load_manifest` and
-    `save_manifest` but passed the raw `manifest_path` straight to `file_lock`,
-    so a `None` raised `AttributeError: 'NoneType' object has no attribute
-    'with_suffix'` and killed the scan.
-
-    Reachable in production from the `kb_compile_scan` MCP tool, which sets
-    `manifest_path = ... if wiki_path else None` — i.e. any call that omits the
-    optional `wiki_dir` argument. `compile_wiki` was unaffected because it
-    resolves the default earlier, which is why no existing test caught this.
+    `save_manifest` but passed the raw `manifest_path` to `file_lock`, so a `None`
+    raised `AttributeError: 'NoneType' object has no attribute 'with_suffix'` and
+    killed the scan. Reachable from `kb_compile_scan` (MCP) on any call omitting
+    `wiki_dir`. `compile_wiki` was unaffected because it resolves the default
+    earlier, which is why no existing test caught it.
     """
     _seed_raw(tmp_kb_env, "default-path-scan")
 
-    # save_hashes defaults to True — this is the branch that took the lock.
     new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
 
     names = {Path(p).name for p in (*new_sources, *changed_sources)}
     assert "default-path-scan.md" in names, (
-        f"Scan with the default manifest path must succeed and see the source; got {names!r}"
-    )
-
-
-def test_reservation_failure_is_logged_at_warning(tmp_kb_env, monkeypatch, caplog):
-    """Threat T2: a swallowed reservation failure must be visible.
-
-    Pre-cycle-83 this was `logger.debug`, so a manifest that silently stopped
-    recording reservations produced no operator signal at default log level.
-    """
-    raw = _seed_raw(tmp_kb_env, "reservation-blows-up")
-
-    def _explode(*args, **kwargs):
-        raise OSError("simulated manifest write failure")
-
-    monkeypatch.setattr(compiler_mod, "save_manifest", _explode)
-
-    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
-        pipeline_mod._check_and_reserve_manifest(
-            hash_bytes(raw.read_bytes()), "raw/articles/reservation-blows-up.md"
-        )
-
-    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-    assert warnings, (
-        "A failed manifest reservation must surface at WARNING; it was previously "
-        "swallowed at DEBUG and therefore invisible in normal operation."
+        f"scan with the default manifest path must succeed and see the source; got {names!r}"
     )
