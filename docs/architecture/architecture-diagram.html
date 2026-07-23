@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Wiki Flywheel — Architecture</title>
+<title>LLM Wiki Flywheel · Architecture</title>
 <meta name="description" content="System architecture of LLM Wiki Flywheel: the five-operation compile-don't-retrieve cycle (Ingest → Compile → Query → Lint → Evolve), the raw → wiki → access pipeline, and the subsystems that power it.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
@@ -294,9 +294,9 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
     <p class="tagline reveal">Drop a source in. The flywheel does the rest.</p>
     <p class="sub reveal">Extraction, linking, quality checks, and self-maintenance run without human intervention. Hybrid BM25 + vector search (model2vec + sqlite-vec, RRF fusion). Evidence trails. Pure compiled markdown + wikilink graph.</p>
     <div class="hero-cta reveal">
-      <a class="btn btn-primary" href="https://github.com/asun28/llm-wiki-flywheel">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
-        Star on GitHub
+      <a class="btn btn-primary" href="https://github.com/asun28/llm-wiki-flywheel#quick-start">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+        Quick start
       </a>
       <a class="btn btn-ghost" href="../../">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
@@ -312,7 +312,7 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
     <div class="sec-head reveal">
       <span class="eyebrow">The five-operation cycle</span>
       <h2>A knowledge flywheel that spins itself</h2>
-      <p>Human curates sources into <span class="mono">raw/</span>; everything else — extraction, linking, quality, evolution — runs automatically and compounds into <span class="mono">wiki/</span>.</p>
+      <p>Human curates sources into <span class="mono">raw/</span>; everything else, from extraction and linking to quality and evolution, runs automatically and compounds into <span class="mono">wiki/</span>.</p>
     </div>
 
     <div class="wheel-stage reveal">
@@ -401,7 +401,7 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
       <article class="card op op-compile reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg></div>
         <h3>Compile <span class="tag">auto</span></h3>
-        <p>Build interlinked pages, inject <code>[[wikilinks]]</code> retroactively, rebuild the PageRank graph and vector index — incrementally via SHA-256.</p>
+        <p>Build interlinked pages, inject <code>[[wikilinks]]</code> retroactively, rebuild the PageRank graph and vector index, incrementally via SHA-256.</p>
       </article>
       <article class="card op op-query reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></div>
@@ -421,7 +421,7 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
       <article class="card reveal" style="display:flex;flex-direction:column;justify-content:center">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/><path d="M16 4h5v5"/></svg></div>
         <h3>Continuous</h3>
-        <p>Every operation feeds the next. Add one source and extraction, linking, checks and evolution all compound — no human in the loop after curation.</p>
+        <p>Every operation feeds the next. Add one source and extraction, linking, checks and evolution all compound, with no human in the loop after curation.</p>
       </article>
     </div>
   </div>
@@ -472,7 +472,7 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
       <p>The infrastructure that makes the flywheel fast, trustworthy, and zero-config.</p>
     </div>
     <div class="grid g-3">
-      <article class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><h3>MCP Server</h3><p>28 tools exposed to Claude Code — ingest, query, search, trust, browse, compile, health. No API key required.</p></article>
+      <article class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><h3>MCP Server</h3><p>28 tools exposed to Claude Code: ingest, query, search, trust, browse, compile, health. No API key required.</p></article>
       <article class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></div><h3>Hybrid Search</h3><p>BM25 + model2vec vectors fused with Reciprocal Rank Fusion, re-ranked by PageRank centrality and trust.</p></article>
       <article class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 6.5 7 1-5 4.9 1.2 7L12 18l-6.2 3.4L7 14.4 2 9.5l7-1z"/></svg></div><h3>Model Tiers</h3><p>Scan (Haiku) for mechanical reads, Write (Sonnet) for authoring, Orchestrate (Opus) for reasoning &amp; verification.</p></article>
       <article class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/></svg></div><h3>SQLite DB</h3><p>Local, file-based store for the graph, edit history, lint verdicts and the sqlite-vec vector index.</p></article>
@@ -486,17 +486,17 @@ html[data-animate] .reveal.in{opacity:1;transform:none;transition:opacity .7s cu
 <section style="padding-top:8px">
   <div class="wrap">
     <div class="stats reveal">
-      <div class="stat"><div class="num" style="color:#4ade80">~3,437</div><div class="lbl">Tests</div></div>
+      <div class="stat"><div class="num" style="color:#4ade80">3,461</div><div class="lbl">Tests</div></div>
       <div class="stat"><div class="num" style="color:#a78bfa">28</div><div class="lbl">MCP tools</div></div>
       <div class="stat"><div class="num" style="color:#38bdf8">18</div><div class="lbl">Modules</div></div>
       <div class="stat"><div class="num" style="color:#fbbf24">8</div><div class="lbl">Lint checks</div></div>
-      <div class="stat"><div class="num" style="color:#f87171">10</div><div class="lbl">Source types</div></div>
-      <div class="stat"><div class="num" style="color:#34d399">~220</div><div class="lbl">Test files</div></div>
+      <div class="stat"><div class="num" style="color:#f87171">9</div><div class="lbl">Source types</div></div>
+      <div class="stat"><div class="num" style="color:#34d399">235</div><div class="lbl">Test files</div></div>
     </div>
     <div class="tiers reveal">
-      <span class="tier-chip tier-scan">scan: Haiku 4.5</span>
-      <span class="tier-chip tier-write">write: Sonnet 4.6</span>
-      <span class="tier-chip tier-orch">orchestrate: Opus 4.7</span>
+      <span class="tier-chip tier-scan">scan: Haiku</span>
+      <span class="tier-chip tier-write">write: Sonnet</span>
+      <span class="tier-chip tier-orch">orchestrate: Opus</span>
     </div>
   </div>
 </section>

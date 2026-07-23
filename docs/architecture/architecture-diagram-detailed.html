@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Knowledge Base — Architecture</title>
+<title>LLM Wiki Flywheel · Architecture (detailed)</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -448,7 +448,7 @@
     <div class="tagline red">Only human-touched layer</div>
 
     <div class="stat-row" style="margin-top: 12px;">
-      <span class="stat">8 source types</span>
+      <span class="stat">9 source types</span>
       <span class="stat">10 templates</span>
     </div>
   </div>
@@ -474,7 +474,7 @@
       <h3>Ingest Pipeline</h3>
       <div class="desc">SHA-256 hash detection. Template-driven extraction via LLM. Duplicate dedup.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-write">write: Sonnet 4.6</span>
+        <span class="tier-badge tier-write">write: Sonnet</span>
       </div>
     </div>
 
@@ -581,9 +581,9 @@
       <h3>Claude Code + MCP Server</h3>
       <div class="desc">25 tools. Natural language interface. No API key needed with Claude Code Max.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-scan">scan: Haiku 4.5</span>
-        <span class="tier-badge tier-write">write: Sonnet 4.6</span>
-        <span class="tier-badge tier-orchestrate">orch: Opus 4.6</span>
+        <span class="tier-badge tier-scan">scan: Haiku</span>
+        <span class="tier-badge tier-write">write: Sonnet</span>
+        <span class="tier-badge tier-orchestrate">orch: Opus</span>
       </div>
     </div>
 
@@ -597,7 +597,7 @@
       <h3>Grounded Query</h3>
       <div class="desc">Hybrid BM25 + vector RRF + PageRank + trust scores. Tiered context assembly. Raw-source fallback. Inline citation-backed answers.</div>
       <div class="stat-row">
-        <span class="tier-badge tier-orchestrate">orchestrate: Opus 4.6</span>
+        <span class="tier-badge tier-orchestrate">orchestrate: Opus</span>
       </div>
     </div>
 
