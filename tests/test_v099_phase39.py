@@ -17,9 +17,9 @@ class TestEnvConfigurableModelTiers:
         # Reimport to get fresh state
         from kb.config import MODEL_TIERS
 
-        assert MODEL_TIERS["scan"] == "claude-haiku-4-5-20251001"
-        assert MODEL_TIERS["write"] == "claude-sonnet-4-6"
-        assert MODEL_TIERS["orchestrate"] == "claude-opus-4-6"
+        assert MODEL_TIERS["scan"] == "claude-haiku-4-5"
+        assert MODEL_TIERS["write"] == "claude-sonnet-5"
+        assert MODEL_TIERS["orchestrate"] == "claude-opus-4-8"
 
     def test_env_override_scan_model(self, monkeypatch):
         """CLAUDE_SCAN_MODEL env var overrides scan tier."""
@@ -75,8 +75,8 @@ class TestEnvConfigurableModelTiers:
         importlib.reload(kb.config)
         try:
             assert kb.config.MODEL_TIERS["scan"] == "custom-scan"
-            assert kb.config.MODEL_TIERS["write"] == "claude-sonnet-4-6"
-            assert kb.config.MODEL_TIERS["orchestrate"] == "claude-opus-4-6"
+            assert kb.config.MODEL_TIERS["write"] == "claude-sonnet-5"
+            assert kb.config.MODEL_TIERS["orchestrate"] == "claude-opus-4-8"
         finally:
             monkeypatch.delenv("CLAUDE_SCAN_MODEL", raising=False)
             importlib.reload(kb.config)

@@ -51,11 +51,11 @@ def test_make_api_call_non_retryable_tracks_last_error(monkeypatch):
     try:
         llm._make_api_call(
             {
-                "model": "claude-haiku-4-5-20251001",
+                "model": "claude-haiku-4-5",
                 "max_tokens": 100,
                 "messages": [{"role": "user", "content": "hi"}],
             },
-            "claude-haiku-4-5-20251001",
+            "claude-haiku-4-5",
         )
         assert False, "expected LLMError"
     except llm.LLMError as e:

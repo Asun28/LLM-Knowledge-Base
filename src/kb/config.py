@@ -205,11 +205,21 @@ VALID_SOURCE_TYPES = frozenset(list(SOURCE_TYPE_DIRS.keys()) + ["comparison", "s
 # ── Model tiering (from tooling-research.md) ──────────────────
 # Haiku for mechanical scanning, Sonnet for writing, Opus for orchestration
 # Override via env vars: CLAUDE_SCAN_MODEL, CLAUDE_WRITE_MODEL, CLAUDE_ORCHESTRATE_MODEL
-# NOTE: Env vars are read once at import time. Process restart required for changes.
+# NOTE: env vars are read at CALL time by `get_model_tier` (cycle 7 AC24), not at
+# import, so an override takes effect without a process restart.
+#
+# ID form differs by model generation (verified against the Models overview):
+#   - Pre-4.6 models (Haiku 4.5): the dateless string is an ALIAS that resolves
+#     to a dated snapshot, so `claude-haiku-4-5` -> `claude-haiku-4-5-20251001`.
+#     Prefer the alias; the dated form is equivalent today but pins us to one
+#     snapshot forever.
+#   - 4.6-generation and later (Sonnet 5, Opus 4.8): the dateless string IS the
+#     pinned snapshot. It is not an evergreen pointer, so a future model needs
+#     an explicit bump here.
 _DEFAULT_MODEL_TIERS: dict[str, str] = {
-    "scan": "claude-haiku-4-5-20251001",
-    "write": "claude-sonnet-4-6",
-    "orchestrate": "claude-opus-4-6",
+    "scan": "claude-haiku-4-5",
+    "write": "claude-sonnet-5",
+    "orchestrate": "claude-opus-4-8",
 }
 
 
@@ -515,7 +525,13 @@ PAGERANK_SEARCH_WEIGHT = 0.5
 QUERY_CONTEXT_MAX_CHARS = 80_000
 
 # Maximum tokens for the LLM answer synthesis response.
-QUERY_MAX_TOKENS = 2048
+#
+# Raised from 2048 alongside the Sonnet 5 / Opus 4.8 tier bump. Those models use
+# the tokenizer introduced with Opus 4.7, which encodes the same text in roughly
+# 30% more tokens than Sonnet 4.6 / Opus 4.6 did. Holding the cap at 2048 would
+# have quietly shortened every synthesized answer by about a third; 2662 is
+# 2048 * 1.3, so an answer that fit before still fits.
+QUERY_MAX_TOKENS = 2662
 
 # ── Search result limits ──────────────────────────────────────
 MAX_SEARCH_RESULTS = 100

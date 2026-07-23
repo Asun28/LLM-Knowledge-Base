@@ -1117,7 +1117,9 @@ class TestQueryMaxTokensConfig:
     def test_query_max_tokens_defined(self):
         from kb.config import QUERY_MAX_TOKENS
 
-        assert QUERY_MAX_TOKENS == 2048
+        # 2048 * 1.3 — compensates for the Opus-4.7-generation tokenizer that
+        # Sonnet 5 and Opus 4.8 use (~30% more tokens for the same text).
+        assert QUERY_MAX_TOKENS == 2662
 
     def test_query_max_tokens_is_int(self):
         from kb.config import QUERY_MAX_TOKENS
