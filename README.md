@@ -147,7 +147,7 @@ walk → installed-file-location heuristic (`config.py:get_project_root`),
 which can land inside the venv `site-packages/` and silently write
 `wiki/`/`raw/`/`.data/` there. Setting `KB_PROJECT_ROOT` makes the bootstrap
 explicit and stable across `cd` operations. The env var is read at call time
-(cycle 65 AC1), so a process-wide set is enough, no restart needed.
+(cycle 65 AC1), so a process-wide set is enough; no restart needed.
 
 **API key:** Copy `.env.example` to `.env`. `ANTHROPIC_API_KEY` is optional for Claude Code/MCP mode and required only for direct API-backed CLI compile/query, MCP calls with `use_api=True`, and `kb_query --format=...` output adapters.
 
@@ -206,7 +206,7 @@ Plus two maintenance commands:
 | Command | What happens |
 |---------|-------------|
 | `kb publish [--format all]` | Emit `llms.txt`, `llms-full.txt`, `graph.jsonld`, `sitemap.xml`, and per-page siblings to `outputs/` (override with `--out-dir`) |
-| `kb rebuild-indexes [--yes]` | Clean-slate wipe, deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
+| `kb rebuild-indexes [--yes]` | Clean-slate wipe: deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
 
 The CLI also mirrors most MCP tools (`kb search`, `kb stats`, `kb read-page`, `kb lint-deep`, `kb detect-drift`, …) for scripting without Claude Code.
 
@@ -214,12 +214,12 @@ The CLI also mirrors most MCP tools (`kb search`, `kb stats`, `kb read-page`, `k
 
 ### Ingest Pipeline
 - 9 ingest source types: `article`, `paper`, `video`, `repo`, `podcast`, `book`, `dataset`, `conversation`, `capture` (`comparison` and `synthesis` are wiki page types, create them with `kb_create_page`)
-- Hash-based dedup, same content won't be ingested twice
+- Hash-based dedup: same content won't be ingested twice
 - **Retroactive wikilink injection**: when you ingest a new topic, existing pages that mention it get auto-linked
 - **Evidence Trail**: every page keeps a reverse-chronological, sentinel-guarded record of which source contributed what, and when
 - **Auto-contradiction detection**: a new source that conflicts with an existing page is flagged into `wiki/contradictions.md` at ingest time, not at query time
-- Cascade tracking, returns which existing pages might need review after the new ingest
-- Short-source tiering, small sources (<1000 chars) defer entity creation to prevent stubs
+- Cascade tracking: returns which existing pages might need review after the new ingest
+- Short-source tiering: small sources (<1000 chars) defer entity creation to prevent stubs
 - **Conversation capture**: `kb_capture` MCP tool atomizes chat / notes / session transcripts into typed knowledge items (decisions, discoveries, corrections, gotchas) with secret-scanner safety rails and a per-process rate limit
 - Structured audit log at `.data/ingest_log.jsonl` with `request_id` correlation across the whole pipeline
 
@@ -396,7 +396,7 @@ Unset `KB_LLM_BACKEND` (or set it to `anthropic`) to return to the default Claud
 | Book | Manual notes or `markitdown` |
 | Dataset | Schema documentation |
 | Conversation | Chat/interview transcript |
-| Capture | `kb_capture` MCP tool, atomizes a chat or session transcript into typed items |
+| Capture | `kb_capture` MCP tool: atomizes a chat or session transcript into typed items |
 
 Use the conversion commands above when the captured source is not already one of the supported text formats.
 
@@ -463,14 +463,14 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 
 Per-cycle detail lives in [`CHANGELOG.md`](CHANGELOG.md) and [`CHANGELOG-history.md`](CHANGELOG-history.md).
 
-### Next, Phase 5 (deferred)
+### Next: Phase 5 (deferred)
 
 - **Grounding**: inline claim-level confidence tags + EXTRACTED lint; claim-to-source BM25 verification (retroactive hallucination detection); multi-source confirmation gate for `belief_state: confirmed`
 - **Retrieval**: chunk-level BM25 sub-page indexing, multi-hop retrieval, BM25 + LLM reranking
 - **Graph**: typed semantic relations, LLM-inferred implicit edges, interactive vis.js viewer, living overview page
 - **Ingest**: URL-aware `kb_ingest` (5-state adapter), two-phase compile pipeline, conversation→KB promotion, temporal claim tracking, autonomous research loop in `evolve`
 
-### Later, Phase 6
+### Later: Phase 6
 
 DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling.
 

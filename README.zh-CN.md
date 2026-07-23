@@ -462,14 +462,14 @@ ruff format src/ tests/         # 代码格式化
 
 逐周期明细见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`CHANGELOG-history.md`](CHANGELOG-history.md)。
 
-### 下一步，Phase 5（延期）
+### 下一步：Phase 5（延期）
 
 - **接地校验**，内联观点级可信度标签 + EXTRACTED Lint；观点溯源 BM25 核验（事后幻觉检测）；多源确认门控（`belief_state: confirmed` 需 ≥ 2 个独立原始资料）
 - **检索**，块级 BM25 子页索引、多跳检索、BM25 + LLM 重排序
 - **图谱**，边类型化语义关系、LLM 隐式关系推断、交互式 vis.js 查看器、动态概览页
 - **摄入**，支持 URL 的 `kb_ingest`（5 状态适配器）、两阶段编译流水线、对话→KB 提升、时间轴观点追踪、Evolve 自主研究循环
 
-### 远期，Phase 6
+### 远期：Phase 6
 
 DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
 
