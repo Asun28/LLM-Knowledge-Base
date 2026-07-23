@@ -6,9 +6,10 @@ import uuid
 from pathlib import Path
 
 from kb.config import MAX_INJECT_TITLE_LEN, MAX_INJECT_TITLES_PER_BATCH, WIKI_DIR
-from kb.utils.io import atomic_text_write, file_lock
+from kb.utils.io import atomic_text_write
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.markdown import extract_wikilinks
+from kb.utils.page_lock import page_lock
 from kb.utils.pages import load_all_pages, page_id, scan_wiki_pages
 from kb.utils.text import wikilink_display_escape
 
@@ -239,7 +240,7 @@ def inject_wikilinks(
         # no-op by the time the lock is acquired (TOCTOU). Skip the write in
         # that case.
         try:
-            with file_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT):
+            with page_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT):
                 try:
                     content = page_path.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
@@ -492,7 +493,7 @@ def _process_inject_chunk(
         # Acquire per-page lock with bounded timeout. Re-read body, re-validate
         # candidates against FRESH content, pick winner from fresh data.
         try:
-            with file_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT):
+            with page_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT):
                 try:
                     fresh_content = page_path.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):

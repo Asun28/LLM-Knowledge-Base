@@ -524,4 +524,21 @@ def file_lock(path: Path, timeout: float | None = None):
         if slot_taken:
             _release_waiter_slot()
         if acquired:
-            lock_path.unlink(missing_ok=True)
+            # Cycle 82 (R2 Codex MAJOR): the release unlink MUST NOT raise.
+            # This runs during exception unwinding, so an OSError here would
+            # REPLACE the in-flight exception — e.g. the
+            # StorageError("evidence_trail_append_failure") that
+            # `_update_existing_page` raises while still holding the page lock,
+            # destroying the caller's partial-write classification. Raising is
+            # also wrong on the success path: the guarded writes already
+            # committed, so failing to tidy up the sidecar is not a failure of
+            # the operation. Log and move on — a leftover lock file is
+            # self-healing via the PID-based stale-lock steal above.
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Failed to remove lock file %s on release; "
+                    "it will be reclaimed by stale-lock detection",
+                    lock_path,
+                )

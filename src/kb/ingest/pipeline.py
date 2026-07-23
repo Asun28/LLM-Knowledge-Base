@@ -32,6 +32,7 @@ from kb.ingest.evidence import append_evidence_trail, render_initial_evidence_tr
 from kb.ingest.extractors import extract_from_source
 from kb.utils.hashing import hash_bytes
 from kb.utils.io import atomic_text_write, file_lock
+from kb.utils.page_lock import page_lock
 from kb.utils.pages import load_all_pages, normalize_sources
 from kb.utils.paths import make_source_ref
 from kb.utils.sanitize import sanitize_text
@@ -555,42 +556,44 @@ def _update_existing_page(
       ``extraction=`` is unavailable; ``_extract_entity_context`` is still
       used when ``ctx is None`` and ``name`` + ``extraction`` are supplied.
 
-    Cycle 20 AC11 / D-NEW-1: the read → modify → atomic_text_write span is now
-    wrapped unconditionally in ``file_lock(page_path)`` so concurrent callers
-    (including the new AC9/AC10 O_EXCL collision fallback) serialise cleanly.
-    ``append_evidence_trail`` stays OUTSIDE the lock block because it acquires
-    its own ``file_lock(page_path)`` internally and the sidecar lock is NOT
-    re-entrant — nesting would self-deadlock. The lock is released after the
-    body write and before evidence append, letting `append_evidence_trail`
-    re-acquire cleanly.
+    Cycle 20 AC11 / D-NEW-1: the read → modify → atomic_text_write span is
+    wrapped unconditionally in a page lock so concurrent callers (including the
+    AC9/AC10 O_EXCL collision fallback) serialise cleanly.
+
+    Cycle 81 AC04 (Phase 4.5 HIGH R5): body write and evidence append now run
+    under ONE outer ``page_lock(page_path)``. Previously the body-write lock had
+    to be released before ``append_evidence_trail`` re-acquired it, because the
+    ``file_lock`` sidecar is not re-entrant — that release-then-reacquire gap let
+    a concurrent writer interleave between a page's body update and its
+    provenance row. ``page_lock`` is reentrant per (thread, page), so both inner
+    acquisitions collapse into no-ops and the window is closed.
     """
-    _wrote_page = _update_existing_page_body(
-        page_path=page_path,
-        source_ref=source_ref,
-        name=name,
-        extraction=extraction,
-        verb=verb,
-        ctx=ctx,
-    )
-    if _wrote_page:
-        # Evidence trail acquires its own file_lock(page_path); the body-write
-        # lock is released by this point so no nested-lock self-deadlock.
-        # Cycle 24 AC2 — wrap OSError to a typed StorageError so callers can
-        # distinguish "body wrote but evidence-append failed" from other failure
-        # modes. Non-`OSError` exceptions (e.g., UnicodeDecodeError) propagate
-        # unchanged for cycle-20 taxonomy coverage in a future cycle.
-        try:
-            append_evidence_trail(
-                page_path,
-                source_ref,
-                f"{verb} in new source — source reference added",
-            )
-        except OSError as e:
-            raise StorageError(
-                "evidence_trail_append_failure",
-                kind="evidence_trail_append_failure",
-                path=page_path,
-            ) from e
+    with page_lock(page_path):
+        _wrote_page = _update_existing_page_body(
+            page_path=page_path,
+            source_ref=source_ref,
+            name=name,
+            extraction=extraction,
+            verb=verb,
+            ctx=ctx,
+        )
+        if _wrote_page:
+            # Cycle 24 AC2 — wrap OSError to a typed StorageError so callers can
+            # distinguish "body wrote but evidence-append failed" from other failure
+            # modes. Non-`OSError` exceptions (e.g., UnicodeDecodeError) propagate
+            # unchanged for cycle-20 taxonomy coverage in a future cycle.
+            try:
+                append_evidence_trail(
+                    page_path,
+                    source_ref,
+                    f"{verb} in new source — source reference added",
+                )
+            except OSError as e:
+                raise StorageError(
+                    "evidence_trail_append_failure",
+                    kind="evidence_trail_append_failure",
+                    path=page_path,
+                ) from e
 
 
 def _update_existing_page_body(
@@ -602,7 +605,7 @@ def _update_existing_page_body(
     verb: str = "Mentioned",
     ctx: str | None = None,
 ) -> bool:
-    """Body of `_update_existing_page` under `file_lock(page_path)`.
+    """Body of `_update_existing_page` under `page_lock(page_path)`.
 
     Returns True when the page body was modified + written to disk; caller
     uses that signal to decide whether to append an evidence-trail entry.
@@ -611,8 +614,12 @@ def _update_existing_page_body(
 
     Cycle 20 AC11 / D-NEW-1 — split out so the lock span is visible and so
     the early-return paths exit the lock cleanly via the `with` context.
+
+    Cycle 81 AC03 — `page_lock` keeps this helper self-locking for any direct
+    caller, while collapsing to a no-op re-entry under `_update_existing_page`'s
+    outer lock (AC04).
     """
-    with file_lock(page_path):
+    with page_lock(page_path):
         # Fix 2.2: Read file exactly once; parse frontmatter from in-memory content (avoids TOCTOU).
         content = page_path.read_text(encoding="utf-8")
         # Cycle 6 AC7 — normalize CRLF → LF so `_SOURCE_BLOCK_RE` (LF-only, line 45)

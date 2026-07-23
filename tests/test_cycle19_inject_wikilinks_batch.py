@@ -69,8 +69,9 @@ def test_under_lock_rederive_picks_fresh_winner(tmp_wiki: Path, monkeypatch) -> 
 
     new_pages = [("Alice", "concepts/alice"), ("Bob", "concepts/bob")]
     # Mutate fresh body between snapshot and lock acquisition by rewriting the page
-    # via a spy on file_lock that runs the mutation BEFORE yielding.
-    real_file_lock = linker.file_lock
+    # via a spy on the page lock that runs the mutation BEFORE yielding.
+    # Cycle 81 AC05 renamed the seam `file_lock` → `page_lock`.
+    real_file_lock = linker.page_lock
     mutated = {"done": False}
 
     @contextmanager
@@ -84,7 +85,7 @@ def test_under_lock_rederive_picks_fresh_winner(tmp_wiki: Path, monkeypatch) -> 
         with real_file_lock(path, timeout=timeout):
             yield
 
-    monkeypatch.setattr(linker, "file_lock", mutating_lock)
+    monkeypatch.setattr(linker, "page_lock", mutating_lock)
 
     result = linker.inject_wikilinks_batch(new_pages, wiki_dir=tmp_wiki)
 
@@ -253,7 +254,7 @@ def test_unmatched_pages_acquire_zero_locks(tmp_wiki: Path, monkeypatch) -> None
         lock_paths.append(path)
         yield
 
-    monkeypatch.setattr(linker, "file_lock", spy_lock)
+    monkeypatch.setattr(linker, "page_lock", spy_lock)
 
     linker.inject_wikilinks_batch([("Foo", "concepts/foo")], wiki_dir=tmp_wiki)
 
