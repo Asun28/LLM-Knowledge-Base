@@ -49,9 +49,18 @@ def _page_key(path: Path | str) -> str:
 
     Uses ``abspath`` rather than ``resolve`` to stay cheap and to avoid
     resolving symlinks — matching ``file_lock``, which derives its sidecar path
-    from the literal path it is handed. ``normcase`` folds Windows
-    drive-letter and separator casing so ``C:\\wiki\\a.md`` and ``c:/wiki/a.md``
-    share one depth counter.
+    from the path it is handed. ``normcase`` folds Windows drive-letter and
+    separator casing so ``C:\\wiki\\a.md`` and ``c:/wiki/a.md`` share one depth
+    counter.
+
+    SYMLINK CAVEAT (inherited from ``file_lock``, not introduced here): two
+    symlinked aliases of the same file normalise to two different keys AND two
+    different sidecars, so they do NOT exclude each other. This predates
+    ``page_lock`` — ``file_lock`` has always keyed on the supplied path — and
+    is not a hazard for current callers, which build page paths from
+    ``wiki_dir`` and pass them through ``_validate_page_id`` /
+    ``_assert_under_project_root``. Do not introduce symlinked page aliases
+    without switching both primitives to ``resolve()``.
     """
     return os.path.normcase(os.path.abspath(str(path)))
 
@@ -102,8 +111,17 @@ def page_lock(path: Path | str, timeout: float | None = None) -> Iterator[None]:
             depths[key] -= 1
             if depths[key] <= 0:
                 depths.pop(key, None)
+        # CRITICAL: this return skips the `file_lock` acquisition below. A
+        # re-entry must NOT acquire — falling through would self-deadlock
+        # against the lock this same thread already holds.
         return
 
+    # The raw `path` is handed to `file_lock` deliberately. The key normalises
+    # with `abspath` while the sidecar does not, but that divergence is not
+    # observable: the OS resolves `..` and relative segments at open time, so
+    # `wiki/../wiki/a.md.lock` and `wiki/a.md.lock` are the same inode.
+    # Verified by revert-check (cycle-11 L1): normalising here changes no test
+    # outcome, so it would be churn, not a fix.
     with file_lock(Path(path), timeout=timeout):
         depths[key] = 1
         try:

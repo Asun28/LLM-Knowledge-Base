@@ -65,7 +65,7 @@ What remained was narrower and real: because `file_lock` is deliberately non-ree
 
 **BACKLOG:** Phase 4.5 HIGH R5 entry DELETED. The residual cross-stage concern (a whole `ingest_source` is not atomic across its 11 stages) is deliberately NOT re-filed — it is already carried by the Phase 4.5 HIGH `ingest/pipeline.py` state-store fan-out entry, whose receipt-file fix is the right shape for it.
 
-**Counts:** tests 3437 → 3456 collected (+19); files ~220 → ~222 (+1 src module, +1 test file); src/kb/ changes 4 files.
+**Counts:** tests 3437 → 3458 collected (+21); files ~220 → ~222 (+1 src module, +1 test file); src/kb/ changes 4 files.
 
 ---
 
@@ -1675,7 +1675,7 @@ the SDK-using tests; CI matrix flips skip behaviour per OS).
 
 ### Phase 4.5 — cycle 32 (2026-04-25)
 
-8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / 10 commits (9 feat+docs+fix + 1 self-review). Tests: 2882 → 2901 (+19) — final count after Step 14 R1 Codex MAJOR 2 added `test_fair_queue_stagger_integrates_with_file_lock`.
+8 AC / 2 src (`cli.py`, `utils/io.py`) + 1 new test file / 10 commits (9 feat+docs+fix + 1 self-review). Tests: 2882 → 2901 (+21) — final count after Step 14 R1 Codex MAJOR 2 added `test_fair_queue_stagger_integrates_with_file_lock`.
 
 **Closes CLI ↔ MCP parity category (b) + widens error discriminator + adds intra-process fair-queue stagger.** Three conceptually separate changes land in one cycle per the batch-by-file convention: the two new CLI wrappers (AC1/AC4) share the `cli.py` surface with the `_is_mcp_error_response` widening (AC3), and `utils/io.py` gets the fair-queue mitigation (AC6) that the Phase 4.5 MEDIUM BACKLOG entry has been tracking since cycle 24 AC9.
 

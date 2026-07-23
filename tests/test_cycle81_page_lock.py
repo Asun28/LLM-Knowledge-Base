@@ -148,6 +148,53 @@ class TestPageKey:
     def test_key_is_absolute(self, tmp_path: Path) -> None:
         assert os.path.isabs(_page_key(tmp_path / "alpha.md"))
 
+    def test_dotdot_path_shares_a_key_with_its_normalised_form(self, tmp_path: Path) -> None:
+        """`wiki/../wiki/a.md` and `wiki/a.md` are the same file, so they must
+        share a depth key."""
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        direct = wiki / "a.md"
+        indirect = wiki / ".." / "wiki" / "a.md"
+        assert _page_key(direct) == _page_key(indirect)
+
+    def test_dotdot_and_direct_paths_mutually_exclude(self, tmp_path: Path) -> None:
+        """Pins the OS-resolution property `page_lock` relies on.
+
+        The key normalises `..` away while the sidecar path does not, so a
+        reviewer will reasonably ask whether one page can end up guarded by two
+        sidecars. It cannot: the OS resolves `..` at open time, making
+        `wiki/../wiki/a.md.lock` and `wiki/a.md.lock` the same inode. This test
+        pins that. It passes with or without normalising the path handed to
+        `file_lock` — which is precisely why that normalisation was NOT added.
+        """
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        direct = wiki / "a.md"
+        direct.write_text("a", encoding="utf-8")
+        indirect = wiki / ".." / "wiki" / "a.md"
+
+        refused: list[BaseException] = []
+        held = threading.Event()
+
+        def contender() -> None:
+            held.wait(timeout=5.0)
+            try:
+                with page_lock(indirect, timeout=0.1):
+                    pass
+            except (TimeoutError, OSError) as exc:
+                refused.append(exc)
+
+        t = threading.Thread(target=contender)
+        t.start()
+        try:
+            with page_lock(direct, timeout=0.25):
+                held.set()
+                time.sleep(0.4)
+        finally:
+            t.join(timeout=5.0)
+
+        assert refused, "the `..` spelling bypassed the lock on the same page"
+
 
 class TestCrossThreadExclusionPreserved:
     """AC01 — reentrancy is thread-local; a second thread still blocks."""
@@ -212,35 +259,37 @@ class TestCallSitesNest:
         assert text.count("raw/articles/second.md") >= 2
         assert not _lock_sidecar(page).exists()
 
-    def test_update_existing_page_holds_one_lock_throughout(self, page: Path) -> None:
-        """AC04 — the sidecar must stay present for the WHOLE call, including the
-        evidence-append step. Pre-cycle-81 the lock was dropped between the body
-        write and the trail append; this observes that gap directly."""
-        observations: list[bool] = []
-        stop = threading.Event()
+    def test_evidence_append_runs_under_the_outer_lock(self, page: Path, monkeypatch) -> None:
+        """AC04 — the deterministic witness.
 
-        def watcher() -> None:
-            while not stop.is_set():
-                observations.append(_lock_sidecar(page).exists())
-                time.sleep(0.001)
+        At the exact moment `_update_existing_page` invokes
+        `append_evidence_trail`, the page sidecar must ALREADY exist, proving
+        the outer `page_lock` is still held. Pre-cycle-81 the body-write lock
+        was released before this call, so the sidecar would be absent here —
+        which makes this a precise discriminator rather than a timing race.
 
-        t = threading.Thread(target=watcher, daemon=True)
-        t.start()
-        try:
-            _update_existing_page(page, "raw/articles/second.md", name="Alpha", verb="Mentioned")
-        finally:
-            stop.set()
-            t.join(timeout=5.0)
+        Deliberately not a polling watcher: a sampler can miss a critical
+        section shorter than its interval and then pass vacuously.
+        """
+        import kb.ingest.pipeline as pipeline_mod
 
-        # The watcher samples before and after the call too, so "always held"
-        # is not assertable. What IS assertable: no held → released → held
-        # sequence, which is exactly the re-acquire signature.
-        transitions = [(observations[i], observations[i + 1]) for i in range(len(observations) - 1)]
-        releases = [i for i, (a, b) in enumerate(transitions) if a and not b]
-        reacquires = [i for i, (a, b) in enumerate(transitions) if not a and b]
-        assert not (releases and reacquires and min(reacquires) > min(releases)), (
-            "lock was released and re-acquired mid-call — the AC04 window is still open"
+        real_append = pipeline_mod.append_evidence_trail
+        observed: dict[str, bool] = {}
+
+        def probe(page_path: Path, *args, **kwargs):
+            observed["sidecar_held"] = _lock_sidecar(page_path).exists()
+            return real_append(page_path, *args, **kwargs)
+
+        monkeypatch.setattr(pipeline_mod, "append_evidence_trail", probe)
+
+        _update_existing_page(page, "raw/articles/second.md", name="Alpha", verb="Mentioned")
+
+        assert observed.get("sidecar_held") is True, (
+            "evidence append ran with the page lock released — the AC04 window is still open"
         )
+        # Non-vacuity: the probe must actually have fired.
+        assert "sidecar_held" in observed
+        assert not _lock_sidecar(page).exists(), "lock leaked past the outer with-block"
 
 
 class TestLinkerUsesPageLock:
