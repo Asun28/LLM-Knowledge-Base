@@ -17,6 +17,61 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-23 — cycle 82b (R2 Codex adversarial-review response)
+
+**Theme:**
+Acts on the R2 Codex adversarial review of the cycle-81/82 branch. Verdict `needs-attention`, 2 MAJOR + 1 MINOR. All three addressed; one MAJOR was independently verified against source before being accepted.
+
+**Getting the review to run at all — Codex harness root cause:**
+
+Two consecutive Codex reviews reported "still running" indefinitely and produced nothing. The cause was NOT Codex (`codex-cli 0.144.6`, ChatGPT auth active, `setup --json` → `ready: true`). The companion's job registry is never reconciled when its child dies, so the record stays `status: "running"` with a dead PID forever and `status` / `result` never report completion:
+
+- Run 1 (`task-mrx11i4m-45njik`): child killed at **114s** by the `Agent` tool's 120-second foreground timeout. Record still claimed "running, 1h 10m elapsed" against dead PID 6672.
+- Run 2 (`review-mrx3lx2p-nwbmm2`): child killed by piping the launch to `head -25`, closing stdout and SIGPIPE-ing node. Dead PID 37668, record stuck in phase `verifying`.
+
+Two secondary findings:
+
+- `cancel` is broken under Git Bash: MSYS rewrites `taskkill /PID` into `C:/Program Files/Git/PID`, failing with `Invalid argument/option`. Needs `MSYS_NO_PATHCONV=1`.
+- The subagent used the freeform `task` verb with a large prompt, producing an unbounded repo-wide `rg` that timed out (`exit 124`). The companion ships a purpose-built `adversarial-review --base <ref> --scope <auto|working-tree|branch>` verb that scopes the diff properly.
+
+Working invocation: `adversarial-review --background --base origin/main --scope branch "<named-files focus>"`, launched detached (no pipes, not inside a foreground Agent call), then polled via `status` / `result`. Completed in **7m 45s** with no orphan.
+
+**MAJOR-1 — phantom depth on async interrupt (`src/kb/utils/page_lock.py`):**
+
+Both branches mutated the thread-local depth BEFORE entering the `try` that guards it:
+
+```python
+depths[key] = 1       # <- an async exception here ...
+try:
+    yield
+finally:
+    depths[key] -= 1  # <- ... never reaches this
+```
+
+A KeyboardInterrupt, signal, or injected cancellation in that gap leaves a positive depth after `file_lock` released. A pooled worker reused later sees depth > 0, treats a fresh acquisition as a re-entry, skips `file_lock`, and mutates the page holding no lock — concurrently with another thread or process.
+
+Fix: both mutations moved INSIDE the `try`, cleanup replaced with `_restore_depth(depths, key, prior)` restoring the EXACT pre-acquisition depth. The absolute restore is the point — a decrement is correct only when the matching increment definitely ran.
+
+**MAJOR-2 — `StorageError` masking (`src/kb/utils/io.py`):**
+
+Verified against source before accepting. `file_lock`'s `finally` ended with a bare `lock_path.unlink(missing_ok=True)`. Cycle 81 AC04 moved the evidence append inside the page lock, so `StorageError("evidence_trail_append_failure")` now propagates while the lock is held; the release unlink runs during that unwinding and an OSError from it REPLACES the StorageError, destroying the caller's partial-write classification. Pre-cycle-81 this could not happen — the append ran outside the body lock, so the sidecar was released before the StorageError was constructed. Cycle 81 genuinely introduced the exposure.
+
+Fix: wrap the release unlink in `try/except OSError` + `logger.warning`. Deliberately NOT a new typed error, contra the review's suggestion: on the success path the guarded writes already committed, so raising would report failure for an operation that succeeded. A leftover lock file is self-healing via the existing PID-based stale-lock steal. Applies to all `file_lock` call sites, not just page locks.
+
+**MINOR-3 — sleep-based concurrency tests (`tests/test_cycle81_page_lock.py`):**
+
+`test_other_thread_cannot_enter_while_held` and `test_dotdot_and_direct_paths_mutually_exclude` held the lock for a fixed `time.sleep(0.4)`; on a loaded runner the contender can be descheduled past the release and acquire cleanly — a false pass. Both also accepted any `OSError`, letting an unrelated permission or lock-parse failure satisfy the exclusion assertion without proving contention.
+
+Rewritten event-driven: the contender signals `attempt_done` in a `finally`, the holder blocks on that Event so the lock is provably held for the whole attempt, only `TimeoutError` is accepted, and `not t.is_alive()` is asserted after join. The module no longer imports `time`.
+
+**Verification honesty (cycle-11 L1 revert-checks):**
+
+Revert-checking the two new interrupt tests showed they pass with AND without the MAJOR-1 fix — an exception raised inside a `with` body always reaches the `finally`, so they never exercise the between-statements gap. That gap is not deterministically reachable from pure Python without bytecode/trace injection, too brittle to maintain. Rather than ship tests that over-claim, the limitation is stated in the test class docstring and `test_restore_depth_is_absolute_not_decrement` is designated the real gate — it pins the absolute-restore contract and fails if `_restore_depth` is reimplemented as a decrement. The fix is retained regardless: mutation-inside-try is the correct idiom and carries no risk.
+
+**Counts:** tests 3458 → 3461 collected (+3); full suite 3421 passed / 24 skipped / 16 xfailed; src/kb/ changes 2 files.
+
+---
+
 ### 2026-07-23 — cycle 82 (refiner page-lock migration)
 
 **Theme:**
@@ -100,7 +155,7 @@ What remained was narrower and real: because `file_lock` is deliberately non-ree
 
 **BACKLOG:** Phase 4.5 HIGH R5 entry DELETED. The residual cross-stage concern (a whole `ingest_source` is not atomic across its 11 stages) is deliberately NOT re-filed — it is already carried by the Phase 4.5 HIGH `ingest/pipeline.py` state-store fan-out entry, whose receipt-file fix is the right shape for it.
 
-**Counts:** tests 3437 → 3458 collected (+21); files ~220 → ~222 (+1 src module, +1 test file); src/kb/ changes 4 files.
+**Counts:** tests 3437 → 3461 collected (+24); files ~220 → ~222 (+1 src module, +1 test file); src/kb/ changes 4 files.
 
 ---
 

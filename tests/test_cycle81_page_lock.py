@@ -20,7 +20,6 @@ AC coverage:
 
 import os
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -129,6 +128,72 @@ class TestReentrancy:
             assert _lock_sidecar(page).exists()
 
 
+class TestInterruptSafety:
+    """R2 Codex MAJOR — an async exception must not strand a depth entry.
+
+    The reported window: if a KeyboardInterrupt lands between the depth
+    mutation and the `try` that guards it, the `finally` never runs and the key
+    stays positive after `file_lock` has released. A pooled thread reused later
+    then treats a fresh acquisition as a re-entry and mutates the page holding
+    NO lock. The fix moves the mutation INSIDE the `try` and restores the exact
+    prior depth.
+
+    HONEST SCOPE (revert-checked per cycle-11 L1): the first two tests below
+    pass with OR without that fix, because an exception raised inside the
+    `with` body always reaches the `finally`. The vulnerable window is a
+    between-two-adjacent-statements gap that pure Python cannot deterministically
+    hit without bytecode/trace injection, which is too brittle to pin here.
+    They are therefore general interrupt-unwinding coverage, NOT a gate on the
+    fix. `test_restore_depth_is_absolute_not_decrement` IS the real gate: it
+    pins the absolute-restore contract that makes the window safe, and fails if
+    anyone reimplements `_restore_depth` as a decrement.
+    """
+
+    def test_interrupt_during_outer_acquire_leaves_no_depth(self, page: Path) -> None:
+        from kb.utils import page_lock as pl
+
+        with pytest.raises(KeyboardInterrupt):
+            with page_lock(page, timeout=0.25):
+                raise KeyboardInterrupt
+
+        assert pl._depths().get(_page_key(page), 0) == 0, "depth stranded after interrupt"
+        assert not _lock_sidecar(page).exists()
+        # The decisive part: the NEXT acquisition must really acquire.
+        with page_lock(page, timeout=0.25):
+            assert _lock_sidecar(page).exists()
+
+    def test_interrupt_during_nested_acquire_restores_outer_depth(self, page: Path) -> None:
+        from kb.utils import page_lock as pl
+
+        key = _page_key(page)
+        with page_lock(page, timeout=0.25):
+            assert pl._depths()[key] == 1
+            with pytest.raises(KeyboardInterrupt):
+                with page_lock(page, timeout=0.25):
+                    raise KeyboardInterrupt
+            # Depth must be back to exactly 1 — not 2 (stranded) and not 0
+            # (over-decremented, which would drop the outer lock's bookkeeping).
+            assert pl._depths()[key] == 1
+            assert _lock_sidecar(page).exists()
+
+        assert pl._depths().get(key, 0) == 0
+        assert not _lock_sidecar(page).exists()
+
+    def test_restore_depth_is_absolute_not_decrement(self) -> None:
+        """A decrement is only correct if the increment definitely happened."""
+        from kb.utils.page_lock import _restore_depth
+
+        depths: dict[str, int] = {}
+        # Simulate the interrupted case: prior was 0, the increment never ran.
+        _restore_depth(depths, "k", 0)
+        assert "k" not in depths
+
+        # Simulate an interrupted nested acquire: prior 2, increment never ran.
+        depths["k"] = 2
+        _restore_depth(depths, "k", 2)
+        assert depths["k"] == 2
+
+
 class TestPageKey:
     """AC01 — key normalisation decides what counts as 'the same page'."""
 
@@ -173,56 +238,76 @@ class TestPageKey:
         direct.write_text("a", encoding="utf-8")
         indirect = wiki / ".." / "wiki" / "a.md"
 
-        refused: list[BaseException] = []
+        refused: list[TimeoutError] = []
         held = threading.Event()
+        attempt_done = threading.Event()
 
         def contender() -> None:
-            held.wait(timeout=5.0)
             try:
-                with page_lock(indirect, timeout=0.1):
-                    pass
-            except (TimeoutError, OSError) as exc:
-                refused.append(exc)
+                held.wait(timeout=10.0)
+                try:
+                    with page_lock(indirect, timeout=0.1):
+                        pass
+                except TimeoutError as exc:
+                    refused.append(exc)
+            finally:
+                attempt_done.set()
 
         t = threading.Thread(target=contender)
         t.start()
         try:
             with page_lock(direct, timeout=0.25):
                 held.set()
-                time.sleep(0.4)
+                assert attempt_done.wait(timeout=10.0), "contender never finished"
         finally:
-            t.join(timeout=5.0)
+            t.join(timeout=10.0)
 
-        assert refused, "the `..` spelling bypassed the lock on the same page"
+        assert not t.is_alive(), "contender thread did not terminate"
+        assert len(refused) == 1, "the `..` spelling bypassed the lock on the same page"
 
 
 class TestCrossThreadExclusionPreserved:
     """AC01 — reentrancy is thread-local; a second thread still blocks."""
 
     def test_other_thread_cannot_enter_while_held(self, page: Path) -> None:
-        entered = threading.Event()
+        """R2 Codex MINOR — event-driven, not sleep-driven.
+
+        The lock is held until the contender signals it has FINISHED its
+        attempt, so a descheduled contender cannot produce a false pass. Only
+        `TimeoutError` is accepted: also catching `OSError` would let an
+        unrelated permission or lock-parse failure satisfy the exclusion
+        assertion without proving contention.
+        """
+        held = threading.Event()
+        attempt_done = threading.Event()
         second_acquired = threading.Event()
-        failed: list[BaseException] = []
+        refused: list[TimeoutError] = []
 
         def contender() -> None:
-            entered.wait(timeout=5.0)
             try:
-                with page_lock(page, timeout=0.1):
-                    second_acquired.set()
-            except (TimeoutError, OSError) as exc:  # expected — lock is held
-                failed.append(exc)
+                held.wait(timeout=10.0)
+                try:
+                    with page_lock(page, timeout=0.1):
+                        second_acquired.set()
+                except TimeoutError as exc:  # expected — lock is held
+                    refused.append(exc)
+            finally:
+                attempt_done.set()
 
         t = threading.Thread(target=contender)
         t.start()
         try:
             with page_lock(page, timeout=0.25):
-                entered.set()
-                time.sleep(0.4)
+                held.set()
+                # Hold the lock until the contender's attempt has fully
+                # resolved — no fixed sleep, so machine load cannot skew this.
+                assert attempt_done.wait(timeout=10.0), "contender never finished"
                 assert not second_acquired.is_set()
         finally:
-            t.join(timeout=5.0)
+            t.join(timeout=10.0)
 
-        assert failed, "second thread must be excluded, not silently admitted"
+        assert not t.is_alive(), "contender thread did not terminate"
+        assert len(refused) == 1, "second thread must be excluded with TimeoutError"
 
     def test_file_lock_and_page_lock_exclude_each_other(self, page: Path) -> None:
         """page_lock must not be a parallel universe — it has to contend on the

@@ -74,6 +74,20 @@ def _depths() -> dict[str, int]:
     return depths
 
 
+def _restore_depth(depths: dict[str, int], key: str, prior: int) -> None:
+    """Restore ``key`` to its EXACT pre-acquisition depth.
+
+    Deliberately an absolute restore rather than a decrement. A decrement is
+    only correct when the matching increment definitely happened; an absolute
+    restore is correct either way, which is what makes the async-exception
+    window safe (R2 Codex MAJOR — see ``page_lock``).
+    """
+    if prior > 0:
+        depths[key] = prior
+    else:
+        depths.pop(key, None)
+
+
 @contextmanager
 def page_lock(path: Path | str, timeout: float | None = None) -> Iterator[None]:
     """Acquire a reentrant exclusive lock on a wiki page.
@@ -103,14 +117,20 @@ def page_lock(path: Path | str, timeout: float | None = None) -> Iterator[None]:
     """
     key = _page_key(path)
     depths = _depths()
-    if depths.get(key, 0) > 0:
-        depths[key] += 1
+    prior = depths.get(key, 0)
+
+    if prior > 0:
+        # R2 Codex MAJOR — the depth mutation lives INSIDE the try. If it sat
+        # outside, an async exception (KeyboardInterrupt, signal, injected
+        # cancellation) landing between the increment and the `try` would skip
+        # the `finally` and strand a positive depth. A pooled thread reused
+        # later would then see depth > 0, treat a fresh acquisition as a
+        # re-entry, and write the page holding NO lock at all.
         try:
+            depths[key] = prior + 1
             yield
         finally:
-            depths[key] -= 1
-            if depths[key] <= 0:
-                depths.pop(key, None)
+            _restore_depth(depths, key, prior)
         # CRITICAL: this return skips the `file_lock` acquisition below. A
         # re-entry must NOT acquire — falling through would self-deadlock
         # against the lock this same thread already holds.
@@ -123,10 +143,11 @@ def page_lock(path: Path | str, timeout: float | None = None) -> Iterator[None]:
     # Verified by revert-check (cycle-11 L1): normalising here changes no test
     # outcome, so it would be churn, not a fix.
     with file_lock(Path(path), timeout=timeout):
-        depths[key] = 1
+        # Same INSIDE-the-try discipline as the re-entry branch above, and the
+        # restore is absolute (`prior`, which is 0 here) rather than a
+        # decrement, so an interrupted acquisition cannot leave the key set.
         try:
+            depths[key] = 1
             yield
         finally:
-            depths[key] -= 1
-            if depths[key] <= 0:
-                depths.pop(key, None)
+            _restore_depth(depths, key, prior)
