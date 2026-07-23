@@ -17,6 +17,41 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-23 — cycle 82 (refiner page-lock migration)
+
+**Theme:**
+Makes the page-lock primitive uniform. Cycle 81 introduced `page_lock` and routed four call sites through it; a sweep of all 22 remaining `file_lock` acquisitions found exactly one page-mutating site left behind — `refine_page` — plus a latent name-shadow hazard in it.
+
+**The shadow hazard (why this could not stay as-is):**
+
+`refine_page` held its page lock in a local variable literally named `page_lock`:
+
+```python
+page_lock = file_lock(page_path)   # local named `page_lock`
+page_lock.__enter__()
+```
+
+Adding `from kb.utils.page_lock import page_lock` to this module without renaming the local would NOT be a syntax error. The assignment simply rebinds the name inside the function, so the helper becomes unreachable there and the local silently holds a `_GeneratorContextManager` instance instead. That is the kind of change that passes review and breaks quietly later.
+
+**Changes:**
+
+- `review/refiner.py` imports `page_lock` and acquires the page through it.
+- The local is renamed `page_lock_cm`.
+- The manual `__enter__()` / `finally: page_lock_cm.__exit__(None, None, None)` form is RETAINED deliberately. The lock spans a long region containing several early `return {"error": ...}` paths; converting to a `with` block would mean restructuring the entire function body for zero behavioural gain. The backlog entry had proposed `with page_lock(page_path):` — that part of the proposed fix was rejected on inspection.
+- Lock ORDER is untouched: page FIRST (`page_lock`), history SECOND (`file_lock(resolved_history_path)`). This preserves the cycle-1 H1 / cycle-19 AC10 contract, which `T-10` asserts explicitly.
+
+**Test seams — only one of the three files needed changing:**
+
+- `tests/test_cycle19_refiner_two_phase.py` — the 2 lock-order spies recorded "page" vs "history" by inspecting the path passed to a single patched `refiner.file_lock`. With the page now going through a different callable, they patch BOTH seams: `refiner.page_lock` records "page", `refiner.file_lock` records "history". The `acquisitions == ["page", "history"]` assertion is unchanged.
+- `tests/test_cycle20_sweep_stale_pending.py` — NO change. It exercises `sweep_stale_pending`, which locks only the history path.
+- `tests/test_refiner.py` — NO change. It asserts `any("review_history" in str(p) ...)`, still a `file_lock` acquisition.
+
+**BACKLOG:** the `review/refiner.py:113` entry filed during cycle 81 is DELETED.
+
+**Counts:** tests 3458 collected (net 0 — seam update only); full suite 3418 passed / 24 skipped / 16 xfailed; src/kb/ changes 1 file.
+
+---
+
 ### 2026-07-23 — cycle 81 (reentrant per-page write lock)
 
 **Theme:**

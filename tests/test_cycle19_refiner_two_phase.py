@@ -155,7 +155,11 @@ def test_lock_order_page_outer_history_inner(tmp_wiki: Path, tmp_path: Path, mon
     history_path = tmp_path / "review_history.json"
 
     # Spy on file_lock to record acquisition order.
+    # Cycle 82 — the page is acquired via `page_lock` and the history via
+    # `file_lock`, so the order spy has to cover BOTH seams. The recorded
+    # sequence and the ["page", "history"] assertion are unchanged.
     real_file_lock = refiner.file_lock
+    real_page_lock = refiner.page_lock
     acquisitions: list[str] = []
 
     @contextmanager
@@ -167,7 +171,14 @@ def test_lock_order_page_outer_history_inner(tmp_wiki: Path, tmp_path: Path, mon
         with real_file_lock(path, *args, **kwargs):
             yield
 
+    @contextmanager
+    def spy_page_lock(path: Path, *args, **kwargs):
+        acquisitions.append("page")
+        with real_page_lock(path, *args, **kwargs):
+            yield
+
     monkeypatch.setattr(refiner, "file_lock", spy_lock)
+    monkeypatch.setattr(refiner, "page_lock", spy_page_lock)
 
     refine_page(
         "concepts/foo",
@@ -313,7 +324,11 @@ def test_revert_lock_order_would_break_test(tmp_wiki: Path, tmp_path: Path, monk
     _seed_page(tmp_wiki, "concepts/foo", "Foo", "Body.")
     history_path = tmp_path / "review_history.json"
 
+    # Cycle 82 — the page is acquired via `page_lock` and the history via
+    # `file_lock`, so the order spy has to cover BOTH seams. The recorded
+    # sequence and the ["page", "history"] assertion are unchanged.
     real_file_lock = refiner.file_lock
+    real_page_lock = refiner.page_lock
     acquisitions: list[str] = []
 
     @contextmanager
@@ -325,7 +340,14 @@ def test_revert_lock_order_would_break_test(tmp_wiki: Path, tmp_path: Path, monk
         with real_file_lock(path, *args, **kwargs):
             yield
 
+    @contextmanager
+    def spy_page_lock(path: Path, *args, **kwargs):
+        acquisitions.append("page")
+        with real_page_lock(path, *args, **kwargs):
+            yield
+
     monkeypatch.setattr(refiner, "file_lock", spy_lock)
+    monkeypatch.setattr(refiner, "page_lock", spy_page_lock)
     refine_page(
         "concepts/foo",
         "Updated.",

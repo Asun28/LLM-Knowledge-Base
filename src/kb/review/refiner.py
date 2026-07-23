@@ -38,6 +38,7 @@ from kb.config import (
 from kb.errors import StorageError, ValidationError
 from kb.utils.io import atomic_text_write, file_lock
 from kb.utils.markdown import FRONTMATTER_RE
+from kb.utils.page_lock import page_lock
 from kb.utils.wiki_log import append_wiki_log
 
 logger = logging.getLogger(__name__)
@@ -109,9 +110,13 @@ def refine_page(
     # Lock-order: page_path acquired FIRST; history_path acquired SECOND (below).
     # Cycle 19 AC10 — order PRESERVED (WITHDRAW of the proposed flip; see module
     # docstring for rationale). T-10 asserts this order.
+    # Cycle 82: acquire via the canonical `page_lock` helper so every
+    # page-mutating site in the codebase uses ONE primitive. The local is named
+    # `page_lock_cm`, not `page_lock` — the old name shadowed the helper and
+    # would have silently broken this call once the import landed.
     try:
-        page_lock = file_lock(page_path)
-        page_lock.__enter__()
+        page_lock_cm = page_lock(page_path)
+        page_lock_cm.__enter__()
     except TimeoutError as e:
         return {"error": f"Failed to acquire page lock for {page_id}: {e}"}
 
@@ -287,7 +292,7 @@ def refine_page(
                     break
             save_review_history(history, resolved_history_path)
     finally:
-        page_lock.__exit__(None, None, None)
+        page_lock_cm.__exit__(None, None, None)
 
     # Append to wiki/log.md (best-effort — page + history already written successfully;
     # a log failure must not crash the caller or hide the successful refine result).
