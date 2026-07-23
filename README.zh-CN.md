@@ -5,10 +5,10 @@
 > **注意：** 英文版 [README.md](README.md) 是规范版本。中文镜像可能滞后 1-2 个开发周期；请通过 GitHub 查看最新状态。
 > *Note: English [README.md](README.md) is canonical. This Chinese mirror may lag by 1-2 cycles; see GitHub for current state.*
 
-![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-2725-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet) ![Version](https://img.shields.io/badge/version-v0.10.0-orange)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Tests](https://img.shields.io/badge/tests-3461-brightgreen) ![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-blueviolet) ![Version](https://img.shields.io/badge/version-v0.12.0-orange)
 
 **编译知识，而非检索碎片。**
-丢入原始资料，剩下的交给 Claude——自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。无需向量数据库，无需文本分块。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
+丢入原始资料，剩下的交给 Claude——自动提取实体、构建维基页面、注入双向链接、追踪可信度、标记矛盾点。以 Markdown 为核心，混合检索为可选项。生成的是完全由你掌控的纯 Markdown 文件，可直接在 Obsidian 中浏览。
 
 灵感源自 [Karpathy 的 LLM 知识库构想](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)，并实现了**全自动化**。原生支持 Claude Code，内置 28 个 MCP 工具——无需配置 API Key 即可运行。同样支持通过 `KB_LLM_BACKEND` 接入本地 AI CLI 工具（Ollama、Gemini CLI、OpenCode、Codex CLI、Kimi Code、QWEN CODE CLI、DeepSeek Coder、GLM-4.5/ZAI CLI 等）。
 
@@ -16,7 +16,7 @@
 
 ## 🎯 为什么用户选择它而非传统 RAG？
 
-🧠 **重结构，轻分块**：基于实体、概念与维基链接构建真实知识图谱，告别不透明的向量检索。
+🧠 **结构优先，向量可选**：基于实体、概念与维基链接构建真实知识图谱；BM25 + 向量混合检索按需启用，用于提升召回。
 ⚡ **默认增量更新**：基于 SHA-256 变更检测，仅重新处理新增或修改的资料。
 🔗 **回溯式链接**：摄入新主题时，已有页面会自动补充 `[[维基链接]]`。
 🧪 **自我修复**：贝叶斯可信度评分、矛盾检测、内容过期标记、死链检查。
@@ -31,7 +31,7 @@ RAG 检索的是文本块，而本系统理解的是知识结构。
 |---|---|---|
 | 存储方式 | 不可读的向量嵌入 (Embeddings) | 可在 Obsidian 中直接浏览的 Markdown 页面 |
 | 知识形态 | 无关联的文本碎片 (Chunks) | 由实体、概念和维基链接构成的知识图谱 |
-| 检索质量 | 依赖 Top-K 相关性，结果不稳定 | BM25 + PageRank 排序，结合可信度评分 |
+| 检索质量 | 依赖 Top-K 相关性，结果不稳定 | BM25 + 向量混合排序，融合 PageRank 与页面可信度评分 |
 | 维护成本 | 资料变更需重新向量化 | 增量编译——仅处理变更部分 |
 | 矛盾处理 | 静默返回冲突片段 | Lint 工具自动跨源检测矛盾 |
 | 知识盲区 | 无法感知缺失内容 | Evolve 工具自动分析覆盖盲区并建议新建页面 |
@@ -180,40 +180,79 @@ KB ingest 仅支持 `.md`、`.txt`、`.json`、`.yaml`、`.yml`、`.rst` 和 `.c
 | 操作 | 命令 | 功能说明 |
 |---|---|---|
 | 摄入 (Ingest) | `kb ingest <file>` | 提取实体/概念/核心观点 → 创建维基页 → 注入维基链接 → 更新索引 |
-| 编译 (Compile) | `kb compile` | 批量摄入所有新增/变更资料（SHA-256 哈希检测，崩溃安全） |
-| 查询 (Query) | `kb query "..."` | BM25 + PageRank 检索 → 生成带内联引用的综合解答 |
-| 检查 (Lint) | `kb lint` | 检测死链、孤立页、过期内容、残页、元数据、来源覆盖、链接环、低可信度页面 |
+| 编译 (Compile) | `kb compile` | 批量摄入所有新增/变更资料（SHA-256 哈希检测，崩溃安全），成功后自动发布 |
+| 查询 (Query) | `kb query "..."` | BM25 + 向量混合检索并融合 PageRank → 生成带内联引用的综合解答；`--format` 可将结果写入 `outputs/` |
+| 检查 (Lint) | `kb lint` | 检测死链、孤立页、过期内容、残页、元数据、来源覆盖、链接环、重复 slug、低可信度页面；`--fix` 自动修复，`--augment` 从网络补全盲区 |
 | 演进 (Evolve) | `kb evolve` | 分析覆盖盲区、连接机会、缺失页面类型、断开图谱组件 |
+
+另有两条维护命令：
+
+| 命令 | 功能说明 |
+|---|---|
+| `kb publish [--format all]` | 生成 `llms.txt`、`llms-full.txt`、`graph.jsonld`、`sitemap.xml` 与逐页关联文件至 `outputs/`（可用 `--out-dir` 覆盖） |
+| `kb rebuild-indexes [--yes]` | 全量重置——删除哈希清单、向量库与进程内 LRU 缓存，使下次 `kb compile` 从零重新摄入 |
+
+CLI 同时镜像了大部分 MCP 工具（`kb search`、`kb stats`、`kb read-page`、`kb lint-deep`、`kb detect-drift` 等），便于脱离 Claude Code 编写脚本。
 
 ---
 
 ## ✨ 核心特性
 
 ### 📥 摄入流水线 (Ingest Pipeline)
-- 支持 10 种资料类型：文章、论文、视频、代码库、播客、书籍、数据集、对话、对比分析、综合报告
+- 支持 9 种摄入资料类型：`article`、`paper`、`video`、`repo`、`podcast`、`book`、`dataset`、`conversation`、`capture`（`comparison` 与 `synthesis` 属于维基页面类型，请用 `kb_create_page` 创建）
 - 基于哈希的去重机制——相同内容不会重复摄入
 - 回溯式维基链接注入——摄入新主题时，提及该主题的历史页面自动补全链接
+- 证据链 (Evidence Trail)——每个页面按倒序记录哪份资料在何时贡献了哪些内容，并由哨兵标记守护
+- 摄入时自动矛盾检测——新资料与既有页面冲突时，即时写入 `wiki/contradictions.md`，而非等到查询时才暴露
 - 级联追踪——返回受新摄入内容影响、可能需要复查的已有页面
 - 短内容分级处理——小型资料（<1000 字符）延迟创建实体，避免生成"残页"(stubs)
 - 对话捕获——`kb_capture` MCP 工具可将聊天/笔记/会话记录原子化为结构化知识项（决策、发现、修正、踩坑记录），内置密钥扫描安全拦截与进程级限流
+- 结构化审计日志 `.data/ingest_log.jsonl`，全流程 `request_id` 关联
 
 ### 🔍 检索与查询 (Search & Query)
-- BM25 排序（支持标题加权与文档长度归一化）
-- PageRank 融合——连接度高的页面排名更靠前
-- 上下文智能截断至 80K 字符，精准筛选相关页面
-- 内联引用溯源：`[source: concepts/attention]` 确保每个观点有据可查
+- 混合检索——BM25（标题加权 + 文档长度归一化）与向量检索通过 RRF 倒数排名融合；向量为可选依赖（`pip install -e '.[hybrid]'`），缺失时自动降级为纯 BM25
+- PageRank 融合——连接度高的页面排名更靠前；`status: mature|evergreen` 与人工撰写的页面获得轻微加权
+- 4 层去重流水线——避免同一观点占据三份上下文预算
+- 多轮查询重写——追问自动继承上一轮的上下文
+- 过期事实标记——当引用页面比其原始资料更旧时，答案会给出提示
+- 原始资料回退——若没有维基页面覆盖该问题，引擎会直接检索 `raw/`，而不是凭空作答
+- 上下文智能截断至 80K 字符；内联引用溯源 `[source: concepts/attention]` 确保每个观点有据可查
+- 输出适配器——`kb query --format={markdown|marp|html|chart|jupyter}` 将答案写入 `outputs/`，可为文档、Marp 幻灯片、独立 HTML、matplotlib 脚本或可执行 Notebook
 
 ### 🛡️ 质量保障系统 (Quality System)
 - 贝叶斯可信度评分——基于查询反馈动态调整页面可信度。"错误"惩罚权重是"不完整"的 2 倍
 - 语义 Lint 检查——深度保真校验（页面对比原始来源）与跨页面矛盾检测
 - Actor-Critic 审查机制——结构化 6 项检查清单，完整审计追踪
 - 质量趋势看板——按周统计 pass/fail/warning，可视化质量演进轨迹
+- 认知完整性元数据——可选的 `belief_state`（confirmed / uncertain / contradicted / stale / retracted）、`authored_by`（human / llm / hybrid）与 `status`（seed → developing → mature → evergreen）字段同时参与排序与发布过滤
+- 响应式盲区填充——`kb lint --augment` 发现残页后推荐权威链接、经 DNS 重绑定安全传输抓取，并以 `confidence: speculative` 摄入。三道门控（`propose` → `--execute` → `--auto-ingest`）确保人工在环；限流 10 次/运行、60 次/小时、3 次/主机/小时
 
 ### 🕸️ 知识图谱 (Knowledge Graph)
 - 基于 NetworkX 从维基链接构建图谱
 - 支持 PageRank 与介数中心性 (Betweenness Centrality) 分析
 - Mermaid 图表导出（大图自动剪枝优化）
 - Obsidian 原生兼容——直接通过 `wiki/` Vault 使用内置图谱视图
+
+### 📤 发布 (Publish)
+`kb publish` 一次生成全部机器可读产物；`kb compile` 成功后也会自动触发：
+
+| 产物 | 说明 |
+|---|---|
+| `llms.txt` | 面向 LLM 的精简维基索引 |
+| `llms-full.txt` | 全部可发布页面的全文合集 |
+| `graph.jsonld` | JSON-LD 知识图谱 |
+| `sitemap.xml` | 标准站点地图 |
+| 逐页关联文件 | 每个页面旁的同名 `.txt`，便于直接抓取 |
+
+`belief_state: retracted|contradicted` 或 `confidence: speculative` 的页面会被跳过，未经核实的内容不会进入发布产物。
+
+`kb publish` 默认写入 `outputs/`；编译成功后的自动发布则写入与 `wiki/` 同级的 `_publish/`（关闭开关 `KB_DISABLE_COMPILE_AUTO_PUBLISH=1`）。
+
+### 🔒 安全与健壮性 (Safety & Robustness)
+- 原子化加锁写入——所有维基页面修改都在可重入的页面级锁内进行；清单、日志与判定存储各自持有独立文件锁
+- 路径安全——双锚点校验在任何读写前拦截路径穿越、Windows 非法字符与符号链接逃逸
+- 提示注入围栏——所有维基与原始内容在进入 LLM 前均被包裹在 `<wiki_context>` 边界内；扫描层输出在进入编排层消费前于层级边界重新校验
+- 崩溃安全编译——SHA-256 清单 + O_EXCL 建页，中断后可续跑而非损坏数据
 
 ### 🤖 Claude Code 集成 (MCP Server)
 原生支持 28 个工具，无需 API Key（Claude Code 作为默认 LLM）。
@@ -351,6 +390,7 @@ export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
 | 书籍 (Book) | 手动笔记或 `markitdown` |
 | 数据集 (Dataset) | Schema 文档说明 |
 | 对话 (Conversation) | 聊天/访谈转录文本 |
+| 捕获 (Capture) | `kb_capture` MCP 工具——将聊天或会话记录原子化为结构化知识项 |
 
 如果捕获到的资料不是受支持的文本格式，请先使用上面的转换命令。
 
@@ -364,26 +404,28 @@ export KB_CLI_MODEL_ORCHESTRATE=qwen2.5-coder:32b
 ```
 llm-wiki-flywheel/
   raw/                     # 不可变的原始资料
-    articles/papers/repos/videos/podcasts/books/datasets/conversations/assets/
+    articles/papers/repos/videos/podcasts/books/datasets/conversations/captures/assets/
   wiki/                    # LLM 生成的维基页面
     entities/concepts/comparisons/summaries/synthesis/
     index.md  _sources.md  _categories.md  log.md  contradictions.md
-  templates/               # 10 套 YAML 提取模板
-  src/kb/                  # Python 核心包（约 6,200 行）
-    cli.py                 # Click CLI（6 个核心命令）
+  templates/               # 11 套 YAML 模板（9 种摄入类型 + comparison/synthesis）
+  src/kb/                  # Python 核心包（约 21,400 行）
+    cli.py                 # Click CLI（24 个命令）
     config.py              # 路径、模型分级、调优常量
-    mcp/                   # FastMCP 服务端（28 个工具）
+    errors.py              # KBError 异常分类体系（ValidationError、StorageError 等）
+    capture.py             # 聊天/会话记录原子化
+    mcp/                   # FastMCP 服务端（28 个工具）+ 统一错误边界
     models/                # WikiPage, RawSource, 前置元数据校验
-    ingest/                # 流水线 + 模板驱动提取器
-    compile/               # 增量编译器 + 维基链接器
-    query/                 # BM25 + PageRank 检索 + 引用生成
-    lint/                  # 8 项检查 + 语义 Lint + 质量趋势
+    ingest/                # 流水线 + 模板驱动提取器 + 证据链
+    compile/               # 增量编译器 + 维基链接器 + 发布构建器
+    query/                 # BM25 + 向量混合检索、RRF、去重、引用、formats/
+    lint/                  # 8 项检查 + 语义 Lint + 判定存储 + augment/ 盲区填充
     evolve/                # 覆盖率分析 + 连接发现
-    graph/                 # NetworkX 图谱 + 统计 + Mermaid 导出
+    graph/                 # NetworkX 图谱 + 统计 + Mermaid 导出 + 缓存
     feedback/              # 贝叶斯可信度评分
     review/                # 页面-来源配对 + 优化器
-    utils/                 # 哈希、LLM 调用、文本处理、I/O
-  tests/                   # 2725 个测试用例（覆盖 230 个文件）
+    utils/                 # 哈希、LLM 调用、页面锁、路径安全、I/O
+  tests/                   # 3461 个测试用例（覆盖 235 个文件）
 ```
 
 </details>
@@ -397,7 +439,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix/macOS
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 2716 通过，9 个跳过
+python -m pytest                # 3421 通过，24 跳过，16 预期失败
 ruff check src/ tests/ --fix    # 代码检查
 ruff format src/ tests/         # 代码格式化
 ```
@@ -408,14 +450,32 @@ ruff format src/ tests/         # 代码格式化
 
 ## 🗺️ 路线图 (Roadmap)
 
-- **Phase 4 (v0.10.0 已发布 2026-04-12)**：RRF 融合混合检索、4 层检索去重流水线、证据追踪模块、查询时过期事实标记、分层上下文组装、原始资料回退检索、摄入时自动矛盾检测、多轮查询重写。发布后审计已修复所有 HIGH (23) + MEDIUM (~30) + LOW (~30) 问题。
-- **Phase 4.11 (未发布 2026-04-14)**：`kb_query --format={markdown|marp|html|chart|jupyter}` 输出适配器——将合成答案导出为 Markdown 文档、Marp 幻灯片、独立 HTML 页面、matplotlib Python 脚本（附 JSON 数据）或可执行 Jupyter Notebook。文件保存至 `outputs/{ts}-{slug}.{ext}`（已 gitignore），含来源前置元数据。响应 Karpathy Tier 1 #1 需求。
-- **Phase 5.0 (未发布 2026-04-15)**：`kb lint --augment` 响应式盲区填充：Lint 发现残页 → 推荐权威链接（Wikipedia, arxiv）→ DNS 重绑定安全传输抓取 → 以 `confidence: speculative` 摄入。三阶段执行尊重人工审核：`propose → --execute → --auto-ingest`。含 G1-G7 资格门控、扫描层相关性检查、摄入后质量判定、回归 `[!gap]` 提示。跨进程限流：10次/运行 + 60次/小时 + 3次/主机/小时。
-- **Phase 4.5 (未发布，v0.10.0 发布后持续审计，2026-04-16 → 2026-04-22)**：22 个迭代周期，480+ 验收条件，230 个测试文件（+1548 测试：1177 → 2725）。核心交付：`kb.errors` 异常分类体系（`KBError` + 5 个子类，`LLMError`/`CaptureError` 重新继承）；slug 碰撞 O_EXCL 防护（写入阶段失败自动清理零字节残留）；2 个新 MCP 工具 `kb_refine_sweep` + `kb_refine_list_stale`（26 → 28 个）；`inject_wikilinks_batch` 批量注入（N×M 磁盘读改为 ~U+2M，内置 ReDoS 防护）；精炼两阶段写入（含 `attempt_id` 关联）；结构化摄入审计日志（`.data/ingest_log.jsonl`，`request_id` 全程关联）；链接器页面级 TOCTOU 锁；wiki_log 锁内轮转；Epistemic-Integrity 2.0（`belief_state` / `authored_by` / `status` 元数据体系）；`kb publish` 5 种 Tier-1 发布格式（llms.txt、llms-full.txt、graph.jsonld、关联页面、站点地图）；`kb_query(save_as=...)` 综合答案持久化；重复 slug + 内联标注 Lint 检查；manifest key 一致性；60+ 安全威胁全部关闭；所有 ≥25 条 AC 批次均执行三轮 PR 审查；Cycle 21：通过 `KB_LLM_BACKEND` 环境变量路由的 8 个替代 LLM 提供商 CLI 子进程后端；Cycle 22：wiki 路径摄入防护、通用提取接地提示、以及用运行时 LLM 调用 spy 替换 `inspect.getsource` 测试。
-- **Phase 5 (延期)**：内联观点级可信度标签 + EXTRACTED Lint 验证；观点溯源 BM25 核验（事后幻觉检测——采样观点并逐一核查引用的 `raw/` 原文，不匹配则将 `belief_state` 置为 `uncertain`）；多源确认门控（`belief_state: confirmed` 需要 ≥ 2 个独立原始资料，通过前置元数据字段 `source_count` 追踪）；支持 URL 的 `kb_ingest`（5 状态适配器模型）；页面状态生命周期（seed→developing→mature→evergreen）；内联质量提示标记；Evolve 自主研究循环；块级 BM25 子页索引；图谱边类型化语义关系；交互式 vis.js HTML 图谱查看器；LLM 隐式关系推断；动态概览页；可操作盲区填充建议；两阶段编译流水线；多跳检索；对话→KB 提升；时间轴观点追踪；BM25 + LLM 重排序。
-- **Phase 6 (未来规划)**：DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
+### 已交付
 
-**已完成版本**：
+| 阶段 | 核心内容 |
+|---|---|
+| **Phase 4**（v0.10.0） | RRF 融合混合检索、4 层去重流水线、证据追踪、查询时过期事实标记、摄入时自动矛盾检测 |
+| **Phase 4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}`——答案导出为文档、Marp 幻灯片、独立 HTML、绘图脚本或 Notebook |
+| **Phase 5.0** | `kb lint --augment` 响应式盲区填充：发现残页 → 推荐权威链接 → 安全抓取 → 以 `confidence: speculative` 摄入，全程三阶段人工审核门控 |
+| **Phase 4.5** | 22 周期发布后审计：`kb.errors` 异常分类体系、`kb publish` Tier-1 发布格式、Epistemic-Integrity 2.0、8 个替代 LLM CLI 后端、60+ 安全威胁关闭 |
+| **Cycle 23-82** | 持续加固：双锚点路径安全、MCP 错误边界、wiki 上下文边界围栏、层级边界校验、可重入页面级写锁 |
+
+逐周期明细见 [`CHANGELOG.md`](CHANGELOG.md) 与 [`CHANGELOG-history.md`](CHANGELOG-history.md)。
+
+### 下一步 — Phase 5（延期）
+
+- **接地校验** — 内联观点级可信度标签 + EXTRACTED Lint；观点溯源 BM25 核验（事后幻觉检测）；多源确认门控（`belief_state: confirmed` 需 ≥ 2 个独立原始资料）
+- **检索** — 块级 BM25 子页索引、多跳检索、BM25 + LLM 重排序
+- **图谱** — 边类型化语义关系、LLM 隐式关系推断、交互式 vis.js 查看器、动态概览页
+- **摄入** — 支持 URL 的 `kb_ingest`（5 状态适配器）、两阶段编译流水线、对话→KB 提升、时间轴观点追踪、Evolve 自主研究循环
+
+### 远期 — Phase 6
+
+DSPy 优化、RAGAS 评估、蒙特卡洛证据采样。
+
+<details>
+<summary><b>已完成版本</b></summary>
+
 
 | 版本 | 核心内容 | 测试数 |
 |---|---|---|
@@ -432,6 +492,8 @@ ruff format src/ tests/         # 代码格式化
 | v0.9.16 | Phase 3.97 — 62 条修复：原子写入、MCP 异常防护、slugify 符号映射、CRLF、整数标题强制转换 | 1033 |
 | v0.10.0 | Phase 4 — RRF 混合检索、4 层去重、证据追踪、查询时过期标记、分层上下文、原始资料回退、自动矛盾检测、多轮重写；发布后修复全部 HIGH/MEDIUM/LOW | 1177（55 文件）|
 | Phase 4.5（未发布） | v0.10.0 后持续审计，22 周期，异常分类体系、O_EXCL 防碰撞、新增 2 个 MCP 工具、批量链接注入、Epistemic-Integrity 2.0、`kb publish` 5 种格式、60+ 安全威胁关闭、8 提供商 CLI 子进程后端（Cycle 21）、wiki 路径摄入防护与提取接地提示（Cycle 22） | 2725（230 文件）|
+
+</details>
 
 ---
 

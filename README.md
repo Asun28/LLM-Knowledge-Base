@@ -30,7 +30,7 @@ RAG retrieves chunks. This system **understands structure**.
 |---|---|---|
 | Storage | Vector embeddings you can't read | Markdown pages you can browse in Obsidian |
 | Knowledge | Chunks with no relationships | Entities, concepts, and wikilinks forming a graph |
-| Quality | Hope the top-K chunks are relevant | BM25 + PageRank ranking with trust scores |
+| Quality | Hope the top-K chunks are relevant | Hybrid BM25 + vector ranking, PageRank blending, per-page trust scores |
 | Maintenance | Re-embed when sources change | Incremental compile — only changed sources reprocessed |
 | Contradictions | Silently returns conflicting chunks | Lint detects contradictions across sources |
 | Gaps | No way to know what's missing | Evolve analyzes coverage gaps and suggests new pages |
@@ -196,39 +196,77 @@ For transcript files produced by `yt-dlp`, convert the generated `.vtt` before i
 | Operation | Command | What happens |
 |-----------|---------|-------------|
 | **Ingest** | `kb ingest <file>` | Extract entities, concepts, key claims → create wiki pages → inject wikilinks → update indexes |
-| **Compile** | `kb compile` | Batch-ingest all new/changed sources (SHA-256 hash detection, crash-safe) |
-| **Query** | `kb query "..."` | BM25 + PageRank search → synthesize answer with inline citations |
-| **Lint** | `kb lint` | Dead links, orphan pages, staleness, stubs, frontmatter, source coverage, wikilink cycles, low-trust pages |
+| **Compile** | `kb compile` | Batch-ingest all new/changed sources (SHA-256 hash detection, crash-safe), then auto-publish |
+| **Query** | `kb query "..."` | Hybrid BM25 + vector search with PageRank blending → synthesized answer with inline citations. `--format` writes it to `outputs/` |
+| **Lint** | `kb lint` | Dead links, orphan pages, staleness, stubs, frontmatter, source coverage, wikilink cycles, duplicate slugs, low-trust pages. `--fix` repairs; `--augment` fills gaps from the web |
 | **Evolve** | `kb evolve` | Coverage gaps, connection opportunities, missing page types, disconnected components |
-| **Rebuild indexes** | `kb rebuild-indexes [--yes]` | Clean-slate wipe — deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
+
+Plus two maintenance commands:
+
+| Command | What happens |
+|---------|-------------|
+| `kb publish [--format all]` | Emit `llms.txt`, `llms-full.txt`, `graph.jsonld`, `sitemap.xml`, and per-page siblings to `outputs/` (override with `--out-dir`) |
+| `kb rebuild-indexes [--yes]` | Clean-slate wipe — deletes the hash manifest + vector DB + in-process LRU caches so the next `kb compile` re-ingests every source from scratch |
+
+The CLI also mirrors most MCP tools (`kb search`, `kb stats`, `kb read-page`, `kb lint-deep`, `kb detect-drift`, …) for scripting without Claude Code.
 
 ## Key Features
 
 ### Ingest Pipeline
-- 10 source types: article, paper, video, repo, podcast, book, dataset, conversation, comparison, synthesis
+- 9 ingest source types: `article`, `paper`, `video`, `repo`, `podcast`, `book`, `dataset`, `conversation`, `capture` (`comparison` and `synthesis` are wiki page types — create them with `kb_create_page`)
 - Hash-based dedup — same content won't be ingested twice
 - **Retroactive wikilink injection** — when you ingest a new topic, existing pages that mention it get auto-linked
+- **Evidence Trail** — every page keeps a reverse-chronological, sentinel-guarded record of which source contributed what, and when
+- **Auto-contradiction detection** — a new source that conflicts with an existing page is flagged into `wiki/contradictions.md` at ingest time, not at query time
 - Cascade tracking — returns which existing pages might need review after the new ingest
 - Short-source tiering — small sources (<1000 chars) defer entity creation to prevent stubs
 - **Conversation capture** — `kb_capture` MCP tool atomizes chat / notes / session transcripts into typed knowledge items (decisions, discoveries, corrections, gotchas) with secret-scanner safety rails and a per-process rate limit
+- Structured audit log at `.data/ingest_log.jsonl` with `request_id` correlation across the whole pipeline
 
 ### Search & Query
-- **BM25 ranking** with title boosting and document length normalization
-- **PageRank blending** — well-connected pages rank higher
-- Context truncated to 80K chars with intelligent page selection
-- Inline citations: `[source: concepts/attention]` traces every claim
+- **Hybrid retrieval** — BM25 (title boosting + length normalization) fused with vector search via Reciprocal Rank Fusion; vectors are opt-in (`pip install -e '.[hybrid]'`) and degrade to BM25-only if unavailable
+- **PageRank blending** — well-connected pages rank higher; `status: mature|evergreen` and human-authored pages get a mild ranking boost
+- **4-layer dedup** so the same claim doesn't occupy three slots in your context window
+- **Multi-turn query rewriting** — follow-up questions inherit context from the previous turn
+- **Stale-truth flagging** — answers warn you when a cited page is older than its raw source
+- **Raw-source fallback** — if no wiki page covers the question, the engine searches `raw/` directly instead of answering from nothing
+- Context capped at 80K chars with intelligent page selection; inline citations (`[source: concepts/attention]`) trace every claim
+- **Output adapters** — `kb query --format={markdown|marp|html|chart|jupyter}` writes the answer to `outputs/` as a doc, Marp deck, standalone HTML page, matplotlib script, or runnable notebook
 
 ### Quality System
 - **Bayesian trust scoring** — query feedback builds per-page trust. "Wrong" penalized 2x vs "incomplete"
 - **Semantic lint** — deep fidelity checks (page vs source) and cross-page contradiction detection
 - **Actor-Critic review** — structured 6-item review checklist with audit trail
 - **Verdict trends** — weekly pass/fail/warning dashboard showing quality trajectory
+- **Epistemic integrity** — optional `belief_state` (confirmed / uncertain / contradicted / stale / retracted), `authored_by` (human / llm / hybrid), and `status` (seed → developing → mature → evergreen) frontmatter fields feed both ranking and publish filtering
+- **Reactive gap-fill** — `kb lint --augment` spots a stub, proposes authoritative URLs, fetches them over a DNS-rebind-safe transport, and ingests as `confidence: speculative`. Three gates (`propose` → `--execute` → `--auto-ingest`) keep a human in the loop; rate-limited 10/run, 60/hour, 3/host/hour
 
 ### Knowledge Graph
 - NetworkX-powered graph from wikilinks
 - PageRank and betweenness centrality
 - Mermaid diagram export (auto-prunes for large graphs)
 - **Obsidian-compatible** — native graph view from `wiki/` vault
+
+### Publish
+`kb publish` emits the machine-consumable stack in one pass — and `kb compile` triggers it automatically on success:
+
+| Artifact | What it is |
+|---|---|
+| `llms.txt` | Compact index of the wiki for LLM consumers |
+| `llms-full.txt` | Full-text bundle of every publishable page |
+| `graph.jsonld` | JSON-LD knowledge graph |
+| `sitemap.xml` | Standard sitemap |
+| per-page siblings | Sibling `.txt` next to each page for direct fetching |
+
+Pages with `belief_state: retracted|contradicted` or `confidence: speculative` are skipped, so unverified content never lands in a published artifact.
+
+`kb publish` writes to `outputs/` by default; the automatic post-compile run writes to `_publish/` alongside `wiki/` (kill-switch `KB_DISABLE_COMPILE_AUTO_PUBLISH=1`).
+
+### Safety & Robustness
+- **Atomic, locked writes** — every wiki page mutation runs under a reentrant per-page lock; the manifest, log, and verdict store use their own file locks
+- **Path safety** — dual-anchor validation rejects traversal, Windows-illegal characters, and symlink escapes before any read or write
+- **Prompt-injection fence** — all wiki and raw content is wrapped in a `<wiki_context>` boundary before it reaches an LLM, and scan-tier outputs are re-validated at the tier boundary before an orchestrate-tier consumer sees them
+- **Crash-safe compile** — SHA-256 manifest + O_EXCL slug creation mean an interrupted run resumes instead of corrupting
 
 ### Claude Code Integration (MCP Server)
 
@@ -358,6 +396,7 @@ Unset `KB_LLM_BACKEND` (or set it to `anthropic`) to return to the default Claud
 | Book | Manual notes or `markitdown` |
 | Dataset | Schema documentation |
 | Conversation | Chat/interview transcript |
+| Capture | `kb_capture` MCP tool — atomizes a chat or session transcript into typed items |
 
 Use the conversion commands above when the captured source is not already one of the supported text formats.
 
@@ -367,26 +406,28 @@ Use the conversion commands above when the captured source is not already one of
 ```
 llm-wiki-flywheel/
   raw/                     # Immutable source documents
-    articles/papers/repos/videos/podcasts/books/datasets/conversations/assets/
+    articles/papers/repos/videos/podcasts/books/datasets/conversations/captures/assets/
   wiki/                    # LLM-generated wiki pages
     entities/concepts/comparisons/summaries/synthesis/
     index.md  _sources.md  _categories.md  log.md  contradictions.md
-  templates/               # 10 YAML extraction schemas
-  src/kb/                  # Python package (~6,200 lines)
-    cli.py                 # Click CLI (6 commands)
+  templates/               # 11 YAML schemas (9 ingest types + comparison/synthesis)
+  src/kb/                  # Python package (~21,400 lines)
+    cli.py                 # Click CLI (24 commands)
     config.py              # Paths, model tiers, tuning constants
-    mcp/                   # FastMCP server (28 tools)
+    errors.py              # KBError taxonomy (ValidationError, StorageError, …)
+    capture.py             # Chat/session transcript atomizer
+    mcp/                   # FastMCP server (28 tools) + shared error boundary
     models/                # WikiPage, RawSource, frontmatter validation
-    ingest/                # Pipeline + template-driven extractors
-    compile/               # Incremental compiler + wikilink linker
-    query/                 # BM25 + PageRank search + citations
-    lint/                  # 8 checks + semantic lint + verdict trends
+    ingest/                # Pipeline + template-driven extractors + evidence trail
+    compile/               # Incremental compiler, wikilink linker, publish builders
+    query/                 # BM25 + vector hybrid, RRF, dedup, citations, formats/
+    lint/                  # 8 checks + semantic lint + verdicts + augment/ gap-fill
     evolve/                # Coverage analysis + connection discovery
-    graph/                 # NetworkX graph + stats + Mermaid export
+    graph/                 # NetworkX graph + stats + Mermaid export + cache
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
-    utils/                 # Hashing, LLM calls, text, I/O
-  tests/                   # 3021 tests across 208 files
+    utils/                 # Hashing, LLM calls, page locks, path safety, I/O
+  tests/                   # 3461 tests across 235 files
 ```
 
 </details>
@@ -399,7 +440,7 @@ llm-wiki-flywheel/
 source .venv/bin/activate       # Unix
 
 pip install -r requirements.txt && pip install -e .
-python -m pytest                # 3010 passed, 11 skipped
+python -m pytest                # 3421 passed, 24 skipped, 16 xfailed
 ruff check src/ tests/ --fix    # Lint
 ruff format src/ tests/         # Format
 ```
@@ -410,29 +451,47 @@ Python 3.12+. Ruff (line length 100, rules E/F/I/W/UP).
 
 ## Roadmap
 
-- **Phase 4 (v0.10.0 shipped 2026-04-12):** Hybrid search with RRF fusion, 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit (unreleased) resolved all HIGH (23) + MEDIUM (~30) + LOW (~30) items.
-- **Phase 4.11 (unreleased, 2026-04-14):** `kb_query --format={markdown|marp|html|chart|jupyter}` output adapters — synthesized answers saved as Markdown docs, Marp slide decks, self-contained HTML pages, matplotlib Python scripts (+ JSON data sidecar), or executable Jupyter notebooks. Files land at `outputs/{ts}-{slug}.{ext}` (gitignored) with provenance frontmatter. Addresses Karpathy Tier 1 #1.
-- **Phase 5.0 (unreleased, 2026-04-15):** `kb lint --augment` — reactive gap-fill: lint detects a stub → propose authoritative URLs (Wikipedia, arxiv) → fetch with DNS-rebind-safe transport → ingest as `confidence: speculative`. Three-gate execution honors human curation: `propose → --execute → --auto-ingest`. Eligibility gates G1-G7 + scan-tier relevance check + post-ingest quality verdict + `[!gap]` callout on regression. Cross-process rate limiting: 10/run + 60/hour + 3/host/hour.
-- **Phase 4.5 (unreleased, post-v0.10.0 audit, 2026-04-16 → 2026-04-22):** 22-cycle backlog blitz — 480+ acceptance criteria across 230 test files (+1548 tests: 1177 → 2725). Key deliverables: `kb.errors` exception taxonomy (`KBError` + 5 subclasses, `LLMError`/`CaptureError` reparented); slug-collision O_EXCL hardening with write-phase poison-unlink; 2 new MCP tools — `kb_refine_sweep` + `kb_refine_list_stale` (26 → 28 tools); `inject_wikilinks_batch` (N×M disk-read hot-path reduced to ~U+2M with ReDoS bounds); refine two-phase write with `attempt_id` correlation; ingest audit log (`.data/ingest_log.jsonl`, request_id correlation); per-page TOCTOU lock in linker; rotate-in-lock for wiki_log; Epistemic-Integrity 2.0 (`belief_state`, `authored_by`, `status` vocabularies); `kb publish` Tier-1 builders (5 formats: llms.txt, llms-full.txt, graph.jsonld, per-page siblings, sitemap); `kb_query(save_as=...)` synthesis persistence; duplicate-slug + inline-callout lint; manifest key consistency; 60+ security threats addressed across all cycles; 3-round PR review pattern for every batch ≥25 ACs; cycle 21: CLI subprocess backend for 8 alternative LLM providers (Ollama, Gemini CLI, OpenCode, Codex CLI, Kimi, QWEN, DeepSeek, ZAI) via `KB_LLM_BACKEND`; cycle 22: wiki-path ingest guard, universal extraction grounding clause, and `inspect.getsource` test replacement with a runtime LLM-call spy.
-- **Phase 5 (deferred):** Inline claim-level confidence tags + EXTRACTED lint verification; claim-to-source BM25 grounding verification (retroactive hallucination detection — samples claims, verifies each against cited `raw/` source body, flags mismatches as `belief_state: uncertain`); multi-source confirmation gate (`belief_state: confirmed` requires ≥ 2 independent raw sources via `source_count` frontmatter tracking); URL-aware `kb_ingest` with 5-state adapter model; page status lifecycle (seed→developing→mature→evergreen); inline quality callout markers; autonomous research loop in evolve; chunk-level BM25 sub-page indexing; typed semantic relations on graph edges; interactive graph HTML viewer (vis.js); semantic edge inference (LLM-inferred implicit relationships); living overview page; actionable gap-fill source suggestions; two-phase compile pipeline; multi-hop retrieval; conversation→KB promotion; temporal claim tracking; BM25 + LLM reranking
-- **Phase 6 (future):** DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling
+### Shipped
+
+| Phase | What landed |
+|---|---|
+| **4** (v0.10.0) | Hybrid search with RRF fusion, 4-layer dedup pipeline, evidence trails, stale-truth flagging at query time, auto-contradiction detection on ingest |
+| **4.11** | `kb query --format={markdown\|marp\|html\|chart\|jupyter}` — answers exported as docs, Marp decks, standalone HTML, plot scripts, or notebooks |
+| **5.0** | `kb lint --augment` reactive gap-fill: stub detected → propose authoritative URLs → safe fetch → ingest as `confidence: speculative`, behind a three-gate human approval flow |
+| **4.5** | 22-cycle post-release audit: `kb.errors` taxonomy, `kb publish` Tier-1 builders, Epistemic-Integrity 2.0, 8 alternative CLI LLM backends, 60+ security threats closed |
+| **Cycles 23-82** | Continued hardening: dual-anchor path safety, MCP error boundary, wiki-context boundary fence, tier-boundary verifier, reentrant per-page write lock |
+
+Per-cycle detail lives in [`CHANGELOG.md`](CHANGELOG.md) and [`CHANGELOG-history.md`](CHANGELOG-history.md).
+
+### Next — Phase 5 (deferred)
+
+- **Grounding** — inline claim-level confidence tags + EXTRACTED lint; claim-to-source BM25 verification (retroactive hallucination detection); multi-source confirmation gate for `belief_state: confirmed`
+- **Retrieval** — chunk-level BM25 sub-page indexing, multi-hop retrieval, BM25 + LLM reranking
+- **Graph** — typed semantic relations, LLM-inferred implicit edges, interactive vis.js viewer, living overview page
+- **Ingest** — URL-aware `kb_ingest` (5-state adapter), two-phase compile pipeline, conversation→KB promotion, temporal claim tracking, autonomous research loop in `evolve`
+
+### Later — Phase 6
+
+DSPy optimization, RAGAS evaluation, Monte Carlo evidence sampling.
 
 <details>
-<summary><b>Completed phases</b></summary>
+<summary><b>Completed releases</b></summary>
 
-- **v0.3.0:** 5 operations + graph + CLI + MCP server (12 tools)
-- **v0.4.0:** Quality system — Bayesian trust, Actor-Critic review, semantic lint
-- **v0.5.0:** Robustness — YAML injection protection, path canonicalization
-- **v0.6.0:** DRY refactor — shared utilities, test fixtures. 180 tests
-- **v0.7.0:** MCP server split, PageRank, entity enrichment, persistent verdicts. 234 tests
-- **v0.8.0:** BM25 search engine. 252 tests
-- **v0.9.0–v0.9.9:** Hardening, comprehensive audit, structured outputs, content growth. 564 tests
-- **v0.9.10–v0.9.13:** Citation fixes, compile scan, BM25 dedup, 54-item backlog fix. 651 tests
-- **v0.9.14:** Phase 3.95 — 38-item backlog remediation. 692 tests
-- **v0.9.15:** Phase 3.96 — 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW). 952 tests
-- **v0.9.16:** Phase 3.97 — 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF fix, integer title coercion, contradiction detection improvements. 1033 tests
-- **v0.10.0:** Phase 4 — hybrid search with RRF fusion (BM25 + vector via model2vec + sqlite-vec), 4-layer search dedup pipeline, evidence trail sections, stale truth flagging at query time, layered context assembly, raw-source fallback retrieval, auto-contradiction detection on ingest, multi-turn query rewriting. Post-release audit resolved all HIGH (23) + MEDIUM (~30) + LOW (~30) items. 1177 tests across 55 files
-- **Phase 4.5 (unreleased, post-v0.10.0):** 22-cycle post-release audit + hardening (2026-04-16 → 2026-04-22). Exception taxonomy, slug-collision O_EXCL, ingest audit log, per-page TOCTOU lock, rotate-in-lock, batch wikilink injection, refine two-phase write, Epistemic-Integrity 2.0, `kb publish` 5 Tier-1 builders, `kb_query(save_as=...)`, duplicate-slug + inline-callout lint, manifest key consistency, 2 new MCP tools (28 total), 60+ security threats closed, CLI subprocess backends for 8 providers (cycle 21), wiki-path ingest guard and extraction grounding clause (cycle 22). 2725 tests across 230 files
+| Version | Highlights | Tests |
+|---|---|---|
+| v0.3.0 | 5 operations + graph + CLI + MCP server (12 tools) | — |
+| v0.4.0 | Quality system — Bayesian trust, Actor-Critic review, semantic lint | — |
+| v0.5.0 | Robustness — YAML injection protection, path canonicalization | — |
+| v0.6.0 | DRY refactor — shared utilities, test fixtures | 180 |
+| v0.7.0 | MCP server split, PageRank, entity enrichment, persistent verdicts | 234 |
+| v0.8.0 | BM25 search engine | 252 |
+| v0.9.0–v0.9.9 | Hardening, comprehensive audit, structured outputs, content growth | 564 |
+| v0.9.10–v0.9.13 | Citation fixes, compile scan, BM25 dedup, 54-item backlog fix | 651 |
+| v0.9.14 | Phase 3.95 — 38-item backlog remediation | 692 |
+| v0.9.15 | Phase 3.96 — 153 fixes (4 CRITICAL, 31 HIGH, 54 MEDIUM, 64 LOW) | 952 |
+| v0.9.16 | Phase 3.97 — 62 fixes: atomic writes, MCP exception guards, slugify symbol mapping, CRLF, integer title coercion | 1033 |
+| v0.10.0 | Phase 4 — hybrid search, 4-layer dedup, evidence trails, layered context, raw-source fallback, multi-turn rewriting | 1177 (55 files) |
+| Phase 4.5 (unreleased) | Post-v0.10.0 audit, 22 cycles — exception taxonomy, O_EXCL slug collision, 2 new MCP tools, batch wikilink injection, Epistemic-Integrity 2.0, `kb publish`, 8-provider CLI backends | 2725 (230 files) |
 
 </details>
 
