@@ -13,8 +13,8 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Metric | Value |
 |--------|-------|
-| Tests | 3397 passed + 24 skipped + 16 xfailed (3437 collected) |
-| Test files | ~224 |
+| Tests | 3421 passed + 24 skipped + 16 xfailed (3461 collected) |
+| Test files | ~235 |
 | Version | v0.12.0 |
 | CI | ubuntu-latest strict-gated (cycle 36+); windows-latest deferred to cycle-53+ |
 
@@ -22,6 +22,9 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Cycle | Date | Theme | Tests | Files |
 |-------|------|-------|-------|-------|
+| 82b | 2026-07-23 | R2 Codex response: phantom depth on async interrupt + `StorageError` masking in `file_lock` cleanup + event-driven concurrency tests | 3458→3461 (+3) | ~235 |
+| 82 | 2026-07-23 | Refiner page-lock migration — one page-lock primitive across all 5 page-mutating sites | 3461 (preserved) | ~235 |
+| 81 | 2026-07-22 | Reentrant per-page write lock (closes Phase 4.5 HIGH R5 release-then-reacquire window) | 3437→3461 (+24) | ~220→~222 |
 | 80 | 2026-07-18 | Freeze-and-fold: v0915 task02/04/05/07 batch (4 folds → 5 receivers, 51 tests moved verbatim; versioned files 24→20) + zero src changes | 3437 (preserved) | ~224→~220 |
 | 79 | 2026-07-17 | nltk 3.10.0 (CVE-2026-54293 fixed-version stamp fired; Dependabot #63 closed; local pip-audit ZERO findings; zero src changes) | 3437 (preserved) | ~224 |
 | 78 | 2026-07-17 | Freeze-and-fold: v0916+v0917 series completed (12 folds, 96 tests moved) + stale diskcache BACKLOG deletion | 3437 (preserved) | ~236→~224 |
