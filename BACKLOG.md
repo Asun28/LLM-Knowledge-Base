@@ -45,6 +45,9 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 
 ### MEDIUM
 
+- `review/refiner.py:113` page-lock primitive inconsistency + name shadow (discovered cycle 81) — `refine_page` is now the ONLY page-mutating site still acquiring the page via `file_lock` rather than the canonical `kb.utils.page_lock.page_lock` (cycle 81 AC01). Correctness is intact today: both primitives contend on the same `.lock` sidecar (locked in by `tests/test_cycle81_page_lock.py::test_file_lock_and_page_lock_exclude_each_other`). Two real hazards remain: (a) the local variable is literally named `page_lock`, so any future `from kb.utils.page_lock import page_lock` in this module would be silently shadowed; (b) the acquisition uses manual `page_lock.__enter__()` / `finally: page_lock.__exit__(None, None, None)` rather than a `with` block, which is fragile under edit. Deferred from cycle 81 because 4 test files (`test_cycle19_refiner_two_phase.py`, `test_cycle20_sweep_stale_pending.py`, `test_refiner.py`) spy on `refiner.file_lock` for BOTH the page and history acquisitions, and `T-10` asserts the page-before-history lock order — the seam split needs its own cycle, not a drive-by.
+  (fix: rename the local to `page_lock_cm`, switch the page acquisition to `with page_lock(page_path):`, keep `file_lock(resolved_history_path)` as the inner history lock so the cycle-1 H1 page→history order is preserved; update the 4 spy seams to distinguish the two acquisitions.)
+
 - `config.py` god-module — 35+ unrelated constants (paths, model IDs, BM25 hyperparameters, dedup thresholds, retries, ingest/evolve/lint limits, retention caps, query budgets, RRF, embeddings). Single-file churn invalidates import cache for the whole package in tests. (R1)
   (fix: split into `config/paths.py` / `config/models.py` / `config/limits.py` / `config/search.py` / `config/lint.py`; or a `Settings` dataclass with grouped subfields; keep `from kb.config import *` shim)
 
