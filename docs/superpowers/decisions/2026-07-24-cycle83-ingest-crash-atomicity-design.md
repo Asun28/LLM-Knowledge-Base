@@ -312,3 +312,25 @@ compile-select and ingest-commit" recovery window, which now overlaps harmlessly
 Design C's own recovery. `find_changed_sources` still tolerates legacy
 `in_progress:`/`failed:` values in old manifests (they compare unequal to the current
 hash → re-selected → self-heal to a bare hash on the next successful ingest).
+
+### R2 review follow-up (2026-07-24)
+
+Codex R2 confirmed Design C's first-ingest path is crash-atomic, but found the same
+data-loss class surviving in two adjacent cases, both now fixed:
+
+- **Re-ingest of an already-recorded source.** With `manifest[ref]` already equal to the
+  current hash (forced re-ingest, or a same-content update that still rewrites the page
+  body + evidence trail), a crash mid-body left that stale-but-equal value → skipped →
+  half-rewritten pages masked. Fix: `_clear_ingest_manifest_entry(ref)` removes the entry
+  before the body (inside the content lock, only when present), so a crash leaves nothing
+  complete-looking; the commit restores it on success.
+- **The duplicate path left the manifest untouched.** A duplicate with no entry was
+  re-ingested (→ re-detected as duplicate) on every compile forever, and a leftover
+  cycle-25 premarker was re-selected forever. Fix: commit the bare hash on the duplicate
+  path too, making it a stable pointer.
+
+Deferred to BACKLOG (R2 MINOR, observability not data-loss): the human `wiki/log.md`
+"Ingested" line is appended before the commit, so a commit failure leaves a
+success-looking audit line; and a post-commit `KeyboardInterrupt` can emit `stage=failure`
+for an already-committed ingest. The authoritative JSONL `stage=success` is correctly
+after the commit.

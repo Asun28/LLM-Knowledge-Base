@@ -231,9 +231,11 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     from different file paths. Skips template entries. Only flags as
     duplicate if the other source file still exists on disk.
 
-    DEPRECATED path: direct callers should use _check_and_reserve_manifest instead
-    so the duplicate check + reservation are atomic. Kept for backward compatibility
-    with tests that call this function directly.
+    Cycle 83 (Design C): this is a read-only check. There is no reservation any
+    more — the manifest is written once, on completion, by
+    `_commit_ingest_manifest`, and duplicate detection is serialized in-process by
+    `_content_ingest_lock`. Kept for backward compatibility with tests that call
+    this function directly.
     """
     try:
         # Lazy import: kb.compile.compiler imports kb.ingest.pipeline (circular)
