@@ -43,9 +43,6 @@ If an entry says _"see CHANGELOG"_, it is resolved and can be safely deleted fro
 - `mcp/core.py` + `browse.py` + `health.py` + `quality.py` — all 25 MCP tools are sync `def`. FastMCP runs them via `anyio.to_thread.run_sync` on a default 40-thread pool. Long tools (`kb_query(use_api=True)` 30s+, `kb_lint()` multi-second, `kb_compile()` minutes, `kb_ingest_content(use_api=True)` 10+s) each hold a thread; under concurrent tool calls the pool saturates. (R3)
   (fix: make long-I/O tools `async def` and `await anyio.to_thread.run_sync(...)` around the SDK call; or document / tune `FastMCP(num_threads=N)`; at minimum surface the concurrency model in the `app.py` instructions block)
 
-- `ingest/pipeline.py:603,715-721,729-754` lock acquisition order risk between same-ingest stages — within one `ingest_source`: stage 1 writes summary page → `append_evidence_trail` to SAME page; stage 2 calls `_update_existing_page` on each entity (re-reads + re-writes); stage 9 `inject_wikilinks` re-reads + re-writes pages it just wrote in stages 1-3; stage 11 writes `wiki/contradictions.md`. None use `file_lock`. Under concurrent ingest A + B, read-then-write windows in different stages overlap non-deterministically. (R5)
-  (fix: per-page write-lock helper `with page_lock(page_path):` wrapping `read_text → modify → atomic_text_write` consistently across `_write_wiki_page`, `_update_existing_page`, `append_evidence_trail`, `inject_wikilinks`; OR coarse wiki-wide ingest mutex)
-
 ### MEDIUM
 
 - `config.py` god-module — 35+ unrelated constants (paths, model IDs, BM25 hyperparameters, dedup thresholds, retries, ingest/evolve/lint limits, retention caps, query budgets, RRF, embeddings). Single-file churn invalidates import cache for the whole package in tests. (R1)
@@ -290,6 +287,44 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 - Concurrent users > 20 with write contention → async job queue (Python, pre-Phase 8)
 - Deployment friction blocks enterprise sales → Phase 8A Next.js wrapper first
 - Team spans multiple machines / cloud deploy needed → cloud wiki storage backend
+
+### Phase 9 candidates — Personal Context Layer (prompt ⇄ knowledge compounding loop) (2026-07-22)
+
+> Source: re-read of *"What an Enterprise Context Layer Actually Is"* mapped onto the "5-folder method".
+> Framing: the product is not a prompt store — it turns every human edit into **reviewable, reusable, propagating personal context**. The enterprise version serves hundreds of agents and dozens of teams; this one serves one person and one AI. Same skeleton.
+> Substrate mapping: folders 1–2 (who I am + product/service) → **Knowledge** (map of the business); folders 3–4 (customer voice + cases) → **Expertise** (how work actually gets done); folder 5 (output rules) → **Norms** (rules of acceptable action).
+> Sequencing rule: ship W1 → W5 in order. Do **not** start with RAG, knowledge graph, or full-text search — the corpus is currently empty (0 records) and the loop must be proven before scale features.
+
+**W1 — Prompt Learning Loop** *(first: proves prompts actually get reused and get better)*
+- Prompt usage record — log every copy / "add to Codex draft" event with timestamp, target model, and the context versions referenced at that moment. (effort: Small)
+- Review-result capture — after a run, store the AI draft and the user's final edited version as a pair. The **diff** is the asset, not the output. (effort: Medium)
+- Before/after diff view + prompt version history with rollback. (effort: Medium)
+
+**W2 — Context Pack (the substrate)**
+- Space isolation — per person / client / product, so contexts never bleed into each other. (effort: Medium)
+- Three context types — Knowledge / Expertise / Norms as first-class records. One schema, three types — **not** five parallel storage structures. (effort: Medium)
+- Five-folder cold-start wizard — the 5-folder method is an onboarding template layered over the 3 types. (effort: Small)
+- Explicit context references from a prompt, pinned to a specific context version. (effort: Medium)
+
+**W3 — Learning Inbox** *(the system must never silently infer a permanent rule)*
+- Learning Candidate extraction from a human edit, carrying source, evidence (the diff), scope, and proposed target. (effort: Medium)
+- Human review with exactly five outcomes: this-prompt-only / → Knowledge / → Expertise / → Norms / don't learn. **Hard invariant:** one correction never becomes a standing rule without explicit approval. (effort: Small)
+
+**W4 — Change Propagation**
+- Impacted-prompt list surfaced whenever a context record is updated. (effort: Medium)
+- Three propagation modes — **Follow** (auto; low-risk, explicitly-referenced only) / **Review** (default; queued for approval) / **Pinned** (keeps a certified older version). (effort: High)
+
+**W5 — Model adaptation** *(one knowledge base, many models)*
+- Base Prompt + Model Adapter split — Knowledge stays single-source; the adapter holds model-specific instruction shape, example format, tool constraints, token budget. **Never fork the knowledge base per model.** (effort: Medium)
+- Model Profile registry — model id, family, capability version. (effort: Small)
+- Adapter resolution order — exact model → model family → base prompt fallback. (effort: Small)
+- Certification state per (prompt, model) — verified / limited / untested / incompatible / needs-recheck. (effort: Medium)
+- Review triage gains a 4th axis — knowledge wrong / base prompt wrong / this model only / don't learn. A model-only failure updates that adapter alone. (effort: Small)
+- Invalidation rules — a Knowledge or Base Prompt change marks dependent certifications `needs-recheck`; a model version bump marks `needs-recheck` only and **never** auto-rewrites prompt content. (effort: Medium)
+
+**Deferred until the loop is proven** — full-text search, conflict detection, published/versioned Context Packs, import/export, sync + team review, RAG, knowledge graph.
+
+**First shippable slice** (current state = 0 records): first-content wizard → prompt gets used → review result recorded → new version saved → reused next time.
 
 ### Design tensions to document in README (not items to implement)
 

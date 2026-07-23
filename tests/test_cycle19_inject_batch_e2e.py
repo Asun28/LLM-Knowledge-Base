@@ -60,9 +60,11 @@ def test_e2e_ingest_invokes_batch_with_bounded_lock_count(tmp_kb_env: Path, monk
 
     monkeypatch.setattr(_linker_mod, "inject_wikilinks_batch", spy_batch)
 
-    # Spy on file_lock so we can assert per-page lock count is bounded by
-    # MATCHED pages (Alice + Bob = 2), NOT N×M per-title acquisitions.
-    real_file_lock = _linker_mod.file_lock
+    # Spy on the linker's page lock so we can assert per-page lock count is
+    # bounded by MATCHED pages (Alice + Bob = 2), NOT N×M per-title
+    # acquisitions. Cycle 81 AC05 renamed the seam `file_lock` → `page_lock`
+    # (reentrant wrapper); the bound asserted here is unchanged.
+    real_file_lock = _linker_mod.page_lock
     page_lock_paths: list[str] = []
 
     @contextmanager
@@ -72,7 +74,7 @@ def test_e2e_ingest_invokes_batch_with_bounded_lock_count(tmp_kb_env: Path, monk
         with real_file_lock(path, *args, **kwargs):
             yield
 
-    monkeypatch.setattr(_linker_mod, "file_lock", spy_lock)
+    monkeypatch.setattr(_linker_mod, "page_lock", spy_lock)
 
     timeouts: list[Exception] = []
     try:

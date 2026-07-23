@@ -5,7 +5,8 @@ import re
 from datetime import date
 from pathlib import Path
 
-from kb.utils.io import atomic_text_write, file_lock
+from kb.utils.io import atomic_text_write
+from kb.utils.page_lock import page_lock
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,12 @@ def append_evidence_trail(
     """
     # H2 fix (Phase 4.5 HIGH): lock the page file for the entire read→modify→write window
     # so concurrent append_evidence_trail calls on the same page don't lose entries.
-    with file_lock(page_path):
+    # Cycle 81 AC02 — `page_lock` instead of `file_lock`: identical behaviour when
+    # this is the outermost acquisition, but a no-op re-entry when the caller
+    # (`_update_existing_page`, AC04) already holds the page lock. That lets the
+    # body write and this provenance append share ONE held lock instead of the
+    # release-then-reacquire window cycle 24 had to document.
+    with page_lock(page_path):
         content = page_path.read_text(encoding="utf-8")
         d = entry_date or date.today().isoformat()
         entry = format_evidence_entry(d, source_ref, action)

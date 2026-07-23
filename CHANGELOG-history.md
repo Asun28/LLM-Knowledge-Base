@@ -17,6 +17,58 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-23 — cycle 81 (reentrant per-page write lock)
+
+**Theme:**
+Closes the last live residual of the Phase 4.5 HIGH R5 "lock acquisition order risk between same-ingest stages" item by making the per-page lock reentrant, so a page's body write and its evidence-trail append happen under ONE held lock instead of two.
+
+**Audit first — most of R5 was already fixed:**
+
+The backlog entry asserted that stage 1 (summary page + evidence trail), stage 2 (`_update_existing_page`), stage 9 (`inject_wikilinks`) and stage 11 (`contradictions.md`) use no `file_lock`. Grep against HEAD disproved that:
+
+- `_update_existing_page_body` — `file_lock(page_path)` since cycle 20 AC11.
+- `append_evidence_trail` — `file_lock(page_path)` since the cycle-1 H2 fix.
+- `inject_wikilinks` / `inject_wikilinks_batch` — `file_lock(page_path, timeout=_INJECT_LOCK_TIMEOUT)` since cycle 18 AC7.
+- `_persist_contradictions` — `file_lock(contradictions_path)` since the cycle-1 H3 fix.
+- `_write_wiki_page` — no lock needed; cycle 24 AC1 made it a single atomic write with the initial trail rendered inline.
+
+What remained was narrower and real: because `file_lock` is deliberately non-reentrant, `_update_existing_page` had to release the body-write lock before `append_evidence_trail` re-acquired it. Cycle 24 documented that window in a docstring instead of closing it. Between those two acquisitions a concurrent writer could interleave, producing a page whose body reflects one ingest while the provenance rows reflect another.
+
+**AC01 — `src/kb/utils/page_lock.py` (NEW leaf module):**
+
+- `page_lock(path, timeout=None)` context manager. The outermost acquisition delegates to `kb.utils.io.file_lock(Path(path), timeout=timeout)` and can raise `TimeoutError` / `OSError` identically; a nested same-thread same-page acquisition yields immediately without touching the filesystem.
+- The depth map lives in `threading.local()`, so a second thread sees an empty map and takes the real lock — cross-thread and cross-process exclusion are unchanged. Only same-thread-same-page nesting is relaxed.
+- Key is `os.path.normcase(os.path.abspath(str(path)))`: `abspath` (not `resolve`) matches `file_lock`, which derives its sidecar from the literal path it is handed; `normcase` folds Windows drive-letter and separator casing.
+- Depth is set to 1 only AFTER `file_lock` yields, so a timed-out acquire cannot leave a phantom depth that would make the NEXT call skip acquisition.
+- Placed as a leaf under `kb.utils` (imports only `kb.utils.io`) so `ingest`, `compile`, and future callers can depend on it without an import cycle.
+
+**AC02/AC03/AC04 — ingest call sites:**
+
+- `ingest/evidence.py:append_evidence_trail` and `ingest/pipeline.py:_update_existing_page_body` swap `file_lock` → `page_lock`. Both remain self-locking for direct callers.
+- `ingest/pipeline.py:_update_existing_page` wraps the body-write + evidence-append pair in one outer `page_lock(page_path)`; the two inner acquisitions collapse to no-ops. The cycle-24 `StorageError("evidence_trail_append_failure")` wrapping is unchanged and now raises with the lock still held, releasing on unwind.
+
+**AC05 — linker:**
+
+- `compile/linker.py` routes both `inject_wikilinks` and `inject_wikilinks_batch` through `page_lock`. Behaviourally identical for today's callers (nothing nests); the win is that a future nested caller injects successfully instead of burning `_INJECT_LOCK_TIMEOUT` (0.25s) per page and skipping with a warning.
+- `linker` no longer holds a `file_lock` reference, so the cycle-18/19 spies (`monkeypatch.setattr(linker, "file_lock", ...)`) were re-pointed to `"page_lock"`. Their assertions — zero locks on the fast path, one lock per matched page, `read_text → lock_enter → read_text → atomic_write → lock_exit` ordering, the bounded per-page count, the under-lock fresh-winner re-derivation, and the timeout-warning path — are all unchanged.
+
+**Tests (`tests/test_cycle81_page_lock.py`, 19):**
+
+- Reentrancy: 2- and 3-level nesting under a 0.25s timeout (a genuine self-deadlock fails fast rather than hanging); sidecar survives inner exit and disappears only at outermost exit; distinct pages each take a real lock; depth cleared after exit so a re-lock still acquires; exception unwinding clears depth; a failed acquire (sidecar stamped with a LIVE pid, so `file_lock` cannot stale-steal it) leaves no phantom depth.
+- Key normalisation: `Path` and `str` share a key; distinct pages differ; the key is absolute and normcase-idempotent.
+- Exclusion preserved: a second thread is refused while the lock is held; a `file_lock` holder blocks a `page_lock` acquirer, proving the two contend on the SAME sidecar rather than living in parallel universes.
+- Call sites: `append_evidence_trail` and `_update_existing_page_body` each nest under an outer lock; `_update_existing_page` writes body AND trail and leaves no sidecar behind.
+- AC04 regression witness: a 1 ms-polling watcher thread samples sidecar existence across the whole `_update_existing_page` call and asserts no held → released → held transition — the exact signature of the pre-cycle-81 re-acquire.
+- AC05: `linker` exposes `page_lock` and no longer exposes `file_lock`; `inject_wikilinks` successfully injects into a page whose lock the calling thread already holds.
+
+**Two test-harness bugs found and fixed during the run** (both in the new tests, neither a product defect): the phantom-depth test first stamped the sidecar with pid `999999999`, which `file_lock` correctly stale-steals instead of timing out; and the linker test first built a `wiki/pages/entities/` tree, whereas `scan_wiki_pages` globs `<wiki_dir>/<subdir>/*.md` flat.
+
+**BACKLOG:** Phase 4.5 HIGH R5 entry DELETED. The residual cross-stage concern (a whole `ingest_source` is not atomic across its 11 stages) is deliberately NOT re-filed — it is already carried by the Phase 4.5 HIGH `ingest/pipeline.py` state-store fan-out entry, whose receipt-file fix is the right shape for it.
+
+**Counts:** tests 3437 → 3456 collected (+19); files ~220 → ~222 (+1 src module, +1 test file); src/kb/ changes 4 files.
+
+---
+
 ### 2026-07-18 — cycle 80 (freeze-and-fold — v0915 series batch 1)
 
 **Theme:**

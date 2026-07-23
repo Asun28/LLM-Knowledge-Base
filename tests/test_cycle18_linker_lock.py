@@ -1,9 +1,14 @@
 """Cycle 18 AC7/AC8 — inject_wikilinks per-page lock with TOCTOU re-read.
 
 Threat T3: concurrent `ingest_source` calls injecting into the same target
-page clobber each other. The fix acquires `file_lock(page_path)` around the
+page clobber each other. The fix acquires a per-page lock around the
 read+modify+write sequence. The pre-lock cheap read preserves the zero-lock
 fast-path for pages that will NOT be modified (threat T8 perf guard).
+
+Cycle 81 AC05: the primitive is now `page_lock(page_path)` — a reentrant
+wrapper that delegates to `file_lock` on the outermost acquisition. The spies
+below therefore patch `linker.page_lock`; the assertions (which pages acquire,
+in what order, how many times) are unchanged.
 
 Test strategy: call-order spies per cycle-17 L2 — do NOT simulate
 concurrency. The locked-RMW invariant is testable by spying on the sequence
@@ -41,7 +46,7 @@ def test_inject_wikilinks_fast_path_no_lock_on_no_match(tmp_wiki: Path, monkeypa
         lock_calls.append(path)
         yield
 
-    monkeypatch.setattr(linker, "file_lock", spy_file_lock)
+    monkeypatch.setattr(linker, "page_lock", spy_file_lock)
 
     updated = linker.inject_wikilinks(target_title, target_pid, wiki_dir=tmp_wiki)
 
@@ -73,7 +78,7 @@ def test_inject_wikilinks_lock_acquired_on_match_page(tmp_wiki: Path, monkeypatc
         lock_calls.append(path)
         yield
 
-    monkeypatch.setattr(linker, "file_lock", spy_file_lock)
+    monkeypatch.setattr(linker, "page_lock", spy_file_lock)
 
     updated = linker.inject_wikilinks(target_title, target_pid, wiki_dir=tmp_wiki)
 
@@ -121,7 +126,7 @@ def test_inject_wikilinks_sequence_order(tmp_wiki: Path, monkeypatch) -> None:
             events.append("atomic_write")
         return real_atomic_write(content, path)
 
-    monkeypatch.setattr(linker, "file_lock", spy_file_lock)
+    monkeypatch.setattr(linker, "page_lock", spy_file_lock)
     monkeypatch.setattr(Path, "read_text", spy_read_text)
     monkeypatch.setattr(linker, "atomic_text_write", spy_atomic_write)
 
@@ -220,7 +225,7 @@ def test_inject_wikilinks_lock_timeout_warning(tmp_wiki: Path, monkeypatch, capl
             raise TimeoutError(f"simulated stuck lock on {path}")
         yield
 
-    monkeypatch.setattr(linker, "file_lock", spy_file_lock)
+    monkeypatch.setattr(linker, "page_lock", spy_file_lock)
 
     with caplog.at_level(logging.WARNING, logger="kb.compile.linker"):
         updated = linker.inject_wikilinks(target_title, target_pid, wiki_dir=tmp_wiki)
