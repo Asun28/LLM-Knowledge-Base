@@ -19,6 +19,18 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 ### 2026-07-24 — cycle 83 (ingest crash-atomicity)
 
+> **The mechanism below (the `in_progress:`/`failed:` marker approach) was REJECTED in
+> Codex R1 review on PR #126** — two markers for identical content mutually suppress
+> forever, reintroducing the data loss, plus a fail-open reservation and a `failed:`
+> downgrade that clobbers a completed hash. It was replaced by **Design C**: the manifest
+> holds bare hashes only, the hash is committed once (LAST) after the body succeeds via
+> `_commit_ingest_manifest` (crash → no entry → re-selected), and same-process concurrency
+> is serialized by an in-process per-content-hash lock (`_content_ingest_lock`).
+> Cross-process concurrent-identical-content degrades to the existing summary-collision
+> merge (user-approved scope). See the design doc's "Redesign — Design C" section. The
+> marker narrative below is kept for the record; its problem framing (verified defect,
+> entry-point coverage, rejected receipt/JSONL designs) still holds.
+
 **Theme:**
 Closes the data-loss half of Phase 4.5 HIGH (R2) `ingest/pipeline.py` state-store fan-out. Makes a partially-completed ingest impossible to mistake for a completed one, for every caller of `ingest_source` rather than only the batch-compile path.
 

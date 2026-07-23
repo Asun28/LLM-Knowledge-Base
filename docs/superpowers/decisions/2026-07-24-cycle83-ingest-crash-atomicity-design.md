@@ -1,5 +1,14 @@
 # Cycle 83 — ingest crash-atomicity: design, threat model, decision gate
 
+> **SUPERSEDED IN PART (2026-07-24).** The `in_progress:`/`failed:` manifest-marker
+> approach recorded below (Approach A, D1–D7) was implemented, reviewed by Codex on
+> PR #126, and **rejected** with a BLOCKER: two `in_progress:` markers for identical
+> content mutually suppress each other permanently, reintroducing the data loss the
+> cycle set out to close, plus two MAJORs (fail-open reservation; `failed:` downgrade
+> clobbering a completed hash). The replacement is **Design C** — see the
+> "Redesign — Design C" section at the bottom. The marker analysis is kept for the
+> record and because its problem framing still holds; only the mechanism changed.
+
 Date: 2026-07-24
 Backlog item: Phase 4.5 HIGH (R2) `ingest/pipeline.py` state-store fan-out
 Paired item: Phase 4.5 MEDIUM `compile/compiler.py` `compile_wiki` per-source rollback
@@ -227,3 +236,79 @@ before concluding a tool lied about writing them.
 4. T6 — `in_progress:` entries are immortal (prune-exempt); needs aging + a capped
    warning list.
 5. T12 — `atomic_json_write` parent-directory fsync.
+
+---
+
+## Redesign — Design C (2026-07-24, chosen after PR #126 review)
+
+### Why the marker approach was structurally doomed
+
+One on-disk manifest value was asked to serve two purposes with opposite lifetimes:
+
+- **Concurrent dedup** needs a live reservation to be *visible and suppressing* — a
+  second ingest of identical content must see the first's claim and skip.
+- **Crash recovery** needs a dead reservation to *stop suppressing* — a crashed claim
+  must not block the content from ever being ingested.
+
+Nothing on disk distinguishes a live claim from a crashed one except process liveness,
+which the value cannot carry (threat T13 forbids putting a pid/timestamp in the string
+because `stored.startswith` must keep working across versions). So *every* single-value
+scheme inherits the tension. The three-way `_claims_content` split did not resolve it;
+it relocated it, and Codex found where it landed (the mutual-suppression BLOCKER).
+
+### The fix: stop overloading the value; use two mechanisms with matching lifetimes
+
+Manifest values become uniformly bare content hashes again (cycle-17 semantics). The
+`in_progress:`/`failed:` vocabulary is retired from the ingest path.
+
+1. **Crash recovery — completion-only commit.** `_commit_ingest_manifest(ref, hash)` is
+   called exactly once, from `ingest_source`, *after* `_run_ingest_body` returns
+   successfully. The hash is the last durable write. A crash anywhere before it leaves
+   no manifest entry (or an older one), so `find_changed_sources` re-selects the source
+   and it is retried. There is no reservation, no marker, and nothing to roll back on
+   failure — the exception path simply does not write the manifest.
+
+2. **Same-process concurrency — in-process content lock.** `_content_ingest_lock` is a
+   per-content-hash `threading.Lock` held across the whole check → body → commit span.
+   A second thread ingesting a different file with identical content cannot run its
+   duplicate check until the first has committed, so it deterministically sees a
+   completed duplicate. This replaces the timing-dependent threaded assertion with a
+   deterministic one.
+
+### The one deliberate scope reduction (user-approved)
+
+Cross-process concurrent ingest of two *different* files with *identical* content is
+NOT serialized (a separate process has its own lock registry). That case degrades to
+both processes writing pages, where the summary-page `O_EXCL` reservation
+(`_write_wiki_page(exclusive=True)` → `StorageError(summary_collision)` →
+`_update_existing_page` pivot) turns the collision into a **merge, not corruption**.
+This is the existing safe fallback, not a new failure mode. The scenario is vanishingly
+rare and degrades safely, so it does not justify a durable cross-process claim whose
+crash semantics are exactly what reintroduced the data-loss bug. The user chose this
+(Design C) over Design B (a durable in-flight ledger that would preserve the
+cross-process guarantee at the cost of a second on-disk artifact and its lifecycle).
+
+### How each PR #126 finding is resolved
+
+- **BLOCKER (mutual marker suppression):** gone — no markers claim; dedup is bare-hash
+  only, and only one bare hash per content can exist among completed sources.
+- **MAJOR-1 (fail-open reservation + premature flag):** gone — there is no reservation;
+  the only manifest write is the completion commit, which propagates its failure rather
+  than swallowing it.
+- **MAJOR-2 (`failed:` downgrade clobbers a completed hash):** gone — there is no
+  downgrade. A late-body failure after a concurrent success cannot overwrite anything,
+  because the failing attempt writes the manifest only on its own success.
+- **MINOR (4 revert-tolerant tests):** the test file is rewritten; each test now targets
+  a Design-C-specific invariant (no entry after crash / re-selection / bare-hash-only /
+  commit-ordering) that a revert to either the pre-cycle-83 or marker behaviour fails.
+
+### What was intentionally left alone
+
+`compile/compiler.py`'s cycle-25 premarker and `failed:` handling are untouched. Under
+bare-hash dedup an `in_progress:` value never equals a content hash, so it cannot
+suppress and cannot participate in the mutual deadlock (which required markers to
+claim). Keeping it avoids disturbing cycle-25's tests and its narrow "crash between
+compile-select and ingest-commit" recovery window, which now overlaps harmlessly with
+Design C's own recovery. `find_changed_sources` still tolerates legacy
+`in_progress:`/`failed:` values in old manifests (they compare unequal to the current
+hash → re-selected → self-heal to a bare hash on the next successful ingest).
