@@ -56,6 +56,13 @@ def _ingest(tmp_kb_env: Path, raw: Path) -> dict:
         extraction=_stub_extraction(),
         wiki_dir=tmp_kb_env / "wiki",
         raw_dir=tmp_kb_env / "raw",
+        # Nothing here exercises hybrid search, and the tail `rebuild_vector_index`
+        # is heavy sqlite I/O. Left enabled, twelve full rebuilds added enough load
+        # to the suite to intermittently tip the pre-existing timing-sensitive
+        # contradiction-concurrency tests past their `file_lock` timeout — the
+        # production change was innocent (the suite is green with this file
+        # excluded), the cost was purely this fixture's.
+        _skip_vector_rebuild=True,
     )
 
 
