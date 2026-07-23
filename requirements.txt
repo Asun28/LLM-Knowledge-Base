@@ -74,7 +74,7 @@ flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.2.0
 gitdb==4.0.12
-GitPython>=3.1.49,<3.2
+GitPython>=3.1.51,<3.2
 greenlet==3.3.2
 h11==0.16.0
 h2==4.3.0
