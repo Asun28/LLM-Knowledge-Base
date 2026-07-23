@@ -251,6 +251,51 @@ def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
     return False
 
 
+def _claims_content(stored_value: object, source_hash: str) -> bool:
+    """Cycle 83 — does this manifest value claim the given content hash?
+
+    `.data/hashes.json` values are a tagged union of three shapes:
+
+    ==================  =========================================  =============
+    value               meaning                                    claims content
+    ==================  =========================================  =============
+    ``{hash}``          ingest COMPLETED; wiki pages exist         yes
+    ``in_progress:``    ingest ACTIVE (or hard-killed mid-run)      yes
+    ``failed:``         ingest raised and was handled; NO pages     no
+    ==================  =========================================  =============
+
+    "Claims" drives duplicate detection only. The split matters in both
+    directions and each half is pinned by a regression test:
+
+    * `in_progress:` MUST claim. Cycle 83 changed the reservation from the bare
+      hash to a marker; if markers did not claim, two threads ingesting distinct
+      files with identical content would both pass the duplicate check and both
+      write pages, reopening the Phase 4.5 HIGH item Q_A RMW race that
+      `test_duplicate_content_concurrent_ingest` exists to prevent.
+    * `failed:` MUST NOT claim. A failed attempt produced no pages, so treating
+      it as a duplicate would suppress a genuinely different source with the same
+      content and leave that content in no page at all — the same silent
+      data-loss class this cycle closes.
+
+    Residual, accepted: a HARD-KILLED ingest leaves `in_progress:` behind, and
+    that stale marker does claim, so a different file with identical content is
+    skipped until the crashed source is retried. This self-heals — a marker never
+    equals the current hash, so `find_changed_sources` re-selects the crashed
+    source on the next compile and its pages get written. Distinguishing live
+    from stale needs process-liveness data that cycle-83 threat T13 forbids
+    encoding in the marker string; tracked in BACKLOG as threat T8.
+    """
+    if not isinstance(stored_value, str):
+        # Defensive: a hand-edited or corrupted manifest can hold non-strings.
+        # Never claim on a value we cannot parse (threat T4).
+        return False
+    if stored_value.startswith("failed:"):
+        return False
+    if stored_value.startswith("in_progress:"):
+        return stored_value[len("in_progress:") :] == source_hash
+    return stored_value == source_hash
+
+
 def _check_and_reserve_manifest(
     source_hash: str,
     source_ref: str,
@@ -275,15 +320,33 @@ def _check_and_reserve_manifest(
             for ref, stored_hash in manifest.items():
                 if ref.startswith("_template/"):
                     continue
-                if stored_hash == source_hash and ref != source_ref:
+                if _claims_content(stored_hash, source_hash) and ref != source_ref:
                     other_path = PROJECT_ROOT / ref
                     if other_path.exists():
                         return True  # Duplicate detected — caller returns early
-            # Not a duplicate — reserve the slot atomically
-            manifest[source_ref] = source_hash
+            # Not a duplicate — reserve the slot atomically.
+            #
+            # Cycle 83 (Phase 4.5 HIGH R2): reserve as `in_progress:{hash}`, NOT the
+            # bare hash. A bare hash here is indistinguishable from a COMPLETED
+            # ingest, so a crash anywhere between this reservation and the Phase-2
+            # confirmation in `_run_ingest_body` left `.data/hashes.json` asserting
+            # the source was fully ingested while the wiki held zero or partial
+            # pages. `find_changed_sources` diffs stored-vs-current hash, so that
+            # source was then skipped PERMANENTLY on every later compile — silent,
+            # unrecoverable-without-`--full` data loss.
+            #
+            # `in_progress:` is the same producer string `compile_wiki` has written
+            # since cycle 25 (compiler.py), so the existing marker-aware consumers
+            # handle it already and no new manifest format is introduced. Written
+            # INSIDE the file_lock acquired above — no new lock target, so the
+            # documented lock order (io.py) is untouched.
+            manifest[source_ref] = f"in_progress:{source_hash}"
             save_manifest(manifest, effective_manifest_path)
     except Exception as e:
-        logger.debug("Duplicate check/reservation skipped: %s", e)
+        # Cycle 83 (threat T2): was `logger.debug`. A manifest that silently stopped
+        # recording reservations produced no operator signal at default log level,
+        # which is exactly the failure this cycle exists to make visible.
+        logger.warning("Duplicate check/reservation failed: %s", e)
     return False
 
 
@@ -1322,6 +1385,12 @@ def ingest_source(
     # extract_from_source or _pre_validate_extraction raised.
     _emit_ingest_jsonl("start", request_id, source_ref, source_hash, outcome={})
 
+    # Cycle 83 (C33-L2) — sentinel-init BEFORE the try. The `except BaseException`
+    # handler reads this flag; anything raised before the reservation point (e.g.
+    # `extract_from_source`, `_pre_validate_extraction`) would otherwise leave it
+    # unbound and turn a real ingest error into a NameError.
+    _reservation_point_passed = False
+
     try:
         # Validate caller-provided extractions before manifest reservation. In
         # Claude Code mode, extraction is produced here first, then validated
@@ -1336,6 +1405,11 @@ def ingest_source(
         # race where two concurrent ingests of the same content both pass the duplicate check.
         # Cycle 19 AC12 — pass manifest_ref (= manifest_key or source_ref) so caller-supplied
         # keys from compile_wiki (manifest_key_for) match the Phase-2 confirmation key below.
+        # Cycle 83 (design D5) — track whether we passed the reservation point so
+        # the exception handler below knows a marker may be outstanding. A local
+        # flag keeps `_check_and_reserve_manifest`'s bool return and signature
+        # intact; its docstring states tests call it directly.
+        _reservation_point_passed = True
         if _check_and_reserve_manifest(source_hash, manifest_ref):
             logger.warning("Duplicate content detected: %s (hash: %s)", source_ref, source_hash)
             # Cycle 18 AC11 — duplicate path emits terminal `stage="duplicate_skip"`.
@@ -1404,6 +1478,34 @@ def ingest_source(
             source_hash,
             outcome={"error_summary": err_summary},
         )
+        # Cycle 83 (design D3) — downgrade the `in_progress:` reservation to
+        # `failed:{hash}` so the marker vocabulary stays honest:
+        #   in_progress: -> ingest died without unwinding (suspected hard kill)
+        #   failed:      -> ingest raised and was handled; no pages were written
+        # Both differ from the bare content hash, so `find_changed_sources`
+        # re-selects the source either way and recovery is preserved. The
+        # distinction is load-bearing for `_claims_content`: `failed:` must not
+        # suppress a different source with identical content, whereas a live
+        # `in_progress:` must, to preserve the Q_A concurrent-ingest guarantee.
+        #
+        # Wrapped in its own try/except so a rollback failure can never replace
+        # the caller's original exception.
+        if _reservation_point_passed:
+            try:
+                from kb.compile.compiler import HASH_MANIFEST, load_manifest, save_manifest
+
+                with file_lock(HASH_MANIFEST):
+                    _rollback_manifest = load_manifest()
+                    _rollback_manifest[manifest_ref] = f"failed:{source_hash}"
+                    save_manifest(_rollback_manifest)
+            except Exception as _downgrade_exc:  # noqa: BLE001 — must not mask `exc`
+                logger.warning(
+                    "Failed to downgrade in_progress marker for %s after ingest "
+                    "failure: %s. The marker remains and will be surfaced by "
+                    "compile_wiki's stale-marker scan.",
+                    manifest_ref,
+                    _downgrade_exc,
+                )
         # Cycle 20 AC5 / AC7 — wrap unexpected exceptions into IngestError so
         # callers get a stable taxonomy. Expected ingest-path kinds
         # (KBError subclasses, OSError, ValueError) pass through unchanged so

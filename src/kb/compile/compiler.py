@@ -230,14 +230,23 @@ def find_changed_sources(
         # Cycle 17 T2 same-class peer — manifest RMW must hold file_lock so a
         # concurrent kb_ingest between our load_manifest (above) and save does
         # not lose its entry. Re-reading under the lock closes the RMW window.
-        with file_lock(manifest_path):
-            latest_manifest = load_manifest(manifest_path)
+        # Cycle 83 — resolve the default BEFORE locking. `load_manifest` and
+        # `save_manifest` both fall back to HASH_MANIFEST internally, but
+        # `file_lock` does not: a `None` here raised
+        # `AttributeError: 'NoneType' object has no attribute 'with_suffix'`
+        # and killed the whole scan. Reachable from `kb_compile_scan` (MCP),
+        # which passes `manifest_path=None` whenever its `wiki_dir` argument is
+        # omitted. `compile_wiki` was unaffected — it resolves the default
+        # earlier — which is why no existing test caught this.
+        effective_manifest_path = manifest_path or HASH_MANIFEST
+        with file_lock(effective_manifest_path):
+            latest_manifest = load_manifest(effective_manifest_path)
             # Re-apply our pruning + template updates on the freshly-loaded
             # manifest so we do not clobber concurrent writes.
             for k in deleted_keys:
                 latest_manifest.pop(k, None)
             latest_manifest.update(current_tpl_hashes)
-            save_manifest(latest_manifest, manifest_path)
+            save_manifest(latest_manifest, effective_manifest_path)
     # Cycle 4 PR R1 Codex MAJOR 3 — previously `elif deleted_keys: save_manifest(...)`
     # ran even when save_hashes=False, which made detect_source_drift (the
     # documented read-only caller) mutate the manifest. The side effect caused
