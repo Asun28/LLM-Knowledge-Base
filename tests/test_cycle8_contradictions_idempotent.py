@@ -302,3 +302,30 @@ def test_write_failure_inside_the_lock_is_not_retried(tmp_wiki, monkeypatch, cap
     ]
     assert dropped, "a write-side failure must still report the drop"
     assert "1 contradiction(s)" in dropped[-1]
+
+
+def test_persist_contradictions_never_raises_on_a_hostile_source_ref(tmp_wiki, caplog):
+    """`_persist_contradictions` is a best-effort boundary — it must never raise.
+
+    Cycle 85 (review MINOR-3). `_safe_source_ref` runs OUTSIDE the function's
+    try/except, so it has to be total. `str()` coercion alone was not enough: an
+    object whose `__str__` itself raises would still escape to the caller, which
+    treats this call as best-effort and does not guard it.
+    """
+
+    class _Hostile:
+        def __str__(self) -> str:
+            raise RuntimeError("__str__ blew up")
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        # Must not raise.
+        _persist_contradictions([{"claim": "alpha"}], _Hostile(), tmp_wiki)
+
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert "alpha" in content, "the claim should still be recorded under a placeholder ref"
+    assert "unprintable source ref" in content, (
+        "a hostile __str__ must fall back to the fixed placeholder"
+    )
+    assert "__str__ blew up" not in content, (
+        "the failing object's error text must not reach contradictions.md"
+    )

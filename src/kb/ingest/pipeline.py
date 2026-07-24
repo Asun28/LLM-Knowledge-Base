@@ -263,13 +263,19 @@ def _safe_source_ref(source_ref: object) -> str:
     H13 fix: everything after the first newline is attacker-controlled, and a
     leading ``#`` would inject a heading into contradictions.md.
 
-    Cycle 85 (review MINOR) — coerced with ``str()`` so this is total. It is now
-    called OUTSIDE `_persist_contradictions`'s try/except, and that function is a
-    best-effort boundary its callers rely on never raising; a malformed direct
-    caller passing e.g. ``None`` previously hit sanitisation inside the try and
-    was swallowed, so leaving this partial would have been a regression.
+    Cycle 85 (review MINOR) — this is TOTAL: it is called OUTSIDE
+    `_persist_contradictions`'s try/except, and that function is a best-effort
+    boundary its callers rely on never raising. `str()` alone was not enough —
+    an object whose ``__str__`` itself raises would still have escaped — so the
+    coercion is guarded too. The fallback is a fixed literal (never interpolated
+    from the offending object) so a hostile ``__str__`` cannot inject markup into
+    contradictions.md through the error path.
     """
-    first_line = str(source_ref).split("\n")[0].split("\r")[0]
+    try:
+        text = str(source_ref)
+    except Exception:  # noqa: BLE001 — a best-effort boundary must not raise
+        return "<unprintable source ref>"
+    first_line = text.split("\n")[0].split("\r")[0]
     return first_line.strip().lstrip("#").strip()
 
 
