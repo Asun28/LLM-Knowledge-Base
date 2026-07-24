@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from datetime import date
@@ -179,7 +180,13 @@ def test_removing_the_lock_loses_a_write(tmp_wiki, monkeypatch):
         if "claim-alpha" in content:
             # Hold alpha until beta has fully committed its own block.
             alpha_may_write.set()
-            beta_written.wait(timeout=_THREAD_BUDGET_SECONDS)
+            # Cycle 85 (review MINOR) — the wait result is asserted, not ignored.
+            # If beta's write failed and was swallowed, alpha would resume on the
+            # timeout and the "beta absent" assertion below would pass for the
+            # WRONG reason (beta never wrote at all, rather than being clobbered).
+            assert beta_written.wait(timeout=_THREAD_BUDGET_SECONDS), (
+                "beta never completed its write, so this test cannot prove alpha clobbered it"
+            )
         result = real_write(content, path)
         if "claim-beta" in content:
             beta_written.set()
@@ -216,3 +223,82 @@ def test_removing_the_lock_loses_a_write(tmp_wiki, monkeypatch):
         "survived, this harness can no longer detect a removed lock, which means "
         "the sibling no-lost-write tests are not actually falsifiable."
     )
+
+
+def test_lock_timeout_retries_once_then_reports_the_drop(tmp_wiki, monkeypatch, caplog):
+    """A lock timeout is retried exactly once, then the loss is named.
+
+    Cycle 85 (review MINOR) — the retry loop and both DROPPED-warning paths had no
+    coverage. This pins: exactly two acquisition attempts, the second using the
+    longer deadline, and a final WARNING that names the source and the claim count
+    so an operator can tell what was discarded and re-ingest it.
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    attempts: list[float | None] = []
+
+    @contextlib.contextmanager
+    def _always_timeout(_path, timeout=None):
+        attempts.append(timeout)
+        raise TimeoutError("simulated lock contention")
+        yield  # pragma: no cover — unreachable, keeps this a generator
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _always_timeout)
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        pipeline_mod._persist_contradictions(
+            [{"claim": "alpha"}, {"claim": "beta"}], "raw/articles/src.md", tmp_wiki
+        )
+
+    assert len(attempts) == 2, f"expected exactly one retry; got attempts={attempts!r}"
+    assert attempts[0] is None, "first attempt must use file_lock's default deadline"
+    assert attempts[1] == pipeline_mod._CONTRADICTION_RETRY_LOCK_TIMEOUT, (
+        f"retry must use the longer deadline; got {attempts[1]!r}"
+    )
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    dropped = [m for m in messages if "DROPPED" in m]
+    assert dropped, f"the give-up path must name the loss; got {messages!r}"
+    assert "2 contradiction(s)" in dropped[-1], f"claim count missing from {dropped[-1]!r}"
+    assert "raw/articles/src.md" in dropped[-1], f"source ref missing from {dropped[-1]!r}"
+
+
+def test_write_failure_inside_the_lock_is_not_retried(tmp_wiki, monkeypatch, caplog):
+    """A failure INSIDE the locked span is reported once, never retried.
+
+    Cycle 85 (review MINOR) — `atomic_text_write` can itself raise TimeoutError.
+    Without an inner handler the outer `except TimeoutError` would treat that as
+    lock contention and retry a write that failed for an unrelated reason. This
+    pins that the lock is acquired exactly once and the drop is reported.
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    acquisitions: list[float | None] = []
+    real_lock = pipeline_mod.file_lock
+
+    @contextlib.contextmanager
+    def _counting_lock(path, timeout=None):
+        acquisitions.append(timeout)
+        with real_lock(path, timeout=timeout):
+            yield
+
+    def _explode(_content, _path):
+        raise TimeoutError("write-side timeout, NOT lock contention")
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _counting_lock)
+    monkeypatch.setattr(pipeline_mod, "atomic_text_write", _explode)
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        pipeline_mod._persist_contradictions([{"claim": "alpha"}], "raw/articles/src.md", tmp_wiki)
+
+    assert len(acquisitions) == 1, (
+        f"a write-side failure must NOT be retried as lock contention; "
+        f"lock was acquired {len(acquisitions)} times"
+    )
+    dropped = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and "DROPPED" in r.getMessage()
+    ]
+    assert dropped, "a write-side failure must still report the drop"
+    assert "1 contradiction(s)" in dropped[-1]

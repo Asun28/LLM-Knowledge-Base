@@ -209,7 +209,22 @@ def _persist_contradictions(
     for attempt, lock_timeout in enumerate((None, _CONTRADICTION_RETRY_LOCK_TIMEOUT)):
         try:
             with file_lock(contradictions_path, timeout=lock_timeout):
-                _write_contradiction_block(contradictions, safe_ref, contradictions_path)
+                # Cycle 85 (review MINOR) — the body has its OWN handler so a
+                # failure INSIDE the locked span can never be mistaken for lock
+                # contention. `atomic_text_write` can itself raise TimeoutError;
+                # without this inner catch the outer `except TimeoutError` would
+                # retry a write that failed for an unrelated reason, contradicting
+                # the "only a lock timeout is retried" contract.
+                try:
+                    _write_contradiction_block(contradictions, safe_ref, contradictions_path)
+                except Exception as body_err:
+                    logger.warning(
+                        "DROPPED %d contradiction(s) for %s — failed to write "
+                        "contradictions.md: %s",
+                        len(contradictions),
+                        safe_ref,
+                        body_err,
+                    )
             return
         except TimeoutError:
             if attempt == 0:
@@ -242,13 +257,19 @@ def _persist_contradictions(
             return
 
 
-def _safe_source_ref(source_ref: str) -> str:
+def _safe_source_ref(source_ref: object) -> str:
     """First line of ``source_ref`` with header markers stripped.
 
     H13 fix: everything after the first newline is attacker-controlled, and a
     leading ``#`` would inject a heading into contradictions.md.
+
+    Cycle 85 (review MINOR) — coerced with ``str()`` so this is total. It is now
+    called OUTSIDE `_persist_contradictions`'s try/except, and that function is a
+    best-effort boundary its callers rely on never raising; a malformed direct
+    caller passing e.g. ``None`` previously hit sanitisation inside the try and
+    was swallowed, so leaving this partial would have been a regression.
     """
-    first_line = source_ref.split("\n")[0].split("\r")[0]
+    first_line = str(source_ref).split("\n")[0].split("\r")[0]
     return first_line.strip().lstrip("#").strip()
 
 
@@ -265,9 +286,7 @@ def _write_contradiction_block(
     """
     header = "# Contradictions\n\nAppend-only log of conflicts detected during ingest.\n\n"
     existing = (
-        contradictions_path.read_text(encoding="utf-8")
-        if contradictions_path.exists()
-        else header
+        contradictions_path.read_text(encoding="utf-8") if contradictions_path.exists() else header
     )
     block = f"\n## {safe_ref} — {date.today().isoformat()}\n"
     for w in contradictions:
