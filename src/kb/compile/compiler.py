@@ -182,6 +182,20 @@ def find_changed_sources(
 
         if stored is None:
             new_sources.append(source)
+        elif not isinstance(stored, str):
+            # Cycle 84 (threat T4) — a hand-edited or corrupted `.data/hashes.json`
+            # can hold a non-string value (int, list, null). `stored.startswith`
+            # raised AttributeError on it and killed the ENTIRE compile scan, so
+            # one bad row took down every source. Treat it as changed: the source
+            # is re-ingested and the bad row self-heals into a bare hash on the
+            # next successful commit.
+            logger.warning(
+                "Manifest entry for %s has a non-string value (%s); treating the "
+                "source as changed so the entry self-heals on re-ingest.",
+                rel_path,
+                type(stored).__name__,
+            )
+            changed_sources.append(source)
         elif stored.startswith("failed:") or stored != current_hash:
             changed_sources.append(source)
 

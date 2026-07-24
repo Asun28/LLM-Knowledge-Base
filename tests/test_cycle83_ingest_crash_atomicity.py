@@ -435,3 +435,32 @@ def test_find_changed_sources_default_manifest_path_does_not_crash(tmp_kb_env):
     assert "default-path-scan.md" in names, (
         f"scan with the default manifest path must succeed and see the source; got {names!r}"
     )
+
+
+def test_corrupt_non_string_manifest_value_does_not_kill_the_scan(tmp_kb_env):
+    """Cycle 84 (threat T4) — a non-string manifest value must not abort the scan.
+
+    `find_changed_sources` called `stored.startswith("failed:")` on whatever
+    `json.loads` produced. A hand-edited or corrupted `.data/hashes.json` holding
+    an int / list / null raised `AttributeError` and killed the ENTIRE compile
+    scan, so one bad row took down every source. The bad row is now treated as
+    changed, so the source is re-ingested and the entry self-heals.
+    """
+    raw_good = _seed_raw(tmp_kb_env, "healthy-source")
+    raw_bad = _seed_raw(tmp_kb_env, "corrupt-entry-source")
+
+    compiler_mod.save_manifest(
+        {
+            "raw/articles/corrupt-entry-source.md": 12345,  # non-string, the poison row
+            "raw/articles/healthy-source.md": hash_bytes(raw_good.read_bytes()),
+        }
+    )
+
+    # Must not raise AttributeError.
+    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+
+    names = {Path(p).name for p in (*new_sources, *changed_sources)}
+    assert raw_bad.name in names, (
+        f"a source whose manifest value is corrupt must be re-selected so the row "
+        f"self-heals; got {names!r}"
+    )
