@@ -17,6 +17,71 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-24 — cycle 83 (ingest crash-atomicity)
+
+> **The mechanism below (the `in_progress:`/`failed:` marker approach) was REJECTED in
+> Codex R1 review on PR #126** — two markers for identical content mutually suppress
+> forever, reintroducing the data loss, plus a fail-open reservation and a `failed:`
+> downgrade that clobbers a completed hash. It was replaced by **Design C**: the manifest
+> holds bare hashes only, the hash is committed once (LAST) after the body succeeds via
+> `_commit_ingest_manifest` (crash → no entry → re-selected), and same-process concurrency
+> is serialized by an in-process per-content-hash lock (`_content_ingest_lock`).
+> Cross-process concurrent-identical-content degrades to the existing summary-collision
+> merge (user-approved scope). See the design doc's "Redesign — Design C" section. The
+> marker narrative below is kept for the record; its problem framing (verified defect,
+> entry-point coverage, rejected receipt/JSONL designs) still holds.
+
+**Theme:**
+Closes the data-loss half of Phase 4.5 HIGH (R2) `ingest/pipeline.py` state-store fan-out. Makes a partially-completed ingest impossible to mistake for a completed one, for every caller of `ingest_source` rather than only the batch-compile path.
+
+**The defect, as verified rather than as recorded:**
+- BACKLOG described the crash window as "between manifest-write and log-append". Reading the source showed the reservation at `_check_and_reserve_manifest` happens BEFORE the first wiki page is written — ahead of the entire `_run_ingest_body` fan-out (summary page → entity/concept pages → index files → Phase-2 confirmation → `append_wiki_log` → affected pages → `inject_wikilinks_batch` → contradictions → vector rebuild). The real exposure spanned all of it.
+- The value written was the bare content hash, which is indistinguishable from a completed ingest. `find_changed_sources` diffs stored-vs-current hash, so a crashed source was skipped **permanently** on every later compile. `kb compile --full` was the only escape and nothing surfaced that to the user.
+- `_check_and_reserve_manifest` swallowed every exception at DEBUG, so a failed reservation was invisible at default log level.
+
+**Entry-point coverage — the reason this was worth a cycle:**
+All six `ingest_source` call sites funnel through `_check_and_reserve_manifest`: `cli.py`, three sites in `mcp/ingest.py`, `compiler.py`, and `lint/augment/orchestrator.py` (`auto_ingest`, which ingests remote web content). Only the `compiler.py` site was preceded by a cycle-25 `in_progress:` marker write. **Five of six entry points had no protection at all**, so the cycle-25 work was much narrower in practice than it appeared.
+
+**Approach selection:**
+- Rejected the BACKLOG-proposed `.data/ingest_locks/<hash>.json` receipt design. It records that a crash happened but leaves `manifest[K] = H` intact, so the permanent skip is not fixed. It is not an alternative to the marker approach — it is the marker approach plus a second durable store, and the second store is the part that accumulates one orphan per crash with no GC. It would also introduce a new lock target needing reconciliation against the cycle-81 `page_lock` span.
+- Rejected `.data/ingest_log.jsonl` as a recovery oracle: rotated via `rotate_if_oversized`, best-effort (`OSError` swallowed at the writer), and **zero readers anywhere in `src/`**. A start-row-without-terminal signature is not reliable when the pair can be split across rotation boundaries.
+- Selected: widen the producer set of the existing `in_progress:` convention down into `ingest_source`. `content_hash(path)` and `hash_bytes(bytes)` are the same function over the same file, so `compile_wiki`'s `pre_hash` and `ingest_source`'s `source_hash` are byte-identical — the two marker writes produce the same string at the same key and the second is a content no-op. No collision, no new format, no new lock.
+
+**`_claims_content` — the three-way manifest vocabulary:**
+New helper deciding whether a manifest value claims a given content hash for duplicate-detection purposes. A bare `{hash}` claims (completed, pages exist). `in_progress:{hash}` claims. `failed:{hash}` does not. Both halves of the split are load-bearing:
+- If `in_progress:` did not claim, two threads ingesting distinct files with identical content would both pass the duplicate check and both write pages, reopening the Phase 4.5 Q_A RMW race.
+- If `failed:` did claim, a prior failed attempt that wrote no pages would suppress a genuinely different source with the same content and leave it in no page at all — the same data-loss class this cycle closes.
+The helper also returns False on non-string values, which partially covers threat T4 on the ingest-side read; the `compiler.py` read sites remain unguarded and are filed to BACKLOG.
+
+**Design correction forced by the test suite:**
+The architecture eval and threat model T8 disagreed on whether to prefix-strip before the duplicate comparison. The initial decision was NOT to strip, reasoning that severity was asymmetric (a stale marker suppressing a different file is data loss; a missed dedup is only a merge). The full-suite gate overturned this: `tests/test_ingest.py::test_duplicate_content_concurrent_ingest` — a dedicated Q_A regression test asserting exactly one of two concurrent threads reports `duplicate: True` — failed, because `"in_progress:H" != "H"`. The guarantee is shipped and tested, not theoretical. The three-way split is what falls out of taking both objections seriously; neither gate proposed it. This is a direct instance of C22-L3 (isolation passes do not prove full-suite green) catching a design error rather than an implementation error.
+
+**Accepted residual:**
+A hard-killed ingest leaves `in_progress:` behind, and a stale marker does claim, so a different file with identical content is skipped until the crashed source is retried. Self-healing — a marker never equals the current hash, so `find_changed_sources` re-selects the crashed source on the next compile and its pages get written. Distinguishing live from stale needs process-liveness data that threat T13 forbids encoding in the marker string (a dict payload breaks `stored.startswith` in every version that reads the manifest). Filed as BACKLOG T8.
+
+**Exception-path downgrade:**
+`ingest_source`'s `except BaseException` downgrades the marker to `failed:{hash}` under `file_lock` before re-raising, mirroring `compiler.py`'s own handling. Wrapped in its own try/except so a rollback failure can never replace the caller's exception. Without it, every ordinary ingest error would leave an `in_progress:` marker and the cycle-25 stale-marker warning would degrade into noise operators learn to ignore. It is also what makes the `_claims_content` split meaningful — the two prefixes must actually correspond to "handled" vs "hard kill". The driving flag is sentinel-initialised before the `try` per C33-L2, so an exception raised before the reservation point (e.g. in `extract_from_source` or `_pre_validate_extraction`) cannot turn a real ingest error into a `NameError`.
+
+**Separate live bug fixed in-cycle:**
+`find_changed_sources` resolved the manifest default for `load_manifest` / `save_manifest` but passed the raw `manifest_path` straight to `file_lock`, so a `None` raised `AttributeError: 'NoneType' object has no attribute 'with_suffix'` and killed the whole scan. Reachable in production from the `kb_compile_scan` MCP tool, which sets `manifest_path = ... if wiki_path else None` — i.e. any call omitting the optional `wiki_dir` argument. `compile_wiki` was unaffected because it resolves the default earlier, which is why no existing test caught it. Fixed with its own regression test: a hard crash, one line, in the same manifest-RMW code path this cycle touches.
+
+**Test design:**
+- The revert detector snapshots the manifest INSIDE a stubbed `_run_ingest_body` rather than asserting on final state. The failure path also writes a `failed:` value, so a final-state-only assertion would pass even with the reservation reverted.
+- All tests read the manifest through the default `HASH_MANIFEST` path patched by `tmp_kb_env` and never pass `manifest_path=`. The Phase-2 confirmation hardcodes `HASH_MANIFEST`, so a `manifest_path=`-passing test would observe only `compile_wiki`'s cycle-25 marker and stay green under revert.
+- `_restore_body` restores only the stubbed function rather than calling a blanket monkeypatch undo. `tmp_kb_env` receives the same `monkeypatch` instance, so undoing everything tears down the path sandbox and lets the remainder of the test write into the real `wiki/` and `.data/`. Caught during implementation when a test failed with an empty manifest.
+
+**Process incident (carried into the Step-24 retrospective):**
+Mid-cycle the working tree was reset — the new test file, both design documents, both `src/` edits and the BACKLOG edits vanished while a Codex subagent dispatched with write access was operating in the same working tree. Nothing had been committed, so git could not recover any of it and the work was reconstructed from conversation context. The surviving `tests/__pycache__/*.pyc` was what confirmed the files had genuinely existed. Lessons: commit after the green phase rather than after the doc pass, since an uncommitted working tree is the only unrecoverable state in git; and do not dispatch a write-capable agent into a working tree holding in-flight uncommitted edits (use a worktree per C42-L4, or dispatch read-only).
+
+**Items:**
+- `src/kb/ingest/pipeline.py` — `_claims_content` helper (new); `_check_and_reserve_manifest` reserves `in_progress:{hash}` and logs reservation failures at WARNING; `ingest_source` sentinel flag + `failed:` downgrade on the exception path.
+- `src/kb/compile/compiler.py` — `find_changed_sources` resolves the manifest default before locking.
+- `tests/test_cycle83_ingest_crash_atomicity.py` — 12 new tests.
+
+**Tests:** 3461 → 3473 collected (+12). Ruff clean.
+
+**Scope:** 2 src files + 1 new test file; BACKLOG HIGH entry rewritten to the residual, 5 new BACKLOG entries filed.
+
 ### 2026-07-23 — cycle 82b (R2 Codex adversarial-review response)
 
 **Theme:**
