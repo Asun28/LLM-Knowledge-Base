@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from datetime import date
@@ -140,3 +141,191 @@ def test_concurrent_identical_claim_block_dedups_once(tmp_wiki, generous_lock_ti
     assert errors == []
     content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
     assert content.count("claim-alpha") == 1
+
+
+def test_removing_the_lock_loses_a_write(tmp_wiki, monkeypatch):
+    """Meta-test: with `file_lock` neutered, a concurrent write IS lost.
+
+    Cycle 85 (review MINOR). The tests above assert that the locked
+    read-modify-write loses no write — but they only fail against a REMOVED lock
+    if the two threads' RMW windows happen to overlap, which a barrier aligning
+    thread *starts* does not guarantee. So "they pass" was weak evidence that the
+    lock is load-bearing.
+
+    This test supplies the missing half: it removes the lock and FORCES the
+    overlap deterministically, then asserts a write really is lost. If this ever
+    starts passing without losing a write, the sibling tests above have stopped
+    being able to detect a broken lock and need rethinking.
+
+    Determinism: alpha is held at its write until beta has completed a full
+    read+write, so alpha's in-memory `existing` (read before beta wrote) is
+    stale and its write clobbers beta's block. That interleaving is exactly what
+    `file_lock` exists to prevent, and is impossible while the lock is real.
+    """
+    from contextlib import contextmanager
+
+    import kb.ingest.pipeline as pipeline_mod
+
+    @contextmanager
+    def _no_lock(_path, timeout=None):
+        yield
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _no_lock)
+
+    alpha_may_write = threading.Event()
+    beta_written = threading.Event()
+    real_write = pipeline_mod.atomic_text_write
+
+    def _gated_write(content: str, path):
+        if "claim-alpha" in content:
+            # Hold alpha until beta has fully committed its own block.
+            alpha_may_write.set()
+            # Cycle 85 (review MINOR) — the wait result is asserted, not ignored.
+            # If beta's write failed and was swallowed, alpha would resume on the
+            # timeout and the "beta absent" assertion below would pass for the
+            # WRONG reason (beta never wrote at all, rather than being clobbered).
+            assert beta_written.wait(timeout=_THREAD_BUDGET_SECONDS), (
+                "beta never completed its write, so this test cannot prove alpha clobbered it"
+            )
+        result = real_write(content, path)
+        if "claim-beta" in content:
+            beta_written.set()
+        return result
+
+    monkeypatch.setattr(pipeline_mod, "atomic_text_write", _gated_write)
+
+    errors: list[BaseException] = []
+
+    def worker(claim: str) -> None:
+        try:
+            _persist_contradictions([{"claim": claim}], "raw/a.md", tmp_wiki)
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    t_alpha = threading.Thread(target=worker, args=("claim-alpha",))
+    t_alpha.start()
+    # Only start beta once alpha has read and is parked at its write.
+    assert alpha_may_write.wait(timeout=_THREAD_BUDGET_SECONDS), "alpha never reached its write"
+
+    t_beta = threading.Thread(target=worker, args=("claim-beta",))
+    t_beta.start()
+
+    for thread in (t_alpha, t_beta):
+        thread.join(timeout=_THREAD_BUDGET_SECONDS)
+
+    assert not any(t.is_alive() for t in (t_alpha, t_beta))
+    assert errors == []
+
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert "claim-alpha" in content, "alpha wrote last, so its block must survive"
+    assert "claim-beta" not in content, (
+        "beta's block should have been CLOBBERED by alpha's stale read. If it "
+        "survived, this harness can no longer detect a removed lock, which means "
+        "the sibling no-lost-write tests are not actually falsifiable."
+    )
+
+
+def test_lock_timeout_retries_once_then_reports_the_drop(tmp_wiki, monkeypatch, caplog):
+    """A lock timeout is retried exactly once, then the loss is named.
+
+    Cycle 85 (review MINOR) — the retry loop and both DROPPED-warning paths had no
+    coverage. This pins: exactly two acquisition attempts, the second using the
+    longer deadline, and a final WARNING that names the source and the claim count
+    so an operator can tell what was discarded and re-ingest it.
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    attempts: list[float | None] = []
+
+    @contextlib.contextmanager
+    def _always_timeout(_path, timeout=None):
+        attempts.append(timeout)
+        raise TimeoutError("simulated lock contention")
+        yield  # pragma: no cover — unreachable, keeps this a generator
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _always_timeout)
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        pipeline_mod._persist_contradictions(
+            [{"claim": "alpha"}, {"claim": "beta"}], "raw/articles/src.md", tmp_wiki
+        )
+
+    assert len(attempts) == 2, f"expected exactly one retry; got attempts={attempts!r}"
+    assert attempts[0] is None, "first attempt must use file_lock's default deadline"
+    assert attempts[1] == pipeline_mod._CONTRADICTION_RETRY_LOCK_TIMEOUT, (
+        f"retry must use the longer deadline; got {attempts[1]!r}"
+    )
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    dropped = [m for m in messages if "DROPPED" in m]
+    assert dropped, f"the give-up path must name the loss; got {messages!r}"
+    assert "2 contradiction(s)" in dropped[-1], f"claim count missing from {dropped[-1]!r}"
+    assert "raw/articles/src.md" in dropped[-1], f"source ref missing from {dropped[-1]!r}"
+
+
+def test_write_failure_inside_the_lock_is_not_retried(tmp_wiki, monkeypatch, caplog):
+    """A failure INSIDE the locked span is reported once, never retried.
+
+    Cycle 85 (review MINOR) — `atomic_text_write` can itself raise TimeoutError.
+    Without an inner handler the outer `except TimeoutError` would treat that as
+    lock contention and retry a write that failed for an unrelated reason. This
+    pins that the lock is acquired exactly once and the drop is reported.
+    """
+    import kb.ingest.pipeline as pipeline_mod
+
+    acquisitions: list[float | None] = []
+    real_lock = pipeline_mod.file_lock
+
+    @contextlib.contextmanager
+    def _counting_lock(path, timeout=None):
+        acquisitions.append(timeout)
+        with real_lock(path, timeout=timeout):
+            yield
+
+    def _explode(_content, _path):
+        raise TimeoutError("write-side timeout, NOT lock contention")
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _counting_lock)
+    monkeypatch.setattr(pipeline_mod, "atomic_text_write", _explode)
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        pipeline_mod._persist_contradictions([{"claim": "alpha"}], "raw/articles/src.md", tmp_wiki)
+
+    assert len(acquisitions) == 1, (
+        f"a write-side failure must NOT be retried as lock contention; "
+        f"lock was acquired {len(acquisitions)} times"
+    )
+    dropped = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and "DROPPED" in r.getMessage()
+    ]
+    assert dropped, "a write-side failure must still report the drop"
+    assert "1 contradiction(s)" in dropped[-1]
+
+
+def test_persist_contradictions_never_raises_on_a_hostile_source_ref(tmp_wiki, caplog):
+    """`_persist_contradictions` is a best-effort boundary — it must never raise.
+
+    Cycle 85 (review MINOR-3). `_safe_source_ref` runs OUTSIDE the function's
+    try/except, so it has to be total. `str()` coercion alone was not enough: an
+    object whose `__str__` itself raises would still escape to the caller, which
+    treats this call as best-effort and does not guard it.
+    """
+
+    class _Hostile:
+        def __str__(self) -> str:
+            raise RuntimeError("__str__ blew up")
+
+    with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+        # Must not raise.
+        _persist_contradictions([{"claim": "alpha"}], _Hostile(), tmp_wiki)
+
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert "alpha" in content, "the claim should still be recorded under a placeholder ref"
+    assert "unprintable source ref" in content, (
+        "a hostile __str__ must fall back to the fixed placeholder"
+    )
+    assert "__str__ blew up" not in content, (
+        "the failing object's error text must not reach contradictions.md"
+    )

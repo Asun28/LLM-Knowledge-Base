@@ -183,6 +183,14 @@ def _emit_contradiction_telemetry(
     return contradictions
 
 
+# Cycle 85 — deadline for the ONE retry after a contradictions.md lock timeout.
+# Deliberately longer than `file_lock`'s 5s default: the first attempt already
+# waited that long, so a retry on the same budget would mostly fail the same way.
+# Kept well under a minute so a genuinely stuck lock still fails fast enough to
+# surface in the ingest, rather than stalling the caller.
+_CONTRADICTION_RETRY_LOCK_TIMEOUT = 15.0
+
+
 def _persist_contradictions(
     contradictions: list[dict],
     source_ref: str,
@@ -194,34 +202,111 @@ def _persist_contradictions(
     so concurrent ingests on the same wiki don't overwrite each other's blocks.
     """
     contradictions_path = effective_wiki_dir / "contradictions.md"
-    header = "# Contradictions\n\nAppend-only log of conflicts detected during ingest.\n\n"
-    try:
-        with file_lock(contradictions_path):
-            existing = (
-                contradictions_path.read_text(encoding="utf-8")
-                if contradictions_path.exists()
-                else header
-            )
-            # H13 fix: take only the FIRST line of source_ref (everything after the first
-            # \n is attacker-controlled injection). Then strip leading # characters and
-            # surrounding whitespace to prevent header injection.
-            first_line = source_ref.split("\n")[0].split("\r")[0]
-            safe_ref = first_line.strip().lstrip("#").strip()
-            block = f"\n## {safe_ref} — {date.today().isoformat()}\n"
-            for w in contradictions:
-                raw_claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
-                claim = sanitize_extraction_field(raw_claim)
-                block += f"- {claim}\n"
-            if existing.find(block) != -1:
-                logger.debug(
-                    "Skipping duplicate contradiction block for %s on %s",
+    safe_ref = _safe_source_ref(source_ref)
+    # Cycle 85 — a lock TIMEOUT is transient (another ingest is mid-append), so it
+    # earns one retry on a longer deadline before we give up. Other failures are
+    # not retried: retrying a permission error or a full disk just doubles the wait.
+    for attempt, lock_timeout in enumerate((None, _CONTRADICTION_RETRY_LOCK_TIMEOUT)):
+        try:
+            with file_lock(contradictions_path, timeout=lock_timeout):
+                # Cycle 85 (review MINOR) — the body has its OWN handler so a
+                # failure INSIDE the locked span can never be mistaken for lock
+                # contention. `atomic_text_write` can itself raise TimeoutError;
+                # without this inner catch the outer `except TimeoutError` would
+                # retry a write that failed for an unrelated reason, contradicting
+                # the "only a lock timeout is retried" contract.
+                try:
+                    _write_contradiction_block(contradictions, safe_ref, contradictions_path)
+                except Exception as body_err:
+                    logger.warning(
+                        "DROPPED %d contradiction(s) for %s — failed to write "
+                        "contradictions.md: %s",
+                        len(contradictions),
+                        safe_ref,
+                        body_err,
+                    )
+            return
+        except TimeoutError:
+            if attempt == 0:
+                logger.warning(
+                    "contradictions.md is locked by another writer; retrying once "
+                    "with a %.0fs deadline (source: %s)",
+                    _CONTRADICTION_RETRY_LOCK_TIMEOUT,
                     safe_ref,
-                    date.today().isoformat(),
                 )
-                return
-            atomic_text_write(existing + block, contradictions_path)
-    except Exception as write_err:
-        logger.warning("Failed to write contradictions.md: %s", write_err)
+                continue
+            # Cycle 85 — name what was LOST. The old message ("Failed to write
+            # contradictions.md: ...") told an operator nothing about which
+            # source's contradictions were discarded or how many, so the loss was
+            # untraceable and could not be deliberately re-run.
+            logger.warning(
+                "DROPPED %d contradiction(s) for %s — could not acquire the "
+                "contradictions.md lock after a retry. Re-ingest this source to "
+                "recover them.",
+                len(contradictions),
+                safe_ref,
+            )
+            return
+        except Exception as write_err:
+            logger.warning(
+                "DROPPED %d contradiction(s) for %s — failed to write contradictions.md: %s",
+                len(contradictions),
+                safe_ref,
+                write_err,
+            )
+            return
+
+
+def _safe_source_ref(source_ref: object) -> str:
+    """First line of ``source_ref`` with header markers stripped.
+
+    H13 fix: everything after the first newline is attacker-controlled, and a
+    leading ``#`` would inject a heading into contradictions.md.
+
+    Cycle 85 (review MINOR) — this is TOTAL: it is called OUTSIDE
+    `_persist_contradictions`'s try/except, and that function is a best-effort
+    boundary its callers rely on never raising. `str()` alone was not enough —
+    an object whose ``__str__`` itself raises would still have escaped — so the
+    coercion is guarded too. The fallback is a fixed literal (never interpolated
+    from the offending object) so a hostile ``__str__`` cannot inject markup into
+    contradictions.md through the error path.
+    """
+    try:
+        text = str(source_ref)
+    except Exception:  # noqa: BLE001 — a best-effort boundary must not raise
+        return "<unprintable source ref>"
+    first_line = text.split("\n")[0].split("\r")[0]
+    return first_line.strip().lstrip("#").strip()
+
+
+def _write_contradiction_block(
+    contradictions: list[dict],
+    safe_ref: str,
+    contradictions_path: Path,
+) -> None:
+    """Read → dedupe → append one contradiction block. Caller MUST hold the lock.
+
+    Split out of `_persist_contradictions` in cycle 85 so the retry loop around it
+    stays readable. The read and the write must remain in the same locked span —
+    this is the H3 read-modify-write that `file_lock` protects.
+    """
+    header = "# Contradictions\n\nAppend-only log of conflicts detected during ingest.\n\n"
+    existing = (
+        contradictions_path.read_text(encoding="utf-8") if contradictions_path.exists() else header
+    )
+    block = f"\n## {safe_ref} — {date.today().isoformat()}\n"
+    for w in contradictions:
+        raw_claim = w.get("claim", str(w)) if isinstance(w, dict) else str(w)
+        claim = sanitize_extraction_field(raw_claim)
+        block += f"- {claim}\n"
+    if existing.find(block) != -1:
+        logger.debug(
+            "Skipping duplicate contradiction block for %s on %s",
+            safe_ref,
+            date.today().isoformat(),
+        )
+        return
+    atomic_text_write(existing + block, contradictions_path)
 
 
 def _is_duplicate_content(source_hash: str, source_ref: str) -> bool:
