@@ -435,3 +435,41 @@ def test_find_changed_sources_default_manifest_path_does_not_crash(tmp_kb_env):
     assert "default-path-scan.md" in names, (
         f"scan with the default manifest path must succeed and see the source; got {names!r}"
     )
+
+
+def test_corrupt_non_string_manifest_value_does_not_kill_the_scan(tmp_kb_env):
+    """Cycle 84 (threat T4) — a non-string manifest value must not abort the scan.
+
+    `find_changed_sources` called `stored.startswith("failed:")` on whatever
+    `json.loads` produced. A hand-edited or corrupted `.data/hashes.json` holding
+    an int / float / list / dict raised `AttributeError` and killed the ENTIRE
+    compile scan, so one bad row took down every source. The bad row is now
+    treated as changed, so the source is re-ingested and the entry self-heals.
+
+    A JSON `null` deserialises to None and takes the earlier `stored is None`
+    branch instead (classified "new"), which also re-ingests and self-heals — it
+    is covered here so the two recovery paths stay pinned together.
+    """
+    raw_good = _seed_raw(tmp_kb_env, "healthy-source")
+    raw_bad = _seed_raw(tmp_kb_env, "corrupt-entry-source")
+    raw_null = _seed_raw(tmp_kb_env, "null-entry-source")
+
+    compiler_mod.save_manifest(
+        {
+            "raw/articles/corrupt-entry-source.md": 12345,  # non-string, the poison row
+            "raw/articles/null-entry-source.md": None,  # JSON null
+            "raw/articles/healthy-source.md": hash_bytes(raw_good.read_bytes()),
+        }
+    )
+
+    # Must not raise AttributeError.
+    new_sources, changed_sources = compiler_mod.find_changed_sources(raw_dir=tmp_kb_env / "raw")
+
+    names = {Path(p).name for p in (*new_sources, *changed_sources)}
+    assert raw_bad.name in names, (
+        f"a source whose manifest value is corrupt must be re-selected so the row "
+        f"self-heals; got {names!r}"
+    )
+    assert raw_null.name in names, (
+        f"a source whose manifest value is JSON null must still be re-selected; got {names!r}"
+    )

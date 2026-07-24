@@ -492,35 +492,51 @@ def test_append_evidence_trail_concurrent(tmp_path):
     assert content.count("## Evidence Trail") == 1, "Evidence Trail section duplicated"
 
 
-def test_persist_contradictions_concurrent(tmp_path):
+def test_persist_contradictions_concurrent(tmp_path, monkeypatch):
     """Regression: Phase 4.5 HIGH item H3 (_persist_contradictions concurrent RMW).
 
     Two threads writing different contradiction payloads concurrently must both
     appear in the final contradictions.md.
+
+    Cycle 84 — made load-insensitive. This asserts a real invariant (the locked
+    RMW loses no write), but it used an unsynchronised thread start and inherited
+    `file_lock`'s 5-second `LOCK_TIMEOUT_SECONDS`. Under full-suite load the
+    waiting thread could exceed that deadline and raise TimeoutError, producing a
+    spurious failure that looks like a lock bug but is scheduler starvation. A
+    barrier now guarantees the two threads genuinely contend (strengthening the
+    test), and the acquisition deadline is widened so only a real lock failure —
+    not a descheduled thread — can fail it.
     """
+    import kb.utils.io as io_mod
     from kb.ingest.pipeline import _persist_contradictions
+
+    monkeypatch.setattr(io_mod, "LOCK_TIMEOUT_SECONDS", 30.0)
 
     wiki_dir = tmp_path / "wiki"
     wiki_dir.mkdir()
 
-    errors: list[Exception] = []
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2)
 
     def _write(source_ref: str, claim: str) -> None:
         try:
+            barrier.wait(timeout=60.0)
             _persist_contradictions(
                 [{"claim": claim}],
                 source_ref,
                 wiki_dir,
             )
-        except Exception as exc:
+        except BaseException as exc:  # noqa: BLE001 — surfaced via assertion below
             errors.append(exc)
 
     t1 = threading.Thread(target=_write, args=("raw/articles/src-a.md", "claim-from-thread-one"))
     t2 = threading.Thread(target=_write, args=("raw/articles/src-b.md", "claim-from-thread-two"))
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+    t1.join(timeout=60.0)
+    t2.join(timeout=60.0)
+
+    assert not t1.is_alive() and not t2.is_alive(), "contradiction writer threads did not finish"
 
     assert not errors, f"Unexpected exceptions during concurrent contradiction writes: {errors}"
     content = (wiki_dir / "contradictions.md").read_text(encoding="utf-8")
