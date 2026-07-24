@@ -140,3 +140,79 @@ def test_concurrent_identical_claim_block_dedups_once(tmp_wiki, generous_lock_ti
     assert errors == []
     content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
     assert content.count("claim-alpha") == 1
+
+
+def test_removing_the_lock_loses_a_write(tmp_wiki, monkeypatch):
+    """Meta-test: with `file_lock` neutered, a concurrent write IS lost.
+
+    Cycle 85 (review MINOR). The tests above assert that the locked
+    read-modify-write loses no write — but they only fail against a REMOVED lock
+    if the two threads' RMW windows happen to overlap, which a barrier aligning
+    thread *starts* does not guarantee. So "they pass" was weak evidence that the
+    lock is load-bearing.
+
+    This test supplies the missing half: it removes the lock and FORCES the
+    overlap deterministically, then asserts a write really is lost. If this ever
+    starts passing without losing a write, the sibling tests above have stopped
+    being able to detect a broken lock and need rethinking.
+
+    Determinism: alpha is held at its write until beta has completed a full
+    read+write, so alpha's in-memory `existing` (read before beta wrote) is
+    stale and its write clobbers beta's block. That interleaving is exactly what
+    `file_lock` exists to prevent, and is impossible while the lock is real.
+    """
+    from contextlib import contextmanager
+
+    import kb.ingest.pipeline as pipeline_mod
+
+    @contextmanager
+    def _no_lock(_path, timeout=None):
+        yield
+
+    monkeypatch.setattr(pipeline_mod, "file_lock", _no_lock)
+
+    alpha_may_write = threading.Event()
+    beta_written = threading.Event()
+    real_write = pipeline_mod.atomic_text_write
+
+    def _gated_write(content: str, path):
+        if "claim-alpha" in content:
+            # Hold alpha until beta has fully committed its own block.
+            alpha_may_write.set()
+            beta_written.wait(timeout=_THREAD_BUDGET_SECONDS)
+        result = real_write(content, path)
+        if "claim-beta" in content:
+            beta_written.set()
+        return result
+
+    monkeypatch.setattr(pipeline_mod, "atomic_text_write", _gated_write)
+
+    errors: list[BaseException] = []
+
+    def worker(claim: str) -> None:
+        try:
+            _persist_contradictions([{"claim": claim}], "raw/a.md", tmp_wiki)
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    t_alpha = threading.Thread(target=worker, args=("claim-alpha",))
+    t_alpha.start()
+    # Only start beta once alpha has read and is parked at its write.
+    assert alpha_may_write.wait(timeout=_THREAD_BUDGET_SECONDS), "alpha never reached its write"
+
+    t_beta = threading.Thread(target=worker, args=("claim-beta",))
+    t_beta.start()
+
+    for thread in (t_alpha, t_beta):
+        thread.join(timeout=_THREAD_BUDGET_SECONDS)
+
+    assert not any(t.is_alive() for t in (t_alpha, t_beta))
+    assert errors == []
+
+    content = (tmp_wiki / "contradictions.md").read_text(encoding="utf-8")
+    assert "claim-alpha" in content, "alpha wrote last, so its block must survive"
+    assert "claim-beta" not in content, (
+        "beta's block should have been CLOBBERED by alpha's stale read. If it "
+        "survived, this harness can no longer detect a removed lock, which means "
+        "the sibling no-lost-write tests are not actually falsifiable."
+    )
