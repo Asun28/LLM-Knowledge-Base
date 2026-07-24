@@ -442,16 +442,22 @@ def test_corrupt_non_string_manifest_value_does_not_kill_the_scan(tmp_kb_env):
 
     `find_changed_sources` called `stored.startswith("failed:")` on whatever
     `json.loads` produced. A hand-edited or corrupted `.data/hashes.json` holding
-    an int / list / null raised `AttributeError` and killed the ENTIRE compile
-    scan, so one bad row took down every source. The bad row is now treated as
-    changed, so the source is re-ingested and the entry self-heals.
+    an int / float / list / dict raised `AttributeError` and killed the ENTIRE
+    compile scan, so one bad row took down every source. The bad row is now
+    treated as changed, so the source is re-ingested and the entry self-heals.
+
+    A JSON `null` deserialises to None and takes the earlier `stored is None`
+    branch instead (classified "new"), which also re-ingests and self-heals — it
+    is covered here so the two recovery paths stay pinned together.
     """
     raw_good = _seed_raw(tmp_kb_env, "healthy-source")
     raw_bad = _seed_raw(tmp_kb_env, "corrupt-entry-source")
+    raw_null = _seed_raw(tmp_kb_env, "null-entry-source")
 
     compiler_mod.save_manifest(
         {
             "raw/articles/corrupt-entry-source.md": 12345,  # non-string, the poison row
+            "raw/articles/null-entry-source.md": None,  # JSON null
             "raw/articles/healthy-source.md": hash_bytes(raw_good.read_bytes()),
         }
     )
@@ -463,4 +469,7 @@ def test_corrupt_non_string_manifest_value_does_not_kill_the_scan(tmp_kb_env):
     assert raw_bad.name in names, (
         f"a source whose manifest value is corrupt must be re-selected so the row "
         f"self-heals; got {names!r}"
+    )
+    assert raw_null.name in names, (
+        f"a source whose manifest value is JSON null must still be re-selected; got {names!r}"
     )
