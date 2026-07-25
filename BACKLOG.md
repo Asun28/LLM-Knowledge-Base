@@ -141,6 +141,32 @@ Ranked priority derived from re-reading Karpathy's gist against current state. I
 - `ingest/connectors/` pluggable connector framework — deterministic per-source fetchers (local git repo, web search, Hacker News; RSS/mail later) each writing raw content + a fetch manifest under `raw/connectors/<name>/`, with multi-instance config (`web-search-1`, `web-search-2`) and selective runs (`kb ingest-connector <name>|all`). Synthesis stays in the existing ingest pipeline — connectors only fetch. Supersets the URL-aware `kb_ingest` adapter entry under "Ingest & Query Convenience" below. Hard requirement: all connector output passes the `wrap_wiki_context` fence + `.llmwikiignore`/secret-scanner rail before any LLM call — openwiki itself ships no such boundary and this is flywheel's differentiator. Source: langchain-ai/openwiki connector architecture.
   (effort: High — connector ABC + manifest schema + 2 reference connectors + config plumbing + secret-scanner integration)
 
+### HIGH LEVERAGE — nashsu/llm_wiki + TencentDB-Agent-Memory review (2026-07-25)
+
+<!-- Sourced from a re-read of nashsu/llm_wiki (Tauri/Rust desktop app, ~15.3k stars, GPL-3.0) and
+     TencentCloud/TencentDB-Agent-Memory (TypeScript, ~9.3k stars, MIT) main + feat/server_team.
+     The latter's MemoryKnowledge/src/engines/wiki/ is an independent Karpathy-gist implementation and
+     credits the gist explicitly — read it as a sibling architecture, not as prior art to import.
+     LICENSING: nashsu is GPL-3.0 — ideas only, no code lift. Tencent is MIT — vendorable with attribution.
+     The 2026-04-12 Phase 5 review already absorbed nashsu's 4-signal weights, Louvain 0.15 threshold,
+     gap-card taxonomy, two-step CoT ingest, and cascade delete; those entries stay where they are.
+     Deliberately NOT adopted: Tencent's team/ACL/Memory-Hub governance layer (contradicts the documented
+     "Enterprise ceiling" scope tension below), its Gateway service split (personal-scale project runs
+     in-process), and nashsu's silent-swallow error style in cascade.ts (every catch is a bare ignore).
+     Tencent's symbolic context-offload (refs/*.md + Mermaid node_id drill-down, vendor-reported
+     -61% tokens / +51% relative pass rate on WideSearch) is deliberately parked to Phase 6 — biggest
+     win but it rewrites query context assembly. Both repos' benchmark numbers are vendor self-reported
+     with no published harness; treat as directional only. -->
+
+- `lint/checks/evidence_resolvable.py` (new) `lint/runner.py` evidence-resolvability check — for every wiki page, assert each `source:` frontmatter entry resolves to a file that actually exists under `raw/`; unresolvable entries become a lint finding naming the page and the dangling ref. Raw-source-side peer of the existing `lint/checks/dead_links.py` (which only covers `[[wikilink]]` targets), so the same-class-peer scan is already half done. Generalizes Tencent's stated invariant — "低层保留证据，高层保留结构 … 没有任何一段摘要是不可逆的黑盒" (no summary is an irreversible black box; every abstraction level carries a resolvable pointer down to raw evidence) — from a convention into something lint enforces. Extends naturally to anchor-level checking once the subsection-provenance item below lands (`raw/file.md#heading` / `:L42-L58`). Source: TencentDB-Agent-Memory README_CN §"每一条信息都 100% 可找回、可恢复".
+  (effort: Low — one check module following the `dead_links.py` shape + runner registration + fixture pages with a deleted source)
+
+- `query/hybrid.py` `graph/cache.py` bounded wikilink hop expansion over BM25 seeds — after BM25/hybrid retrieval, walk `[[wikilink]]` edges 1–2 hops from the seed set to surface pages that share no query keywords. Contract cribbed from Tencent's `MemoryKnowledge/src/engines/wiki/graph-search.ts`: seeds frozen at `hop=0` with their original retrieval score (never overwritten by an incoming decayed path); per-hop multiplicative `decay`; for non-seed nodes reached by multiple paths, highest score wins (BFS layer order fixes min-hop on first arrival); a `min_score` floor; a hard `max_nodes` visited cap (their default 200) explicitly framed as a DoS rail on dense graphs; and a recorded `via` (previous-hop node label) per hit for explainability in citations. There is currently **no** graph expansion anywhere in the query path — `graph/export.py:15 DEFAULT_MAX_NODES` caps visualization only. Ships the bounded-traversal substrate for the parked Phase 6 "Multi-signal graph retrieval" item **without** its typed-semantic-relations prerequisite; the 4-signal weighting can be layered on later as a scoring change rather than a new traversal. Source: TencentDB-Agent-Memory `wiki/graph-search.ts` (MIT).
+  (effort: Medium — traversal function over the cached graph + hybrid-result merge + budget interaction with `QUERY_CONTEXT_MAX_CHARS` + cap/decay/floor config constants + `via` plumbed into citation rendering)
+
+- `lint/augment/tier_boundary.py` `review/refiner.py` closed action vocabulary for LLM-proposed operations — LLM-proposed follow-up actions currently have no fixed value domain, only key-shape validation. Define a frozen enum of permitted actions and reject out-of-vocabulary values at the tier boundary before orchestrate-tier consumption, recording a distinct manifest reason (`action_not_in_vocabulary: ...`) for forensic distinctness from the existing `tier_boundary_rejected: ...`. nashsu constrains its async review queue to exactly `create page` / `deep research` / `skip`, with the rationale stated as "约束操作防止 LLM 凭空生成任意操作" — constrain the operation set so the model cannot invent arbitrary actions. Direct same-class peer of the cycle-73/74 `_validate_tier_boundary` work: adds a value-domain check alongside the existing `expected_keys` / `required_keys` key-domain checks. Anti-spoofing rule (T5) carries over unchanged — the enum MUST be derived from the local schema, NEVER from the model output. Source: nashsu/llm_wiki README_CN §12 (审核系统).
+  (effort: Low — `allowed_values` param on `_validate_tier_boundary` + enum constant + distinct error reason + xfail-strict negative test proving an invented action is rejected)
+
 ### HIGH LEVERAGE — Epistemic Integrity 2.0
 
 - `ingest/pipeline.py` subsection-level provenance — allow `source: raw/file.md#heading` or `raw/file.md:L42-L58` deep-links in frontmatter; ingest extractor captures heading context. Source: Agent-Wiki (kkollsga, gist).
