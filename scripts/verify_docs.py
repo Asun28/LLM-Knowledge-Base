@@ -58,10 +58,14 @@ def _count_tests_collected() -> int:
         [sys.executable, "-m", "pytest", "--collect-only", "-q"],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
-        text=True,
+        # Same reason as `_count_diff_lines`: pin UTF-8 rather than inheriting
+        # the locale codec, so a non-ASCII test id or path can't kill the
+        # reader thread and leave stdout/stderr as None.
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
-    output = result.stdout + result.stderr
+    output = (result.stdout or "") + (result.stderr or "")
     match = re.search(r"(\d+)\s+tests?\s+collected", output)
     if match is None:
         raise VerifyError(f"pytest --collect-only didn't report a count:\n{output[-500:]}")
@@ -153,7 +157,12 @@ def _count_diff_lines(file_relpath: str, base_ref: str, prefix: str) -> int:
         result = subprocess.run(
             ["git", "diff", f"{base_ref}...HEAD", "--", file_relpath],
             capture_output=True,
-            text=True,
+            # Git emits UTF-8. `text=True` alone decodes with the locale codec
+            # (cp1252 on Windows), which kills the reader thread on any
+            # non-Latin-1 byte and silently leaves `result.stdout` as None. Docs
+            # legitimately quote non-ASCII source material, so pin the codec.
+            encoding="utf-8",
+            errors="replace",
             cwd=PROJECT_ROOT,
             check=True,
         )
