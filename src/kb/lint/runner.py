@@ -10,6 +10,7 @@ from kb.lint.checks import (
     check_cycles,
     check_dead_links,
     check_duplicate_slugs,
+    check_evidence_resolvable,
     check_frontmatter,
     check_frontmatter_staleness,
     check_inline_callouts,
@@ -133,6 +134,15 @@ def run_all_checks(
     coverage = check_source_coverage(wiki_dir, raw_dir, pages=shared_pages)
     all_issues.extend(coverage)
     checks_run.append({"name": "source_coverage", "issues": len(coverage)})
+
+    # Cycle 86 AC01 — the reverse direction of source_coverage above. That check
+    # asks "is every raw file referenced by some page?"; this one asks "does
+    # every page reference resolve to a real raw file?". Both run off the same
+    # `shared_pages` scan, so the addition costs one pass over already-loaded
+    # frontmatter rather than a second walk of the wiki tree.
+    evidence = check_evidence_resolvable(wiki_dir, raw_dir, pages=shared_pages)
+    all_issues.extend(evidence)
+    checks_run.append({"name": "evidence_resolvable", "issues": len(evidence)})
 
     cycles = check_cycles(wiki_dir, graph=shared_graph)
     all_issues.extend(cycles)

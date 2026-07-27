@@ -11,6 +11,11 @@ from kb.lint.checks.duplicate_slug import (
     _slug_for_duplicate,
     check_duplicate_slugs,
 )
+from kb.lint.checks.evidence_resolvable import (
+    _EVIDENCE_REFS_PER_PAGE_CAP,
+    _resolve_evidence_ref,
+    check_evidence_resolvable,
+)
 from kb.lint.checks.frontmatter import (
     _ACTION_INGEST_RE,
     _EVIDENCE_TRAIL_ANCHOR,
@@ -45,6 +50,7 @@ __all__ = [
     "check_cycles",
     "check_dead_links",
     "check_duplicate_slugs",
+    "check_evidence_resolvable",
     "check_frontmatter",
     "check_frontmatter_staleness",
     "check_inline_callouts",
@@ -62,11 +68,13 @@ __all__ = [
     "_CALLOUTS_CROSS_PAGE_CAP",
     "_CALLOUTS_PER_PAGE_CAP",
     "_DUPLICATE_SLUGS_PAGE_CAP",
+    "_EVIDENCE_REFS_PER_PAGE_CAP",
     "_EVIDENCE_TRAIL_ANCHOR",
     "_INDEX_FILES",
     "_STATUS_MATURE_STALE_DAYS",
     "_bounded_edit_distance",
     "_compose_page_topics",
     "_effective_max_days",
+    "_resolve_evidence_ref",
     "_slug_for_duplicate",
 ]
