@@ -30,6 +30,7 @@
       'authored_by_drift',
       'frontmatter',
       'source_coverage',
+      'evidence_resolvable',
       'wikilink_cycles',
       'stub_pages',
       'duplicate_slugs',

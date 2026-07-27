@@ -227,7 +227,8 @@ def test_run_all_checks(tmp_wiki, tmp_path):
     # so count bumped 8 -> 10.
     # Cycle 16 AC14: wired `check_duplicate_slugs` + `check_inline_callouts`
     # so count bumped 10 -> 12.
-    assert len(report["checks_run"]) == 12
+    # Cycle 86 AC01: wired `check_evidence_resolvable` so count bumped 12 -> 13.
+    assert len(report["checks_run"]) == 13
 
 
 def test_run_all_checks_empty(tmp_wiki, tmp_path):
@@ -281,6 +282,10 @@ def test_lint_runner_enumeration_order_unchanged(monkeypatch, tmp_path):
         "authored_by_drift",
         "frontmatter",
         "source_coverage",
+        # Cycle 86 AC01 — registered directly after source_coverage because the
+        # two are inverse directions of the same page<->raw relation and share
+        # the `shared_pages` scan.
+        "evidence_resolvable",
         "wikilink_cycles",
         "stub_pages",
         "duplicate_slugs",
@@ -307,6 +312,7 @@ def test_lint_runner_enumeration_order_unchanged(monkeypatch, tmp_path):
         "check_authored_by_drift",
         "check_frontmatter",
         "check_source_coverage",
+        "check_evidence_resolvable",
         "check_cycles",
         "check_stub_pages",
         "check_duplicate_slugs",

@@ -17,6 +17,237 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-27 — cycle 86 (validation & ordering correctness)
+
+**Scope:** 5 ACs — two Phase-5 HIGH-LEVERAGE "Low effort" items from the
+2026-07-25 nashsu/llm_wiki + TencentDB review, two Phase-4.5 MEDIUM defects from
+the cycle-83 audit, and one stale backlog entry cycle 84 had already closed.
+
+**AC01 — `lint/checks/evidence_resolvable.py` (NEW) + runner registration.**
+For every wiki page, each file-shaped `source:` frontmatter entry must resolve to
+a file that exists under `raw/`. Fills a real gap between two existing checks:
+`dead_links.py` covers only `[[wikilink]]` targets (links between pages), and
+`check_source_coverage` runs the opposite direction (raw files nothing
+references). A page could pass both while every one of its provenance pointers
+dangled.
+
+- Resolution is the inverse of `make_source_ref`: strip a leading `raw/` and
+  re-anchor the remainder under the caller's `raw_dir`, which keeps the check
+  working under the `tmp_kb_env` sandbox where `raw_dir` is not literally named
+  `raw`.
+- **Severity split (DESIGN-AMEND, raised at Step 9).** The AC text said only
+  "unresolvable entries become a lint finding", and the first implementation used
+  `error` uniformly. Running the suite showed
+  `test_v5_lint_augment_cli.py::test_cli_lint_augment_propose_default` failing,
+  because its fixture page declares `source: raw/articles/test.md` without
+  creating the file and an `error` flips `kb lint`'s exit code. The fixture is a
+  faithful sample of reality — raw sources get pruned, archived, and moved after
+  ingest — so a missing file became `warning` (surfaced, operator judges) while a
+  ref that does not resolve under `raw/` at all stayed `error` (no legitimate
+  workflow produces one). Escalating the warning later is a one-line change;
+  starting at `error` and retreating would have been the irreversible direction.
+- **T1 — no filesystem oracle.** Frontmatter is LLM-written, so a `source:` ref is
+  attacker-influenceable. `_resolve_evidence_ref` resolves and containment-checks
+  BEFORE any filesystem access and returns `None` on escape; callers report that
+  without probing. Absolute refs need no special branch — `Path("raw") /
+  "/etc/shadow"` collapses to `/etc/shadow`, which then fails `is_relative_to`.
+  Pinned by a `Path.is_file` spy, not by reading source text (C11-L2).
+- `http(s)://` refs are skipped rather than flagged: URL-sourced pages are a
+  supported shape, and flagging them would train operators to ignore the check.
+- `_EVIDENCE_REFS_PER_PAGE_CAP = 200` (T2) bounds per-page work and emits an
+  `evidence_refs_truncated` notice so the truncation is never silent.
+- Registered in `run_all_checks` — an unwired helper is orphan code (the cycle-3
+  PR-review MAJOR). `checks_run` goes 12 → 13; the enumeration-order pin and the
+  lint-report snapshot were updated to match.
+
+**AC02 — value-domain gate at the tier boundary.** `_validate_tier_boundary`
+gained `allowed_values: Mapping[str, frozenset] | None`. Every cycle-73/74 check
+covers the KEY domain (unexpected key, missing required key) or a shape bound
+(depth, string length, key count), so `{"action": "exfiltrate"}` — a legal key set
+with a legal shape — passed straight through. The permitted-action enum existed
+only as JSON-schema text plus a hand-rolled `if` after the boundary, so every new
+call site had to re-implement the check or silently inherit the gap.
+
+- New `ValueDomainError(TierBoundaryError)` in `errors.py`. Subclassing keeps
+  every legacy `except TierBoundaryError` / `except ValidationError` site
+  catching by inheritance, while letting `proposer.py` split-catch for the
+  forensically distinct `action_not_in_vocabulary:` reason — separable in an
+  audit from the existing `tier_boundary_rejected:` shape-rejection prefix.
+  **Catch ordering is load-bearing** and is commented as such: the subclass must
+  be caught first or the parent swallows it and the distinction collapses.
+- The vocabulary is `_ACTION_VOCABULARY`, derived from
+  `_PROPOSER_SCHEMA["properties"]["action"]["enum"]`. T5 anti-spoofing carries
+  over unchanged: deriving it in the module (rather than accepting a
+  caller-supplied set) makes "never from model output" structural rather than a
+  convention.
+- The now-dead `if action != "propose"` re-check is REMOVED. With the enum
+  enforced at the boundary and `action` in the schema's `required` list, the
+  branch was unreachable, and keeping it would leave the vocabulary duplicated at
+  exactly the call site this AC exists to de-duplicate.
+- Unhashable values are handled explicitly: `value in frozenset` raises
+  `TypeError` rather than returning `False`, so an enum field arriving as a list
+  is caught and rejected instead of leaking a `TypeError`.
+- A key named in `allowed_values` but absent from `scan_output` is NOT a
+  rejection — that is `required_keys`' job, and conflating them would silently
+  make every optional enum field mandatory.
+- **Scope: root-level keys only.** `capture.py:280,286`'s `kind` / `confidence`
+  enums live inside `items[].properties` and a root-level map cannot reach them.
+  Supporting nested paths means inventing a path mini-language inside a security
+  validator — new parsing surface in the worst possible place. Those enums stay
+  enforced by `_call_llm_json`'s jsonschema pass, and the gap is FILED in BACKLOG
+  per cycle-23 L3 rather than left as an undocumented deferral.
+
+**AC03 — ingest audit ordering.** `_run_ingest_body` appended the `Ingested …`
+line to `wiki/log.md` at step 7, before `_commit_ingest_manifest` ran on return.
+A commit failure therefore left the human audit trail asserting a successful
+ingest the manifest never recorded, so an operator reading `log.md` saw a
+completed ingest while `find_changed_sources` still treated the source as
+unprocessed.
+
+- The append moved into `ingest_source`, after the commit and after the
+  `stage=success` JSONL row. JSONL is the authoritative correlation surface, so
+  emitting it first minimises the window in which a durable ingest has no
+  terminal machine record.
+- Extracted as `_append_ingest_success_log` so the ordering is spy-testable at a
+  named production symbol instead of by asserting on call order inside a
+  200-line function. `_run_ingest_body` is now a pure worker with zero audit
+  emissions — the same caller-owns-the-envelope rule (C18-L2) that the cycle-83
+  manifest move follows.
+- **Second half — `committed` flag.** Previously ANY exception reaching the
+  handler emitted `stage=failure`, including an async `KeyboardInterrupt` landing
+  between the commit and the success emission. That produced a failure record for
+  an ingest whose pages AND manifest entry are both durable — a correlation
+  surface actively contradicting durable state, which is worse than no record
+  because it teaches operators to distrust the log. Post-commit the handler now
+  emits the terminal success row if the tail did not reach it, then re-raises
+  UNCHANGED (a `KeyboardInterrupt` stays a `KeyboardInterrupt`; no `IngestError`
+  wrap applies to work that succeeded). If the success emission is ITSELF what
+  failed, the retry is swallowed with a warning so a telemetry failure can never
+  replace the caller's original exception. Genuine pre-commit failures still emit
+  `failure` — the flag must not trade one audit defect for a worse one, and a
+  test pins that.
+
+**AC04 — parent-directory fsync.** `_flush_and_fsync` guarantees the temp file's
+CONTENTS reach stable storage before `os.replace`; it does not guarantee the
+RENAME does. On ext4 with `data=writeback`, on XFS, and on several network
+filesystems the directory entry is a separate metadata stream, so a power loss
+just after the replace can leave the directory pointing at the pre-rename inode —
+the write silently reverts.
+
+- New `_fsync_parent_dir`, called from BOTH `atomic_json_write` and
+  `_atomic_text_write_replace`. The backlog named only the JSON path, but the two
+  are identical in shape and the text path carries far more traffic (every wiki
+  page, evidence-trail append, and `log.md` line), so hardening only the rarer
+  surface would have been arbitrary.
+- **Best-effort by design**, unlike `_flush_and_fsync` which must raise. The two
+  guard different failure modes: a content-fsync failure means a half-written
+  file could be promoted over a good one (corruption — fatal); a directory-fsync
+  failure means a completed write might not survive a power cut (recovery is a
+  re-ingest). Making it fatal would convert writes that work today into hard
+  failures on filesystems that reject `fsync` on a directory handle. It logs a
+  WARNING so the degradation is visible rather than silent — the same posture as
+  `_cleanup_tmp` in the same module.
+- No-op on Windows: NTFS has no `O_DIRECTORY` and `os.open` on a directory raises
+  there; rename durability comes from `MoveFileEx`.
+
+**AC05 — stale backlog entry deleted.** The Phase-4.5 MEDIUM entry claimed
+"`find_changed_sources` calls `stored.startswith("failed:")` on whatever
+`json.loads` produced … the `compiler.py` read sites remain unguarded". False as
+of cycle 84. All five read sites were re-checked: line 185 IS the
+`isinstance(stored, str)` guard, line 205 is unreachable for non-strings because
+it sits in the same `elif` chain, lines 218/460/588 coerce with `str(v)`, and
+line 230 is a plain `!=` that is type-agnostic. Deleted per the BACKLOG lifecycle
+(deletion, never strikethrough), with a behavioural test pinning that a corrupt
+non-string manifest value classifies the source as changed instead of raising
+`AttributeError` and killing the whole scan.
+
+**Revert-sensitivity — confirmed, not assumed.** Every regression test was
+mutation-checked by reverting its production change and confirming the test
+fails: dropping `allowed_values` from the proposer call site, neutering the
+`committed` flag, removing the dir-fsync call, reverting the severity split, and
+moving the human log back to its pre-cycle-86 position. The AC03 tests assert
+relative ORDER rather than presence, because presence assertions survive exactly
+the reordering they are meant to catch (C24-L4).
+
+**Housekeeping.** Two `ruff format` line-joins that the Step-9 format pass picked
+up in `mcp/browse.py` and `utils/text.py` were REVERTED — they were pre-existing
+drift on `main`, traced to no AC, and CI gates on `ruff check` rather than
+`ruff format --check`, so they had no justification in this diff.
+
+**BACKLOG:** 4 entries deleted (2 Phase-5 HIGH LEVERAGE shipped by AC01/AC02, 2
+Phase-4.5 MEDIUM shipped by AC03/AC04, 1 stale per AC05); 4 new entries filed
+(nested-enum scope-out, Windows durability gap, rename peers, TOCTOU).
+
+**Codex PR review (R1) — 2 BLOCKERs + 4 MAJORs, all fixed in-cycle.**
+
+- **BLOCKER-1 `evidence_resolvable.py`** — containment ran AFTER
+  `Path.resolve()`. But resolve IS filesystem access: it stats and follows
+  links, and on Windows resolving `\\attacker.invalid\share\probe` can
+  initiate SMB/DNS/authentication traffic. The probe IS the payload, so
+  avoiding `.is_file()` afterwards was too late — the T1 boundary had already
+  been crossed. UNC, drive-absolute, POSIX-absolute, and
+  UNC-smuggled-behind-the-`raw/`-strip refs are now rejected on the string
+  alone, before any filesystem call. My original docstring claimed "before any
+  filesystem access", which was simply wrong about what `resolve()` does.
+- **BLOCKER-2 `review/context.py` (PRE-EXISTING, not introduced by this
+  cycle)** — the deep-lint source loader confined refs to the PROJECT ROOT and
+  applied `raw/` containment ONLY when `is_link` was true. A plain
+  `source: .env` therefore passed the project-root check, skipped the raw
+  check because it is not a symlink, was read, rendered through
+  `lint/semantic.py`, and returned to the calling model by
+  `mcp/quality.py:kb_refine_page`. Frontmatter is LLM-written and
+  user-editable, so this is a concrete project-secret disclosure, not a
+  theoretical one. Raw-containment now applies to every ref regardless of
+  spelling; `is_link` is retained only so the log distinguishes the cases.
+  Dates from cycles 7/37 — surfaced by the same-class-peer question in the
+  review prompt, which is exactly what that question exists for.
+- **MAJOR-1/2 `ingest/pipeline.py`** — `committed = True` and
+  `success_emitted = True` are both assigned AFTER the operations they
+  describe. An interrupt in the first gap made the handler emit `failure` for
+  an ingest already durable in the manifest; an interrupt in the second made
+  it append a SECOND success row for one request_id. AC03's window was
+  narrowed, not closed. Both now consult the authority rather than the flag:
+  `_manifest_records_commit` re-reads `.data/hashes.json` (what
+  `find_changed_sources` actually uses) and `_jsonl_has_terminal_row` re-reads
+  the JSONL. Both helpers are deliberately non-raising — they run inside a
+  handler that must re-raise the caller's original exception, so an
+  audit-path I/O error must never replace the real one.
+- **MAJOR-4 `utils/io.py`** — `_fsync_parent_dir` swallowed every `OSError`,
+  `EIO` and `ENOSPC` included. Silence reads as durability: the caller
+  proceeds, `_commit_ingest_manifest` declares the ingest committed, and a
+  power loss can still revert the manifest with success telemetry already on
+  disk. Only `_FSYNC_UNSUPPORTED_ERRNOS` (EINVAL / ENOTSUP / EOPNOTSUPP /
+  EPERM / EACCES / ENOSYS / EBADF) are now tolerated with a WARNING; anything
+  else raises. This AMENDS design Q5, which specified blanket swallowing — the
+  review's argument is better than the original reasoning, which conflated
+  "the filesystem does not support this call" with "the disk failed".
+  Descriptor close errors are logged and swallowed separately so a close
+  failure cannot overwrite the fsync's durability verdict.
+- **Test corrections (review MINOR/NIT, all valid).** The xfail-strict
+  negative called `_validate_tier_boundary` directly AND supplied
+  `allowed_values` itself, so removing that argument from the proposer call
+  site would not have affected it — it proved the validator works, not that
+  the caller uses it. It now drives `_propose_urls`. The AC05 test never read
+  `BACKLOG.md`, so restoring the stale entry would have kept it green; a
+  doc-grep assertion was added using the cycle-23/73 walk-up helper, since the
+  `real_project_root` fixture requires `--use-real-paths`. The text-path fsync
+  had no ordering test, so moving it before its rename would have left the
+  suite green while defeating durability.
+
+**Deferred with the review's analysis rather than silently dropped:** MAJOR-3
+(Windows has NO rename-durability barrier — `_fsync_parent_dir` returns
+immediately there and `os.replace` does not request `MOVEFILE_WRITE_THROUGH`,
+so AC04 currently hardens the CI platform but not the primary development
+one), the `capture.py:694` / `query/embeddings.py:363` bare-`os.replace`
+peers, and the inherent check-then-stat TOCTOU in the new lint check. All
+three are filed in BACKLOG with concrete fix shapes.
+
+**Tests:** 3479 → 3541 collected (+62 in
+`tests/test_cycle86_validation_ordering.py`); full Windows local suite 3491
+passed / 26 skipped / 17 xfailed; ruff clean.
+
+---
+
 ### 2026-07-24 — cycle 83 (ingest crash-atomicity)
 
 > **The mechanism below (the `in_progress:`/`failed:` marker approach) was REJECTED in

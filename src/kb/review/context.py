@@ -88,25 +88,43 @@ def pair_page_with_sources(
                 }
             )
             continue
-        # Q_B fix (Phase 4.5 HIGH): reject symlinks whose resolved target escapes RAW_DIR.
-        # A symlink inside raw/ could point to /etc/passwd or project secrets.
-        if is_link:
-            try:
-                source_path.relative_to(raw_dir.resolve())
-            except ValueError:
-                logger.warning(
-                    "Source symlink escapes raw/ directory — skipping: %s -> %s",
-                    source_ref,
-                    source_path,
-                )
-                source_contents.append(
-                    {
-                        "path": source_ref,
-                        "content": None,
-                        "error": f"Source symlink escapes raw/ directory: {source_ref}",
-                    }
-                )
-                continue
+        # Q_B fix (Phase 4.5 HIGH): reject targets that escape RAW_DIR.
+        #
+        # Cycle 86 (Codex review BLOCKER) — this check used to run ONLY when
+        # `is_link` was true. That left a plain, non-symlink ref free to name
+        # any file inside the project root: `source: .env` passed the
+        # project-root check above, skipped this one because it is not a
+        # symlink, and was then read below and rendered into the review context
+        # that `kb_refine_page` returns to the model. Frontmatter is LLM-written
+        # and user-editable, so that is a concrete secret-disclosure path, not a
+        # theoretical one.
+        #
+        # Sources legitimately live under `raw/` — that is what `make_source_ref`
+        # emits and what the frontmatter template documents — so the containment
+        # rule is the same for every ref regardless of how it is spelled. The
+        # `is_link` flag is still captured on the UNRESOLVED path (cycle 37 AC1)
+        # so operators can tell the two cases apart in the log.
+        try:
+            source_path.relative_to(raw_dir.resolve())
+        except ValueError:
+            logger.warning(
+                "Source %s escapes raw/ directory — skipping: %s -> %s",
+                "symlink" if is_link else "path",
+                source_ref,
+                source_path,
+            )
+            source_contents.append(
+                {
+                    "path": source_ref,
+                    "content": None,
+                    "error": (
+                        f"Source symlink escapes raw/ directory: {source_ref}"
+                        if is_link
+                        else f"Source path escapes raw/ directory: {source_ref}"
+                    ),
+                }
+            )
+            continue
 
         if source_path.exists():
             try:
