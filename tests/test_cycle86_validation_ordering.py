@@ -772,7 +772,11 @@ def test_write_still_succeeds_when_dir_fsync_is_unavailable(tmp_path, monkeypatc
 
     def _fail_only_on_directories(fd):
         if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError("EINVAL: fsync not supported on this directory")
+            # errno must be set, not just described in the message: after the
+            # MAJOR-4 fix the helper classifies on `e.errno`, and an errno-less
+            # OSError is (correctly) treated as a genuine storage failure
+            # rather than an unsupported call. CI caught this.
+            raise OSError(errno.EINVAL, "fsync not supported on this directory")
         return real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", _fail_only_on_directories)
@@ -781,6 +785,62 @@ def test_write_still_succeeds_when_dir_fsync_is_unavailable(tmp_path, monkeypatc
     io_mod.atomic_json_write({"k": "v"}, target)
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"k": "v"}
+
+
+@pytest.mark.parametrize(
+    ("raised", "expect_raise"),
+    [
+        (OSError(errno.EINVAL, "unsupported"), False),
+        (OSError(errno.ENOTSUP, "unsupported"), False),
+        (OSError(errno.EPERM, "not permitted"), False),
+        (OSError(errno.EIO, "device failure"), True),
+        (OSError(errno.ENOSPC, "no space"), True),
+        (OSError("no errno at all"), True),
+    ],
+)
+def test_fsync_errno_classification_is_platform_independent(
+    tmp_path, monkeypatch, raised, expect_raise
+):
+    """Pin MAJOR-4's tolerate-vs-raise split WITHOUT depending on the host OS.
+
+    The real POSIX/Windows branches are guarded by skipif, so on Windows the
+    classifier was never executed and two CI rounds were burned discovering
+    that in ubuntu instead. This drives the branch directly by faking the
+    POSIX path, so the rule is enforced wherever the suite runs.
+
+    An errno-less OSError is expected to RAISE: unknown cause is treated as a
+    genuine failure, which is the conservative direction for a durability
+    barrier.
+    """
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "open", lambda *a, **k: 4242)
+    monkeypatch.setattr(os, "close", lambda fd: None)
+
+    def _raise(fd):
+        raise raised
+
+    monkeypatch.setattr(os, "fsync", _raise)
+
+    if expect_raise:
+        with pytest.raises(OSError):
+            io_mod._fsync_parent_dir(tmp_path)
+    else:
+        io_mod._fsync_parent_dir(tmp_path)
+
+
+def test_fsync_close_error_does_not_mask_the_durability_verdict(tmp_path, monkeypatch):
+    """A failing `os.close` must not turn a SUCCESSFUL fsync into an error —
+    the durability question was already answered by then."""
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "open", lambda *a, **k: 4242)
+    monkeypatch.setattr(os, "fsync", lambda fd: None)
+
+    def _bad_close(fd):
+        raise OSError(errno.EIO, "close failed")
+
+    monkeypatch.setattr(os, "close", _bad_close)
+
+    io_mod._fsync_parent_dir(tmp_path)  # must not raise
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows no-op branch")

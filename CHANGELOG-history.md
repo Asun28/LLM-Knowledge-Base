@@ -242,7 +242,7 @@ one), the `capture.py:694` / `query/embeddings.py:363` bare-`os.replace`
 peers, and the inherent check-then-stat TOCTOU in the new lint check. All
 three are filed in BACKLOG with concrete fix shapes.
 
-**Tests:** 3479 → 3534 collected (+55 in
+**Tests:** 3479 → 3541 collected (+62 in
 `tests/test_cycle86_validation_ordering.py`); full Windows local suite 3491
 passed / 26 skipped / 17 xfailed; ruff clean.
 
