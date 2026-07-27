@@ -39,7 +39,9 @@ AC03's ``required_keys``) from the locally-built JSONSchema (e.g.
 
 from __future__ import annotations
 
-from kb.errors import TierBoundaryError
+from collections.abc import Mapping
+
+from kb.errors import TierBoundaryError, ValueDomainError
 
 _TBV_ALLOWED_VALUE_TYPES = (str, int, float, type(None), list, dict)
 
@@ -49,6 +51,7 @@ def _validate_tier_boundary(
     *,
     expected_keys: frozenset[str],
     required_keys: frozenset[str] = frozenset(),
+    allowed_values: Mapping[str, frozenset] | None = None,
     max_depth: int = 4,
     max_string_len: int = 4096,
     max_keys: int = 500,
@@ -70,9 +73,13 @@ def _validate_tier_boundary(
            (cycle-74 AC03 — derived from the schema's ``"required"``
            list; the empty default preserves the cycle-73 contract that
            optional-field subsets are accepted).
-        5. Any string value longer than ``max_string_len`` (length bound).
-        6. Any nested structure deeper than ``max_depth`` (DoS bound).
-        7. Any value not in ``_TBV_ALLOWED_VALUE_TYPES`` (rejects custom
+        5. Any ROOT-LEVEL key listed in ``allowed_values`` whose value is
+           outside its permitted set (cycle-86 AC02 — raises the
+           ``ValueDomainError`` subclass so callers can split-catch it
+           for a forensically distinct manifest reason).
+        6. Any string value longer than ``max_string_len`` (length bound).
+        7. Any nested structure deeper than ``max_depth`` (DoS bound).
+        8. Any value not in ``_TBV_ALLOWED_VALUE_TYPES`` (rejects custom
            classes if Pydantic / pickle is bypassed). ``bool`` is
            explicitly accepted via the int branch (it's a Python bool
            subclass) — JSON true/false round-trip cleanly.
@@ -80,6 +87,26 @@ def _validate_tier_boundary(
     Missing keys outside ``required_keys`` are NOT a rejection cause —
     schema-level optional fields are allowed. Downstream consumers use
     ``.get(...)`` to handle missing.
+
+    ``allowed_values`` (cycle-86 AC02) closes the VALUE domain, which the
+    cycle-73/74 key-domain checks left open: ``{"action": "exfiltrate"}``
+    has a legal key set and a legal shape, so before cycle 86 it passed
+    the boundary untouched and each call site re-implemented the
+    membership test by hand. Scope is deliberately ROOT-LEVEL keys only —
+    supporting nested paths (``items[].kind``) would mean inventing a
+    path mini-language inside a security validator. Nested enums stay
+    enforced by ``_call_llm_json``'s jsonschema pass; see the cycle-86
+    design doc Q3 for the full argument and the filed follow-up.
+
+    A key named in ``allowed_values`` but ABSENT from ``scan_output`` is
+    NOT a rejection — absence is the ``required_keys`` check's job, and
+    conflating the two would make every optional enum field mandatory.
+
+    Anti-spoofing (T5, carried over unchanged from cycle 73): the
+    permitted sets MUST be derived from the LOCAL schema (e.g.
+    ``frozenset(schema['properties']['action']['enum'])``) — NEVER from
+    ``scan_output`` itself, which would let the response authorise its
+    own vocabulary.
     """
     if not isinstance(scan_output, dict):
         raise TierBoundaryError(
@@ -109,6 +136,30 @@ def _validate_tier_boundary(
             "tier-boundary verification failed: required key(s) missing: "
             f"{sorted(missing_required)!r}"
         )
+
+    # Cycle-86 AC02 — value-domain gate. Runs AFTER the key-domain checks
+    # (so an unexpected key is still reported as an unexpected key rather
+    # than as a vocabulary miss) and BEFORE the depth walk (a rejected
+    # vocabulary should not pay for a full traversal). Only root-level
+    # keys present in BOTH maps are checked; absence is required_keys'
+    # job, not this gate's.
+    for key, permitted in (allowed_values or {}).items():
+        if key not in scan_output:
+            continue
+        value = scan_output[key]
+        # Membership on an unhashable value (list / dict) raises TypeError
+        # rather than returning False, so screen for it explicitly — an
+        # enum-typed field arriving as a list is itself out-of-vocabulary.
+        try:
+            in_vocabulary = value in permitted
+        except TypeError:
+            in_vocabulary = False
+        if not in_vocabulary:
+            raise ValueDomainError(
+                "tier-boundary verification failed: value for key "
+                f"{key!r} is not in the permitted vocabulary "
+                f"{sorted(permitted, key=repr)!r} (got {value!r})"
+            )
 
     # Walk values for depth + length + type. Depth counts the root dict
     # as level 1 — so max_depth=4 admits root → list → dict → str (4).

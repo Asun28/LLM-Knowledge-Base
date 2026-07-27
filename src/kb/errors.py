@@ -27,6 +27,7 @@ __all__ = [
     "QueryError",
     "ValidationError",
     "TierBoundaryError",
+    "ValueDomainError",
     "StorageError",
 ]
 
@@ -69,6 +70,31 @@ class TierBoundaryError(ValidationError):
 
     Threat-model: T4 (EscalationOfPrivilege — bounds the blast radius of
     cycle-72's prompt-injection probability reduction).
+    """
+
+
+class ValueDomainError(TierBoundaryError):
+    """Cycle 86 AC02: a scan-tier response carried a value outside the
+    schema-declared vocabulary for its key.
+
+    Distinct from its ``TierBoundaryError`` parent, which covers the KEY
+    domain (unexpected key, missing required key) plus the shape bounds
+    (depth, string length, key count). This subclass covers the VALUE
+    domain: ``{"action": "exfiltrate"}`` has a perfectly legal key set
+    and shape, so nothing before cycle 86 rejected it at the boundary —
+    the permitted-action enum lived only in JSON-schema text plus a
+    hand-rolled ``if`` at each call site, which meant every new caller
+    had to re-implement the check or silently inherit the gap.
+
+    Subclasses ``TierBoundaryError`` (and therefore ``ValidationError``)
+    so every legacy ``except TierBoundaryError`` / ``except
+    ValidationError`` site still catches it. Callers that want forensic
+    distinctness split-catch this class FIRST and record the
+    ``action_not_in_vocabulary: ...`` reason, mirroring how cycle-73 AC04
+    split ``tier_boundary_rejected: ...`` out of the generic handler.
+
+    Threat-model: T3 (EscalationOfPrivilege — an invented action must not
+    reach an orchestrate-tier consumer).
     """
 
 

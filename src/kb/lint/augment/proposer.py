@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 from kb import config
-from kb.errors import TierBoundaryError
+from kb.errors import TierBoundaryError, ValueDomainError
 from kb.lint.augment.tier_boundary import _validate_tier_boundary
 from kb.lint.fetcher import _registered_domain, _url_is_allowed
 from kb.utils.llm import call_llm_json
@@ -51,6 +51,19 @@ _PROPOSER_SCHEMA = {
     "required": ["action"],
     "additionalProperties": True,
 }
+
+# Cycle 86 AC02 — the closed action vocabulary, derived from the schema
+# above rather than restated as a literal. Two properties matter:
+#
+#   1. T5 anti-spoofing — the permitted set comes from LOCAL schema text,
+#      never from the model's response. Deriving it here (instead of
+#      accepting a caller-supplied set) makes that structural.
+#   2. Single source of truth — editing the schema's `enum` now updates
+#      the boundary check automatically. Before cycle 86 the vocabulary
+#      lived in three places (schema text, the prompt template, and a
+#      hand-rolled `if` after the boundary), so they could drift apart
+#      silently and each new call site had to re-implement the check.
+_ACTION_VOCABULARY = frozenset(_PROPOSER_SCHEMA["properties"]["action"]["enum"])
 
 
 def _call_llm_json(*args: Any, **kwargs: Any) -> Any:
@@ -106,21 +119,31 @@ def _propose_urls(*, stub: dict[str, Any], purpose_text: str) -> dict[str, Any]:
             response,
             expected_keys=frozenset(_PROPOSER_SCHEMA["properties"].keys()),
             required_keys=frozenset(_PROPOSER_SCHEMA["required"]),
+            allowed_values={"action": _ACTION_VOCABULARY},
         )
+    except ValueDomainError as e:
+        # Cycle 86 AC02 — split-catch BEFORE the TierBoundaryError parent
+        # so the out-of-vocabulary case keeps its own manifest reason.
+        # ValueDomainError subclasses TierBoundaryError, so the ordering
+        # here is load-bearing: swapping these two blocks would silently
+        # collapse the forensic distinction this AC exists to create.
+        logger.warning("Proposer action_not_in_vocabulary for %s: %s", stub.get("page_id"), e)
+        return {"action": "abstain", "reason": f"action_not_in_vocabulary: {e}"}
     except TierBoundaryError as e:
-        logger.warning(
-            "Proposer tier_boundary_rejected for %s: %s", stub.get("page_id"), e
-        )
+        logger.warning("Proposer tier_boundary_rejected for %s: %s", stub.get("page_id"), e)
         return {"action": "abstain", "reason": f"tier_boundary_rejected: {e}"}
     except Exception as e:
         logger.warning("Proposer LLM call failed for %s: %s", stub.get("page_id"), e)
         return {"action": "abstain", "reason": f"proposer LLM error: {type(e).__name__}"}
 
-    action = response.get("action")
-    if action == "abstain":
+    # Cycle 86 AC02 — the trailing `if action != "propose"` re-check that
+    # used to live here is gone. `allowed_values` above already rejected
+    # anything outside {"propose", "abstain"}, and "action" is in the
+    # schema's `required` list, so by this line the value is necessarily
+    # one of the two. Keeping the branch would leave the vocabulary
+    # duplicated at the call site — exactly the drift this AC removes.
+    if response.get("action") == "abstain":
         return {"action": "abstain", "reason": response.get("reason", "abstained")}
-    if action != "propose":
-        return {"action": "abstain", "reason": f"unexpected action: {action!r}"}
 
     raw_urls = response.get("urls") or []
     filtered: list[str] = []
