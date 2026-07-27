@@ -1510,6 +1510,16 @@ def ingest_source(
     # extract_from_source or _pre_validate_extraction raised.
     _emit_ingest_jsonl("start", request_id, source_ref, source_hash, outcome={})
 
+    # Cycle 86 AC03 (Phase 4.5 MEDIUM, cycle-83 R2 MINOR) — post-commit state.
+    # `_commit_ingest_manifest` is the point of no return: once it returns, the
+    # ingest IS recorded and `find_changed_sources` will not re-select the
+    # source. Anything raising AFTER that point is a failure of the bookkeeping
+    # tail, not of the ingest, and must not be reported as though the ingest
+    # failed. Both flags are initialised BEFORE the try so the `except` body can
+    # read them unconditionally (C33-L2).
+    committed = False
+    success_emitted = False
+
     try:
         # Validate caller-provided extractions before the ingest body. In Claude
         # Code mode, extraction is produced here first, then validated. This runs
@@ -1601,6 +1611,8 @@ def ingest_source(
             # a concurrent same-content thread observes it. Everything above can
             # crash without leaving a false "ingested" claim in the manifest.
             _commit_ingest_manifest(manifest_ref, source_hash)
+            # Cycle 86 AC03 — point of no return crossed.
+            committed = True
 
         _emit_ingest_jsonl(
             "success",
@@ -1612,6 +1624,28 @@ def ingest_source(
                 "pages_updated": len(result.get("pages_updated", [])),
                 "pages_skipped": len(result.get("pages_skipped", [])),
             },
+        )
+        success_emitted = True
+
+        # Cycle 86 AC03 — the human `Ingested ...` line is appended HERE, after
+        # the manifest commit, not at step 7 of `_run_ingest_body` where it used
+        # to live. Pre-cycle-86 the order was: write pages -> append log ->
+        # return -> commit manifest. A commit failure therefore left `wiki/log.md`
+        # asserting a successful ingest the manifest never recorded, so an
+        # operator reading the human audit trail saw a completed ingest while
+        # `find_changed_sources` still treated the source as unprocessed.
+        #
+        # It follows the JSONL emission rather than preceding it: JSONL is the
+        # authoritative correlation surface, so emitting it first minimises the
+        # window in which a durable ingest has no terminal machine record. This
+        # also keeps the caller owning the whole telemetry envelope (C18-L2) —
+        # `_run_ingest_body` is now a pure worker with no audit emissions.
+        _append_ingest_success_log(
+            request_id=request_id,
+            source_ref=source_ref,
+            pages_created=len(result.get("pages_created", [])),
+            pages_updated=len(result.get("pages_updated", [])),
+            wiki_dir=effective_wiki_dir,
         )
         # Cycle 64 AC11 — drop the graph cache entry for this wiki_dir so the
         # next get_graph(wiki_dir) call rebuilds from post-ingest disk state.
@@ -1625,6 +1659,48 @@ def ingest_source(
             logger.debug("Cycle 64 graph-cache invalidate skipped at ingest tail: %s", _exc)
         return result
     except BaseException as exc:
+        # Cycle 86 AC03 — split pre-commit failure from post-commit interruption.
+        #
+        # Pre-cycle-86 every exception reaching here emitted `stage="failure"`,
+        # including an asynchronous KeyboardInterrupt landing in the narrow
+        # window between `_commit_ingest_manifest` returning and the success
+        # emission. That produced a `failure` row for an ingest whose pages are
+        # on disk and whose hash IS in the manifest — a correlation surface
+        # actively contradicting durable state, which is the worst kind of audit
+        # record because it makes the operator distrust the log rather than the
+        # process.
+        if committed:
+            # The ingest completed. Emit the terminal `success` row if the tail
+            # did not reach it, so the request_id always has exactly one
+            # terminal row, then re-raise UNCHANGED — a KeyboardInterrupt must
+            # stay a KeyboardInterrupt, and no IngestError wrap applies to work
+            # that actually succeeded.
+            if not success_emitted:
+                try:
+                    _emit_ingest_jsonl(
+                        "success",
+                        request_id,
+                        source_ref,
+                        source_hash,
+                        outcome={
+                            "pages_created": len(result.get("pages_created", [])),
+                            "pages_updated": len(result.get("pages_updated", [])),
+                            "pages_skipped": len(result.get("pages_skipped", [])),
+                            "post_commit_interrupt": type(exc).__name__,
+                        },
+                    )
+                except BaseException:  # noqa: BLE001
+                    # If the success emission is ITSELF what failed, retrying it
+                    # here fails the same way. Swallow it: this handler exists to
+                    # re-raise the caller's original exception, and letting a
+                    # telemetry failure replace it would lose the real cause.
+                    logger.warning(
+                        "Post-commit success emission failed for %s; the ingest "
+                        "IS committed and the original exception follows.",
+                        source_ref,
+                        exc_info=True,
+                    )
+            raise
         err_summary = sanitize_text(str(exc))
         _emit_ingest_jsonl(
             "failure",
@@ -1651,6 +1727,43 @@ def ingest_source(
         if isinstance(exc, Exception) and not isinstance(exc, (KBError, OSError, ValueError)):
             raise IngestError(str(exc)) from exc
         raise
+
+
+def _append_ingest_success_log(
+    *,
+    request_id: str,
+    source_ref: str,
+    pages_created: int,
+    pages_updated: int,
+    wiki_dir: Path,
+) -> None:
+    """Cycle 86 AC03: append the human-readable success line to ``wiki/log.md``.
+
+    Extracted from ``_run_ingest_body`` step 7 so the caller can invoke it
+    AFTER ``_commit_ingest_manifest``. Extracting it (rather than inlining
+    the ``append_wiki_log`` call at the new site) keeps the AC03 regression
+    test able to spy a single named production symbol instead of asserting
+    on call ORDER inside a 200-line function — see C16-L2 on tests that
+    must reach the real call site to be revert-sensitive.
+
+    Best-effort, unchanged from the original: the pages are already written
+    and the manifest already committed, so a `log.md` write failure must not
+    turn a successful ingest into an exception. Only ``OSError`` is
+    swallowed — a programming error still propagates.
+
+    Cycle 18 AC10 — the ``[req=...]`` prefix is hex-only (no markdown
+    markers, no ``|``/newline), so it flows through
+    ``_escape_markdown_prefix`` untouched.
+    """
+    try:
+        append_wiki_log(
+            "ingest",
+            f"[req={request_id}] Ingested {source_ref} → created {pages_created} pages, "
+            f"updated {pages_updated} pages",
+            wiki_dir / "log.md",
+        )
+    except OSError as e:
+        logger.warning("Failed to append wiki log after successful ingest: %s", e)
 
 
 def _run_ingest_body(
@@ -1833,21 +1946,11 @@ def _run_ingest_body(
     # redesign closes. The single completion write also retires the dual-write
     # divergence the old Phase-1/Phase-2 pair had under a non-default manifest path.
 
-    # 7. Append to log (best-effort — page writes already succeeded; a log failure
-    # must not crash the caller or hide the successful ingest result).
-    # Cycle 18 AC10 — prefix the message with `[req={request_id}]` so the
-    # wiki/log.md line correlates 1:1 with the JSONL `request_id` field.
-    # The prefix is hex-only (no markdown markers, no `|`/newline) so it flows
-    # through `_escape_markdown_prefix` untouched — verified by regression test.
-    try:
-        append_wiki_log(
-            "ingest",
-            f"[req={request_id}] Ingested {source_ref} → created {len(pages_created)} pages, "
-            f"updated {len(pages_updated)} pages",
-            effective_wiki_dir / "log.md",
-        )
-    except OSError as e:
-        logger.warning("Failed to append wiki log after successful ingest: %s", e)
+    # 7. Cycle 86 AC03 — the human `Ingested ...` log line is NO LONGER appended
+    # here. It moved to `ingest_source`, after `_commit_ingest_manifest`, so the
+    # human audit trail can never claim a success the manifest did not record.
+    # Same reasoning as the cycle-83 manifest move directly above: this body is a
+    # worker, and every audit emission belongs to the caller's envelope (C18-L2).
 
     # Load all pages once — shared by affected-pages analysis and contradiction detection
     all_wiki_pages = load_all_pages(wiki_dir=effective_wiki_dir)
