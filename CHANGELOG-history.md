@@ -175,12 +175,76 @@ drift on `main`, traced to no AC, and CI gates on `ruff check` rather than
 `ruff format --check`, so they had no justification in this diff.
 
 **BACKLOG:** 4 entries deleted (2 Phase-5 HIGH LEVERAGE shipped by AC01/AC02, 2
-Phase-4.5 MEDIUM shipped by AC03/AC04, 1 stale per AC05); 1 new entry filed for
-the nested-enum scope-out.
+Phase-4.5 MEDIUM shipped by AC03/AC04, 1 stale per AC05); 4 new entries filed
+(nested-enum scope-out, Windows durability gap, rename peers, TOCTOU).
 
-**Tests:** 3479 → 3526 collected (+47 in
-`tests/test_cycle86_validation_ordering.py`); full Windows local suite 3483
-passed / 25 skipped / 17 xfailed; ruff clean.
+**Codex PR review (R1) — 2 BLOCKERs + 4 MAJORs, all fixed in-cycle.**
+
+- **BLOCKER-1 `evidence_resolvable.py`** — containment ran AFTER
+  `Path.resolve()`. But resolve IS filesystem access: it stats and follows
+  links, and on Windows resolving `\\attacker.invalid\share\probe` can
+  initiate SMB/DNS/authentication traffic. The probe IS the payload, so
+  avoiding `.is_file()` afterwards was too late — the T1 boundary had already
+  been crossed. UNC, drive-absolute, POSIX-absolute, and
+  UNC-smuggled-behind-the-`raw/`-strip refs are now rejected on the string
+  alone, before any filesystem call. My original docstring claimed "before any
+  filesystem access", which was simply wrong about what `resolve()` does.
+- **BLOCKER-2 `review/context.py` (PRE-EXISTING, not introduced by this
+  cycle)** — the deep-lint source loader confined refs to the PROJECT ROOT and
+  applied `raw/` containment ONLY when `is_link` was true. A plain
+  `source: .env` therefore passed the project-root check, skipped the raw
+  check because it is not a symlink, was read, rendered through
+  `lint/semantic.py`, and returned to the calling model by
+  `mcp/quality.py:kb_refine_page`. Frontmatter is LLM-written and
+  user-editable, so this is a concrete project-secret disclosure, not a
+  theoretical one. Raw-containment now applies to every ref regardless of
+  spelling; `is_link` is retained only so the log distinguishes the cases.
+  Dates from cycles 7/37 — surfaced by the same-class-peer question in the
+  review prompt, which is exactly what that question exists for.
+- **MAJOR-1/2 `ingest/pipeline.py`** — `committed = True` and
+  `success_emitted = True` are both assigned AFTER the operations they
+  describe. An interrupt in the first gap made the handler emit `failure` for
+  an ingest already durable in the manifest; an interrupt in the second made
+  it append a SECOND success row for one request_id. AC03's window was
+  narrowed, not closed. Both now consult the authority rather than the flag:
+  `_manifest_records_commit` re-reads `.data/hashes.json` (what
+  `find_changed_sources` actually uses) and `_jsonl_has_terminal_row` re-reads
+  the JSONL. Both helpers are deliberately non-raising — they run inside a
+  handler that must re-raise the caller's original exception, so an
+  audit-path I/O error must never replace the real one.
+- **MAJOR-4 `utils/io.py`** — `_fsync_parent_dir` swallowed every `OSError`,
+  `EIO` and `ENOSPC` included. Silence reads as durability: the caller
+  proceeds, `_commit_ingest_manifest` declares the ingest committed, and a
+  power loss can still revert the manifest with success telemetry already on
+  disk. Only `_FSYNC_UNSUPPORTED_ERRNOS` (EINVAL / ENOTSUP / EOPNOTSUPP /
+  EPERM / EACCES / ENOSYS / EBADF) are now tolerated with a WARNING; anything
+  else raises. This AMENDS design Q5, which specified blanket swallowing — the
+  review's argument is better than the original reasoning, which conflated
+  "the filesystem does not support this call" with "the disk failed".
+  Descriptor close errors are logged and swallowed separately so a close
+  failure cannot overwrite the fsync's durability verdict.
+- **Test corrections (review MINOR/NIT, all valid).** The xfail-strict
+  negative called `_validate_tier_boundary` directly AND supplied
+  `allowed_values` itself, so removing that argument from the proposer call
+  site would not have affected it — it proved the validator works, not that
+  the caller uses it. It now drives `_propose_urls`. The AC05 test never read
+  `BACKLOG.md`, so restoring the stale entry would have kept it green; a
+  doc-grep assertion was added using the cycle-23/73 walk-up helper, since the
+  `real_project_root` fixture requires `--use-real-paths`. The text-path fsync
+  had no ordering test, so moving it before its rename would have left the
+  suite green while defeating durability.
+
+**Deferred with the review's analysis rather than silently dropped:** MAJOR-3
+(Windows has NO rename-durability barrier — `_fsync_parent_dir` returns
+immediately there and `os.replace` does not request `MOVEFILE_WRITE_THROUGH`,
+so AC04 currently hardens the CI platform but not the primary development
+one), the `capture.py:694` / `query/embeddings.py:363` bare-`os.replace`
+peers, and the inherent check-then-stat TOCTOU in the new lint check. All
+three are filed in BACKLOG with concrete fix shapes.
+
+**Tests:** 3479 → 3534 collected (+55 in
+`tests/test_cycle86_validation_ordering.py`); full Windows local suite 3491
+passed / 26 skipped / 17 xfailed; ruff clean.
 
 ---
 

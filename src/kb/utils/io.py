@@ -11,6 +11,7 @@ convention. Verified by cycle-1/2/6 reviewers; deviating from this ordering is
 a bug, not a style preference.
 """
 
+import errno
 import json
 import logging
 import os
@@ -171,6 +172,20 @@ def _flush_and_fsync(fd: int) -> None:
     os.fsync(fd)
 
 
+# Errnos that mean "this filesystem/platform does not support fsync on a
+# directory handle" rather than "the storage layer failed". Only these are
+# tolerated; anything else (EIO, ENOSPC, …) is a real durability failure and
+# propagates. Cycle 86, Codex review MAJOR.
+_FSYNC_UNSUPPORTED_ERRNOS = frozenset(
+    e
+    for e in (
+        getattr(errno, name, None)
+        for name in ("EINVAL", "ENOTSUP", "EOPNOTSUPP", "EPERM", "EACCES", "ENOSYS", "EBADF")
+    )
+    if e is not None
+)
+
+
 def _fsync_parent_dir(directory: Path) -> None:
     """Cycle 86 AC04 (Phase 4.5 MEDIUM / cycle-83 threat T12): flush the
     parent directory entry so the ``os.replace`` itself is durable.
@@ -183,19 +198,30 @@ def _fsync_parent_dir(directory: Path) -> None:
     directory still pointing at the pre-rename inode — the write silently
     reverts. fsync-ing the directory closes that window.
 
-    Best-effort by design, unlike ``_flush_and_fsync`` which must raise.
-    The distinction is the failure mode each one guards:
+    Failure handling splits on WHY the fsync failed (cycle 86, Codex review
+    MAJOR — the first version swallowed every ``OSError`` alike):
 
-      * content fsync failing means a half-written file could be promoted
-        over a good one — corruption, so it must be fatal;
-      * directory fsync failing means a completed write might not survive
-        a power cut — the recovery is a re-ingest, not data loss.
+      * **Unsupported** (``EINVAL`` / ``ENOTSUP`` / ``EPERM`` / … — see
+        ``_FSYNC_UNSUPPORTED_ERRNOS``): tolerated with a WARNING. Some SMB
+        and NFS mounts reject ``fsync`` on a directory handle outright, and
+        macOS wants ``F_FULLFSYNC`` instead. Treating those as fatal would
+        convert writes that work today into hard failures.
+      * **Genuine storage failure** (``EIO``, ``ENOSPC``, anything else):
+        RAISES. Swallowing these is worse than never calling fsync, because
+        the caller reads silence as durability — ``_commit_ingest_manifest``
+        would report a committed ingest whose manifest entry a power loss
+        can still revert, with success telemetry already on disk saying
+        otherwise.
 
-    Making this fatal would convert writes that work today into hard
-    failures on filesystems that reject ``fsync`` on a directory handle
-    (documented on some SMB/NFS mounts, and on macOS where ``F_FULLFSYNC``
-    is the correct call). We log at WARNING instead so the degradation is
-    visible rather than silent — same posture as ``_cleanup_tmp``.
+    Note the asymmetry with ``_flush_and_fsync`` above, which raises on
+    everything: a content-fsync failure risks promoting a half-written file
+    over a good one, which is corruption. A directory-fsync failure risks
+    losing a rename, whose recovery is a re-ingest — worth reporting, but
+    only when it reflects a real fault rather than an unsupported call.
+
+    A failure to CLOSE the descriptor is logged and swallowed regardless:
+    the fsync above has already decided durability, and a close error must
+    not overwrite that verdict.
 
     No-op on Windows: NTFS has no ``O_DIRECTORY``, and ``os.open`` on a
     directory raises ``PermissionError`` there. Windows durability for the
@@ -213,9 +239,31 @@ def _fsync_parent_dir(directory: Path) -> None:
     try:
         os.fsync(fd)
     except OSError as e:
-        logger.warning("Parent-dir fsync failed for %s: %s", directory, e)
+        # Cycle 86 (Codex review MAJOR) — distinguish "this filesystem does not
+        # support the operation" from "the storage layer failed". The first is
+        # the case this helper exists to tolerate; the second is a real
+        # durability failure, and swallowing it would let `_commit_ingest_manifest`
+        # report a committed ingest whose manifest a power loss can still revert.
+        if e.errno in _FSYNC_UNSUPPORTED_ERRNOS:
+            logger.warning(
+                "Parent-dir fsync unsupported for %s (errno=%s): %s", directory, e.errno, e
+            )
+        else:
+            logger.error(
+                "Parent-dir fsync FAILED for %s (errno=%s): %s — rename durability "
+                "is not guaranteed for this write",
+                directory,
+                e.errno,
+                e,
+            )
+            raise
     finally:
-        os.close(fd)
+        # A failure to close leaves descriptor state uncertain but the fsync
+        # above already decided durability, so it must not mask that verdict.
+        try:
+            os.close(fd)
+        except OSError as close_err:
+            logger.warning("Failed to close parent-dir fd for %s: %s", directory, close_err)
 
 
 def atomic_json_write(data: object, path: Path) -> None:

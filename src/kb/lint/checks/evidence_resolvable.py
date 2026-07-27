@@ -19,6 +19,7 @@ convention by hand; this check makes lint enforce it.
 from __future__ import annotations
 
 import logging
+import ntpath
 from pathlib import Path
 
 import frontmatter
@@ -60,6 +61,20 @@ def _resolve_evidence_ref(ref: str, raw_dir: Path) -> Path | None:
     ``is_relative_to`` and returns ``None``.
     """
     rel = ref.replace("\\", "/").strip()
+
+    # LEXICAL rejection, before any filesystem call. `Path.resolve()` is itself
+    # filesystem access — it stats and follows links — and on Windows resolving
+    # a UNC ref such as `\\attacker.invalid\share\probe` can initiate SMB/DNS/
+    # authentication traffic. Doing that and only THEN checking containment
+    # would defeat the T1 boundary before the check ever ran: the probe is the
+    # payload. So anything that could anchor outside `raw_dir` is rejected on
+    # the string alone.
+    #
+    # (Backslashes are already normalised to `/` above, so a UNC path arrives
+    # here as `//host/share`.)
+    if rel.startswith("//") or rel.startswith("/") or ntpath.splitdrive(rel)[0]:
+        return None
+
     # `make_source_ref` writes refs project-root-relative with a `raw/` prefix,
     # so strip it before re-anchoring under the caller's raw_dir. This is what
     # keeps the check working under the tmp_path sandbox, where raw_dir is not
@@ -67,6 +82,10 @@ def _resolve_evidence_ref(ref: str, raw_dir: Path) -> Path | None:
     if rel.startswith("raw/"):
         rel = rel[len("raw/") :]
     if not rel:
+        return None
+    # Re-check after the prefix strip: `raw//host/share` becomes `/host/share`,
+    # which is absolute again.
+    if rel.startswith("/") or ntpath.splitdrive(rel)[0]:
         return None
     try:
         resolved = (raw_dir / rel).resolve()

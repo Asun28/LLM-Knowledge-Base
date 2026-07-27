@@ -1669,13 +1669,30 @@ def ingest_source(
         # actively contradicting durable state, which is the worst kind of audit
         # record because it makes the operator distrust the log rather than the
         # process.
+        # Cycle 86 (Codex review MAJOR) — do not trust the in-memory flag alone.
+        # `committed = True` runs AFTER `_commit_ingest_manifest` returns, so an
+        # interrupt landing in that gap (or during the commit's own lock
+        # cleanup) leaves the flag False for an ingest that IS durably
+        # recorded. Re-reading the manifest closes the window properly instead
+        # of just narrowing it: the manifest is the authority on whether the
+        # commit happened, and the flag is only a cheap fast path.
+        if not committed:
+            committed = _manifest_records_commit(manifest_ref, source_hash)
+
         if committed:
             # The ingest completed. Emit the terminal `success` row if the tail
             # did not reach it, so the request_id always has exactly one
             # terminal row, then re-raise UNCHANGED — a KeyboardInterrupt must
             # stay a KeyboardInterrupt, and no IngestError wrap applies to work
             # that actually succeeded.
-            if not success_emitted:
+            # Cycle 86 (Codex review MAJOR) — `success_emitted` is set AFTER the
+            # row is appended and fsynced, so an interrupt in that gap would
+            # make this handler write a SECOND success row for one request_id.
+            # A correlation surface that double-counts misleads exactly as much
+            # as one that under-counts, so confirm against the file rather than
+            # the flag. On a read failure the helper reports False and we emit —
+            # a duplicate row beats no terminal row at all.
+            if not success_emitted and not _jsonl_has_terminal_row(request_id):
                 try:
                     _emit_ingest_jsonl(
                         "success",
@@ -1727,6 +1744,70 @@ def ingest_source(
         if isinstance(exc, Exception) and not isinstance(exc, (KBError, OSError, ValueError)):
             raise IngestError(str(exc)) from exc
         raise
+
+
+def _manifest_records_commit(manifest_ref: str, source_hash: str) -> bool:
+    """Cycle 86: has ``_commit_ingest_manifest`` durably recorded this ingest?
+
+    Read-only authority check for the failure path. ``ingest_source`` sets its
+    ``committed`` flag on the line AFTER the commit returns, so an interrupt in
+    that gap would otherwise make the handler emit ``stage="failure"`` for an
+    ingest whose hash is already on disk. The manifest — not the flag — is what
+    ``find_changed_sources`` consults, so it is the correct arbiter.
+
+    Never raises: this runs inside an exception handler that must re-raise the
+    caller's original exception, so a manifest read failure degrades to "assume
+    not committed" (the pre-cycle-86 behaviour) rather than replacing the real
+    error with an I/O error from the audit path.
+    """
+    try:
+        from kb.compile.compiler import load_manifest  # noqa: PLC0415
+
+        return load_manifest().get(manifest_ref) == source_hash
+    except Exception as exc:  # noqa: BLE001 — audit path must not mask the caller's error
+        logger.warning("Could not confirm manifest commit for %s: %s", manifest_ref, exc)
+        return False
+
+
+def _jsonl_has_terminal_row(request_id: str) -> bool:
+    """Cycle 86: does ``.data/ingest_log.jsonl`` already hold a terminal row
+    for ``request_id``?
+
+    Guards the post-commit retry emission. ``success_emitted`` is set AFTER the
+    row is written, so an interrupt in between would make the handler append a
+    SECOND success row for one request_id — and a correlation surface that
+    double-counts is as misleading as one that under-counts. Reading back is
+    cheap here because it only happens on the exception path.
+
+    Never raises, for the same reason as ``_manifest_records_commit``: on a read
+    failure it reports False, so the handler falls back to emitting, and a
+    duplicate row is strictly better than none.
+    """
+    try:
+        # Same lazy, dynamic lookup `_emit_ingest_jsonl` uses, so a
+        # `tmp_kb_env` monkeypatch of `kb.config.PROJECT_ROOT` is honoured
+        # here too (cycle-18 L1 snapshot-binding hazard).
+        from kb import config as _config  # noqa: PLC0415
+
+        path = _config.PROJECT_ROOT / ".data" / "ingest_log.jsonl"
+        if not path.is_file():
+            return False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("request_id") == request_id and row.get("stage") in (
+                "success",
+                "failure",
+                "duplicate_skip",
+            ):
+                return True
+    except Exception as exc:  # noqa: BLE001 — audit path must not mask the caller's error
+        logger.warning("Could not scan ingest JSONL for %s: %s", request_id, exc)
+    return False
 
 
 def _append_ingest_success_log(

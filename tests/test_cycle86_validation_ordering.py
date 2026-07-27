@@ -22,6 +22,7 @@ production helper rather than exercising `os.fsync` in isolation.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -214,6 +215,40 @@ def test_escaping_ref_is_never_stat_ed(tmp_path, monkeypatch):
     assert len(issues) == 1
     assert not any("shadow" in p for p in probed), (
         f"out-of-tree ref was stat'd — T1 oracle regression. Probed: {probed}"
+    )
+
+
+@pytest.mark.parametrize(
+    "hostile_ref",
+    [
+        r"\\attacker.invalid\share\probe",  # UNC — SMB/DNS traffic on resolve
+        "//attacker.invalid/share/probe",
+        "C:/Windows/System32/config/SAM",  # drive-absolute
+        "/etc/shadow",  # POSIX absolute
+        r"raw\\\\attacker.invalid\share\x",  # UNC smuggled behind the raw/ strip
+    ],
+)
+def test_hostile_ref_is_rejected_without_resolving_it(tmp_path, monkeypatch, hostile_ref):
+    """BLOCKER (Codex review): `Path.resolve()` is itself filesystem access.
+
+    The first version checked containment only AFTER resolving, so a UNC ref
+    could initiate SMB/DNS/authentication traffic during resolution — the
+    probe IS the payload, and avoiding `.is_file()` afterwards is too late.
+    These refs must be rejected on the string alone, so `resolve` is never
+    reached.
+    """
+    resolved: list[str] = []
+    real_resolve = Path.resolve
+
+    def _spy_resolve(self, *a, **k):
+        resolved.append(str(self))
+        return real_resolve(self, *a, **k)
+
+    monkeypatch.setattr(Path, "resolve", _spy_resolve)
+
+    assert evidence_mod._resolve_evidence_ref(hostile_ref, tmp_path) is None
+    assert not any("attacker.invalid" in p or "System32" in p for p in resolved), (
+        f"hostile ref was resolved before the containment check: {resolved}"
     )
 
 
@@ -418,22 +453,30 @@ def test_propose_urls_still_accepts_a_valid_proposal(monkeypatch):
 
 
 @pytest.mark.xfail(
-    strict=True, reason="AC02: an invented action must never pass the boundary"
+    strict=True, reason="AC02: an invented action must never survive _propose_urls"
 )
-def test_invented_action_passing_the_boundary_is_a_regression():
+def test_invented_action_surviving_the_proposer_is_a_regression(monkeypatch):
     """xfail-strict negative (CONDITION 2).
 
-    If `allowed_values` is ever dropped from the proposer call site or the
-    validator stops enforcing it, this test starts PASSING and strict mode
-    turns that into a suite failure. A plain assertion could not distinguish
-    "rejected correctly" from "test never ran".
+    Goes through `_propose_urls` rather than calling the validator directly.
+    The first version of this test supplied `allowed_values` itself, so
+    removing that argument from the production call site would not have
+    affected it — it proved the validator works, not that the caller uses it
+    (Codex review NIT). Driving the real entry point means dropping
+    `allowed_values` at `proposer.py` makes this xfail start PASSING, and
+    strict mode turns that into a suite failure.
     """
-    _validate_tier_boundary(
-        {"action": "exfiltrate"},
-        expected_keys=_EXPECTED,
-        required_keys=_REQUIRED,
-        allowed_values=_VOCAB,
+    monkeypatch.setattr(
+        proposer_mod,
+        "_call_llm_json",
+        lambda *a, **k: {"action": "exfiltrate", "urls": ["https://evil.test/x"]},
     )
+    monkeypatch.setattr(proposer_mod, "_url_is_allowed", lambda *a, **k: True)
+
+    result = proposer_mod._propose_urls(stub={"page_id": "concepts/x"}, purpose_text="")
+
+    # Only reachable if the invented action was NOT rejected.
+    assert result["action"] == "propose"
 
 
 # ==========================================================================
@@ -660,17 +703,60 @@ def test_fsync_parent_dir_swallows_errors_rather_than_failing_the_write(tmp_path
     io_mod._fsync_parent_dir(tmp_path / "no-such-dir")  # must not raise
 
 
-def test_helper_swallows_a_failing_fsync_on_a_real_directory(tmp_path, monkeypatch):
-    """T7, direct: the helper must absorb an `os.fsync` refusal, not just an
-    `os.open` one. Called directly rather than through `atomic_json_write`,
-    because a blanket `os.fsync` patch would also hit `_flush_and_fsync` —
-    which is REQUIRED to raise, and whose failure is a different contract.
+def test_text_path_dir_fsync_also_runs_after_its_rename(tmp_path, monkeypatch):
+    """The ordering test above covers the JSON path only. Without this, moving
+    the TEXT path's fsync before its rename would leave the suite green while
+    defeating durability on the higher-traffic surface (Codex review MINOR).
     """
-    monkeypatch.setattr(
-        os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("EINVAL on directory"))
-    )
+    order: list[str] = []
+    real_replace = Path.replace
+
+    def _spy_replace(self, target):
+        order.append("replace")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", _spy_replace)
+    monkeypatch.setattr(io_mod, "_fsync_parent_dir", lambda d: order.append("dir_fsync"))
+
+    io_mod.atomic_text_write("body\n", tmp_path / "page.md")
+
+    assert order == ["replace", "dir_fsync"]
+
+
+def test_helper_tolerates_an_unsupported_fsync(tmp_path, monkeypatch):
+    """T7, direct: an `EINVAL`-class refusal (the filesystem does not support
+    fsync on a directory handle) is tolerated.
+
+    Called directly rather than through `atomic_json_write`, because a blanket
+    `os.fsync` patch would also hit `_flush_and_fsync` — which is REQUIRED to
+    raise, and whose failure is a different contract. That confusion is what
+    CI caught on ubuntu-latest.
+    """
+
+    def _unsupported(fd):
+        raise OSError(errno.EINVAL, "fsync not supported on this directory")
+
+    monkeypatch.setattr(os, "fsync", _unsupported)
 
     io_mod._fsync_parent_dir(tmp_path)  # must not raise
+
+
+@pytest.mark.skipif(os.name == "nt", reason="helper is a no-op on Windows")
+def test_helper_raises_on_a_genuine_storage_failure(tmp_path, monkeypatch):
+    """A real `EIO` must NOT be swallowed (Codex review MAJOR).
+
+    Silence would be read as durability: `_commit_ingest_manifest` would
+    declare the ingest committed while a power loss can still revert the
+    manifest, with success telemetry already on disk saying otherwise.
+    """
+
+    def _eio(fd):
+        raise OSError(errno.EIO, "device failure")
+
+    monkeypatch.setattr(os, "fsync", _eio)
+
+    with pytest.raises(OSError):
+        io_mod._fsync_parent_dir(tmp_path)
 
 
 def test_write_still_succeeds_when_dir_fsync_is_unavailable(tmp_path, monkeypatch):
@@ -728,6 +814,32 @@ def test_fsync_parent_dir_actually_fsyncs_on_posix(tmp_path, monkeypatch):
 # ==========================================================================
 # AC05 — backlog hygiene: the stale load_manifest entry is gone
 # ==========================================================================
+
+
+def _repo_root() -> Path:
+    """Walk up from this file until BACKLOG.md appears — the cycle-23 AC2 /
+    cycle-73 hygiene pattern. The `real_project_root` fixture is not usable
+    here because it requires the `--use-real-paths` opt-out flag.
+    """
+    here = Path(__file__).resolve().parent
+    for ancestor in (here, *here.parents):
+        if (ancestor / "BACKLOG.md").exists():
+            return ancestor
+    raise AssertionError("BACKLOG.md not found in any ancestor of tests/")
+
+
+def test_backlog_no_longer_claims_compiler_read_sites_are_unguarded():
+    """AC05 pins the DELETION, not just the behaviour behind it.
+
+    The behavioural test below proves cycle 84's guard works, but it would
+    keep passing if someone restored the stale backlog entry — so on its own
+    it does not pin AC05 at all (Codex review MINOR). This asserts the claim
+    text is actually gone.
+    """
+    backlog = (_repo_root() / "BACKLOG.md").read_text(encoding="utf-8")
+
+    assert "the `compiler.py` read sites remain unguarded" not in backlog
+    assert "`load_manifest` has no value type check" not in backlog
 
 
 def test_corrupt_manifest_value_does_not_kill_the_compile_scan(tmp_path, monkeypatch):
