@@ -171,6 +171,53 @@ def _flush_and_fsync(fd: int) -> None:
     os.fsync(fd)
 
 
+def _fsync_parent_dir(directory: Path) -> None:
+    """Cycle 86 AC04 (Phase 4.5 MEDIUM / cycle-83 threat T12): flush the
+    parent directory entry so the ``os.replace`` itself is durable.
+
+    ``_flush_and_fsync`` above guarantees the temp file's CONTENTS reach
+    stable storage before the rename. It does not guarantee the RENAME
+    does. On ext4 (``data=writeback``), XFS, and several network
+    filesystems the directory entry lives in a separate metadata stream,
+    so a power loss immediately after ``os.replace`` can leave the
+    directory still pointing at the pre-rename inode — the write silently
+    reverts. fsync-ing the directory closes that window.
+
+    Best-effort by design, unlike ``_flush_and_fsync`` which must raise.
+    The distinction is the failure mode each one guards:
+
+      * content fsync failing means a half-written file could be promoted
+        over a good one — corruption, so it must be fatal;
+      * directory fsync failing means a completed write might not survive
+        a power cut — the recovery is a re-ingest, not data loss.
+
+    Making this fatal would convert writes that work today into hard
+    failures on filesystems that reject ``fsync`` on a directory handle
+    (documented on some SMB/NFS mounts, and on macOS where ``F_FULLFSYNC``
+    is the correct call). We log at WARNING instead so the degradation is
+    visible rather than silent — same posture as ``_cleanup_tmp``.
+
+    No-op on Windows: NTFS has no ``O_DIRECTORY``, and ``os.open`` on a
+    directory raises ``PermissionError`` there. Windows durability for the
+    rename comes from ``os.replace``'s underlying ``MoveFileEx``.
+    """
+    if os.name == "nt":
+        return
+    try:
+        # O_DIRECTORY is POSIX-only and absent on some platforms; fall back
+        # to a plain O_RDONLY open, which is valid for directories there.
+        fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError as e:
+        logger.warning("Could not open parent dir %s for fsync: %s", directory, e)
+        return
+    try:
+        os.fsync(fd)
+    except OSError as e:
+        logger.warning("Parent-dir fsync failed for %s: %s", directory, e)
+    finally:
+        os.close(fd)
+
+
 def atomic_json_write(data: object, path: Path) -> None:
     """Write data as JSON to path atomically (temp file + rename).
 
@@ -194,6 +241,9 @@ def atomic_json_write(data: object, path: Path) -> None:
             f.flush()
             _flush_and_fsync(f.fileno())
         Path(tmp_path).replace(path)
+        # Cycle 86 AC04 — the rename is only durable once the directory
+        # entry is flushed too. Best-effort; see _fsync_parent_dir.
+        _fsync_parent_dir(path.parent)
     except BaseException:
         # fd_transferred=True means os.fdopen took ownership; the with-block already
         # closed it. Only close manually if os.fdopen never ran (rare failure).
@@ -221,6 +271,10 @@ def _atomic_text_write_replace(content: str, path: Path) -> None:
             f.flush()
             _flush_and_fsync(f.fileno())
         Path(tmp_path).replace(path)
+        # Cycle 86 AC04 — same-class peer of atomic_json_write's barrier
+        # (design Q4). This is the higher-traffic surface of the two: every
+        # wiki page, evidence-trail append, and log.md write lands here.
+        _fsync_parent_dir(path.parent)
     except BaseException:
         if not fd_transferred:
             try:
