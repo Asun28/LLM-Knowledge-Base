@@ -178,7 +178,7 @@ drift on `main`, traced to no AC, and CI gates on `ruff check` rather than
 Phase-4.5 MEDIUM shipped by AC03/AC04, 1 stale per AC05); 1 new entry filed for
 the nested-enum scope-out.
 
-**Tests:** 3479 → 3525 collected (+46 in
+**Tests:** 3479 → 3526 collected (+47 in
 `tests/test_cycle86_validation_ordering.py`); full Windows local suite 3483
 passed / 25 skipped / 17 xfailed; ruff clean.
 

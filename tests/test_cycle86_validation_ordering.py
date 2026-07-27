@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -659,16 +660,38 @@ def test_fsync_parent_dir_swallows_errors_rather_than_failing_the_write(tmp_path
     io_mod._fsync_parent_dir(tmp_path / "no-such-dir")  # must not raise
 
 
+def test_helper_swallows_a_failing_fsync_on_a_real_directory(tmp_path, monkeypatch):
+    """T7, direct: the helper must absorb an `os.fsync` refusal, not just an
+    `os.open` one. Called directly rather than through `atomic_json_write`,
+    because a blanket `os.fsync` patch would also hit `_flush_and_fsync` —
+    which is REQUIRED to raise, and whose failure is a different contract.
+    """
+    monkeypatch.setattr(
+        os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("EINVAL on directory"))
+    )
+
+    io_mod._fsync_parent_dir(tmp_path)  # must not raise
+
+
 def test_write_still_succeeds_when_dir_fsync_is_unavailable(tmp_path, monkeypatch):
-    """Belt-and-braces on T7: even if the underlying `os.fsync` refuses, the
-    write completes and the bytes land."""
-    if os.name != "nt":
-        monkeypatch.setattr(
-            os,
-            "fsync",
-            lambda fd: (_ for _ in ()).throw(OSError("EINVAL on directory")),
-        )
+    """T7 end-to-end: a filesystem that rejects fsync on a DIRECTORY handle
+    must not break writes that work today.
+
+    The patch fails only directory descriptors. Failing every fsync would
+    take out `_flush_and_fsync` too and prove nothing about the directory
+    barrier — that mistake is what CI caught on ubuntu-latest, since the
+    content fsync raised before the code under test was ever reached.
+    """
+    real_fsync = os.fsync
+
+    def _fail_only_on_directories(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("EINVAL: fsync not supported on this directory")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", _fail_only_on_directories)
     target = tmp_path / "resilient.json"
+
     io_mod.atomic_json_write({"k": "v"}, target)
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"k": "v"}
