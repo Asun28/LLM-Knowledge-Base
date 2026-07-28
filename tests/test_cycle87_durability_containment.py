@@ -319,17 +319,25 @@ def test_existence_verdict_is_driven_by_the_no_follow_helper(tmp_path, monkeypat
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink test")
-def test_stat_does_not_follow_a_symlink_swapped_in_after_the_containment_check(tmp_path):
+def test_stat_does_not_follow_a_symlink_swapped_in_after_the_containment_check(
+    tmp_path, monkeypatch
+):
     """The existence stat must not follow a link out of `raw/` (threat T1).
 
-    Models the TOCTOU window directly: containment was decided against a path
-    under `raw/`, and only afterwards did that path become a symlink pointing
-    outside. `_resolve_evidence_ref` legitimately returns the contained path
-    because in the real race it returns before the swap lands.
+    Models the TOCTOU window directly. `_resolve_evidence_ref` is stubbed to
+    return the contained path because that is what it does in the real race: it
+    calls `.resolve()` and decides containment BEFORE the swap lands, so it
+    returns a path it correctly judged to be inside `raw/`. Only afterwards does
+    that path become a symlink pointing outside. Letting the real resolver run
+    against an already-planted symlink would test the wrong thing entirely —
+    `.resolve()` follows the link, containment then rejects it, and the stat
+    under test is never reached.
 
     Pre-fix, `resolved.is_file()` followed the link and reported True — a stat
     of a path outside `raw/` whose result reached lint output, which is exactly
     the filesystem-existence oracle the cycle-86 T1 boundary exists to prevent.
+    So pre-fix this emits NO issue at all; post-fix the link is refused and the
+    ref is reported unresolvable.
     """
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
@@ -342,6 +350,8 @@ def test_stat_does_not_follow_a_symlink_swapped_in_after_the_containment_check(t
     swapped.symlink_to(secret)
     assert swapped.is_file(), "precondition: the pre-fix stat would have followed this link"
 
+    monkeypatch.setattr(evidence_mod, "_resolve_evidence_ref", lambda ref, raw: swapped)
+
     wiki_dir = tmp_path / "wiki"
     page = _write_page(wiki_dir, "raw/evidence.md")
 
@@ -349,6 +359,33 @@ def test_stat_does_not_follow_a_symlink_swapped_in_after_the_containment_check(t
 
     assert [i["check"] for i in issues] == ["evidence_unresolvable"]
     assert "does not resolve to a file" in issues[0]["message"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink test")
+def test_a_symlink_resolving_inside_raw_is_still_accepted(tmp_path):
+    """R1 raised that the no-follow stat might reject legitimate symlinks in
+    `raw/`. It does not, and this pins that rather than arguing it.
+
+    `_resolve_evidence_ref` returns the RESOLVED path, so an ordinary symlink is
+    already followed and containment-checked before the stat ever runs. A link
+    pointing INSIDE `raw/` therefore arrives at the stat as its regular-file
+    target and passes. (A link pointing OUTSIDE `raw/` was already an `error`
+    before this cycle, via the containment check — not the silent pass the
+    review assumed.) Only a link appearing at the resolved path itself, i.e. one
+    swapped in after resolution, is refused.
+    """
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "shared").mkdir(parents=True)
+    real = raw_dir / "shared" / "real.md"
+    real.write_text("shared evidence", encoding="utf-8")
+
+    link = raw_dir / "evidence.md"
+    link.symlink_to(real)
+
+    wiki_dir = tmp_path / "wiki"
+    page = _write_page(wiki_dir, "raw/evidence.md")
+
+    assert check_evidence_resolvable(wiki_dir=wiki_dir, raw_dir=raw_dir, pages=[page]) == []
 
 
 def test_a_real_contained_file_still_passes(tmp_path):
