@@ -325,6 +325,16 @@ class RenameCompletedBarrierError(OSError):
 
     Subclasses ``OSError`` so every existing ``except OSError`` still catches it;
     callers that must distinguish check for this type explicitly.
+
+    **Only all-or-nothing callers need to handle it.** ``atomic_json_write`` and
+    ``_atomic_text_write_replace`` deliberately do NOT: their destination now
+    holds the new content, which is the outcome the caller asked for, and the
+    exception means "that write is not durability-guaranteed", not "it did not
+    happen". Rolling it back would DESTROY a completed write over a failed
+    fsync. Their ``_cleanup_tmp`` is a no-op here because the temp was renamed
+    away, which is correct. ``capture._write_item_files`` is different only
+    because it promises all-or-nothing across a BATCH, so one item's completed
+    promote has to be undone when a later step fails.
     """
 
 
