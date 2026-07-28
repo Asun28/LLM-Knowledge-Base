@@ -429,7 +429,7 @@ llm-wiki-flywheel/
     feedback/              # Bayesian trust scoring
     review/                # Page-source pairing + refiner
     utils/                 # Hashing, LLM calls, page locks, path safety, I/O
-  tests/                   # 3461 tests across 235 files
+  tests/                   # 3555 tests across 239 files
 ```
 
 </details>
