@@ -97,18 +97,21 @@ def test_os_replace_called_with_correct_paths(hybrid_wiki, monkeypatch):
     vec_path = _vec_db_path(hybrid_wiki)
     tmp_path = vec_path.parent / (vec_path.name + ".tmp")
 
-    replace_spy = MagicMock(wraps=embeddings_mod.os.replace)
-    monkeypatch.setattr(embeddings_mod.os, "replace", replace_spy)
+    # Cycle 87 AC02 moved the promote onto `durable_replace`, which is now the
+    # seam: on Windows it uses `MoveFileExW` rather than `os.replace`, so spying
+    # the latter would silently observe zero calls there.
+    replace_spy = MagicMock(wraps=embeddings_mod.durable_replace)
+    monkeypatch.setattr(embeddings_mod, "durable_replace", replace_spy)
 
     rebuild_vector_index(hybrid_wiki, force=True)
 
     assert replace_spy.call_count == 1, (
-        f"os.replace must fire exactly once; got {replace_spy.call_count}. "
+        f"the promote must fire exactly once; got {replace_spy.call_count}. "
         f"Revert to direct in-place write would fire 0 calls."
     )
     # Call args: (tmp_path_str, vec_path_str) per the production contract.
     args = replace_spy.call_args.args
-    assert args == (str(tmp_path), str(vec_path)), f"os.replace called with wrong paths: {args}"
+    assert args == (str(tmp_path), str(vec_path)), f"promote called with wrong paths: {args}"
 
 
 def test_crash_during_build_leaves_no_tmp_and_preserves_production(hybrid_wiki, monkeypatch):
@@ -201,9 +204,10 @@ def test_cache_entry_closed_and_popped_before_replace(hybrid_wiki, monkeypatch):
     idx._conn = mock_conn
     embeddings_mod._index_cache[str(vec_path)] = idx
 
-    # Spy on os.replace — verify cache pop + conn.close happened BEFORE it.
-    # Capture real os.replace BEFORE monkeypatching to avoid recursion.
-    real_replace = embeddings_mod.os.replace
+    # Spy on the promote — verify cache pop + conn.close happened BEFORE it.
+    # Capture the real callable BEFORE monkeypatching to avoid recursion.
+    # Cycle 87 AC02: the seam is `durable_replace`, not `os.replace`.
+    real_replace = embeddings_mod.durable_replace
     ordering_checks = []
 
     def _spy_replace(src, dst):
@@ -214,7 +218,7 @@ def test_cache_entry_closed_and_popped_before_replace(hybrid_wiki, monkeypatch):
         ordering_checks.append(("close",))
 
     mock_conn.close = _spy_close
-    monkeypatch.setattr(embeddings_mod.os, "replace", _spy_replace)
+    monkeypatch.setattr(embeddings_mod, "durable_replace", _spy_replace)
 
     rebuild_vector_index(hybrid_wiki, force=True)
 
@@ -240,13 +244,13 @@ def test_empty_pages_branch_uses_tmp_then_replace(tmp_path, monkeypatch):
     vec_path = _vec_db_path(wiki_dir)
     tmp_path_db = vec_path.parent / (vec_path.name + ".tmp")
 
-    replace_spy = MagicMock(wraps=embeddings_mod.os.replace)
-    monkeypatch.setattr(embeddings_mod.os, "replace", replace_spy)
+    replace_spy = MagicMock(wraps=embeddings_mod.durable_replace)
+    monkeypatch.setattr(embeddings_mod, "durable_replace", replace_spy)
 
     result = rebuild_vector_index(wiki_dir, force=True)
     assert result is True
     assert replace_spy.call_count == 1, (
-        "Empty-pages branch must also call os.replace(tmp, vec) exactly once"
+        "Empty-pages branch must also promote tmp -> vec exactly once"
     )
     assert replace_spy.call_args.args == (str(tmp_path_db), str(vec_path))
     assert vec_path.exists()

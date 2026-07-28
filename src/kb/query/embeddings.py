@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from kb.config import EMBEDDING_MODEL
-from kb.utils.io import file_lock
+from kb.utils.io import durable_replace, file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +360,11 @@ def rebuild_vector_index(wiki_dir: Path, force: bool = False) -> bool:
             # os.replace so Windows can release the read handle on vec_path.
             _evict_vector_index_cache_entry(vec_path)
 
-            os.replace(str(tmp_path), str(vec_path))
+            # Cycle 87 AC02 — was a bare `os.replace`, which bypassed both
+            # atomic-write helpers and so carried no durability barrier at all:
+            # power loss here could silently restore the previous index while
+            # this function returned True.
+            durable_replace(str(tmp_path), str(vec_path))
         except Exception:
             # Cycle 24 AC8 — clean-slate on crash: the tmp DB may be partial
             # or complete-but-unreplaced; either way it is not the production

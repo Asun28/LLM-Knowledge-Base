@@ -33,6 +33,7 @@ from kb.config import (
     TEMPLATES_DIR,
 )
 from kb.errors import KBError
+from kb.utils.io import durable_replace
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
 
@@ -690,8 +691,15 @@ def _write_item_files(
                 _rollback_finalized(written)
                 _rollback_reservations(reservations[i:])
                 return [], f"Error: slug escapes captures dir: {slug!r}"
-            temp_path.write_text(markdown, encoding="utf-8")
-            os.replace(temp_path, final_path)
+            # Cycle 87 AC02 — was `write_text` + a bare `os.replace`, which left
+            # BOTH halves unflushed: the body could still be in the page cache
+            # when the promote landed, so power loss could surface a reported
+            # capture as empty, and the rename itself had no barrier either.
+            with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(markdown)
+                handle.flush()
+                os.fsync(handle.fileno())
+            durable_replace(temp_path, final_path)
             written.append(
                 CaptureItem(
                     slug=slug,
