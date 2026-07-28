@@ -33,7 +33,7 @@ from kb.config import (
     TEMPLATES_DIR,
 )
 from kb.errors import KBError
-from kb.utils.io import durable_replace
+from kb.utils.io import RenameCompletedBarrierError, durable_replace
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
 
@@ -710,11 +710,25 @@ def _write_item_files(
                 )
             )
     except OSError as e:
+        if isinstance(e, RenameCompletedBarrierError):
+            # Cycle 87 R1 (Codex MAJOR-1). The promote is no longer all-or-nothing
+            # from the caller's side: the rename COMPLETED and only the durability
+            # barrier failed after it. `written` never recorded this item, and its
+            # temp is already gone, so neither rollback below touches the final —
+            # an orphan `<slug>.md` would survive a capture reported as ([], err).
+            try:
+                final_path.unlink(missing_ok=True)
+            except OSError as unlink_err:  # pragma: no cover — rare AV / lock race
+                logger.warning(
+                    "Failed to remove %s during all-or-nothing rollback: %s",
+                    final_path,
+                    unlink_err,
+                )
         _rollback_finalized(written)
         # Roll back the failing reservation AND every untouched one after it.
         # `reservations[current_idx:]` includes the failing item (whose temp
-        # still exists when write_text raises pre-os.replace; is a no-op when
-        # os.replace itself raises because temp was already renamed).
+        # still exists when the body write raises pre-promote; is a no-op once
+        # the promote has renamed the temp away).
         _rollback_reservations(reservations[current_idx:])
         return [], f"Error: write failed on item {current_idx}: {e}"
 

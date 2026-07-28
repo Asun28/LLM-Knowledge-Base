@@ -752,16 +752,19 @@ def test_rotate_inside_lock(tmp_path: Path, monkeypatch) -> None:
         events.append(f"rotate:{p.name}")
         real_rotate(p)
 
-    # Spy on Path.rename — captures the actual rotation rename.
-    real_rename = Path.rename
+    # Spy on the rotation promote. Cycle 87 R1 (MINOR-3) routed rotation through
+    # `durable_replace`, so `Path.rename` no longer fires here — and on Windows
+    # the promote is `MoveFileExW`, so `os.replace` would not fire either. The
+    # shared helper is the only platform-agnostic seam.
+    real_promote = wiki_log.durable_replace
 
-    def spy_rename(self, target):
-        events.append(f"rename:{self.name}->{Path(target).name}")
-        return real_rename(self, target)
+    def spy_rename(src, target):
+        events.append(f"rename:{Path(src).name}->{Path(target).name}")
+        return real_promote(src, target)
 
     monkeypatch.setattr(wiki_log, "file_lock", spy_file_lock)
     monkeypatch.setattr(wiki_log, "_rotate_log_if_oversized", spy_rotate)
-    monkeypatch.setattr(Path, "rename", spy_rename)
+    monkeypatch.setattr(wiki_log, "durable_replace", spy_rename)
 
     wiki_log.append_wiki_log("test", "trigger rotate", log_path)
 

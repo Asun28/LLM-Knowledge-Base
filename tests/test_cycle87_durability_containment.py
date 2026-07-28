@@ -165,6 +165,85 @@ def test_atomic_text_write_routes_through_durable_replace(tmp_path, monkeypatch)
     assert Path(spy.call_args[0][1]) == target
 
 
+def test_barrier_failure_after_a_completed_rename_raises_the_distinct_type(tmp_path, monkeypatch):
+    """R1 MAJOR-1. `os.replace` was atomic in the sense callers relied on: it
+    either renamed or raised, never both. The POSIX parent-dir fsync runs AFTER
+    the rename and cycle-86 made it raise on genuine storage failure, so a bare
+    re-raise tells the caller the promote did not happen while the destination
+    sits there. The distinct type is what lets an all-or-nothing caller undo it.
+    """
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
+
+    def _boom(_directory):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(io_mod, "_fsync_parent_dir", _boom)
+
+    tmp = tmp_path / "src.tmp"
+    tmp.write_text("payload", encoding="utf-8")
+    dest = tmp_path / "dest.md"
+
+    with pytest.raises(io_mod.RenameCompletedBarrierError) as excinfo:
+        io_mod.durable_replace(tmp, dest)
+
+    assert excinfo.value.errno == 5
+    assert isinstance(excinfo.value, OSError), "legacy except OSError sites must still catch"
+    assert dest.read_text(encoding="utf-8") == "payload", "the rename DID complete"
+    assert not tmp.exists()
+
+
+# ==========================================================================
+# AC01 supplement — the real Win32 boundary (R1 MINOR-4)
+# ==========================================================================
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exercises the real kernel32 binding")
+def test_move_file_ex_w_abi_is_declared():
+    """R1 MINOR-4: the faked-platform tests stub `_resolve_move_file_ex_w`, so a
+    wrong argtypes/restype or a dropped `use_last_error` leaves them all green.
+    This asserts the real declaration. `ctypes.wintypes` cannot even be imported
+    on POSIX, so this cannot be a faked-platform test.
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    fn = io_mod._resolve_move_file_ex_w()
+
+    assert fn.argtypes == (
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.DWORD,
+    )
+    assert fn.restype is ctypes.wintypes.BOOL
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exercises the real kernel32 binding")
+def test_real_write_through_promote_creates_overwrites_and_reports_failure(tmp_path):
+    """R1 MINOR-4: end-to-end proof the native path works, which no faked test
+    can give. CI is ubuntu-only, so without this the Windows branch would ship
+    having never actually executed.
+    """
+    dest = tmp_path / "dest.md"
+
+    first = tmp_path / "a.tmp"
+    first.write_text("payload-A", encoding="utf-8")
+    io_mod.durable_replace(first, dest)
+    assert dest.read_text(encoding="utf-8") == "payload-A"
+    assert not first.exists()
+
+    # MOVEFILE_REPLACE_EXISTING must actually overwrite an existing destination.
+    second = tmp_path / "b.tmp"
+    second.write_text("payload-B", encoding="utf-8")
+    io_mod.durable_replace(second, dest)
+    assert dest.read_text(encoding="utf-8") == "payload-B"
+
+    # A failed move must raise rather than silently report success. WinError maps
+    # onto an OSError subclass, which is what every caller's except OSError relies on.
+    with pytest.raises(OSError) as excinfo:
+        io_mod.durable_replace(tmp_path / "absent.tmp", tmp_path / "other.md")
+    assert excinfo.value.winerror == 2
+
+
 # ==========================================================================
 # AC02 — the two bare os.replace peers
 # ==========================================================================
@@ -225,6 +304,67 @@ def _write_capture(captures_dir: Path):
         "2026-04-13T00:00:00Z",
         captures_dir=captures_dir,
     )
+
+
+def test_capture_removes_the_final_when_the_barrier_fails_after_the_rename(tmp_path, monkeypatch):
+    """R1 MAJOR-1. Capture promises all-or-nothing. When the rename completes and
+    only the barrier fails, `written` never records the item and its temp is
+    already gone, so neither rollback touches the final — an orphan `<slug>.md`
+    would survive a capture reported as `([], error)`.
+
+    Fails against a revert of the RenameCompletedBarrierError handling: the
+    orphan remains and the captures dir is not empty.
+    """
+    captures_dir = tmp_path / "captures"
+
+    def _rename_then_fail(src, dst):
+        os.replace(src, dst)  # the promote genuinely completes
+        raise io_mod.RenameCompletedBarrierError(5, "Input/output error")
+
+    monkeypatch.setattr(capture_mod, "durable_replace", _rename_then_fail)
+
+    written, err = _write_capture(captures_dir)
+
+    assert written == []
+    assert err is not None and "write failed" in err
+    assert list(captures_dir.glob("*.md")) == [], "all-or-nothing leaked an orphan capture"
+
+
+def test_proposal_consumption_promotes_through_durable_replace(tmp_path, monkeypatch):
+    """R1 MAJOR-2. Scoped out originally as idempotent re-consumption, which
+    understated it: a reverted rename makes the next run reparse the proposals
+    and `persister.py` write ANOTHER raw article under a fresh run id.
+    """
+    import kb.lint.augment.orchestrator as orch_mod
+
+    assert orch_mod.durable_replace is io_mod.durable_replace
+    src = tmp_path / "_augment_proposals.md"
+    src.write_text("proposals", encoding="utf-8")
+    dest = tmp_path / "_augment_proposals.md.consumed-abcd1234"
+
+    orch_mod.durable_replace(src, dest)
+
+    assert dest.read_text(encoding="utf-8") == "proposals"
+    assert not src.exists()
+
+
+def test_log_rotation_promotes_through_durable_replace(tmp_path, monkeypatch):
+    """R1 MINOR-3. Same-class rename peer: power loss could otherwise revert the
+    archive-name transition after rotation was reported.
+    """
+    import kb.utils.wiki_log as wiki_log_mod
+
+    spy = MagicMock(wraps=wiki_log_mod.durable_replace)
+    monkeypatch.setattr(wiki_log_mod, "durable_replace", spy)
+
+    log_path = tmp_path / "log.md"
+    log_path.write_text("x" * 64, encoding="utf-8")
+
+    wiki_log_mod.rotate_if_oversized(log_path, max_bytes=8, archive_stem_prefix="log")
+
+    assert spy.call_count == 1
+    assert not log_path.exists()
+    assert len(list(tmp_path.glob("log.*.md"))) == 1
 
 
 def test_vector_rebuild_promotes_through_durable_replace(tmp_path, monkeypatch):

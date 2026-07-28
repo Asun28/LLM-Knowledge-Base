@@ -147,13 +147,77 @@ do if the production code still calls `.is_file()`; the Windows branch must call
 `_fsync_parent_dir`; a failed write-through move must raise with no fallback; and
 capture's content flush must be ordered before its promote.
 
+**R1 review outcome (Codex).**
+
+Codex returned REQUEST-CHANGES with 2 MAJOR + 3 MINOR. Four were fixed in-cycle; one
+was filed. DeepSeek ran the same diff in parallel and returned 2 MAJOR + 2 MINOR, all
+four of which were rejected with citations.
+
+*MAJOR-1 — a regression this cycle introduced.* `os.replace` was atomic in the sense
+callers relied on: it either renamed or raised, never both. `durable_replace` broke that,
+because the POSIX parent-directory fsync runs AFTER the rename and cycle 86 deliberately
+made it raise on genuine storage failure. `capture._write_item_files` appends to `written`
+only after the promote returns, so a barrier failure left the final file on disk, absent
+from `written`, with its temp already renamed away — `_rollback_finalized` did not know
+about it and `_rollback_reservations` was a no-op for it. An orphan `<slug>.md` therefore
+survived a capture reported as `([], error)`, silently breaking an explicit all-or-nothing
+contract. The pre-existing comment at that site even asserted the old atomicity as its
+justification. Fixed with `RenameCompletedBarrierError(OSError)`, raised only when the
+rename completed and the barrier then failed; capture unlinks the final on it. It
+subclasses `OSError` so every legacy `except OSError` still catches by inheritance.
+
+*MAJOR-2 — a scope-out that did not survive.* The PR body listed
+`orchestrator.py`'s proposal-consumption rename as an out-of-scope same-class peer, on the
+grounds that its failure mode was idempotent re-consumption rather than data loss. Codex
+traced the consequence one step further: if power loss reverts that rename, the next run
+reparses `_augment_proposals.md`, repeats the fetch/LLM/ingest work, and `persister.py`
+writes ANOTHER raw article under a fresh run id. That is duplicated content, not a no-op.
+The same-class-peer rule says a weak scope-out justification brings the peer in scope, so
+it was routed through `durable_replace`.
+
+*MINOR-3.* `wiki_log.rotate_if_oversized` was a third bare-rename peer that the
+concept-grep missed. Also routed through the barrier.
+
+*MINOR-4.* The faked-platform tests stub `_resolve_move_file_ex_w` wholesale, so a wrong
+`argtypes`/`restype`, or a dropped `use_last_error=True`, left every one of them green —
+and a stale `WinError(0)` instead of the real code is exactly the failure that would cause.
+Two Windows-only tests now assert the real ABI declaration and drive a genuine
+create / overwrite / failure cycle through kernel32. This converts a manual pre-merge check
+into permanent coverage; ubuntu CI can never execute that branch.
+
+*MINOR-5 — filed, not fixed.* Codex flagged that several AC03 tests cannot detect a revert
+to `Path.is_file()`, while agreeing they should be RETAINED as non-regression guards and
+that the real detectors (the platform-independent helper-driven test and the POSIX swap
+test) do work. The ask is ADDED Windows reparse coverage — file symlink, junction,
+hardlink. Deferred because unprivileged symlink creation fails on the development machine
+(`WinError 1314`), so the test would skip on the only platform able to run it. Filed with
+the junction-first approach recorded.
+
+*DeepSeek findings, all rejected with citations.* Two claimed `atomic_json_write` leaks its
+temp file when the promote raises — but `_cleanup_tmp(tmp_path)` runs unconditionally in the
+`except BaseException` block at io.py:401 and io.py:429; only the `os.close` is gated on
+`fd_transferred`, and the review attached the guard to the wrong statement. One cited a test
+by a name that does not exist in the repository. One claimed the `lstat` change regresses
+legitimate symlinks under `raw/` — but `_resolve_evidence_ref` returns the RESOLVED path, so
+a link inside `raw/` reaches the stat as its regular-file target, and a link pointing outside
+`raw/` was already an `error` via the containment check rather than the silent pass assumed.
+That last one was plausible enough to settle with a test rather than an argument, so
+`test_a_symlink_resolving_inside_raw_is_still_accepted` now pins it.
+
+*CI caught a bad test.* The POSIX symlink test planted the link and let the real
+`_resolve_evidence_ref` run. That helper calls `.resolve()`, which follows the link, so
+containment rejected it and the stat under test was never reached — the assertion failed on
+a different message. It looked green locally only because the test is skipped on Windows.
+The resolver is now stubbed to return the contained path, which is what it genuinely returns
+in the race being modelled.
+
 | Metric | Value |
 |---|---|
-| ACs | 3 shipped, 1 dropped-stale |
-| src files | 4 (`utils/io.py`, `capture.py`, `query/embeddings.py`, `lint/checks/evidence_resolvable.py`) |
-| Tests | 3541 → 3555 collected (+14) |
+| ACs | 3 shipped, 1 dropped-stale, 4 R1 findings fixed |
+| src files | 6 (`utils/io.py`, `capture.py`, `query/embeddings.py`, `lint/checks/evidence_resolvable.py`, `lint/augment/orchestrator.py`, `utils/wiki_log.py`) |
+| Tests | 3541 → 3562 collected (+21) |
 | Test files | 238 → 239 |
-| BACKLOG | 4 entries deleted (3 shipped, 1 stale) |
+| BACKLOG | 4 deleted (3 shipped, 1 stale) + 1 filed (Windows reparse coverage) |
 
 ### 2026-07-27 — cycle 86 (validation & ordering correctness)
 

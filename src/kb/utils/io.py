@@ -310,6 +310,24 @@ def _raise_last_windows_error() -> None:  # pragma: no cover - faked platform
     raise ctypes.WinError(ctypes.get_last_error())
 
 
+class RenameCompletedBarrierError(OSError):
+    """The rename COMPLETED, and only the durability barrier afterwards failed.
+
+    Cycle 87 R1 (Codex MAJOR-1). ``os.replace`` was atomic in the sense callers
+    relied on: it either renamed or raised, never both. ``durable_replace`` broke
+    that, because the POSIX parent-directory fsync runs AFTER the rename and
+    cycle-86 made it raise on genuine storage failure (``EIO`` / ``ENOSPC``).
+
+    A caller that treats any exception as "the promote did not happen" will then
+    leave the destination in place while reporting failure. For
+    ``capture._write_item_files`` that silently breaks an explicit all-or-nothing
+    contract: the orphan ``<slug>.md`` survives a capture reported as `([], err)`.
+
+    Subclasses ``OSError`` so every existing ``except OSError`` still catches it;
+    callers that must distinguish check for this type explicitly.
+    """
+
+
 def _use_windows_write_through() -> bool:
     """Whether ``durable_replace`` should take the Win32 write-through path.
 
@@ -362,7 +380,15 @@ def durable_replace(tmp: Path | str, dest: Path | str) -> None:
     # Arguments are passed through unchanged rather than coerced to Path: callers
     # that hand in strings have their exact call shape preserved for spies.
     os.replace(tmp, dest)
-    _fsync_parent_dir(Path(dest).parent)
+    try:
+        _fsync_parent_dir(Path(dest).parent)
+    except OSError as exc:
+        # Cycle 87 R1 (Codex MAJOR-1) — past this line the rename has ALREADY
+        # happened, so a bare re-raise would tell the caller "the promote did not
+        # occur" while the destination sits there. Re-raise as a distinct type so
+        # callers with an all-or-nothing contract can undo it. See
+        # RenameCompletedBarrierError.
+        raise RenameCompletedBarrierError(exc.errno, str(exc)) from exc
 
 
 def atomic_json_write(data: object, path: Path) -> None:
