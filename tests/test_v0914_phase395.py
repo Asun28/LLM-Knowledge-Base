@@ -414,12 +414,16 @@ class TestAtomicTextWrite:
         target = tmp_path / "output.md"
         target.write_text("original", encoding="utf-8")
 
-        # Monkey-patch Path.replace to fail after write
+        # Make the promote fail after the temp write. Cycle 87 AC01 moved the
+        # rename into `durable_replace`, which is the only platform-agnostic
+        # seam — on Windows it uses `MoveFileExW`, so patching `Path.replace`
+        # or `os.replace` would not intercept and nothing would raise.
+        import kb.utils.io as io_mod
 
-        def failing_replace(self, target):
+        def failing_replace(_src, _dst):
             raise OSError("disk full")
 
-        monkeypatch.setattr(Path, "replace", failing_replace)
+        monkeypatch.setattr(io_mod, "durable_replace", failing_replace)
 
         with pytest.raises(OSError):
             atomic_text_write("new content", target)

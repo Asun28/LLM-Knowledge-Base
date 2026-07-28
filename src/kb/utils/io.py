@@ -224,8 +224,9 @@ def _fsync_parent_dir(directory: Path) -> None:
     not overwrite that verdict.
 
     No-op on Windows: NTFS has no ``O_DIRECTORY``, and ``os.open`` on a
-    directory raises ``PermissionError`` there. Windows durability for the
-    rename comes from ``os.replace``'s underlying ``MoveFileEx``.
+    directory raises ``PermissionError`` there. Windows rename durability is
+    obtained a different way — see ``durable_replace``, which routes ``nt``
+    around this helper entirely rather than pretending it did something.
     """
     if os.name == "nt":
         return
@@ -266,6 +267,104 @@ def _fsync_parent_dir(directory: Path) -> None:
             logger.warning("Failed to close parent-dir fd for %s: %s", directory, close_err)
 
 
+# Win32 ``MoveFileExW`` flags. ``MOVEFILE_COPY_ALLOWED`` is deliberately absent:
+# it lets the move degrade into a cross-volume copy+delete, which is not an
+# atomic replacement and would reintroduce the torn-write window this helper
+# exists to close.
+_MOVEFILE_REPLACE_EXISTING = 0x1
+_MOVEFILE_WRITE_THROUGH = 0x8
+
+
+def _resolve_move_file_ex_w():  # pragma: no cover - exercised via a faked platform
+    """Return a fully-typed ``MoveFileExW`` callable. Windows only.
+
+    Split into its own function for two reasons. It keeps the ``ctypes`` ABI
+    declaration in one auditable place — cycle 65 lost a day to an under-declared
+    ``CreateFileW`` whose wrong ``restype`` broke real-file unlinks — and it gives
+    the faked-platform tests a seam, since ``ctypes.WinDLL`` does not exist on the
+    POSIX CI runner at all.
+
+    ``use_last_error=True`` is load-bearing: it makes ctypes capture the thread's
+    Win32 error code immediately after the call, so ``ctypes.get_last_error()``
+    cannot be clobbered by an intervening call the way a bare
+    ``GetLastError()`` lookup can be.
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+    move_file_ex_w = kernel32.MoveFileExW
+    move_file_ex_w.argtypes = (
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.DWORD,
+    )
+    move_file_ex_w.restype = ctypes.wintypes.BOOL
+    return move_file_ex_w
+
+
+def _raise_last_windows_error() -> None:  # pragma: no cover - faked platform
+    """Raise an ``OSError`` carrying the last Win32 error. Windows only."""
+    import ctypes
+
+    raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _use_windows_write_through() -> bool:
+    """Whether ``durable_replace`` should take the Win32 write-through path.
+
+    A named predicate rather than an inline ``os.name == "nt"`` so the tests can
+    drive BOTH branches on a single platform. Monkeypatching ``os.name`` itself
+    is not viable: ``pathlib.Path`` selects its concrete flavour from it at
+    instantiation, so faking it makes every ``Path(...)`` in the call stack raise
+    ``UnsupportedOperation``.
+    """
+    return os.name == "nt"
+
+
+def durable_replace(tmp: Path | str, dest: Path | str) -> None:
+    """Atomically replace ``dest`` with ``tmp``, making the RENAME durable.
+
+    Cycle 87 AC01 (Phase 4.5 MEDIUM, cycle-86 Codex review MAJOR). Cycle 86 added
+    a rename barrier but only a POSIX one, so the platform this project is
+    actually developed on kept no durability guarantee at all. This helper is the
+    single promote path for every caller that needs one, which is the other half
+    of the fix: the same gap kept reappearing because each site rolled its own
+    ``os.replace``.
+
+    **POSIX** — rename, then fsync the parent directory, because the directory
+    entry lives in a separate metadata stream on ext4 ``data=writeback``, XFS and
+    several network filesystems.
+
+    **Windows** — ``MoveFileExW`` with ``MOVEFILE_WRITE_THROUGH``, which MSDN
+    defines as not returning until the move has been flushed to disk. This does
+    NOT go through ``os.replace``: CPython passes only
+    ``MOVEFILE_REPLACE_EXISTING``, so the ``os.replace``-is-durable-on-NTFS claim
+    the previous docstring made was never true.
+
+    Two shapes were rejected during design (both reviewers independently agreed).
+    Re-opening ``dest`` after the rename and fsync-ing that handle is durability
+    theatre: ``FlushFileBuffers`` flushes the file's own data and MFT record, not
+    the parent directory index that carries the name, and it would additionally
+    race any concurrent unlink of ``dest``. Falling back to ``os.replace`` when
+    the write-through move fails is worse than the original bug, because it
+    converts a durability failure into a successful-looking write.
+    """
+    if _use_windows_write_through():
+        move_file_ex_w = _resolve_move_file_ex_w()
+        if not move_file_ex_w(
+            os.fspath(tmp),
+            os.fspath(dest),
+            _MOVEFILE_REPLACE_EXISTING | _MOVEFILE_WRITE_THROUGH,
+        ):
+            _raise_last_windows_error()
+        return
+    # Arguments are passed through unchanged rather than coerced to Path: callers
+    # that hand in strings have their exact call shape preserved for spies.
+    os.replace(tmp, dest)
+    _fsync_parent_dir(Path(dest).parent)
+
+
 def atomic_json_write(data: object, path: Path) -> None:
     """Write data as JSON to path atomically (temp file + rename).
 
@@ -288,10 +387,9 @@ def atomic_json_write(data: object, path: Path) -> None:
             json.dump(data, f, indent=2, allow_nan=False)
             f.flush()
             _flush_and_fsync(f.fileno())
-        Path(tmp_path).replace(path)
-        # Cycle 86 AC04 — the rename is only durable once the directory
-        # entry is flushed too. Best-effort; see _fsync_parent_dir.
-        _fsync_parent_dir(path.parent)
+        # Cycle 87 AC01 — the rename is only durable once the directory entry
+        # (POSIX) or the move itself (Windows) is flushed. See durable_replace.
+        durable_replace(tmp_path, path)
     except BaseException:
         # fd_transferred=True means os.fdopen took ownership; the with-block already
         # closed it. Only close manually if os.fdopen never ran (rare failure).
@@ -318,11 +416,10 @@ def _atomic_text_write_replace(content: str, path: Path) -> None:
             f.write(content)
             f.flush()
             _flush_and_fsync(f.fileno())
-        Path(tmp_path).replace(path)
-        # Cycle 86 AC04 — same-class peer of atomic_json_write's barrier
-        # (design Q4). This is the higher-traffic surface of the two: every
-        # wiki page, evidence-trail append, and log.md write lands here.
-        _fsync_parent_dir(path.parent)
+        # Cycle 87 AC01 — same-class peer of atomic_json_write's barrier
+        # (cycle-86 design Q4). This is the higher-traffic surface of the two:
+        # every wiki page, evidence-trail append, and log.md write lands here.
+        durable_replace(tmp_path, path)
     except BaseException:
         if not fd_transferred:
             try:

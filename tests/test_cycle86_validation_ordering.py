@@ -652,7 +652,15 @@ def test_run_ingest_body_no_longer_emits_the_success_audit_line(
 
 def test_atomic_json_write_fsyncs_the_parent_directory(tmp_path, monkeypatch):
     """Spies the production helper at the real call site rather than
-    exercising `os.fsync` standalone (C16-L2)."""
+    exercising `os.fsync` standalone (C16-L2).
+
+    Cycle 87 AC01 pins the platform explicitly. The parent-dir fsync is the
+    POSIX barrier only — Windows now takes the `MoveFileExW` write-through path
+    and never calls this helper. Before, this passed on Windows only because the
+    helper was still *called* there as a no-op, which is the accident that let
+    the Windows durability gap survive cycle 86.
+    """
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
     seen: list[Path] = []
     monkeypatch.setattr(io_mod, "_fsync_parent_dir", lambda d: seen.append(Path(d)))
 
@@ -667,7 +675,11 @@ def test_atomic_json_write_fsyncs_the_parent_directory(tmp_path, monkeypatch):
 
 def test_atomic_text_write_fsyncs_the_parent_directory(tmp_path, monkeypatch):
     """Design Q4 — the same-class peer. This is the higher-traffic surface:
-    every wiki page and evidence-trail append lands here."""
+    every wiki page and evidence-trail append lands here.
+
+    Cycle 87 AC01 — POSIX branch, see the JSON peer above.
+    """
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
     seen: list[Path] = []
     monkeypatch.setattr(io_mod, "_fsync_parent_dir", lambda d: seen.append(Path(d)))
 
@@ -680,15 +692,21 @@ def test_atomic_text_write_fsyncs_the_parent_directory(tmp_path, monkeypatch):
 
 def test_dir_fsync_runs_after_the_rename_not_before(tmp_path, monkeypatch):
     """Ordering matters: fsync-ing the directory before the rename would
-    flush the wrong state and provide no durability at all."""
+    flush the wrong state and provide no durability at all.
+
+    Cycle 87 AC01 — the rename primitive is `os.replace` inside
+    `durable_replace`, not `Path.replace`; spying the old one would observe
+    nothing and assert a one-element order vacuously.
+    """
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
     order: list[str] = []
-    real_replace = Path.replace
+    real_replace = io_mod.os.replace
 
-    def _spy_replace(self, target):
+    def _spy_replace(src, dst):
         order.append("replace")
-        return real_replace(self, target)
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(Path, "replace", _spy_replace)
+    monkeypatch.setattr(io_mod.os, "replace", _spy_replace)
     monkeypatch.setattr(io_mod, "_fsync_parent_dir", lambda d: order.append("dir_fsync"))
 
     io_mod.atomic_json_write({"k": "v"}, tmp_path / "out.json")
@@ -708,14 +726,15 @@ def test_text_path_dir_fsync_also_runs_after_its_rename(tmp_path, monkeypatch):
     the TEXT path's fsync before its rename would leave the suite green while
     defeating durability on the higher-traffic surface (Codex review MINOR).
     """
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
     order: list[str] = []
-    real_replace = Path.replace
+    real_replace = io_mod.os.replace
 
-    def _spy_replace(self, target):
+    def _spy_replace(src, dst):
         order.append("replace")
-        return real_replace(self, target)
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(Path, "replace", _spy_replace)
+    monkeypatch.setattr(io_mod.os, "replace", _spy_replace)
     monkeypatch.setattr(io_mod, "_fsync_parent_dir", lambda d: order.append("dir_fsync"))
 
     io_mod.atomic_text_write("body\n", tmp_path / "page.md")
