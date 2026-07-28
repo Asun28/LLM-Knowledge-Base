@@ -539,7 +539,7 @@ def test_a_real_contained_file_still_passes(tmp_path):
     assert check_evidence_resolvable(wiki_dir=wiki_dir, raw_dir=raw_dir, pages=[page]) == []
 
 
-def test_durable_rename_refuses_to_clobber_an_existing_destination(tmp_path):
+def test_durable_rename_refuses_to_clobber_an_existing_destination(tmp_path, monkeypatch):
     """R2 MINOR-4/MINOR-5. The R1 fixes gained a barrier by routing two callers
     onto `durable_replace`, which silently also swapped their semantics from
     no-clobber to overwrite. Both depend on the refusal: wiki_log picks its
@@ -551,6 +551,13 @@ def test_durable_rename_refuses_to_clobber_an_existing_destination(tmp_path):
     src.write_text("new", encoding="utf-8")
     dest = tmp_path / "dest.md"
     dest.write_text("PRECIOUS EXISTING ARCHIVE", encoding="utf-8")
+
+    # Drive the POSIX branch explicitly. `os.rename` REPLACES silently on POSIX
+    # (no-clobber from `Path.rename` is Windows-only), so a POSIX implementation
+    # built on it would destroy the archive while this test passed on Windows —
+    # which is exactly what CI caught. `os.link` is the portable atomic
+    # no-clobber primitive and works on NTFS too, so this runs on both.
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
 
     with pytest.raises(OSError):
         io_mod.durable_rename(src, dest)
@@ -564,8 +571,10 @@ def test_durable_rename_refuses_to_clobber_an_existing_destination(tmp_path):
     assert dest.read_text(encoding="utf-8") == "new"
 
 
-def test_durable_rename_succeeds_onto_a_free_destination(tmp_path):
-    """The no-clobber guard must not break the ordinary path."""
+def test_durable_rename_succeeds_onto_a_free_destination(tmp_path, monkeypatch):
+    """The no-clobber guard must not break the ordinary path. Runs the POSIX
+    branch explicitly for the same reason as the test above."""
+    monkeypatch.setattr(io_mod, "_use_windows_write_through", lambda: False)
     src = tmp_path / "log.md"
     src.write_text("body", encoding="utf-8")
     dest = tmp_path / "log.2026-07.md"

@@ -428,7 +428,20 @@ def durable_rename(src: Path | str, dest: Path | str) -> None:
         if not move_file_ex_w(os.fspath(src), os.fspath(dest), _MOVEFILE_WRITE_THROUGH):
             _raise_last_windows_error()
         return
-    os.rename(src, dest)
+
+    # NOT `os.rename`: on POSIX that is `rename(2)`, which REPLACES an existing
+    # destination silently — the no-clobber behaviour callers see from
+    # `Path.rename` is Windows-only. Using it here would have left the exact
+    # archive-destroying bug this function exists to prevent, on the CI platform
+    # (caught by CI, not locally, because the local platform is the one where
+    # `os.rename` does refuse).
+    #
+    # `link(2)` is the portable atomic no-clobber primitive: it fails with EEXIST
+    # if the destination exists, with no window between the check and the create.
+    # Both call sites move within one directory, so the cross-filesystem and
+    # no-hardlink-support limitations of `os.link` do not apply.
+    os.link(src, dest)
+    os.unlink(src)
     try:
         _fsync_parent_dir(Path(dest).parent)
     except OSError as exc:
