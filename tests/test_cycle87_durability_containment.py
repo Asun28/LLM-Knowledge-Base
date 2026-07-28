@@ -337,12 +337,12 @@ def test_proposal_consumption_promotes_through_durable_replace(tmp_path, monkeyp
     """
     import kb.lint.augment.orchestrator as orch_mod
 
-    assert orch_mod.durable_replace is io_mod.durable_replace
+    assert orch_mod.durable_rename is io_mod.durable_rename
     src = tmp_path / "_augment_proposals.md"
     src.write_text("proposals", encoding="utf-8")
     dest = tmp_path / "_augment_proposals.md.consumed-abcd1234"
 
-    orch_mod.durable_replace(src, dest)
+    orch_mod.durable_rename(src, dest)
 
     assert dest.read_text(encoding="utf-8") == "proposals"
     assert not src.exists()
@@ -354,8 +354,8 @@ def test_log_rotation_promotes_through_durable_replace(tmp_path, monkeypatch):
     """
     import kb.utils.wiki_log as wiki_log_mod
 
-    spy = MagicMock(wraps=wiki_log_mod.durable_replace)
-    monkeypatch.setattr(wiki_log_mod, "durable_replace", spy)
+    spy = MagicMock(wraps=wiki_log_mod.durable_rename)
+    monkeypatch.setattr(wiki_log_mod, "durable_rename", spy)
 
     log_path = tmp_path / "log.md"
     log_path.write_text("x" * 64, encoding="utf-8")
@@ -537,3 +537,62 @@ def test_a_real_contained_file_still_passes(tmp_path):
     page = _write_page(wiki_dir, "raw/evidence.md")
 
     assert check_evidence_resolvable(wiki_dir=wiki_dir, raw_dir=raw_dir, pages=[page]) == []
+
+
+def test_durable_rename_refuses_to_clobber_an_existing_destination(tmp_path):
+    """R2 MINOR-4/MINOR-5. The R1 fixes gained a barrier by routing two callers
+    onto `durable_replace`, which silently also swapped their semantics from
+    no-clobber to overwrite. Both depend on the refusal: wiki_log picks its
+    archive name with an ordinal loop precisely so it does not destroy an
+    existing archive, and the consumed-proposal name is unique only to 8 run-id
+    characters. Adding durability must not change who wins a collision.
+    """
+    src = tmp_path / "src.md"
+    src.write_text("new", encoding="utf-8")
+    dest = tmp_path / "dest.md"
+    dest.write_text("PRECIOUS EXISTING ARCHIVE", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        io_mod.durable_rename(src, dest)
+
+    assert dest.read_text(encoding="utf-8") == "PRECIOUS EXISTING ARCHIVE"
+    assert src.exists(), "a refused rename must leave the source in place"
+
+    # durable_replace is the overwrite variant and must stay that way, since
+    # tmp->final promotes rely on it.
+    io_mod.durable_replace(src, dest)
+    assert dest.read_text(encoding="utf-8") == "new"
+
+
+def test_durable_rename_succeeds_onto_a_free_destination(tmp_path):
+    """The no-clobber guard must not break the ordinary path."""
+    src = tmp_path / "log.md"
+    src.write_text("body", encoding="utf-8")
+    dest = tmp_path / "log.2026-07.md"
+
+    io_mod.durable_rename(src, dest)
+
+    assert dest.read_text(encoding="utf-8") == "body"
+    assert not src.exists()
+
+
+def test_log_rotation_does_not_destroy_an_existing_archive(tmp_path):
+    """R2 MINOR-5 end-to-end: the ordinal loop picks the next free name, and the
+    promote must not overwrite the archive it just stepped around."""
+    import kb.utils.wiki_log as wiki_log_mod
+
+    log_path = tmp_path / "log.md"
+    log_path.write_text("x" * 64, encoding="utf-8")
+    existing = list(tmp_path.glob("log.*.md"))
+    assert existing == []
+
+    wiki_log_mod.rotate_if_oversized(log_path, max_bytes=8, archive_stem_prefix="log")
+    first = list(tmp_path.glob("log.*.md"))
+    assert len(first) == 1
+    first[0].write_text("FIRST ARCHIVE", encoding="utf-8")
+
+    log_path.write_text("y" * 64, encoding="utf-8")
+    wiki_log_mod.rotate_if_oversized(log_path, max_bytes=8, archive_stem_prefix="log")
+
+    assert first[0].read_text(encoding="utf-8") == "FIRST ARCHIVE", "clobbered the prior archive"
+    assert len(list(tmp_path.glob("log.*.md"))) == 2

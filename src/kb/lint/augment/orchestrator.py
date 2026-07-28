@@ -28,7 +28,7 @@ from kb.lint.augment.tier_boundary import (  # noqa: F401 — re-export (cycle-7
     _TBV_ALLOWED_VALUE_TYPES,
     _validate_tier_boundary,
 )
-from kb.utils.io import atomic_text_write, durable_replace
+from kb.utils.io import RenameCompletedBarrierError, atomic_text_write, durable_rename
 from kb.utils.pages import load_purpose
 from kb.utils.text import wrap_wiki_context
 
@@ -589,8 +589,26 @@ def run_augment(
             # article under a fresh run id. That is duplicated content, not a
             # no-op, so the transition needs the same barrier as any other
             # durable state change.
-            durable_replace(proposals_path, consumed_path)
+            durable_rename(proposals_path, consumed_path)
             summary_lines.append(f"- Proposals consumed: {consumed_path}")
+        except RenameCompletedBarrierError as e:
+            # Cycle 87 R2 (Codex MAJOR-3). Distinct from a failed rename: the
+            # rename COMPLETED and only its durability barrier failed, so the
+            # proposals are consumed right now but a power loss can restore them
+            # and the next run will re-ingest. Swallowing this as an ordinary
+            # rename warning would report a durable consumption that is not one.
+            logger.error(
+                "Proposals consumed but NOT durably: %s -> %s: %s — a crash before "
+                "the next flush can restore %s and cause duplicate ingestion",
+                proposals_path,
+                consumed_path,
+                e,
+                proposals_path.name,
+            )
+            summary_lines.append(
+                f"- WARNING: proposals consumed but not durable ({consumed_path.name}); "
+                f"a crash before the next flush can cause duplicate ingestion"
+            )
         except OSError as e:
             logger.warning(
                 "Failed to rename consumed proposals file %s -> %s: %s",

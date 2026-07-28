@@ -215,9 +215,9 @@ in the race being modelled.
 |---|---|
 | ACs | 3 shipped, 1 dropped-stale, 4 R1 findings fixed |
 | src files | 6 (`utils/io.py`, `capture.py`, `query/embeddings.py`, `lint/checks/evidence_resolvable.py`, `lint/augment/orchestrator.py`, `utils/wiki_log.py`) |
-| Tests | 3541 → 3562 collected (+21) |
+| Tests | 3541 → 3565 collected (+24) |
 | Test files | 238 → 239 |
-| BACKLOG | 4 deleted (3 shipped, 1 stale) + 1 filed (Windows reparse coverage) |
+| BACKLOG | 4 deleted (3 shipped, 1 stale) + 3 filed (Windows reparse coverage, capture rollback indeterminacy, refiner not-durable state) |
 
 ### 2026-07-27 — cycle 86 (validation & ordering correctness)
 

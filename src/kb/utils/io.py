@@ -401,6 +401,40 @@ def durable_replace(tmp: Path | str, dest: Path | str) -> None:
         raise RenameCompletedBarrierError(exc.errno, str(exc)) from exc
 
 
+def durable_rename(src: Path | str, dest: Path | str) -> None:
+    """Rename ``src`` to ``dest`` durably, REFUSING to clobber an existing dest.
+
+    Cycle 87 R2 (Codex MINOR-4 + MINOR-5). The R1 fixes routed two callers onto
+    ``durable_replace`` to gain a barrier, which silently also swapped their
+    semantics: ``Path.rename`` refuses an existing destination, while
+    ``os.replace`` and ``MOVEFILE_REPLACE_EXISTING`` overwrite it. Both callers
+    depend on the refusal — ``wiki_log.rotate_if_oversized`` picks its archive
+    name with an ordinal loop whose whole point is not to destroy an existing
+    archive, and the augment consumed-proposal name is unique only to 8 run-id
+    characters. Adding durability should not have changed who wins a collision.
+
+    So the barrier and the clobber policy are separated: this is the no-clobber
+    variant; ``durable_replace`` is the overwrite variant, used for tmp→final
+    promotes where overwriting IS the contract.
+
+    Raises ``FileExistsError`` if ``dest`` exists, and
+    ``RenameCompletedBarrierError`` if the rename completed but the barrier then
+    failed (same contract as ``durable_replace`` — see that type's docstring).
+    """
+    if _use_windows_write_through():
+        move_file_ex_w = _resolve_move_file_ex_w()
+        # No MOVEFILE_REPLACE_EXISTING: the move fails rather than destroying an
+        # existing dest, which is the semantic being preserved here.
+        if not move_file_ex_w(os.fspath(src), os.fspath(dest), _MOVEFILE_WRITE_THROUGH):
+            _raise_last_windows_error()
+        return
+    os.rename(src, dest)
+    try:
+        _fsync_parent_dir(Path(dest).parent)
+    except OSError as exc:
+        raise RenameCompletedBarrierError(exc.errno, str(exc)) from exc
+
+
 def atomic_json_write(data: object, path: Path) -> None:
     """Write data as JSON to path atomically (temp file + rename).
 

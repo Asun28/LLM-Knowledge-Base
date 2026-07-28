@@ -753,10 +753,11 @@ def test_rotate_inside_lock(tmp_path: Path, monkeypatch) -> None:
         real_rotate(p)
 
     # Spy on the rotation promote. Cycle 87 R1 (MINOR-3) routed rotation through
-    # `durable_replace`, so `Path.rename` no longer fires here — and on Windows
-    # the promote is `MoveFileExW`, so `os.replace` would not fire either. The
-    # shared helper is the only platform-agnostic seam.
-    real_promote = wiki_log.durable_replace
+    # the shared barrier and R2 (MINOR-5) settled on the NO-CLOBBER variant, so
+    # `Path.rename` no longer fires here — and on Windows the promote is
+    # `MoveFileExW`, so `os.replace` would not fire either. The shared helper is
+    # the only platform-agnostic seam.
+    real_promote = wiki_log.durable_rename
 
     def spy_rename(src, target):
         events.append(f"rename:{Path(src).name}->{Path(target).name}")
@@ -764,7 +765,7 @@ def test_rotate_inside_lock(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(wiki_log, "file_lock", spy_file_lock)
     monkeypatch.setattr(wiki_log, "_rotate_log_if_oversized", spy_rotate)
-    monkeypatch.setattr(wiki_log, "durable_replace", spy_rename)
+    monkeypatch.setattr(wiki_log, "durable_rename", spy_rename)
 
     wiki_log.append_wiki_log("test", "trigger rotate", log_path)
 

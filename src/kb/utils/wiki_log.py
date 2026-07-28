@@ -5,7 +5,7 @@ import stat as _stat
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from kb.utils.io import durable_replace, file_lock
+from kb.utils.io import durable_rename, file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,13 @@ def rotate_if_oversized(
         archive,
     )
     try:
-        # Cycle 87 R1 (Codex MINOR-3) — same-class rename peer. Power loss after
+        # Cycle 87 R1 (Codex MINOR-3) — same-class rename peer: power loss after
         # this returns could revert the archive-name transition, leaving the
-        # rotation reported but not durable.
-        durable_replace(path, archive)
+        # rotation reported but not durable. R2 MINOR-5: no-clobber, because the
+        # ordinal loop above exists precisely to avoid destroying an existing
+        # archive, and a replace would silently do so if one appeared after the
+        # `archive.exists()` check.
+        durable_rename(path, archive)
     except OSError as e:
         logger.warning("Log rotation failed for %s: %s", path, e)
 
