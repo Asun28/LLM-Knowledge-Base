@@ -194,7 +194,7 @@ pyee==13.0.1
 Pygments==2.20.0
 PyJWT==2.13.0
 pylatexenc==2.10
-pymdown-extensions==10.21.3
+pymdown-extensions==11.0.0
 PyMuPDF==1.27.2.2
 pyOpenSSL==26.2.0
 pypdfium2==5.6.0
@@ -283,6 +283,6 @@ websockets==15.0.1
 xlsxwriter==3.2.9
 xxhash==3.6.0
 yarl==1.23.0
-yt-dlp==2026.6.9
+yt-dlp==2026.7.4
 zipp==3.23.0
 zstandard==0.25.0
