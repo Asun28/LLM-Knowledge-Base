@@ -114,6 +114,28 @@ def test_an_unopenable_directory_reports_unsupported(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("code", [errno.EIO, errno.ENOSPC])
+def test_a_failing_open_raises_instead_of_claiming_unsupported(tmp_path, monkeypatch, code):
+    """R1 DeepSeek HIGH. The open branch swallowed every errno alike since cycle
+    86, which was defensible while it returned `None` — that claimed nothing.
+
+    Naming the value UNSUPPORTED is what made the swallow wrong: it asserts WHY
+    there was no flush, so an `EIO` from failing storage would reach the caller
+    as a benign platform limitation. This cycle introduced that mislabelling, so
+    this cycle fixes it — the open branch now classifies errnos with the same set
+    the fsync branch uses.
+    """
+    _force_posix_branch(monkeypatch)
+
+    def _fail(path, flags, *a, **kw):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(io_mod.os, "open", _fail)
+
+    with pytest.raises(OSError):
+        _fsync_parent_dir(tmp_path)
+
+
+@pytest.mark.parametrize("code", [errno.EIO, errno.ENOSPC])
 def test_a_genuine_storage_failure_still_raises(tmp_path, monkeypatch, code):
     """The cycle-86 contract is unchanged: a real fault is an exception, NOT a
     fourth enum value. Returning it would let `durable_replace` report a

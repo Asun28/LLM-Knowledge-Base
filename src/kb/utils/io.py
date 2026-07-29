@@ -284,6 +284,23 @@ def _fsync_parent_dir(directory: Path) -> BarrierResult:
         # to a plain O_RDONLY open, which is valid for directories there.
         fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     except OSError as e:
+        # Cycle 89 R1 (DeepSeek HIGH). This branch swallowed every errno alike
+        # since cycle 86, which was defensible while it returned ``None`` — that
+        # claimed nothing. Returning UNSUPPORTED is a positive claim about WHY
+        # there was no flush, so an ``EIO`` from failing storage would be
+        # mislabelled "this filesystem does not support it" and the caller would
+        # read a dying disk as a benign platform limitation. Naming the value is
+        # what made the old swallow wrong, so this classification has to match
+        # the one the fsync branch below already uses.
+        if e.errno not in _FSYNC_UNSUPPORTED_ERRNOS:
+            logger.error(
+                "Parent-dir open FAILED for %s (errno=%s): %s — rename durability "
+                "is not guaranteed for this write",
+                directory,
+                e.errno,
+                e,
+            )
+            raise
         logger.warning("Could not open parent dir %s for fsync: %s", directory, e)
         # No handle means no flush. Same answer as a refused fsync from the
         # caller's side, so it reports as UNSUPPORTED rather than as success.
