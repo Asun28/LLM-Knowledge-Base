@@ -33,7 +33,7 @@ from kb.config import (
     TEMPLATES_DIR,
 )
 from kb.errors import KBError
-from kb.utils.io import RenameCompletedBarrierError, durable_replace
+from kb.utils.io import RenameCompletedBarrierError, _fsync_parent_dir, durable_replace
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
 
@@ -41,6 +41,13 @@ logger = logging.getLogger(__name__)
 
 MAX_PROMPT_CHARS = 600_000
 _SLUG_COLLISION_CEILING = 10000
+
+# Cycle 88 AC02 — stable, greppable marker for "the all-or-nothing rollback could
+# not finish, so the batch state is unknown rather than empty". A machine-readable
+# token rather than prose for the same reason `tier_boundary_rejected:` is one:
+# operators and log scrapers need to distinguish this from an ordinary write
+# failure without matching on a sentence that later gets reworded.
+ROLLBACK_INCOMPLETE_MARKER = "rollback_incomplete"
 
 assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS, "CAPTURE_MAX_BYTES must not exceed MAX_PROMPT_CHARS"
 
@@ -587,26 +594,73 @@ def _reserve_hidden_temp(item: dict, existing: set[str], captures_dir: Path) -> 
     raise CaptureError(f"slug retry exhausted for {item['title']!r}")
 
 
-def _rollback_reservations(reservations: list[tuple[str, Path, dict]]) -> None:
-    """Unlink every hidden-temp file in `reservations`. Best-effort."""
+def _rollback_reservations(reservations: list[tuple[str, Path, dict]]) -> list[Path]:
+    """Unlink every hidden-temp file in `reservations`.
+
+    Returns the paths whose unlink FAILED (cycle 88 AC02). Still best-effort in
+    that one failure does not abort the rest, but the failures are now reported
+    to the caller instead of only to the log — see `_write_item_files`.
+    """
+    survivors: list[Path] = []
     for _slug, temp_path, _item in reservations:
         try:
             temp_path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Reservation rollback failed for %s: %s", temp_path, e)
+            survivors.append(temp_path)
+    return survivors
 
 
-def _rollback_finalized(written: list[CaptureItem]) -> None:
-    """Unlink every finalized `.md` file in `written`. Best-effort.
+def _rollback_finalized(written: list[CaptureItem]) -> list[Path]:
+    """Unlink every finalized `.md` file in `written`.
 
     Cycle 17 AC10 all-or-nothing semantics: on Phase-3 mid-batch failure, the
     batch is treated as a whole. Callers receive `(written=[], error_msg)`.
+
+    Returns the paths whose unlink FAILED (cycle 88 AC02).
     """
+    survivors: list[Path] = []
     for item in written:
         try:
             item.path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Finalized-file rollback failed for %s: %s", item.path, e)
+            survivors.append(item.path)
+    return survivors
+
+
+def _finish_rollback(captures_dir: Path, survivors: list[Path], *, attempted: bool) -> str:
+    """Make the rollback deletions durable, and describe any indeterminacy.
+
+    Cycle 88 AC02 (cycle-87 R2 Codex MAJOR-1 residual). Two gaps closed here:
+
+    * **No barrier.** The unlinks had none, so a power loss right after a
+      rollback could resurrect items the caller was told did not exist. One
+      directory fsync after the last deletion closes that, and only one is
+      needed — the entries all live in the same directory.
+    * **Silent partial rollback.** `([], error)` is read as "nothing was
+      written". When a deletion fails that is false, and the caller has no way
+      to tell the two apart. The returned suffix says so explicitly.
+
+    The barrier is `attempted`-gated so a rollback that deleted nothing (the
+    first reservation failing, say) cannot manufacture an indeterminacy report
+    out of an fsync failure. A failing barrier is itself folded into
+    `survivors`: it means the deletions are not guaranteed, which is the same
+    unknown-state answer as a failed unlink.
+    """
+    if attempted:
+        try:
+            _fsync_parent_dir(captures_dir)
+        except OSError as e:
+            logger.warning("Rollback barrier failed for %s: %s", captures_dir, e)
+            survivors = [*survivors, captures_dir]
+    if not survivors:
+        return ""
+    names = ", ".join(sorted(p.name for p in survivors))
+    return (
+        f" [{ROLLBACK_INCOMPLETE_MARKER}] batch state is UNKNOWN rather than empty — "
+        f"{len(survivors)} path(s) may remain: {names}"
+    )
 
 
 def _write_item_files(
@@ -636,6 +690,16 @@ def _write_item_files(
     remaining ``.reserving`` temps are ALL unlinked; the call returns
     ``([], error_msg)``.
 
+    **Rollback outcome (cycle 88 AC02).** ``([], error_msg)`` alone used to mean
+    two different things, because every rollback unlink swallowed its ``OSError``
+    with a warning. When the rollback fully succeeds the batch state is
+    known-empty. When it does not, ``error_msg`` now carries the
+    ``ROLLBACK_INCOMPLETE_MARKER`` and names the paths that may still exist, so
+    the caller can distinguish "nothing was written" from "the batch state is
+    unknown" — a distinction a retry needs. The deletions are also followed by a
+    single directory fsync, without which a power loss could resurrect items the
+    caller was told did not exist.
+
     Keyword-only ``captures_dir`` override lets unit tests pick a sandbox
     directory without monkeypatching the module-level ``CAPTURES_DIR``.
     """
@@ -654,11 +718,19 @@ def _write_item_files(
             existing.add(slug)
             reservations.append((slug, temp_path, item))
     except CaptureError as e:
-        _rollback_reservations(reservations)
-        return [], f"Error: {e}"
+        detail = _finish_rollback(
+            _captures_dir,
+            _rollback_reservations(reservations),
+            attempted=bool(reservations),
+        )
+        return [], f"Error: {e}{detail}"
     except OSError as e:
-        _rollback_reservations(reservations)
-        return [], f"Error: reservation failed: {e}"
+        detail = _finish_rollback(
+            _captures_dir,
+            _rollback_reservations(reservations),
+            attempted=bool(reservations),
+        )
+        return [], f"Error: reservation failed: {e}{detail}"
 
     finalized_slugs = [slug for slug, _path, _item in reservations]
 
@@ -688,9 +760,12 @@ def _write_item_files(
             )
             final_path = _captures_dir / f"{slug}.md"
             if not _is_path_within_captures(final_path, base_dir=_captures_dir):
-                _rollback_finalized(written)
-                _rollback_reservations(reservations[i:])
-                return [], f"Error: slug escapes captures dir: {slug!r}"
+                detail = _finish_rollback(
+                    _captures_dir,
+                    _rollback_finalized(written) + _rollback_reservations(reservations[i:]),
+                    attempted=True,
+                )
+                return [], f"Error: slug escapes captures dir: {slug!r}{detail}"
             # Cycle 87 AC02 — was `write_text` + a bare `os.replace`, which left
             # BOTH halves unflushed: the body could still be in the page cache
             # when the promote landed, so power loss could surface a reported
@@ -710,6 +785,7 @@ def _write_item_files(
                 )
             )
     except OSError as e:
+        survivors: list[Path] = []
         if isinstance(e, RenameCompletedBarrierError):
             # Cycle 87 R1 (Codex MAJOR-1). The promote is no longer all-or-nothing
             # from the caller's side: the rename COMPLETED and only the durability
@@ -718,19 +794,23 @@ def _write_item_files(
             # an orphan `<slug>.md` would survive a capture reported as ([], err).
             try:
                 final_path.unlink(missing_ok=True)
-            except OSError as unlink_err:  # pragma: no cover — rare AV / lock race
+            except OSError as unlink_err:
+                # Cycle 88 AC02 — was a bare warning, which let the exact orphan
+                # cycle 87 set out to prevent survive an `([], error)` unreported.
                 logger.warning(
                     "Failed to remove %s during all-or-nothing rollback: %s",
                     final_path,
                     unlink_err,
                 )
-        _rollback_finalized(written)
+                survivors.append(final_path)
+        survivors += _rollback_finalized(written)
         # Roll back the failing reservation AND every untouched one after it.
         # `reservations[current_idx:]` includes the failing item (whose temp
         # still exists when the body write raises pre-promote; is a no-op once
         # the promote has renamed the temp away).
-        _rollback_reservations(reservations[current_idx:])
-        return [], f"Error: write failed on item {current_idx}: {e}"
+        survivors += _rollback_reservations(reservations[current_idx:])
+        detail = _finish_rollback(_captures_dir, survivors, attempted=True)
+        return [], f"Error: write failed on item {current_idx}: {e}{detail}"
 
     return written, None
 
