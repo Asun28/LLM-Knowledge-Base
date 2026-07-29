@@ -711,9 +711,17 @@ def _write_item_files(
     known-empty. When it does not, ``error_msg`` now carries the
     ``ROLLBACK_INCOMPLETE_MARKER`` and names the paths that may still exist, so
     the caller can distinguish "nothing was written" from "the batch state is
-    unknown" — a distinction a retry needs. The deletions are also followed by a
-    single directory fsync, without which a power loss could resurrect items the
-    caller was told did not exist.
+    unknown" — a distinction a retry needs.
+
+    The deletions are also followed by a single directory fsync, **on POSIX
+    only**: `_fsync_parent_dir` no-ops on ``nt``, so on Windows a power loss
+    within the write-back window can still resurrect rolled-back items. The
+    marker deliberately does NOT fire for that case — the rollback COMPLETED,
+    and completion is a different axis from durability (the same split
+    `refine_page` draws between ``status`` and ``durable``). Marking every
+    Windows rollback indeterminate would fire on every capture failure on the
+    primary dev platform and destroy the marker's signal value. See BACKLOG for
+    the Windows delete-durability residual.
 
     Keyword-only ``captures_dir`` override lets unit tests pick a sandbox
     directory without monkeypatching the module-level ``CAPTURES_DIR``.
