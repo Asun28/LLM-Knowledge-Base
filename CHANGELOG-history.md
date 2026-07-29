@@ -127,8 +127,31 @@ the unresolvable warning the test assumed, and it is the Windows peer of cycle
 87's note that an out-of-tree POSIX symlink was already an `error` rather than a
 silent pass. The test now pins the real behaviour and says why.
 
-Tests: 3520 → 3535 (+15, `tests/test_cycle88_rollback_reporting.py`), all
-written red-first. Full suite 3535 passed, 28 skipped, 17 xfailed, 10 snapshots.
+Tests: 3520 → 3537 (+17, `tests/test_cycle88_rollback_reporting.py`), all
+written red-first. Full suite 3537 passed, 28 skipped, 17 xfailed, 10 snapshots.
+
+**Review outcome (R1 + R2, Codex and DeepSeek in parallel).** Four findings
+landed, two accepted outright and two accepted-as-observation with the proposed
+remedy rejected. R1 Codex caught a genuine bug in the AC02 fix itself: when every
+unlink succeeded but the barrier failed, `_finish_rollback` reported the captures
+DIRECTORY as the surviving path — a path that always remains, so the message was
+actionable-looking and empty. That fix also exposed a vacuous test of ours, which
+asserted only that the marker appeared and so passed against the wrong filename.
+R2 Codex then executed the MCP path and showed `kb_refine_page` dropped the AC01
+`warning`/`durable` fields entirely, meaning the primary caller of `refine_page`
+delivered the caveat to nobody; fixed with a `[warn]` line and two tests.
+
+The two REJECTED remedies share one argument, recorded because consistency
+mattered more than either finding. R1 DeepSeek proposed marking every Windows
+rollback indeterminate; R2 Codex proposed the same for POSIX filesystems where
+`_fsync_parent_dir` tolerates an unsupported errno. Both would fire the marker
+wherever a barrier is merely UNAVAILABLE, which is constant on Windows and on SMB
+and NFS mounts — training the reader to ignore the one case the marker exists to
+flag, a rollback that could not finish. Completion and durability are different
+axes, exactly as AC01 splits `status` from `durable`. The shared root cause —
+`_fsync_parent_dir` returns normally whether it flushed, no-oped on `nt`, or
+tolerated an error, so no caller can tell — is filed in BACKLOG as a tri-state
+API change touching `durable_replace` and `durable_rename` too.
 
 ### 2026-07-28 — cycle 87 (durability & containment completion)
 

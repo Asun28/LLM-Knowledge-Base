@@ -151,6 +151,54 @@ def test_the_happy_path_makes_no_durability_claim(tmp_wiki: Path, tmp_path: Path
     assert result.get("durable") is not False
 
 
+def test_the_mcp_wrapper_surfaces_the_durability_warning(monkeypatch):
+    """R2 Codex P2. `kb_refine_page` treats any result without an `error` key as
+    ordinary success, so the AC01 fields reached the dict and stopped there —
+    an MCP caller saw a bare "Refined: ..." and could not make the retry
+    decision the fields exist to enable.
+
+    This is the primary caller of `refine_page`, so a warning that does not
+    cross this boundary is not delivered to anyone.
+    """
+    from kb.mcp import quality
+
+    monkeypatch.setattr(quality, "_validate_page_id", lambda page_id, **kw: None)
+    monkeypatch.setattr(
+        "kb.review.refiner.refine_page",
+        lambda *a, **k: {
+            "page_id": "concepts/foo",
+            "updated": True,
+            "revision_notes": "notes",
+            "durable": False,
+            "warning": "Page concepts/foo was written but is not durability-guaranteed: EIO",
+        },
+    )
+    monkeypatch.setattr("kb.compile.linker.build_backlinks", lambda *a, **k: {})
+
+    out = quality.kb_refine_page("concepts/foo", "body text", "notes")
+
+    assert "Refined: concepts/foo" in out
+    assert "[warn]" in out
+    assert "not durability-guaranteed" in out
+
+
+def test_the_mcp_wrapper_stays_quiet_on_an_ordinary_refine(monkeypatch):
+    """Over-warning would train the reader to ignore the line."""
+    from kb.mcp import quality
+
+    monkeypatch.setattr(quality, "_validate_page_id", lambda page_id, **kw: None)
+    monkeypatch.setattr(
+        "kb.review.refiner.refine_page",
+        lambda *a, **k: {"page_id": "concepts/foo", "updated": True, "revision_notes": "notes"},
+    )
+    monkeypatch.setattr("kb.compile.linker.build_backlinks", lambda *a, **k: {})
+
+    out = quality.kb_refine_page("concepts/foo", "body text", "notes")
+
+    assert "Refined: concepts/foo" in out
+    assert "[warn]" not in out
+
+
 # ==========================================================================
 # AC02 — a rollback that could not finish must say so
 # ==========================================================================

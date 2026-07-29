@@ -660,6 +660,23 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
       previous docstring claimed NTFS durability that ``os.replace`` never
       provided. Filed for a Windows-specific pass; see BACKLOG.
 
+      **And a POSIX barrier is not proof either** (R2 Codex P2).
+      ``_fsync_parent_dir`` returns normally both when it cannot open the
+      directory and when the fsync fails with a TOLERATED errno (``EINVAL`` /
+      ``ENOTSUP`` / ``EPERM`` — some SMB and NFS mounts reject fsync on a
+      directory handle outright). In those cases no flush happened and this
+      function still records ``barrier_failed = False``.
+
+      That is NOT reported as indeterminate, deliberately and for the same
+      reason the Windows case is not: the rollback COMPLETED, and completion is
+      a different axis from durability. Firing the marker wherever a barrier is
+      merely unavailable would make it constant on those mounts and train the
+      reader to ignore the one case it exists to flag — a rollback that could
+      not finish. Fixing it properly needs ``_fsync_parent_dir`` to REPORT
+      whether a flush occurred, which changes a signature that ``durable_replace``
+      and ``durable_rename`` also depend on; that belongs in its own cycle and is
+      filed in BACKLOG alongside the Windows half.
+
       The INDETERMINACY REPORT below is fully cross-platform, and it is the more
       load-bearing half: it tells the caller the batch state is unknown whether
       or not the barrier was available.
@@ -683,6 +700,14 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
     Passing ``targets`` also gates the barrier: a rollback that deleted nothing
     (the first reservation failing, say) takes no fsync, so an fsync failure
     cannot manufacture an indeterminacy report for a batch that never wrote.
+
+    ``targets`` is deliberately a conservative SUPERSET of what was really
+    deleted. `unlink(missing_ok=True)` does not report whether the entry existed,
+    so a temp the promote already renamed away is still listed — in the
+    barrier-failure path the current item's ``.reserving`` name appears alongside
+    its ``.md``. Over-listing costs the caller one stat that finds nothing;
+    under-listing would let a file it was never told about come back. Erring
+    toward the harmless direction is the point.
     """
     barrier_failed = False
     if targets:
