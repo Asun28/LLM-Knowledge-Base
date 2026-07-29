@@ -268,10 +268,16 @@ def test_rollback_deletions_are_fsynced_once_after_the_last_unlink(tmp_path, mon
     assert "unlink:decision-alpha.md" in order
 
 
-def test_a_failed_rollback_barrier_is_itself_reported_as_indeterminate(tmp_path, monkeypatch):
-    """The barrier is the thing that makes "deleted" survive a power cut. If it
-    raises, the deletions are not guaranteed and the batch state is unknown —
-    silently swallowing that recreates the defect one layer down."""
+def test_a_failed_rollback_barrier_names_the_files_that_may_reappear(tmp_path, monkeypatch):
+    """The barrier is what makes "deleted" survive a power cut. If it raises, the
+    deletions are not guaranteed and the batch state is unknown.
+
+    R1 Codex P2: the first version named the captures DIRECTORY here. That path
+    always remains, so it told the caller nothing while omitting the only useful
+    answer — which deleted files a crash can bring back. Every unlink succeeds in
+    this test, so a report naming only `captures` would be actionable-looking and
+    empty.
+    """
     captures_dir = tmp_path / "captures"
     monkeypatch.setattr(capture_mod, "durable_replace", _fail_promote_on(2, _oserror))
 
@@ -284,6 +290,31 @@ def test_a_failed_rollback_barrier_is_itself_reported_as_indeterminate(tmp_path,
 
     assert written == []
     assert capture_mod.ROLLBACK_INCOMPLETE_MARKER in err
+    assert "may reappear" in err
+    # The two promoted files and the third item's untouched reservation.
+    assert "decision-alpha.md" in err
+    assert "decision-beta.md" in err
+    assert "captures" not in err, "naming the containing dir is not an answer"
+    assert list(captures_dir.glob("*.md")) == [], "the unlinks themselves succeeded"
+
+
+def test_the_two_indeterminacy_classes_are_reported_separately(tmp_path, monkeypatch):
+    """A path whose unlink FAILED is still present now; a path whose unlink
+    succeeded without a barrier merely may come back. Collapsing them into one
+    list would tell the caller to go looking for files that are not there."""
+    captures_dir = tmp_path / "captures"
+    monkeypatch.setattr(capture_mod, "durable_replace", _fail_promote_on(2, _oserror))
+    monkeypatch.setattr(
+        capture_mod, "_fsync_parent_dir", lambda d: (_ for _ in ()).throw(OSError(5, "EIO"))
+    )
+    _fail_unlink_for(monkeypatch, "decision-alpha.md")
+
+    _written, err = _write_three(captures_dir)
+
+    still_present, _, may_reappear = err.partition("may reappear")
+    assert "still present: decision-alpha.md" in still_present
+    assert "decision-beta.md" in may_reappear
+    assert "decision-alpha.md" not in may_reappear, "a stuck file cannot also 'reappear'"
 
 
 def test_an_orphan_from_a_failed_barrier_is_reported_when_its_unlink_fails(tmp_path, monkeypatch):

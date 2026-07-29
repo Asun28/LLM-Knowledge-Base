@@ -127,8 +127,8 @@ the unresolvable warning the test assumed, and it is the Windows peer of cycle
 87's note that an out-of-tree POSIX symlink was already an `error` rather than a
 silent pass. The test now pins the real behaviour and says why.
 
-Tests: 3520 → 3534 (+14, `tests/test_cycle88_rollback_reporting.py`), all
-written red-first. Full suite 3534 passed, 28 skipped, 17 xfailed, 10 snapshots.
+Tests: 3520 → 3535 (+15, `tests/test_cycle88_rollback_reporting.py`), all
+written red-first. Full suite 3535 passed, 28 skipped, 17 xfailed, 10 snapshots.
 
 ### 2026-07-28 — cycle 87 (durability & containment completion)
 
