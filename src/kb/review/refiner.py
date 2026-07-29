@@ -36,7 +36,7 @@ from kb.config import (
     WIKI_DIR,
 )
 from kb.errors import StorageError, ValidationError
-from kb.utils.io import atomic_text_write, file_lock
+from kb.utils.io import RenameCompletedBarrierError, atomic_text_write, file_lock
 from kb.utils.markdown import FRONTMATTER_RE
 from kb.utils.page_lock import page_lock
 from kb.utils.wiki_log import append_wiki_log
@@ -250,6 +250,12 @@ def refine_page(
         else:
             resolved_history_path = REVIEW_HISTORY_PATH
 
+        # Cycle 88 AC01 — bound BEFORE the lock span, not inside it. The tail
+        # `return` reads this, and every path that reaches the tail does pass the
+        # in-span assignment today; hoisting it means a future edit that adds an
+        # early exit cannot turn that into an UnboundLocalError.
+        durability_error: str | None = None
+
         # Single history_lock span covers pending-write + page-write + applied/failed flip.
         # (Hold-through semantic per cycle-19 AC9 — release-and-reacquire would race.)
         with file_lock(resolved_history_path):
@@ -272,8 +278,29 @@ def refine_page(
 
             # Phase 2 — write the page body. Exceptions flip pending → failed
             # under the SAME lock span (no release/re-acquire window).
+            #
+            # Cycle 88 AC01 (cycle-87 R2 Codex MAJOR-2). The two handlers are
+            # ORDER-SENSITIVE: RenameCompletedBarrierError subclasses OSError, so
+            # placing the broad one first swallows the narrow case and silently
+            # restores the false `failed` report. Same catch-ordering hazard as
+            # ValueDomainError before TierBoundaryError (cycle 86).
             try:
                 atomic_text_write(new_text, page_path)
+            except RenameCompletedBarrierError as e:
+                # The rename COMPLETED — `page_path` already holds `new_text` —
+                # and only the durability barrier after it failed. Recording
+                # `failed` here would contradict the file on disk and send an
+                # operator looking for a revision that is actually present.
+                #
+                # `status` answers "did the revision land in the page?" (yes);
+                # `durable` answers "is that landing guaranteed to survive power
+                # loss?" (no). Keeping them as separate axes rather than inventing
+                # a fourth status value means `sweep_stale_pending`'s pending-only
+                # logic and every existing `status` consumer stay correct.
+                durability_error = str(e)
+                logger.warning(
+                    "Page %s was written but its durability barrier failed: %s", page_id, e
+                )
             except OSError as e:
                 history = load_review_history(resolved_history_path)
                 for row in history:
@@ -289,6 +316,13 @@ def refine_page(
             for row in history:
                 if row.get("attempt_id") == attempt_id:
                     row["status"] = "applied"
+                    if durability_error is not None:
+                        # Written ONLY on the not-durable path. Absence means "no
+                        # caveat recorded", per the `get_prompt_version` legacy-
+                        # default convention — stamping every row would claim a
+                        # verdict for pre-cycle-88 rows that never recorded one.
+                        row["durable"] = False
+                        row["durability_error"] = durability_error
                     break
             save_review_history(history, resolved_history_path)
     finally:
@@ -312,11 +346,21 @@ def refine_page(
     except Exception as _exc:  # noqa: BLE001
         logger.debug("Cycle 64 graph-cache invalidate skipped at refine tail: %s", _exc)
 
-    return {
+    result: dict = {
         "page_id": page_id,
         "updated": True,
         "revision_notes": revision_notes,
     }
+    if durability_error is not None:
+        # Cycle 88 AC01 — surfaced to the caller rather than only to the log,
+        # because the retry decision is the caller's. `updated` stays True and no
+        # `error` key is added: the revision IS in the page, so a caller that
+        # branches on `error` must not treat this as a refusal.
+        result["durable"] = False
+        result["warning"] = (
+            f"Page {page_id} was written but is not durability-guaranteed: {durability_error}"
+        )
+    return result
 
 
 def list_stale_pending(

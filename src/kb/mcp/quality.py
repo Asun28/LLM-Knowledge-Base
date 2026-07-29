@@ -121,6 +121,14 @@ def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "")
         f"Refined: {page_id}",
         f"Notes: {revision_notes}",
     ]
+    # Cycle 88 R2 (Codex P2). `refine_page` reports an applied-but-not-durable
+    # write as `durable: False` + `warning`, with no `error` key — because the
+    # revision IS in the page. This wrapper's success branch dropped both, so an
+    # MCP caller saw a bare "Refined: ..." and could not make the retry decision
+    # the field exists to enable. Listed before the backlinks warning: a
+    # durability caveat outranks a failed convenience lookup.
+    if result.get("durable") is False:
+        lines.append(f"[warn] {result.get('warning', 'page write is not durability-guaranteed')}")
     if backlinks_err is not None:
         lines.append(f"[warn] {backlinks_err}")
     if affected:
