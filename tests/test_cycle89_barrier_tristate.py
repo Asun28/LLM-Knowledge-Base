@@ -328,3 +328,45 @@ def test_the_barrier_note_still_fires_when_some_deletion_succeeded(tmp_path, mon
 
     assert capture_mod.ROLLBACK_INCOMPLETE_MARKER in detail
     assert capture_mod.BARRIER_UNSUPPORTED_MARKER in detail
+
+
+def test_a_missing_directory_is_tolerated_on_the_posix_branch(tmp_path, monkeypatch):
+    """R2 Codex P1, and the sharpest C86-L3 illustration in the codebase.
+
+    `tests/test_cycle86_validation_ordering.py` already pins that a nonexistent
+    directory must NOT raise (the T7 contract: the barrier must never convert a
+    working write into a hard failure). On Windows that test passes VACUOUSLY —
+    the platform check returns before the open is attempted — so an R1 fix that
+    made `ENOENT` raise was green locally and would have failed Ubuntu CI.
+
+    This test forces the POSIX branch, so the T7 contract is now pinned on both
+    platforms instead of only the one CI happens to run.
+    """
+    _force_posix_branch(monkeypatch)
+
+    assert _fsync_parent_dir(tmp_path / "no-such-dir") is BarrierResult.UNSUPPORTED
+
+
+def test_only_genuine_storage_faults_raise_from_the_open_branch(tmp_path, monkeypatch):
+    """The open branch classifies with an ALLOW-LIST, not the inverse of the
+    tolerated set: `fsync` on a valid descriptor cannot return `ENOENT` but
+    `open` routinely can, so the two branches face different error populations
+    and deriving one rule from the other is what caused the P1."""
+    _force_posix_branch(monkeypatch)
+
+    for benign in (errno.ENOENT, errno.ENOTDIR, errno.EACCES):
+        monkeypatch.setattr(
+            io_mod.os,
+            "open",
+            lambda *a, _c=benign, **kw: (_ for _ in ()).throw(OSError(_c, os.strerror(_c))),
+        )
+        assert _fsync_parent_dir(tmp_path) is BarrierResult.UNSUPPORTED, benign
+
+    for fault in (errno.EIO, errno.ENOSPC):
+        monkeypatch.setattr(
+            io_mod.os,
+            "open",
+            lambda *a, _c=fault, **kw: (_ for _ in ()).throw(OSError(_c, os.strerror(_c))),
+        )
+        with pytest.raises(OSError):
+            _fsync_parent_dir(tmp_path)

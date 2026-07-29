@@ -187,6 +187,20 @@ _FSYNC_UNSUPPORTED_ERRNOS = frozenset(
 )
 
 
+# Cycle 89 R2 (Codex P1). The OPEN branch of `_fsync_parent_dir` classifies with
+# an ALLOW-LIST of genuine storage faults, not the inverse of
+# `_FSYNC_UNSUPPORTED_ERRNOS`. The two branches face different error populations:
+# `fsync` on an already-valid descriptor cannot return `ENOENT`, whereas `open`
+# can and routinely does (a concurrently-removed directory). Deriving the open
+# branch's rule by inverting the fsync branch's therefore made a missing
+# directory a hard failure and broke the cycle-86 T7 contract — "the barrier must
+# not convert working writes into hard failures" — which the Ubuntu CI suite
+# pins and Windows cannot see, because the platform check short-circuits first.
+_STORAGE_FAULT_ERRNOS = frozenset(
+    e for e in (getattr(errno, name, None) for name in ("EIO", "ENOSPC")) if e is not None
+)
+
+
 def _dir_fsync_supported() -> bool:
     """Whether this platform can fsync a directory handle at all.
 
@@ -290,9 +304,15 @@ def _fsync_parent_dir(directory: Path) -> BarrierResult:
         # there was no flush, so an ``EIO`` from failing storage would be
         # mislabelled "this filesystem does not support it" and the caller would
         # read a dying disk as a benign platform limitation. Naming the value is
-        # what made the old swallow wrong, so this classification has to match
-        # the one the fsync branch below already uses.
-        if e.errno not in _FSYNC_UNSUPPORTED_ERRNOS:
+        # what made the old swallow wrong.
+        #
+        # R2 Codex P1 corrected the SHAPE of that classification. The first fix
+        # inverted `_FSYNC_UNSUPPORTED_ERRNOS`, which swept in `ENOENT` — a
+        # concurrently-removed directory — and turned it into a hard failure,
+        # breaking the cycle-86 T7 contract on Ubuntu while passing on Windows,
+        # where the platform check returns before this line is ever reached.
+        # Only a genuine storage fault raises here.
+        if e.errno in _STORAGE_FAULT_ERRNOS:
             logger.error(
                 "Parent-dir open FAILED for %s (errno=%s): %s — rename durability "
                 "is not guaranteed for this write",
