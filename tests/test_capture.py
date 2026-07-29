@@ -1083,7 +1083,7 @@ class TestWriteItemFiles:
                 raise OSError(28, "No space left on device")
             _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture.os.replace", maybe_fail)
+        monkeypatch.setattr("kb.capture.durable_replace", maybe_fail)
         written, err = _write_item_files(items, "p", "2026-04-13T00:00:00Z")
         assert err is not None
         assert "No space left" in err
@@ -1291,7 +1291,7 @@ class TestCaptureItems:
                 raise OSError(28, "No space left on device")
             _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture.os.replace", fail_second)
+        monkeypatch.setattr("kb.capture.durable_replace", fail_second)
         result = capture_items(content)
         # Cycle 17 AC10 — all-or-nothing: NO items written when Phase-3 fails mid-batch.
         assert result.rejected_reason is not None
@@ -2184,7 +2184,7 @@ class TestAC10TwoPassWrite:
                 raise OSError(13, "permission denied on third replace")
             _os.replace(src, dst)
 
-        with patch("kb.capture.os.replace", side_effect=failing_replace):
+        with patch("kb.capture.durable_replace", side_effect=failing_replace):
             written, err = _write_item_files(
                 items,
                 provenance="phase3-fail",
@@ -2209,7 +2209,7 @@ class TestAC10TwoPassWrite:
         """Hidden-temp reservations must not match `*.md` glob (T4 defense)."""
         items = _make_two_pass_items(2)
         # Replace os.replace with a no-op to leave temps in place for this test.
-        with patch("kb.capture.os.replace", side_effect=lambda *a, **kw: None):
+        with patch("kb.capture.durable_replace", side_effect=lambda *a, **kw: None):
             _write_item_files(
                 items,
                 provenance="hidden-temp-test",

@@ -220,23 +220,26 @@ class TestIoLockHardening:
     def test_fsync_called_before_replace_in_atomic_json_write(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """Ordering: flush+fsync must precede Path.replace in atomic_json_write."""
+        """Ordering: flush+fsync must precede the promote in atomic_json_write."""
         from kb.utils import io as mod
 
         order: list[str] = []
         original_fsync = os.fsync
-        original_replace = Path.replace
+        # Cycle 87 AC01 — `durable_replace` IS the promote, and it is the only
+        # platform-agnostic seam: on Windows it uses `MoveFileExW`, so spying
+        # either `Path.replace` or `os.replace` observes nothing there.
+        original_replace = mod.durable_replace
 
         def spy_fsync(fd):
             order.append("fsync")
             return original_fsync(fd)
 
-        def spy_replace(self, target):
+        def spy_replace(src, dst):
             order.append("replace")
-            return original_replace(self, target)
+            return original_replace(src, dst)
 
         monkeypatch.setattr(mod.os, "fsync", spy_fsync)
-        monkeypatch.setattr(Path, "replace", spy_replace)
+        monkeypatch.setattr(mod, "durable_replace", spy_replace)
 
         target = tmp_path / "d.json"
         mod.atomic_json_write({"k": "v"}, target)
@@ -250,18 +253,21 @@ class TestIoLockHardening:
 
         order: list[str] = []
         original_fsync = os.fsync
-        original_replace = Path.replace
+        # Cycle 87 AC01 — `durable_replace` IS the promote, and it is the only
+        # platform-agnostic seam: on Windows it uses `MoveFileExW`, so spying
+        # either `Path.replace` or `os.replace` observes nothing there.
+        original_replace = mod.durable_replace
 
         def spy_fsync(fd):
             order.append("fsync")
             return original_fsync(fd)
 
-        def spy_replace(self, target):
+        def spy_replace(src, dst):
             order.append("replace")
-            return original_replace(self, target)
+            return original_replace(src, dst)
 
         monkeypatch.setattr(mod.os, "fsync", spy_fsync)
-        monkeypatch.setattr(Path, "replace", spy_replace)
+        monkeypatch.setattr(mod, "durable_replace", spy_replace)
 
         target = tmp_path / "d.txt"
         mod.atomic_text_write("hello", target)
@@ -273,13 +279,13 @@ class TestIoLockHardening:
         from kb.utils import io as mod
 
         target = tmp_path / "d.json"
-        # Trigger the except-cleanup path by making `Path.replace` fail so the
+        # Trigger the except-cleanup path by making the promote fail so the
         # caller-visible exception is the replace OSError — then make the
         # cleanup unlink fail too. The original OSError must still propagate
         # and the cleanup WARN must be logged.
         real_unlink = Path.unlink
 
-        def failing_replace(self, _target):
+        def failing_replace(_src, _dst):
             raise OSError("replace failed")
 
         def failing_unlink(self, *args, **kwargs):
@@ -287,7 +293,7 @@ class TestIoLockHardening:
                 raise OSError("cleanup failure")
             return real_unlink(self, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "replace", failing_replace)
+        monkeypatch.setattr(mod, "durable_replace", failing_replace)
         monkeypatch.setattr(Path, "unlink", failing_unlink)
         with caplog.at_level(logging.WARNING, logger="kb.utils.io"):
             with pytest.raises(OSError, match="replace failed"):

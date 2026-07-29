@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import ntpath
+import os
+import stat
 from pathlib import Path
 
 import frontmatter
@@ -101,6 +103,40 @@ def _resolve_evidence_ref(ref: str, raw_dir: Path) -> Path | None:
     return resolved
 
 
+def _is_regular_file_no_follow(path: Path) -> bool:
+    """Report whether ``path`` is a regular file, without following a symlink.
+
+    Cycle 87 AC03 (cycle-86 Codex review MINOR). ``_resolve_evidence_ref`` decides
+    containment against a resolved path, and the existence check then ran as a
+    separate ``Path.is_file()``. Between the two, replacing the final component
+    under ``raw/`` with a link to somewhere outside it made the stat follow the
+    link, so lint output became a filesystem-existence oracle for host paths —
+    the same T1 boundary the containment check exists to hold.
+
+    ``os.lstat`` closes that: it never follows a final-component symlink, so the
+    answer describes the entry the containment check accepted rather than
+    whatever it was swapped for. This deviates from the BACKLOG's suggested
+    ``_open_no_follow`` + ``fstat`` shape (DESIGN-AMEND) for three reasons —
+    ``lstat`` opens nothing, so it has no descriptor to leak and no side effects
+    on FIFOs or device nodes; it needs no platform branch; and
+    ``_open_no_follow`` misreads a plain ``ENOENT`` as "O_NOFOLLOW unsupported"
+    and emits a spurious once-per-process warning, which a lint check that
+    routinely meets missing files would fire constantly.
+
+    Honest scope: this closes the FINAL-component swap. Swapping an ANCESTOR
+    directory is not closed, because both this and the ``O_NOFOLLOW`` shape
+    re-walk the ancestors; only ``openat2(RESOLVE_BENEATH)`` would, and that is
+    Linux-5.6+ only. The residual leak stays a boolean, and it still requires
+    local write access to ``raw/``.
+    """
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except (OSError, ValueError):
+        # Missing, unreadable, or a malformed path (embedded NUL) — all of which
+        # mean "no resolvable evidence file here", not a lint-run crash.
+        return False
+
+
 def check_evidence_resolvable(
     wiki_dir: Path | None = None,
     raw_dir: Path | None = None,
@@ -180,7 +216,7 @@ def check_evidence_resolvable(
                     }
                 )
                 continue
-            if not resolved.is_file():
+            if not _is_regular_file_no_follow(resolved):
                 # `warning`, not `error` — deliberately weaker than the escape
                 # case above. A raw source can legitimately be pruned, archived,
                 # or moved after ingest, so a missing file is a hygiene signal

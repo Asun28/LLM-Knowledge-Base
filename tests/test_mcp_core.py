@@ -488,8 +488,10 @@ class TestKbCaptureWrapper:
             }
         )
         # Cycle 17 AC10 — capture two-pass switched from _exclusive_atomic_write
-        # to os.open + os.replace. All-or-nothing semantics: any Phase-3 failure
-        # returns empty `written`. Monkeypatch os.replace to trigger mid-batch.
+        # to os.open + a promote. All-or-nothing semantics: any Phase-3 failure
+        # returns empty `written`. Cycle 87 AC02 moved the promote onto
+        # `durable_replace`, which is the seam to fault-inject at: on Windows it
+        # uses `MoveFileExW`, so patching `os.replace` would never fire.
         call_count = [0]
 
         def fail_second(src, dst):
@@ -500,7 +502,7 @@ class TestKbCaptureWrapper:
                 raise OSError(28, "No space left on device")
             _os.replace(src, dst)
 
-        monkeypatch.setattr("kb.capture.os.replace", fail_second)
+        monkeypatch.setattr("kb.capture.durable_replace", fail_second)
         result = kb_capture(content)
         # All-or-nothing: no items committed under mid-batch failure.
         assert "Error:" in result

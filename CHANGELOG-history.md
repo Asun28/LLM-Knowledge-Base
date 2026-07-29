@@ -17,6 +17,208 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-28 — cycle 87 (durability & containment completion)
+
+Three follow-ons to the cycle-86 Codex review, all in the same two fix families,
+plus one stale backlog entry deleted.
+
+**AC01 — `utils/io.py`: the rename had no durability barrier on Windows.**
+
+`_fsync_parent_dir` returns immediately when `os.name == "nt"`, because NTFS has
+no `O_DIRECTORY` and `os.open` on a directory raises there. Its docstring
+asserted that Windows rename durability "comes from `os.replace`'s underlying
+`MoveFileEx`". That was never true: CPython's `os.replace` calls `MoveFileExW`
+with `MOVEFILE_REPLACE_EXISTING` only, and that flag carries no power-loss
+promise. Cycle-86 AC04 therefore hardened the CI platform and left the primary
+development platform exactly as it was.
+
+The fix is a new `durable_replace(tmp, dest)` that is the single promote path
+for every caller needing one. That is the other half of the fix rather than
+incidental refactoring: the same class of gap kept reappearing precisely because
+each call site rolled its own `os.replace`.
+
+- **POSIX** — rename, then fsync the parent directory. Unchanged from cycle 86.
+- **Windows** — `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH`.
+  MSDN defines WRITE_THROUGH as not returning until the move has been flushed to
+  disk. `MOVEFILE_COPY_ALLOWED` is deliberately omitted: it permits the move to
+  degrade into a cross-volume copy+delete, which is not an atomic replacement.
+
+Two alternatives were put to both design reviewers independently, and both
+reached the same verdict:
+
+1. *Re-open `dest` after the rename and fsync that handle.* Rejected as
+   durability theatre. `FlushFileBuffers` flushes the file's own data and its MFT
+   record; the parent directory index that carries the NAME is a separate stream
+   and is not flushed by it. The shape also opens a race against any concurrent
+   unlink of `dest`, which for a live SQLite database is a realistic failure.
+2. *Fall back to `os.replace` when the write-through move fails.* Rejected as
+   worse than the original bug, because it converts a durability failure into a
+   successful-looking write — the same reasoning that made cycle 86 narrow
+   `_fsync_parent_dir`'s error swallowing.
+
+The ctypes surface is declared explicitly — `WinDLL("kernel32.dll",
+use_last_error=True)`, `wintypes.LPCWSTR/LPCWSTR/DWORD` argtypes, `wintypes.BOOL`
+restype, and `ctypes.WinError(ctypes.get_last_error())` on failure.
+`use_last_error=True` is load-bearing: it makes ctypes capture the thread's Win32
+error immediately after the call, where a bare `GetLastError()` lookup can be
+clobbered by an intervening call. Cycle 65 lost time to an under-declared
+`CreateFileW`; `MoveFileExW` is a far smaller surface (two wide strings and a
+DWORD, no HANDLE, no `CloseHandle`), which is what made this option acceptable.
+
+**AC02 — the two bare `os.replace` peers.**
+
+`capture.py:694` returned a successful capture, and `query/embeddings.py:363`
+returned a successful vector rebuild, each after a bare `os.replace`. Both bypass
+`atomic_json_write` and `_atomic_text_write_replace`, so neither had any barrier.
+Power loss could leave a reported capture missing, or silently restore the
+previous vector DB while `rebuild_vector_index` returned `True`.
+
+Both now promote through `durable_replace`. Capture additionally flushes its
+body: it used `write_text`, which leaves content in the page cache, so the
+promote could win that race even once the rename itself was durable — the
+"or partial" half of the backlog entry.
+
+The backlog preferred routing both through `atomic_text_write` /
+`atomic_json_write`, on the grounds that "a third bespoke write path is how this
+class keeps reappearing". Neither fits: capture promotes into a path already
+reserved by an `O_EXCL` two-pass protocol, and the vector index is a binary
+SQLite file built by a separate writer. Sharing one promote primitive satisfies
+the stated intent without forcing either caller through a helper that would have
+to be reshaped around it.
+
+**AC03 — `lint/checks/evidence_resolvable.py` containment TOCTOU.**
+
+Containment was decided against the resolved path, and the existence check then
+ran as a separate `Path.is_file()`. Between the two, replacing the final
+component under `raw/` with a link pointing outside made the stat follow it, and
+its result reached lint output — the filesystem-existence oracle over LLM-written
+frontmatter that the cycle-86 T1 boundary exists to prevent.
+
+`os.lstat` never follows a final-component symlink, so the verdict now describes
+the entry containment actually accepted.
+
+This is a **DESIGN-AMEND** against the backlog's suggested `_open_no_follow` +
+`fstat` shape, for three reasons: `lstat` opens nothing, so there is no
+descriptor to leak and no side effect on FIFOs or device nodes; it needs no
+platform branch; and `_open_no_follow` treats any non-`ELOOP` `OSError` as
+"O_NOFOLLOW unsupported", so a plain `ENOENT` triggers a spurious
+once-per-process warning — which a check that routinely encounters missing files
+would fire constantly.
+
+Residual scope is documented in the docstring rather than glossed: this closes
+the FINAL-component swap, not an ancestor-directory swap. Both this and the
+`O_NOFOLLOW` shape re-walk ancestors; only `openat2(RESOLVE_BENEATH)` would close
+that, and it is Linux-5.6+ only. The leak stays a boolean and still requires
+local write access to `raw/`.
+
+**AC04 — DROPPED as stale, no code change.**
+
+The backlog claimed `test_persist_contradictions_concurrent` and
+`test_concurrent_same_day_same_source_distinct_claims_both_persist` "rely on
+wall-clock thread overlap rather than a deterministic barrier". Both already use
+`threading.Barrier(2)` with widened lock timeouts, shipped in cycle 84 (PR #127),
+and cycle 85 added `test_removing_the_lock_loses_a_write` as a falsifiability
+meta-test proving the lock is load-bearing. The entry was deleted. This is the
+"BACKLOG says open — check current source first" red flag firing as intended.
+
+**Test-seam consequences.**
+
+Nine promote seams across six test files were retargeted. Tests had been
+fault-injecting at `Path.replace` or `os.replace`; on Windows `durable_replace`
+uses `MoveFileExW`, so those patches no longer intercept and the tests would
+either observe nothing or fail to raise. `durable_replace` is now the only
+platform-agnostic seam, which also makes those tests stronger than before.
+
+Cycle-86's four AC04 tests are pinned to the POSIX branch explicitly via
+`_use_windows_write_through`. They had passed on Windows only because the
+`_fsync_parent_dir` no-op was still *called* there — the accident that let this
+whole gap survive a cycle.
+
+Platform branches are driven by faked-platform tests rather than `skipif`
+(C86-L3). `_use_windows_write_through()` exists as that seam because faking
+`os.name` directly is not viable: `pathlib.Path` selects its concrete flavour
+from `os.name` at instantiation, so every `Path(...)` in the call stack raises
+`UnsupportedOperation` under the fake.
+
+**Revert-sensitivity, confirmed per test rather than assumed:** forcing
+`_is_regular_file_no_follow` to False must flip the lint verdict, which it cannot
+do if the production code still calls `.is_file()`; the Windows branch must call
+`MoveFileExW` with flags `9` and must NOT call `os.replace` or
+`_fsync_parent_dir`; a failed write-through move must raise with no fallback; and
+capture's content flush must be ordered before its promote.
+
+**R1 review outcome (Codex).**
+
+Codex returned REQUEST-CHANGES with 2 MAJOR + 3 MINOR. Four were fixed in-cycle; one
+was filed. DeepSeek ran the same diff in parallel and returned 2 MAJOR + 2 MINOR, all
+four of which were rejected with citations.
+
+*MAJOR-1 — a regression this cycle introduced.* `os.replace` was atomic in the sense
+callers relied on: it either renamed or raised, never both. `durable_replace` broke that,
+because the POSIX parent-directory fsync runs AFTER the rename and cycle 86 deliberately
+made it raise on genuine storage failure. `capture._write_item_files` appends to `written`
+only after the promote returns, so a barrier failure left the final file on disk, absent
+from `written`, with its temp already renamed away — `_rollback_finalized` did not know
+about it and `_rollback_reservations` was a no-op for it. An orphan `<slug>.md` therefore
+survived a capture reported as `([], error)`, silently breaking an explicit all-or-nothing
+contract. The pre-existing comment at that site even asserted the old atomicity as its
+justification. Fixed with `RenameCompletedBarrierError(OSError)`, raised only when the
+rename completed and the barrier then failed; capture unlinks the final on it. It
+subclasses `OSError` so every legacy `except OSError` still catches by inheritance.
+
+*MAJOR-2 — a scope-out that did not survive.* The PR body listed
+`orchestrator.py`'s proposal-consumption rename as an out-of-scope same-class peer, on the
+grounds that its failure mode was idempotent re-consumption rather than data loss. Codex
+traced the consequence one step further: if power loss reverts that rename, the next run
+reparses `_augment_proposals.md`, repeats the fetch/LLM/ingest work, and `persister.py`
+writes ANOTHER raw article under a fresh run id. That is duplicated content, not a no-op.
+The same-class-peer rule says a weak scope-out justification brings the peer in scope, so
+it was routed through `durable_replace`.
+
+*MINOR-3.* `wiki_log.rotate_if_oversized` was a third bare-rename peer that the
+concept-grep missed. Also routed through the barrier.
+
+*MINOR-4.* The faked-platform tests stub `_resolve_move_file_ex_w` wholesale, so a wrong
+`argtypes`/`restype`, or a dropped `use_last_error=True`, left every one of them green —
+and a stale `WinError(0)` instead of the real code is exactly the failure that would cause.
+Two Windows-only tests now assert the real ABI declaration and drive a genuine
+create / overwrite / failure cycle through kernel32. This converts a manual pre-merge check
+into permanent coverage; ubuntu CI can never execute that branch.
+
+*MINOR-5 — filed, not fixed.* Codex flagged that several AC03 tests cannot detect a revert
+to `Path.is_file()`, while agreeing they should be RETAINED as non-regression guards and
+that the real detectors (the platform-independent helper-driven test and the POSIX swap
+test) do work. The ask is ADDED Windows reparse coverage — file symlink, junction,
+hardlink. Deferred because unprivileged symlink creation fails on the development machine
+(`WinError 1314`), so the test would skip on the only platform able to run it. Filed with
+the junction-first approach recorded.
+
+*DeepSeek findings, all rejected with citations.* Two claimed `atomic_json_write` leaks its
+temp file when the promote raises — but `_cleanup_tmp(tmp_path)` runs unconditionally in the
+`except BaseException` block at io.py:401 and io.py:429; only the `os.close` is gated on
+`fd_transferred`, and the review attached the guard to the wrong statement. One cited a test
+by a name that does not exist in the repository. One claimed the `lstat` change regresses
+legitimate symlinks under `raw/` — but `_resolve_evidence_ref` returns the RESOLVED path, so
+a link inside `raw/` reaches the stat as its regular-file target, and a link pointing outside
+`raw/` was already an `error` via the containment check rather than the silent pass assumed.
+That last one was plausible enough to settle with a test rather than an argument, so
+`test_a_symlink_resolving_inside_raw_is_still_accepted` now pins it.
+
+*CI caught a bad test.* The POSIX symlink test planted the link and let the real
+`_resolve_evidence_ref` run. That helper calls `.resolve()`, which follows the link, so
+containment rejected it and the stat under test was never reached — the assertion failed on
+a different message. It looked green locally only because the test is skipped on Windows.
+The resolver is now stubbed to return the contained path, which is what it genuinely returns
+in the race being modelled.
+
+| Metric | Value |
+|---|---|
+| ACs | 3 shipped, 1 dropped-stale, 4 R1 findings fixed |
+| src files | 6 (`utils/io.py`, `capture.py`, `query/embeddings.py`, `lint/checks/evidence_resolvable.py`, `lint/augment/orchestrator.py`, `utils/wiki_log.py`) |
+| Tests | 3541 → 3565 collected (+24) |
+| Test files | 238 → 239 |
+| BACKLOG | 4 deleted (3 shipped, 1 stale) + 3 filed (Windows reparse coverage, capture rollback indeterminacy, refiner not-durable state) |
+
 ### 2026-07-27 — cycle 86 (validation & ordering correctness)
 
 **Scope:** 5 ACs — two Phase-5 HIGH-LEVERAGE "Low effort" items from the
