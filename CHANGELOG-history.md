@@ -114,11 +114,36 @@ verdict — the behaviour the existing cycle-86 comment documents as deliberate)
 and leftover `os.name == "nt"` checks (verified: none remain outside the two
 named predicates).
 
-Tests: 3537 → 3560 (+24, one platform-skipped —
+**R2 (Codex) found a CI-breaking regression in the R1 fix — P1, caught before
+merge.** R1 made the open branch raise on any errno NOT in
+`_FSYNC_UNSUPPORTED_ERRNOS`. That set was written for the FSYNC branch, and the
+two branches face different error populations: `fsync` on an already-valid
+descriptor cannot return `ENOENT`, whereas `open` can and routinely does when a
+directory is concurrently removed. Inverting one branch's rule to derive the
+other turned a missing directory into a hard failure, breaking the cycle-86 T7
+contract that the barrier must never convert a working write into a hard failure.
+
+The way it hid is the lesson. `tests/test_cycle86_validation_ordering.py`
+already pins T7 by calling the helper with a nonexistent directory — and on
+Windows that test passes VACUOUSLY, because `_dir_fsync_supported()` returns
+before the open is attempted. So the regression was green locally and would have
+failed only on Ubuntu CI. This is C86-L3 in its sharpest form: the lesson is in
+CLAUDE.md, the seam that makes it avoidable was added by THIS cycle, and the fix
+still tripped over it one commit later. A `skipif` is not the only way to get a
+platform-blind test — an early return does it too, and silently.
+
+The open branch now classifies with `_STORAGE_FAULT_ERRNOS = {EIO, ENOSPC}`, an
+allow-list of genuine faults. Every previously-tolerated outcome (`ENOENT`,
+`ENOTDIR`, `EACCES`, `EPERM`) stays tolerated and reports `UNSUPPORTED`, so the
+only behaviour change from cycle 88 remains the one DeepSeek asked for. A new
+test forces the POSIX branch and pins the T7 missing-directory contract on BOTH
+platforms rather than only the one CI runs, closing the vacuum that hid this.
+
+Tests: 3537 → 3562 (+26, one platform-skipped —
 `tests/test_cycle89_barrier_tristate.py`). The AC01 tests drive BOTH platform
 branches from either OS through the new seam, which cut the skip count from 11 to
 1; the single remaining skip is one deliberately un-mocked POSIX run, kept so the
-faked tests cannot all agree on a wrong syscall shape. Full suite 3560 passed, 29
+faked tests cannot all agree on a wrong syscall shape. Full suite 3562 passed, 29
 skipped, 17 xfailed, 10 snapshots.
 
 Remaining, rewritten in BACKLOG rather than deleted: Windows has no directory-
