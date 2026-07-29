@@ -33,7 +33,12 @@ from kb.config import (
     TEMPLATES_DIR,
 )
 from kb.errors import KBError
-from kb.utils.io import RenameCompletedBarrierError, _fsync_parent_dir, durable_replace
+from kb.utils.io import (
+    BarrierResult,
+    RenameCompletedBarrierError,
+    _fsync_parent_dir,
+    durable_replace,
+)
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
 
@@ -48,6 +53,12 @@ _SLUG_COLLISION_CEILING = 10000
 # operators and log scrapers need to distinguish this from an ordinary write
 # failure without matching on a sentence that later gets reworded.
 ROLLBACK_INCOMPLETE_MARKER = "rollback_incomplete"
+
+# Cycle 89 AC02 — a DIFFERENT claim from the marker above, so a different token.
+# `rollback_incomplete` means the batch state is unknown; this means the rollback
+# finished but this filesystem refused the durability barrier, so the deletions
+# are not yet on stable storage. Both can appear on one error.
+BARRIER_UNSUPPORTED_MARKER = "barrier_unsupported"
 
 assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS, "CAPTURE_MAX_BYTES must not exceed MAX_PROMPT_CHARS"
 
@@ -710,12 +721,30 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
     toward the harmless direction is the point.
     """
     barrier_failed = False
+    barrier = None
     if targets:
         try:
-            _fsync_parent_dir(captures_dir)
+            barrier = _fsync_parent_dir(captures_dir)
         except OSError as e:
             logger.warning("Rollback barrier failed for %s: %s", captures_dir, e)
             barrier_failed = True
+
+    # Cycle 89 AC02 — a SEPARATE suffix, never folded into the marker clauses
+    # below. The two say different things and conflating them would undo the
+    # cycle-88 decision: `rollback_incomplete` means "the batch state is UNKNOWN,
+    # go look"; this note means "the rollback completed and the state IS known,
+    # but the deletions are not yet on stable storage".
+    #
+    # SKIPPED_PLATFORM (Windows) is deliberately NOT reported even though it too
+    # means no flush. It is constant on that platform, so the note would appear
+    # on every capture failure and become noise — the crying-wolf failure cycle
+    # 88 rejected twice. UNSUPPORTED is unusual and filesystem-specific, which is
+    # exactly what makes it worth saying.
+    barrier_note = (
+        f" [{BARRIER_UNSUPPORTED_MARKER}] rollback deletions are not on stable storage"
+        if barrier is BarrierResult.UNSUPPORTED
+        else ""
+    )
 
     clauses: list[str] = []
     if survivors:
@@ -731,10 +760,11 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
             names = _name_list(may_reappear)
             clauses.append(f"{len(may_reappear)} may reappear after a crash: {names}")
     if not clauses:
-        return ""
+        return barrier_note
     return (
         f" [{ROLLBACK_INCOMPLETE_MARKER}] batch state is UNKNOWN rather than empty — "
         + "; ".join(clauses)
+        + barrier_note
     )
 
 

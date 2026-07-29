@@ -11,6 +11,7 @@ convention. Verified by cycle-1/2/6 reviewers; deviating from this ordering is
 a bug, not a style preference.
 """
 
+import enum
 import errno
 import json
 import logging
@@ -186,7 +187,55 @@ _FSYNC_UNSUPPORTED_ERRNOS = frozenset(
 )
 
 
-def _fsync_parent_dir(directory: Path) -> None:
+def _dir_fsync_supported() -> bool:
+    """Whether this platform can fsync a directory handle at all.
+
+    A named predicate rather than an inline ``os.name == "nt"``, for the reason
+    C86-L3 records: a ``skipif``-guarded platform branch is untested on whichever
+    platform the developer is not using, and that is precisely how the Windows
+    durability gap survived cycle 86. With the check behind a seam both branches
+    are reachable from either platform.
+
+    Monkeypatching ``os.name`` instead is not viable — ``pathlib.Path`` selects
+    its concrete flavour from it at instantiation, so faking it makes every
+    ``Path(...)`` in the call stack raise ``UnsupportedOperation``. Same hazard
+    ``_use_windows_write_through`` exists to avoid; kept separate from it because
+    they answer different questions and could diverge (a future platform might
+    support one and not the other).
+    """
+    return os.name != "nt"
+
+
+class BarrierResult(enum.Enum):
+    """Which of three things ``_fsync_parent_dir`` actually did.
+
+    Cycle 89 AC01 (cycle-88 R1 DeepSeek + R2 Codex, same root cause reached from
+    two directions). The helper used to return ``None`` in all three cases, so no
+    caller could tell a real flush from no flush at all — and both reviewers
+    independently proposed making callers report a missing barrier without
+    noticing that the information needed to do so did not exist.
+
+    The three values exist because they warrant three DIFFERENT decisions, which
+    is what makes this a tri-state rather than a bool:
+
+      * ``FLUSHED`` — the directory entry is on stable storage. Say nothing.
+      * ``UNSUPPORTED`` — the filesystem refused (``EINVAL`` / ``ENOTSUP`` /
+        ``EPERM`` …, or the directory could not be opened at all). Unusual and
+        filesystem-specific, so an operator generally wants to know.
+      * ``SKIPPED_PLATFORM`` — Windows, where this is a documented permanent
+        no-op. Constant, therefore not worth repeating to a human on every call:
+        surfacing it would be the crying-wolf failure cycle 88 rejected twice.
+
+    A genuine storage failure (``EIO`` / ``ENOSPC``) is NOT a value here — it
+    still RAISES, exactly as cycle 86 established.
+    """
+
+    FLUSHED = "flushed"
+    UNSUPPORTED = "unsupported"
+    SKIPPED_PLATFORM = "skipped_platform"
+
+
+def _fsync_parent_dir(directory: Path) -> BarrierResult:
     """Cycle 86 AC04 (Phase 4.5 MEDIUM / cycle-83 threat T12): flush the
     parent directory entry so the ``os.replace`` itself is durable.
 
@@ -228,15 +277,18 @@ def _fsync_parent_dir(directory: Path) -> None:
     obtained a different way — see ``durable_replace``, which routes ``nt``
     around this helper entirely rather than pretending it did something.
     """
-    if os.name == "nt":
-        return
+    if not _dir_fsync_supported():
+        return BarrierResult.SKIPPED_PLATFORM
     try:
         # O_DIRECTORY is POSIX-only and absent on some platforms; fall back
         # to a plain O_RDONLY open, which is valid for directories there.
         fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     except OSError as e:
         logger.warning("Could not open parent dir %s for fsync: %s", directory, e)
-        return
+        # No handle means no flush. Same answer as a refused fsync from the
+        # caller's side, so it reports as UNSUPPORTED rather than as success.
+        return BarrierResult.UNSUPPORTED
+    result = BarrierResult.FLUSHED
     try:
         os.fsync(fd)
     except OSError as e:
@@ -249,6 +301,7 @@ def _fsync_parent_dir(directory: Path) -> None:
             logger.warning(
                 "Parent-dir fsync unsupported for %s (errno=%s): %s", directory, e.errno, e
             )
+            result = BarrierResult.UNSUPPORTED
         else:
             logger.error(
                 "Parent-dir fsync FAILED for %s (errno=%s): %s — rename durability "
@@ -265,6 +318,7 @@ def _fsync_parent_dir(directory: Path) -> None:
             os.close(fd)
         except OSError as close_err:
             logger.warning("Failed to close parent-dir fd for %s: %s", directory, close_err)
+    return result
 
 
 # Win32 ``MoveFileExW`` flags. ``MOVEFILE_COPY_ALLOWED`` is deliberately absent:
