@@ -297,3 +297,34 @@ def test_no_barrier_is_taken_when_the_rollback_deleted_nothing(tmp_path, monkeyp
 
     assert detail == ""
     assert calls == []
+
+
+def test_no_barrier_note_when_every_deletion_failed(tmp_path, monkeypatch):
+    """R1 Codex P2. If every unlink failed, nothing was deleted — so there is no
+    deletion for a durability caveat to be about.
+
+    Pre-fix the same error said both "every file remains" and "the deletions may
+    not stick", which cannot both be true. Reporting a caveat about work that
+    never happened is the same false-claim class this cycle exists to remove.
+    """
+    monkeypatch.setattr(capture_mod, "_fsync_parent_dir", lambda d: BarrierResult.UNSUPPORTED)
+    stuck = tmp_path / "decision-alpha.md"
+
+    detail = capture_mod._finish_rollback(tmp_path, [stuck], targets=[stuck])
+
+    assert capture_mod.ROLLBACK_INCOMPLETE_MARKER in detail
+    assert "still present: decision-alpha.md" in detail
+    assert capture_mod.BARRIER_UNSUPPORTED_MARKER not in detail
+
+
+def test_the_barrier_note_still_fires_when_some_deletion_succeeded(tmp_path, monkeypatch):
+    """The guard must not over-correct: a partially-successful rollback DOES have
+    deletions whose durability is in question."""
+    monkeypatch.setattr(capture_mod, "_fsync_parent_dir", lambda d: BarrierResult.UNSUPPORTED)
+    stuck = tmp_path / "decision-alpha.md"
+    gone = tmp_path / "decision-beta.md"
+
+    detail = capture_mod._finish_rollback(tmp_path, [stuck], targets=[stuck, gone])
+
+    assert capture_mod.ROLLBACK_INCOMPLETE_MARKER in detail
+    assert capture_mod.BARRIER_UNSUPPORTED_MARKER in detail

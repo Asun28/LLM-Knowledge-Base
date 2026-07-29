@@ -740,25 +740,32 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
     # on every capture failure and become noise — the crying-wolf failure cycle
     # 88 rejected twice. UNSUPPORTED is unusual and filesystem-specific, which is
     # exactly what makes it worth saying.
+    # Paths whose unlink SUCCEEDED. A durability caveat can only apply to these:
+    # a file that is still on disk has no deletion to make durable. Computed once
+    # and shared with the barrier-failure clause below, which needs the same set.
+    deleted = [p for p in targets if p not in survivors]
+
     barrier_note = (
         f" [{BARRIER_UNSUPPORTED_MARKER}] rollback deletions are not on stable storage"
-        if barrier is BarrierResult.UNSUPPORTED
+        # R1 Codex P2 — the `deleted` guard. Without it, a rollback where EVERY
+        # unlink failed still claimed its deletions were not durable, so one
+        # error said both "every file remains" and "the deletions may not stick".
+        # There were no deletions. Reporting a caveat about work that never
+        # happened is the same false-claim class this cycle exists to remove.
+        if barrier is BarrierResult.UNSUPPORTED and deleted
         else ""
     )
 
     clauses: list[str] = []
     if survivors:
         clauses.append(f"{len(survivors)} still present: {_name_list(survivors)}")
-    if barrier_failed:
-        # R1 Codex P2 — the first version named `captures_dir` here. That is the
-        # one path guaranteed to remain no matter what, so it told the caller
-        # nothing, while omitting the only useful answer: WHICH deletions are not
-        # on stable storage yet. Report the targets whose unlink succeeded — those
-        # are exactly the ones a crash can bring back.
-        may_reappear = [p for p in targets if p not in survivors]
-        if may_reappear:
-            names = _name_list(may_reappear)
-            clauses.append(f"{len(may_reappear)} may reappear after a crash: {names}")
+    if barrier_failed and deleted:
+        # Cycle-88 R1 Codex P2 — the first version named `captures_dir` here. That
+        # is the one path guaranteed to remain no matter what, so it told the
+        # caller nothing, while omitting the only useful answer: WHICH deletions
+        # are not on stable storage yet. `deleted` is exactly the set a crash can
+        # bring back.
+        clauses.append(f"{len(deleted)} may reappear after a crash: {_name_list(deleted)}")
     if not clauses:
         return barrier_note
     return (
