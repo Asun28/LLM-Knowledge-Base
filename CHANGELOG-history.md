@@ -80,11 +80,45 @@ the note into the marker's clause list would have re-created exactly the
 conflation cycle 88 decided against; the first draft of this cycle did that and
 it was caught before commit.
 
-Tests: 3537 → 3556 (+20, one platform-skipped —
+**Review outcome (R1, Codex and DeepSeek in parallel).** Two findings accepted,
+three rejected — and both accepted ones were defects this cycle INTRODUCED,
+which is the useful pattern to note: adding a name to something previously
+unnamed turns old silence into a new claim.
+
+DeepSeek HIGH: the `os.open` branch had swallowed every errno alike since cycle
+86. That was defensible while it returned `None`, because `None` claimed
+nothing. `UNSUPPORTED` asserts WHY there was no flush, so an `EIO` from failing
+storage now reached the caller as a benign platform limitation — a dying disk
+reading as "this filesystem does not support directory fsync". The open branch
+now classifies errnos with the same set the fsync branch has used since cycle
+86, so both paths answer the question identically.
+
+Codex P2, reproduced by execution: when every rollback unlink fails, `survivors`
+contains every target and nothing was deleted, yet the `barrier_unsupported`
+note still fired — one error reading both "1 still present: decision-alpha.md"
+and "rollback deletions are not on stable storage". Both cannot be true. The
+note is now gated on `deleted`, the set the barrier-FAILURE clause already
+computed for the same reason; the duplicate comprehension is folded into one
+binding so the two paths cannot drift apart again.
+
+Rejected, with reasons recorded because two of them rest on false premises:
+`durable_replace`/`durable_rename` should log on non-FLUSHED (pre-cycle-89 the
+helper already swallowed unsupported errnos internally and returned `None`, so
+callers never saw them and nothing was lost — and it already logs that case
+itself, while `durable_replace` runs on every wiki page write, making a second
+per-call warning duplicate flood on exactly the filesystems that trigger it);
+`os.close` should re-raise `EIO` (the fd is a READ-ONLY directory handle with no
+buffered writes behind it, and the fsync above has already established
+durability, so re-raising would let a close error overwrite a correctly-decided
+verdict — the behaviour the existing cycle-86 comment documents as deliberate);
+and leftover `os.name == "nt"` checks (verified: none remain outside the two
+named predicates).
+
+Tests: 3537 → 3560 (+24, one platform-skipped —
 `tests/test_cycle89_barrier_tristate.py`). The AC01 tests drive BOTH platform
 branches from either OS through the new seam, which cut the skip count from 11 to
 1; the single remaining skip is one deliberately un-mocked POSIX run, kept so the
-faked tests cannot all agree on a wrong syscall shape. Full suite 3556 passed, 29
+faked tests cannot all agree on a wrong syscall shape. Full suite 3560 passed, 29
 skipped, 17 xfailed, 10 snapshots.
 
 Remaining, rewritten in BACKLOG rather than deleted: Windows has no directory-
