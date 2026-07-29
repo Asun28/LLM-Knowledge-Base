@@ -33,7 +33,12 @@ from kb.config import (
     TEMPLATES_DIR,
 )
 from kb.errors import KBError
-from kb.utils.io import RenameCompletedBarrierError, _fsync_parent_dir, durable_replace
+from kb.utils.io import (
+    BarrierResult,
+    RenameCompletedBarrierError,
+    _fsync_parent_dir,
+    durable_replace,
+)
 from kb.utils.llm import call_llm_json
 from kb.utils.text import slugify, yaml_sanitize
 
@@ -48,6 +53,12 @@ _SLUG_COLLISION_CEILING = 10000
 # operators and log scrapers need to distinguish this from an ordinary write
 # failure without matching on a sentence that later gets reworded.
 ROLLBACK_INCOMPLETE_MARKER = "rollback_incomplete"
+
+# Cycle 89 AC02 — a DIFFERENT claim from the marker above, so a different token.
+# `rollback_incomplete` means the batch state is unknown; this means the rollback
+# finished but this filesystem refused the durability barrier, so the deletions
+# are not yet on stable storage. Both can appear on one error.
+BARRIER_UNSUPPORTED_MARKER = "barrier_unsupported"
 
 assert CAPTURE_MAX_BYTES <= MAX_PROMPT_CHARS, "CAPTURE_MAX_BYTES must not exceed MAX_PROMPT_CHARS"
 
@@ -710,31 +721,57 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
     toward the harmless direction is the point.
     """
     barrier_failed = False
+    barrier = None
     if targets:
         try:
-            _fsync_parent_dir(captures_dir)
+            barrier = _fsync_parent_dir(captures_dir)
         except OSError as e:
             logger.warning("Rollback barrier failed for %s: %s", captures_dir, e)
             barrier_failed = True
 
+    # Cycle 89 AC02 — a SEPARATE suffix, never folded into the marker clauses
+    # below. The two say different things and conflating them would undo the
+    # cycle-88 decision: `rollback_incomplete` means "the batch state is UNKNOWN,
+    # go look"; this note means "the rollback completed and the state IS known,
+    # but the deletions are not yet on stable storage".
+    #
+    # SKIPPED_PLATFORM (Windows) is deliberately NOT reported even though it too
+    # means no flush. It is constant on that platform, so the note would appear
+    # on every capture failure and become noise — the crying-wolf failure cycle
+    # 88 rejected twice. UNSUPPORTED is unusual and filesystem-specific, which is
+    # exactly what makes it worth saying.
+    # Paths whose unlink SUCCEEDED. A durability caveat can only apply to these:
+    # a file that is still on disk has no deletion to make durable. Computed once
+    # and shared with the barrier-failure clause below, which needs the same set.
+    deleted = [p for p in targets if p not in survivors]
+
+    barrier_note = (
+        f" [{BARRIER_UNSUPPORTED_MARKER}] rollback deletions are not on stable storage"
+        # R1 Codex P2 — the `deleted` guard. Without it, a rollback where EVERY
+        # unlink failed still claimed its deletions were not durable, so one
+        # error said both "every file remains" and "the deletions may not stick".
+        # There were no deletions. Reporting a caveat about work that never
+        # happened is the same false-claim class this cycle exists to remove.
+        if barrier is BarrierResult.UNSUPPORTED and deleted
+        else ""
+    )
+
     clauses: list[str] = []
     if survivors:
         clauses.append(f"{len(survivors)} still present: {_name_list(survivors)}")
-    if barrier_failed:
-        # R1 Codex P2 — the first version named `captures_dir` here. That is the
-        # one path guaranteed to remain no matter what, so it told the caller
-        # nothing, while omitting the only useful answer: WHICH deletions are not
-        # on stable storage yet. Report the targets whose unlink succeeded — those
-        # are exactly the ones a crash can bring back.
-        may_reappear = [p for p in targets if p not in survivors]
-        if may_reappear:
-            names = _name_list(may_reappear)
-            clauses.append(f"{len(may_reappear)} may reappear after a crash: {names}")
+    if barrier_failed and deleted:
+        # Cycle-88 R1 Codex P2 — the first version named `captures_dir` here. That
+        # is the one path guaranteed to remain no matter what, so it told the
+        # caller nothing, while omitting the only useful answer: WHICH deletions
+        # are not on stable storage yet. `deleted` is exactly the set a crash can
+        # bring back.
+        clauses.append(f"{len(deleted)} may reappear after a crash: {_name_list(deleted)}")
     if not clauses:
-        return ""
+        return barrier_note
     return (
         f" [{ROLLBACK_INCOMPLETE_MARKER}] batch state is UNKNOWN rather than empty — "
         + "; ".join(clauses)
+        + barrier_note
     )
 
 

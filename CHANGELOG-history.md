@@ -17,6 +17,143 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-29 — cycle 89 (barrier tri-state)
+
+Cycle 88's review produced the same finding twice, from two model families
+approaching from opposite ends. R1 DeepSeek said the Windows rollback claims a
+durability it does not have; R2 Codex said the POSIX tolerated-errno path does
+the same thing. Both proposed the same remedy — have callers REPORT a missing
+barrier — and neither noticed that `_fsync_parent_dir` returned `None` in all
+three cases, so the information needed to report it did not exist.
+
+Cycle 88 rejected both remedies for consistency (a barrier that is merely
+UNAVAILABLE is not the same as a rollback that could not finish) and filed the
+shared root cause instead. This cycle closes it.
+
+That a finding surfaced independently from two directions is the signal worth
+recording: it was not a matter of taste, it was a missing capability that both
+reviewers ran into from whichever side they happened to approach.
+
+**AC01 — `_fsync_parent_dir` reports which of three things it did.**
+
+`BarrierResult.FLUSHED` / `UNSUPPORTED` / `SKIPPED_PLATFORM`. A genuine storage
+failure (`EIO`, `ENOSPC`) is deliberately NOT a fourth value — it still RAISES,
+exactly as cycle 86 established, because returning it would let `durable_replace`
+report a committed write whose rename a power loss can still revert.
+
+`UNSUPPORTED` covers both the tolerated-errno case and the cannot-open-the-
+directory case. They differ in mechanism but not in the answer the caller needs:
+no flush happened.
+
+`_dir_fsync_supported()` is added as the platform seam, applying C86-L3 rather
+than restating it — a `skipif`-guarded branch holding a decision rule is untested
+on whichever platform the developer is not using, which is precisely how the
+Windows gap survived cycle 86. It is kept SEPARATE from
+`_use_windows_write_through()` even though both currently reduce to
+`os.name != "nt"`, because they answer different questions and a future platform
+could support one and not the other. Monkeypatching `os.name` remains off the
+table: `pathlib.Path` selects its flavour from it at instantiation, so faking it
+makes every `Path(...)` in the call stack raise.
+
+The change is additive. `durable_replace` and `durable_rename` ignore the return
+value and are behaviourally unchanged, which is pinned by a test rather than
+asserted in prose — a tolerated barrier must still be a successful promote.
+
+**AC02 — `capture._finish_rollback` decides per value.**
+
+This is where the third enum value earns its keep, and the reason this is a
+tri-state rather than a bool. `UNSUPPORTED` and `SKIPPED_PLATFORM` both mean "no
+flush happened", yet they warrant opposite handling:
+
+  * `UNSUPPORTED` is unusual and filesystem-specific (SMB and NFS mounts that
+    refuse fsync on a directory handle), so an operator wants to know. It emits
+    `BARRIER_UNSUPPORTED_MARKER`.
+  * `SKIPPED_PLATFORM` is constant on Windows. A note would ride along on every
+    capture failure on the primary development platform and train the reader to
+    ignore it — the crying-wolf failure cycle 88 rejected twice. It stays silent.
+
+The note is a SEPARATE suffix from `ROLLBACK_INCOMPLETE_MARKER`, and both can
+appear on one error. They make different claims: `rollback_incomplete` means
+"the batch state is UNKNOWN, go look", while `barrier_unsupported` means "the
+state IS known-empty, but the deletions are not yet on stable storage". Folding
+the note into the marker's clause list would have re-created exactly the
+conflation cycle 88 decided against; the first draft of this cycle did that and
+it was caught before commit.
+
+**Review outcome (R1, Codex and DeepSeek in parallel).** Two findings accepted,
+three rejected — and both accepted ones were defects this cycle INTRODUCED,
+which is the useful pattern to note: adding a name to something previously
+unnamed turns old silence into a new claim.
+
+DeepSeek HIGH: the `os.open` branch had swallowed every errno alike since cycle
+86. That was defensible while it returned `None`, because `None` claimed
+nothing. `UNSUPPORTED` asserts WHY there was no flush, so an `EIO` from failing
+storage now reached the caller as a benign platform limitation — a dying disk
+reading as "this filesystem does not support directory fsync". The open branch
+now classifies errnos with the same set the fsync branch has used since cycle
+86, so both paths answer the question identically.
+
+Codex P2, reproduced by execution: when every rollback unlink fails, `survivors`
+contains every target and nothing was deleted, yet the `barrier_unsupported`
+note still fired — one error reading both "1 still present: decision-alpha.md"
+and "rollback deletions are not on stable storage". Both cannot be true. The
+note is now gated on `deleted`, the set the barrier-FAILURE clause already
+computed for the same reason; the duplicate comprehension is folded into one
+binding so the two paths cannot drift apart again.
+
+Rejected, with reasons recorded because two of them rest on false premises:
+`durable_replace`/`durable_rename` should log on non-FLUSHED (pre-cycle-89 the
+helper already swallowed unsupported errnos internally and returned `None`, so
+callers never saw them and nothing was lost — and it already logs that case
+itself, while `durable_replace` runs on every wiki page write, making a second
+per-call warning duplicate flood on exactly the filesystems that trigger it);
+`os.close` should re-raise `EIO` (the fd is a READ-ONLY directory handle with no
+buffered writes behind it, and the fsync above has already established
+durability, so re-raising would let a close error overwrite a correctly-decided
+verdict — the behaviour the existing cycle-86 comment documents as deliberate);
+and leftover `os.name == "nt"` checks (verified: none remain outside the two
+named predicates).
+
+**R2 (Codex) found a CI-breaking regression in the R1 fix — P1, caught before
+merge.** R1 made the open branch raise on any errno NOT in
+`_FSYNC_UNSUPPORTED_ERRNOS`. That set was written for the FSYNC branch, and the
+two branches face different error populations: `fsync` on an already-valid
+descriptor cannot return `ENOENT`, whereas `open` can and routinely does when a
+directory is concurrently removed. Inverting one branch's rule to derive the
+other turned a missing directory into a hard failure, breaking the cycle-86 T7
+contract that the barrier must never convert a working write into a hard failure.
+
+The way it hid is the lesson. `tests/test_cycle86_validation_ordering.py`
+already pins T7 by calling the helper with a nonexistent directory — and on
+Windows that test passes VACUOUSLY, because `_dir_fsync_supported()` returns
+before the open is attempted. So the regression was green locally and would have
+failed only on Ubuntu CI. This is C86-L3 in its sharpest form: the lesson is in
+CLAUDE.md, the seam that makes it avoidable was added by THIS cycle, and the fix
+still tripped over it one commit later. A `skipif` is not the only way to get a
+platform-blind test — an early return does it too, and silently.
+
+The open branch now classifies with `_STORAGE_FAULT_ERRNOS = {EIO, ENOSPC}`, an
+allow-list of genuine faults. Every previously-tolerated outcome (`ENOENT`,
+`ENOTDIR`, `EACCES`, `EPERM`) stays tolerated and reports `UNSUPPORTED`, so the
+only behaviour change from cycle 88 remains the one DeepSeek asked for. A new
+test forces the POSIX branch and pins the T7 missing-directory contract on BOTH
+platforms rather than only the one CI runs, closing the vacuum that hid this.
+
+Tests: 3537 → 3562 (+26, one platform-skipped —
+`tests/test_cycle89_barrier_tristate.py`). The AC01 tests drive BOTH platform
+branches from either OS through the new seam, which cut the skip count from 11 to
+1; the single remaining skip is one deliberately un-mocked POSIX run, kept so the
+faked tests cannot all agree on a wrong syscall shape. Full suite 3562 passed, 29
+skipped, 17 xfailed, 10 snapshots.
+
+Remaining, rewritten in BACKLOG rather than deleted: Windows has no directory-
+flush primitive at all. `DeleteFileW` has no write-through flag,
+`FlushFileBuffers` is unsupported on a directory handle, and transactional NTFS
+is deprecated — so `SKIPPED_PLATFORM` is currently permanent there and the honest
+outcome may be won't-fix. Three consecutive cycles have now had a reviewer
+propose reporting that gap, so the note asks for the finding to be written into
+`docs/reference/` rather than re-derived a fourth time.
+
 ### 2026-07-29 — cycle 88 (honest durability & rollback reporting)
 
 The three residual MEDIUMs filed by cycle-87's own Codex review. All three share
