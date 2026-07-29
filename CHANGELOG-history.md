@@ -17,6 +17,119 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-29 — cycle 88 (honest durability & rollback reporting)
+
+The three residual MEDIUMs filed by cycle-87's own Codex review. All three share
+one shape, which is why they landed as one cycle: the code takes a correct
+ACTION, then tells the caller something the filesystem does not support.
+
+None of the three is data loss. In every case the bytes on disk are correct and
+a retry is idempotent. That is precisely what makes them worth closing — a
+caller that cannot trust the report cannot automate the retry, so the defect
+converts a recoverable condition into a manual one.
+
+**AC01 — `review/refiner.py`: a failed barrier is not a failed revision.**
+
+`refine_page` wrapped `atomic_text_write` in a broad `except OSError` that
+recorded the revision `failed` and returned an error. When only the durability
+barrier fails, `page_path` already contains `new_text`, so the recorded state
+contradicts the file and sends an operator hunting for a revision that is
+actually present.
+
+`RenameCompletedBarrierError` is now caught BEFORE the broad handler and records
+`status: applied` with `durable: false` and `durability_error`. The design
+decision worth recording is that `status` and `durable` are kept as SEPARATE
+axes rather than adding a fourth status value: `status` answers "did the
+revision land in the page?" (yes) and `durable` answers "is that landing
+guaranteed to survive power loss?" (no). A fourth status value would have forced
+`sweep_stale_pending`'s pending-only logic and every existing `status` consumer
+to learn a new vocabulary for a condition none of them care about. Same
+orthogonality the wiki frontmatter already uses for `belief_state` versus
+`confidence`.
+
+Both fields are written ONLY on the not-durable path. Absence means "no caveat
+recorded", following the `get_prompt_version` legacy-default convention —
+stamping every row would claim a verdict for pre-cycle-88 rows that never
+recorded one.
+
+`refine_page` also returns `durable: False` plus a `warning`, while keeping
+`updated: True` and adding NO `error` key. That combination is deliberate: the
+revision IS in the page, so a caller branching on `error` must not treat it as a
+refusal, but the retry decision belongs to the caller and therefore has to reach
+it rather than stopping at the log.
+
+**Catch order is load-bearing.** `RenameCompletedBarrierError` subclasses
+`OSError`, so placing the broad handler first silently swallows the narrow case
+and restores the false `failed` report — the identical hazard cycle 86 recorded
+for `ValueDomainError` before `TierBoundaryError`. Two tests pin it from both
+sides, and neither ordering passes both. `durability_error` is bound before the
+lock span rather than inside it, so a future edit that adds an early exit cannot
+turn the tail `return` into an `UnboundLocalError`.
+
+**AC02 — `capture.py`: a rollback that could not finish must say so.**
+
+`_write_item_files` promises all-or-nothing across a batch and signals failure as
+`([], error_msg)`, which readers take to mean "nothing was written". Every
+rollback unlink swallowed its `OSError` with a warning and no barrier followed
+the deletions, so a partial rollback was indistinguishable from a clean one.
+
+Four changes: both rollback helpers RETURN the paths whose unlink failed instead
+of only logging them; the cycle-87 completed-promote orphan unlink feeds the same
+list (that unlink could itself fail, so the exact orphan cycle 87 set out to
+prevent could still survive an `([], error)` unreported); `_finish_rollback`
+takes one directory fsync after the last deletion; and when anything is left
+behind the error carries `ROLLBACK_INCOMPLETE_MARKER` and names the surviving
+paths. The marker is a stable machine-readable token rather than prose for the
+same reason `tier_boundary_rejected:` is one — log scrapers must not have to
+match on a sentence that later gets reworded.
+
+Two guards against over-reporting, which would be its own defect: the barrier is
+`attempted`-gated, so a rollback that deleted nothing (the first reservation
+failing, say) cannot manufacture an indeterminacy report out of an fsync
+failure; and a clean rollback still returns the plain error. A FAILING barrier
+folds into `survivors`, because "the deletions are not guaranteed" is the same
+unknown-state answer as a failed unlink.
+
+**Honest scope — the barrier half is POSIX-only.** `_fsync_parent_dir` returns
+immediately when `os.name == "nt"`, so on this project's primary development
+platform the deletions still get no barrier. Unlike the rename case there is no
+cheap Win32 equivalent to route around it: `DeleteFileW` has no write-through
+flag, and `FlushFileBuffers` is not supported on a directory handle (the
+volume-handle form flushes the entire volume and requires admin). The docstring
+states this plainly instead of implying a cross-platform guarantee, and the
+residual is filed in BACKLOG. This was caught in-cycle, before review: cycle 87
+exists because a docstring claimed NTFS durability that `os.replace` never
+provided, and repeating that shape on the delete path would have been the same
+defect one function over. The cross-platform indeterminacy report is the more
+load-bearing half regardless — it tells the caller the batch state is unknown
+whether or not a barrier was available.
+
+**AC03 — Windows reparse-point coverage for the no-follow stat.**
+
+Cycle 87's `_is_regular_file_no_follow` was pinned on POSIX symlinks only.
+Junctions (`mklink /J`) need no privileges, unlike symlinks which fail
+`WinError 1314` unprivileged, so they are the reachable probe on the primary dev
+platform. Four tests: helper-level junction rejection; the true TOCTOU peer,
+with `_resolve_evidence_ref` stubbed to return the contained path exactly as the
+POSIX test does, because that is what it does in the real race (it resolves and
+judges containment BEFORE the swap lands); a hardlink ACCEPTANCE test pinning
+the boundary of the rejection, since `S_ISREG` is true for hardlinks and a
+`raw/` tree that dedupes with them must keep linting clean; and the documented
+ancestor-swap residual as an executable statement for a future
+`openat2(RESOLVE_BENEATH)` pass.
+
+**One expectation was corrected by the code, not the reverse.** The end-to-end
+junction test first asserted a `warning` and failed with `error`. A junction left
+in place under `raw/` is traversed by `_resolve_evidence_ref`'s `.resolve()`, so
+containment rejects the target as outside `raw/` — severity `error`, and the path
+is deliberately never stat'd, per the T1 no-oracle rule. That is stronger than
+the unresolvable warning the test assumed, and it is the Windows peer of cycle
+87's note that an out-of-tree POSIX symlink was already an `error` rather than a
+silent pass. The test now pins the real behaviour and says why.
+
+Tests: 3520 → 3534 (+14, `tests/test_cycle88_rollback_reporting.py`), all
+written red-first. Full suite 3534 passed, 28 skipped, 17 xfailed, 10 snapshots.
+
 ### 2026-07-28 — cycle 87 (durability & containment completion)
 
 Three follow-ons to the cycle-86 Codex review, all in the same two fix families,

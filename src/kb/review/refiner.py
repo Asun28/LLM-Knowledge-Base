@@ -250,6 +250,12 @@ def refine_page(
         else:
             resolved_history_path = REVIEW_HISTORY_PATH
 
+        # Cycle 88 AC01 — bound BEFORE the lock span, not inside it. The tail
+        # `return` reads this, and every path that reaches the tail does pass the
+        # in-span assignment today; hoisting it means a future edit that adds an
+        # early exit cannot turn that into an UnboundLocalError.
+        durability_error: str | None = None
+
         # Single history_lock span covers pending-write + page-write + applied/failed flip.
         # (Hold-through semantic per cycle-19 AC9 — release-and-reacquire would race.)
         with file_lock(resolved_history_path):
@@ -278,7 +284,6 @@ def refine_page(
             # placing the broad one first swallows the narrow case and silently
             # restores the false `failed` report. Same catch-ordering hazard as
             # ValueDomainError before TierBoundaryError (cycle 86).
-            durability_error: str | None = None
             try:
                 atomic_text_write(new_text, page_path)
             except RenameCompletedBarrierError as e:

@@ -638,6 +638,21 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, attempted: bo
       rollback could resurrect items the caller was told did not exist. One
       directory fsync after the last deletion closes that, and only one is
       needed — the entries all live in the same directory.
+
+      **Honest scope: this half is POSIX-only.** ``_fsync_parent_dir`` returns
+      immediately when ``os.name == "nt"``, so on Windows — this project's
+      primary development platform — the deletions get no barrier. Unlike the
+      rename case, there is no cheap Win32 equivalent to reach for:
+      ``DeleteFileW`` has no write-through flag, and ``FlushFileBuffers`` is not
+      supported on a directory handle (the volume-handle form flushes the entire
+      volume and needs admin). Saying so plainly rather than implying a
+      cross-platform guarantee is the point — cycle 87 exists because the
+      previous docstring claimed NTFS durability that ``os.replace`` never
+      provided. Filed for a Windows-specific pass; see BACKLOG.
+
+      The INDETERMINACY REPORT below is fully cross-platform, and it is the more
+      load-bearing half: it tells the caller the batch state is unknown whether
+      or not the barrier was available.
     * **Silent partial rollback.** `([], error)` is read as "nothing was
       written". When a deletion fails that is false, and the caller has no way
       to tell the two apart. The returned suffix says so explicitly.
