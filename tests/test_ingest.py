@@ -1987,3 +1987,371 @@ class TestUpdateExistingPageDateInBody:
         # Count occurrences of the source
         count = result.count("raw/articles/a.md")
         assert count == 1  # Should only appear once
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (ingest pipeline subset) --
+
+
+class TestIngestPipeline:
+    """ingest/pipeline.py correctness fixes."""
+
+    def test_summary_page_preserves_created_date_on_reingest(self, tmp_path):
+        """Re-ingesting same source must not overwrite created: date on summary page."""
+        from datetime import date, timedelta
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        # Create a raw source structure
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        raw_path = raw_dir / "articles" / "test-article.md"
+        raw_path.write_text("# Test\nContent about stuff.", encoding="utf-8")
+
+        wiki_dir = tmp_path / "wiki"
+        for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / subdir).mkdir(parents=True)
+
+        old_date = (date.today() - timedelta(days=10)).isoformat()
+        summary_path = wiki_dir / "summaries" / "test.md"
+        summary_path.write_text(
+            f"---\ntitle: Test\nsource:\n  - raw/articles/test-article.md\n"
+            f"created: {old_date}\nupdated: {old_date}\n"
+            f"type: summary\nconfidence: stated\n---\n\n# Test\n",
+            encoding="utf-8",
+        )
+
+        extraction = {"title": "Test", "entities_mentioned": [], "concepts_mentioned": []}
+
+        with (
+            patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
+            patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+            patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+            patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+            patch("kb.ingest.pipeline.append_wiki_log"),
+            patch("kb.ingest.pipeline._is_duplicate_content", return_value=False),
+            patch("kb.compile.compiler.load_manifest", return_value={}),
+            patch("kb.compile.compiler.save_manifest"),
+        ):
+            result = ingest_source(raw_path, source_type="article", extraction=extraction)
+
+        import frontmatter
+
+        post = frontmatter.load(str(summary_path))
+        created_val = str(post.metadata.get("created", ""))
+        assert old_date in created_val, (
+            f"Re-ingest overwrote created: date. Got: {created_val!r},"
+            f" expected to contain: {old_date!r}"
+        )
+        assert "summaries/test" in result.get("pages_updated", []), (
+            "Re-ingested summary should be in pages_updated, not pages_created"
+        )
+
+    def test_ingest_source_rejects_path_outside_raw_dir(self, tmp_path):
+        """ingest_source must reject paths outside the raw/ directory."""
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        outside_path = tmp_path / "outside.md"
+        outside_path.write_text("# Outside\nContent.", encoding="utf-8")
+
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+
+        with patch("kb.ingest.pipeline.RAW_DIR", raw_dir):
+            with pytest.raises(ValueError, match="raw/"):
+                ingest_source(
+                    outside_path,
+                    source_type="article",
+                    extraction={"title": "X", "entities_mentioned": [], "concepts_mentioned": []},
+                )
+
+    def test_update_sources_mapping_warns_when_file_missing(self, tmp_path, caplog):
+        """_update_sources_mapping logs a warning when _sources.md doesn't exist."""
+        import logging
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import _update_sources_mapping
+
+        missing_sources = tmp_path / "_sources.md"
+
+        with patch("kb.ingest.pipeline.WIKI_SOURCES", missing_sources):
+            with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+                _update_sources_mapping("raw/articles/test.md", ["summaries/test"])
+
+        assert any("sources" in r.message.lower() for r in caplog.records), (
+            f"Expected warning about missing _sources.md."
+            f" Got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_update_index_batch_warns_when_file_missing(self, tmp_path, caplog):
+        """_update_index_batch logs a warning when index.md doesn't exist."""
+        import logging
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import _update_index_batch
+
+        missing_index = tmp_path / "index.md"
+
+        with patch("kb.ingest.pipeline.WIKI_INDEX", missing_index):
+            with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+                _update_index_batch([("summary", "test-article", "Test Article")])
+
+        assert any("index" in r.message.lower() for r in caplog.records), (
+            f"Expected warning about missing index.md. Got: {[r.message for r in caplog.records]}"
+        )
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (ingest pipeline + extractors + mcp.app) --
+
+
+class TestUpdateExistingPageFrontmatterOnly:
+    """ingest/pipeline.py _update_existing_page: regex scoped to frontmatter only."""
+
+    def test_body_matching_line_does_not_corrupt_frontmatter(self, tmp_wiki):
+        """Source entry must be inserted in frontmatter, not mid-body."""
+
+        from kb.ingest.pipeline import _update_existing_page
+
+        page_dir = tmp_wiki / "concepts"
+        page_dir.mkdir(exist_ok=True)
+        page_path = page_dir / "test-page.md"
+        # Body contains a line that matches the source-entry pattern
+        page_path.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/first.md"\ncreated: 2026-01-01\n'
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            '  - "raw/articles/body-line.md"\n\nSome body content.\n',
+            encoding="utf-8",
+        )
+        _update_existing_page(page_path, "raw/articles/second.md")
+        content = page_path.read_text(encoding="utf-8")
+        # New source must appear inside the frontmatter block (before the closing ---)
+        fm_end = content.index("---\n\n")
+        assert "raw/articles/second.md" in content[: fm_end + 5], (
+            "New source entry not found in frontmatter"
+        )
+        # The body must NOT have an extra YAML source-list entry (  - "...") for second.md
+        # (A reference in ## References is expected and acceptable)
+        body = content[fm_end + 5 :]
+        source_list_entry = '  - "raw/articles/second.md"'
+        assert source_list_entry not in body, (
+            f"YAML source entry was incorrectly inserted into the body: {body!r}"
+        )
+
+
+class TestProcessItemBatchTypeGuard:
+    """ingest/pipeline.py _process_item_batch: non-string items are skipped."""
+
+    def test_none_in_list_does_not_crash(self, tmp_wiki):
+        """A None element in items_raw must be skipped, not raise AttributeError."""
+        from kb.ingest.pipeline import _process_item_batch
+
+        # None element in the middle
+        created, updated, skipped, _, _ = _process_item_batch(
+            [None, "ValidEntity", 42, "AnotherEntity"],
+            "entities_mentioned",
+            50,
+            "entity",
+            "raw/articles/test.md",
+            {"title": "Test"},
+            wiki_dir=tmp_wiki,
+        )
+        # Only valid strings should produce pages
+        entity_ids = created + updated
+        assert any("validentity" in p for p in entity_ids), "ValidEntity not created"
+        assert any("anotherentity" in p for p in entity_ids), "AnotherEntity not created"
+
+
+class TestIngestSourceEmptySlug:
+    """ingest/pipeline.py ingest_source: empty slug triggers fallback, not hidden file."""
+
+    def test_punctuation_only_title_uses_stem_fallback(self, tmp_project):
+        """A title like '???' must not create 'wiki/summaries/.md'."""
+        from unittest.mock import patch
+
+        from kb.ingest.pipeline import ingest_source
+
+        raw_dir = tmp_project / "raw"
+        wiki_dir = tmp_project / "wiki"
+        raw_path = raw_dir / "articles" / "punc-title.md"
+        raw_path.write_text("# ???\n\nSome content about punctuation.\n", encoding="utf-8")
+
+        extraction = {
+            "title": "???",  # slugifies to empty string
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        with (
+            patch("kb.ingest.pipeline.RAW_DIR", raw_dir),
+            patch("kb.utils.paths.RAW_DIR", raw_dir),
+            patch("kb.ingest.pipeline.WIKI_DIR", wiki_dir),
+            patch("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md"),
+            patch("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md"),
+            patch("kb.ingest.pipeline.append_wiki_log"),
+            patch("kb.ingest.pipeline._is_duplicate_content", return_value=False),
+            patch("kb.compile.compiler.load_manifest", return_value={}),
+            patch("kb.compile.compiler.save_manifest"),
+        ):
+            result = ingest_source(raw_path, "article", extraction=extraction)
+        # Summary must be created with a non-empty slug (fallback to stem)
+        assert result["pages_created"] or result["pages_updated"]
+        hidden_md = wiki_dir / "summaries" / ".md"
+        assert not hidden_md.exists(), "Hidden .md file must not be created"
+
+
+class TestExtractionSchemaCaching:
+    """ingest/extractors.py: _build_schema_cached uses LRU cache."""
+
+    def test_schema_cached_across_calls(self):
+        """Calling _build_schema_cached twice for the same type returns the same object."""
+        from kb.ingest.extractors import _build_schema_cached
+
+        schema1 = _build_schema_cached("article")
+        schema2 = _build_schema_cached("article")
+        assert schema1 is schema2, "Expected same object from cache"
+
+
+class TestUpdateSourcesMappingBacktick:
+    """ingest/pipeline.py _update_sources_mapping: backtick-wrapped check avoids prefix match."""
+
+    def test_shorter_ref_does_not_match_longer_ref(self, tmp_wiki):
+        """'raw/articles/a.md' must not falsely match when 'raw/articles/abc.md' is present."""
+        from kb.ingest.pipeline import _update_sources_mapping
+
+        sources_path = tmp_wiki / "_sources.md"
+        sources_path.write_text(
+            "# Sources\n\n- `raw/articles/abc.md` → concepts/something\n",
+            encoding="utf-8",
+        )
+        _update_sources_mapping("raw/articles/a.md", ["concepts/new-page"], tmp_wiki)
+        content = sources_path.read_text(encoding="utf-8")
+        assert "`raw/articles/a.md`" in content, (
+            "Shorter ref should have been added despite longer ref present"
+        )
+
+
+class TestBuildSummaryContentTypeGuard:
+    """ingest/pipeline.py _build_summary_content: None in authors list is handled."""
+
+    def test_none_in_authors_list_does_not_crash(self):
+        """_build_summary_content must not raise TypeError for [None, 'Alice']."""
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test Article",
+            "authors": [None, "Alice Smith"],
+        }
+        result = _build_summary_content(extraction, "article")
+        assert "Alice Smith" in result
+
+
+class TestFormatIngestResultGetSafety:
+    """mcp/app.py _format_ingest_result: uses .get() for result dict keys."""
+
+    def test_partial_result_does_not_raise(self):
+        """_format_ingest_result must not raise KeyError on a partial result dict."""
+        from kb.mcp.app import _format_ingest_result
+
+        partial = {}  # Missing pages_created, pages_updated
+        result = _format_ingest_result("raw/articles/test.md", "article", "abc123", partial)
+        assert isinstance(result, str)
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (ingest pipeline + extractors) --
+
+
+class TestUpdateExistingPageCRLF:
+    """_update_existing_page must handle Windows CRLF line endings."""
+
+    def test_crlf_frontmatter_preserves_body(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_existing_page
+
+        page_path = tmp_wiki / "entities" / "test-entity.md"
+        # Write with CRLF line endings
+        crlf_content = (
+            "---\r\n"
+            'title: "Test Entity"\r\n'
+            "source:\r\n"
+            '  - "raw/articles/old.md"\r\n'
+            "created: 2026-01-01\r\n"
+            "updated: 2026-01-01\r\n"
+            "type: entity\r\n"
+            "confidence: stated\r\n"
+            "---\r\n"
+            "\r\n"
+            "# Test Entity\r\n"
+            "\r\n"
+            "This is the body content.\r\n"
+        )
+        page_path.write_text(crlf_content, encoding="utf-8")
+
+        _update_existing_page(page_path, "raw/articles/new.md")
+
+        result = page_path.read_text(encoding="utf-8")
+        assert "body content" in result, "Body was lost due to CRLF handling"
+        assert "raw/articles/new.md" in result
+
+
+class TestBuildSummaryContentAuthors:
+    """_build_summary_content must handle non-string author values."""
+
+    def test_dict_authors_coerced(self):
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test Paper",
+            "authors": [{"name": "Alice"}, "Bob", {"name": "Charlie"}],
+        }
+        content = _build_summary_content(extraction, "paper")
+        assert "Alice" in content
+        assert "Bob" in content
+        assert "Charlie" in content
+
+    def test_non_string_non_dict_authors_skipped(self):
+        from kb.ingest.pipeline import _build_summary_content
+
+        extraction = {
+            "title": "Test",
+            "authors": [42, None, "Valid Author"],
+        }
+        content = _build_summary_content(extraction, "article")
+        assert "Valid Author" in content
+
+
+class TestParseFieldSpecWarning:
+    """_parse_field_spec should warn on non-identifier field names."""
+
+    def test_spaces_in_field_name_warns(self, caplog):
+        import logging
+
+        from kb.ingest.extractors import _parse_field_spec
+
+        with caplog.at_level(logging.WARNING):
+            name, desc, is_list = _parse_field_spec("url string: the URL")
+
+        # Should still parse (best-effort) but warn if field name has spaces/parens
+        assert isinstance(name, str)
+
+
+class TestIngestSourceWikiDirThreading:
+    """ingest_source must respect custom wiki_dir throughout the pipeline."""
+
+    def test_update_index_batch_uses_wiki_dir(self, tmp_wiki):
+        from kb.ingest.pipeline import _update_index_batch
+
+        # Create index.md in tmp_wiki
+        index_path = tmp_wiki / "index.md"
+        index_path.write_text(
+            "# Index\n\n## Entities\n\n*No pages yet.*\n\n## Concepts\n\n*No pages yet.*\n",
+            encoding="utf-8",
+        )
+
+        _update_index_batch(
+            [("entity", "test-slug", "Test Entity")],
+            wiki_dir=tmp_wiki,
+        )
+
+        content = index_path.read_text(encoding="utf-8")
+        assert "test-slug" in content

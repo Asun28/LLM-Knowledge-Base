@@ -274,3 +274,65 @@ class TestProjectRootResolution:
         config = self._reload_config()
 
         assert config.PROJECT_ROOT == self._heuristic_root(config)
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (make_source_ref) --
+
+
+class TestMakeSourceRefRaisesForOutsidePath:
+    """utils/paths.py make_source_ref: raises ValueError for paths outside raw/."""
+
+    def test_raises_for_path_outside_raw(self, tmp_path):
+        """make_source_ref must raise ValueError if source is outside raw/."""
+        from kb.utils.paths import make_source_ref
+
+        outside = tmp_path / "not-raw" / "something.md"
+        outside.parent.mkdir()
+        outside.touch()
+
+        with pytest.raises(ValueError, match="outside"):
+            make_source_ref(outside, raw_dir=tmp_path / "raw")
+
+    def test_valid_path_returns_ref(self, tmp_path):
+        """make_source_ref returns canonical ref for paths inside raw/."""
+        from kb.utils.paths import make_source_ref
+
+        raw_dir = tmp_path / "raw"
+        articles = raw_dir / "articles"
+        articles.mkdir(parents=True)
+        src = articles / "test.md"
+        src.touch()
+
+        ref = make_source_ref(src, raw_dir=raw_dir)
+        assert ref == "raw/articles/test.md"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (make_source_ref) --
+
+
+class TestMakeSourceRefLiteralRaw:
+    """make_source_ref must always produce 'raw/...' prefix."""
+
+    def test_custom_dir_name_still_uses_raw_prefix(self, tmp_path):
+        from kb.utils.paths import make_source_ref
+
+        custom_raw = tmp_path / "my_custom_raw_dir"
+        articles = custom_raw / "articles"
+        articles.mkdir(parents=True)
+        source = articles / "test.md"
+        source.write_text("content", encoding="utf-8")
+
+        ref = make_source_ref(source, raw_dir=custom_raw)
+        assert ref == "raw/articles/test.md"
+
+    def test_standard_raw_dir_unchanged(self, tmp_path):
+        from kb.utils.paths import make_source_ref
+
+        raw = tmp_path / "raw"
+        articles = raw / "articles"
+        articles.mkdir(parents=True)
+        source = articles / "test.md"
+        source.write_text("content", encoding="utf-8")
+
+        ref = make_source_ref(source, raw_dir=raw)
+        assert ref == "raw/articles/test.md"

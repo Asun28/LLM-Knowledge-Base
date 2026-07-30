@@ -433,3 +433,62 @@ class TestAddVerdictNullByte:
         entry = add_verdict("concepts/rag", "review", "pass", path=path)
         assert entry["page_id"] == "concepts/rag"
         assert len(load_verdicts(path)) == 1
+
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (verdicts) --
+
+
+class TestVerdictPathTraversal:
+    """lint/verdicts.py add_verdict: rejects path traversal in page_id."""
+
+    def test_add_verdict_rejects_path_traversal(self, tmp_path):
+        """add_verdict must raise ValueError for page_ids with '..' or leading '/'."""
+        import pytest
+
+        from kb.lint.verdicts import add_verdict
+
+        with pytest.raises(ValueError, match="Invalid page_id"):
+            add_verdict("../etc/passwd", "fidelity", "pass", path=tmp_path / "v.json")
+
+        with pytest.raises(ValueError, match="Invalid page_id"):
+            add_verdict("/absolute/path", "fidelity", "pass", path=tmp_path / "v.json")
+
+
+class TestVerdictNotesCap:
+    """lint/verdicts.py add_verdict: notes length is capped via truncation."""
+
+    def test_add_verdict_truncates_oversized_notes(self, tmp_path):
+        """add_verdict must truncate notes that exceed MAX_NOTES_LEN (not raise)."""
+        from kb.lint.verdicts import MAX_NOTES_LEN, add_verdict
+
+        entry = add_verdict(
+            "concepts/test",
+            "fidelity",
+            "pass",
+            notes="x" * 2001,
+            path=tmp_path / "v.json",
+        )
+        assert len(entry["notes"]) <= MAX_NOTES_LEN
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (verdicts) --
+
+
+class TestAddVerdictTruncatesNotes:
+    """add_verdict must truncate long notes instead of raising ValueError."""
+
+    def test_long_notes_truncated(self, tmp_path):
+        from kb.lint.verdicts import MAX_NOTES_LEN, add_verdict
+
+        verdict_path = tmp_path / "verdicts.json"
+        long_notes = "x" * (MAX_NOTES_LEN + 500)
+
+        result = add_verdict(
+            "concepts/test",
+            "fidelity",
+            "pass",
+            notes=long_notes,
+            path=verdict_path,
+        )
+        assert len(result["notes"]) <= MAX_NOTES_LEN

@@ -498,3 +498,144 @@ def test_make_api_call_missing_usage_logs_zero_tokens(monkeypatch, caplog):
     message = next(r.getMessage() for r in caplog.records if r.name == "kb.utils.llm")
     assert "tokens_in=0" in message
     assert "tokens_out=0" in message
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (retry semantics subset) --
+# Helper renamed _make_rate_limit_error -> _make_rate_limit_error_p393 (receiver collision).
+
+
+def _make_rate_limit_error_p393():
+    import anthropic
+
+    resp = httpx.Response(429, request=httpx.Request("POST", "https://api.anthropic.com"))
+    return anthropic.RateLimitError(message="rate limited", response=resp, body=None)
+
+
+class TestLLMRetrySemantics:
+    """utils/llm.py retry count and last_error safety."""
+
+    def test_max_retries_means_retries_not_attempts(self, monkeypatch):
+        """MAX_RETRIES=2 should make 3 total calls (1 initial + 2 retries)."""
+        from kb.utils import llm as llm_mod
+
+        calls = []
+
+        def fake_create(**kwargs):
+            calls.append(1)
+            raise _make_rate_limit_error_p393()
+
+        monkeypatch.setattr(llm_mod, "MAX_RETRIES", 2)
+        monkeypatch.setattr(llm_mod, "RETRY_BASE_DELAY", 0)
+        client = llm_mod.get_client()
+        monkeypatch.setattr(client.messages, "create", fake_create)
+
+        with pytest.raises(llm_mod.LLMError):
+            llm_mod._make_api_call({"model": "x", "max_tokens": 10, "messages": []}, "x")
+
+        assert len(calls) == 3, f"Expected 3 total calls (1+2 retries), got {len(calls)}"
+
+    def test_max_retries_zero_makes_one_call_and_raises_llmerror(self, monkeypatch):
+        """MAX_RETRIES=0 should make exactly 1 call (range(1)) then raise LLMError."""
+        from kb.utils import llm as llm_mod
+
+        monkeypatch.setattr(llm_mod, "MAX_RETRIES", 0)
+        monkeypatch.setattr(llm_mod, "RETRY_BASE_DELAY", 0)
+        client = llm_mod.get_client()
+
+        def fake_create(**kwargs):
+            raise _make_rate_limit_error_p393()
+
+        monkeypatch.setattr(client.messages, "create", fake_create)
+
+        with pytest.raises(llm_mod.LLMError):
+            llm_mod._make_api_call({"model": "x", "max_tokens": 10, "messages": []}, "x")
+
+
+# -- Cycle 93 fold from test_phase4_audit_observability.py (LLM retry logging subset) --
+
+
+def test_llm_last_retry_logs_giving_up(caplog):
+    """On final attempt, log must say 'giving up', not 'retrying'."""
+    from kb.utils import llm as llm_mod
+    from kb.utils.llm import _make_api_call
+
+    mock_resp = MagicMock(status_code=429, headers={})
+
+    with patch.object(llm_mod, "get_client") as mock_client:
+        mock_client.return_value.messages.create.side_effect = anthropic.RateLimitError(
+            message="rate limited", response=mock_resp, body={}
+        )
+        with caplog.at_level(logging.WARNING, logger="kb.utils.llm"):
+            with pytest.raises(Exception):
+                _make_api_call({"model": "test", "messages": [], "max_tokens": 1}, "test-model")
+
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warning_messages, "No warnings were logged"
+    last_warning = warning_messages[-1]
+    assert "retrying" not in last_warning.lower(), (
+        f"Last warning still says 'retrying': {last_warning!r}"
+    )
+    assert "giving up" in last_warning.lower(), (
+        f"Last warning does not say 'giving up': {last_warning!r}"
+    )
+
+
+def test_llm_intermediate_retry_logs_retrying(caplog):
+    """Before the final attempt, log must say 'retrying'."""
+    from kb.utils import llm as llm_mod
+    from kb.utils.llm import MAX_RETRIES, _make_api_call
+
+    if MAX_RETRIES < 1:
+        pytest.skip("Need at least 1 retry to test intermediate logs")
+
+    call_count = [0]
+    mock_resp = MagicMock(status_code=429, headers={})
+
+    def side_effect(*args, **kwargs):
+        call_count[0] += 1
+        raise anthropic.RateLimitError(message="rate limited", response=mock_resp, body={})
+
+    with patch.object(llm_mod, "get_client") as mock_client:
+        with patch.object(llm_mod, "time") as mock_time:
+            mock_time.sleep = MagicMock()
+            mock_client.return_value.messages.create.side_effect = side_effect
+            with caplog.at_level(logging.WARNING, logger="kb.utils.llm"):
+                with pytest.raises(Exception):
+                    _make_api_call({"model": "test", "messages": [], "max_tokens": 1}, "test-model")
+
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_messages) >= 2, "Expected at least 2 warnings (intermediate + final)"
+    # First warning (not final attempt) must say retrying
+    assert "retrying" in warning_messages[0].lower()
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (llm retry) --
+
+
+class TestMakeApiCallNoSleepAfterFinalRetry:
+    """_make_api_call must not sleep after the final failed attempt."""
+
+    def test_sleep_count_equals_max_retries(self, monkeypatch):
+        import anthropic
+
+        import kb.utils.llm as llm_mod
+
+        sleep_calls = []
+        monkeypatch.setattr("time.sleep", lambda d: sleep_calls.append(d))
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.headers = {}
+        mock_client.messages.create.side_effect = anthropic.RateLimitError(
+            message="rate limited",
+            response=mock_response,
+            body={},
+        )
+        monkeypatch.setattr(llm_mod, "get_client", lambda: mock_client)
+
+        with pytest.raises(llm_mod.LLMError):
+            llm_mod._make_api_call({"model": "test", "max_tokens": 10, "messages": []}, "test")
+
+        # Should sleep MAX_RETRIES times, not MAX_RETRIES + 1
+        assert len(sleep_calls) == llm_mod.MAX_RETRIES

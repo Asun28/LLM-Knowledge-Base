@@ -1346,3 +1346,466 @@ class TestMaskCodeBlocksCollision:
         assert "code1" in restored
         assert "code2" in restored
         assert "block" in restored
+
+
+# -- Cycle 93 fold from test_v0911_phase392.py (linker inject + compile fields subset) --
+# ── Task 5: inject_wikilinks special-char boundary fix ──────────
+
+
+class TestInjectWikilinksSpecialChars:
+    """inject_wikilinks must handle titles starting/ending with non-word chars."""
+
+    def _make_page(self, wiki_dir, page_id: str, body: str):
+        parts = page_id.split("/")
+        d = wiki_dir
+        for p in parts[:-1]:
+            d = d / p
+        d.mkdir(parents=True, exist_ok=True)
+        page = d / f"{parts[-1]}.md"
+        page.write_text(
+            f"---\ntitle: {parts[-1]}\nsource:\n  - raw/articles/a.md\n"
+            f"created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            f"confidence: stated\n---\n\n{body}",
+            encoding="utf-8",
+        )
+        return page
+
+    def test_inject_cxx_title(self, tmp_wiki):
+        """Titles ending with non-word chars (C++) are injected correctly."""
+        from kb.compile.linker import inject_wikilinks
+
+        self._make_page(tmp_wiki, "concepts/target", "")
+        source_page = self._make_page(tmp_wiki, "concepts/source", "We use C++ for performance.")
+
+        updated = inject_wikilinks("C++", "concepts/target", wiki_dir=tmp_wiki)
+
+        content = source_page.read_text(encoding="utf-8")
+        assert "[[concepts/target|C++]]" in content, f"Wikilink not injected:\n{content}"
+        assert "concepts/source" in updated
+
+    def test_inject_dotnet_title(self, tmp_wiki):
+        """Titles starting with non-word chars (.NET) are injected correctly."""
+        from kb.compile.linker import inject_wikilinks
+
+        self._make_page(tmp_wiki, "concepts/target", "")
+        source_page = self._make_page(tmp_wiki, "concepts/source", "The .NET ecosystem is large.")
+
+        updated = inject_wikilinks(".NET", "concepts/target", wiki_dir=tmp_wiki)
+
+        content = source_page.read_text(encoding="utf-8")
+        assert "[[concepts/target|.NET]]" in content, f"Wikilink not injected:\n{content}"
+        assert "concepts/source" in updated
+
+
+# ── Task 6: compile_wiki propagates ingest fields ─────────────────
+
+
+class TestCompileWikiPropagatesFields:
+    """compile_wiki must include pages_skipped, wikilinks_injected, affected_pages, duplicates."""
+
+    def test_compile_wiki_result_has_all_fields(self, tmp_project):
+        """compile_wiki result dict includes all ingest_source output fields."""
+        from unittest.mock import MagicMock, patch
+
+        from kb.compile.compiler import compile_wiki
+
+        fake_ingest = MagicMock(
+            return_value={
+                "pages_created": ["concepts/foo"],
+                "pages_updated": [],
+                "pages_skipped": ["entities/bar"],
+                "wikilinks_injected": ["summaries/baz"],
+                "affected_pages": ["concepts/qux"],
+                "duplicate": False,
+                "source_path": "raw/articles/test.md",
+                "source_type": "article",
+                "content_hash": "abc123",
+            }
+        )
+
+        raw_dir = tmp_project / "raw"
+        (raw_dir / "articles").mkdir(parents=True, exist_ok=True)
+        (raw_dir / "articles" / "test.md").write_text("# Test\nContent.", encoding="utf-8")
+
+        with patch("kb.compile.compiler.ingest_source", fake_ingest):
+            result = compile_wiki(
+                incremental=False,
+                raw_dir=raw_dir,
+                manifest_path=tmp_project / "hashes.json",
+            )
+
+        assert "pages_skipped" in result, "pages_skipped missing"
+        assert "wikilinks_injected" in result, "wikilinks_injected missing"
+        assert "affected_pages" in result, "affected_pages missing"
+        assert "duplicates" in result, "duplicates missing"
+        assert result["pages_skipped"] == ["entities/bar"]
+        assert result["wikilinks_injected"] == ["summaries/baz"]
+        assert result["affected_pages"] == ["concepts/qux"]
+        assert result["duplicates"] == 0
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (compile fixes subset) --
+
+
+class TestCompileFixes:
+    """compile/linker.py and compile/compiler.py correctness fixes."""
+
+    def test_inject_wikilinks_skips_page_already_linked_case_insensitive(
+        self, tmp_wiki, create_wiki_page
+    ):
+        """inject_wikilinks must not inject duplicate when target already exists (lowercase)."""
+        from kb.compile.linker import inject_wikilinks
+
+        # Page body already has a lowercase wikilink to concepts/gpt4
+        create_wiki_page(
+            page_id="entities/openai",
+            title="OpenAI",
+            content="We use [[concepts/gpt4|GPT-4]] in our work. GPT-4 is great.",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(page_id="concepts/gpt4", title="GPT-4", wiki_dir=tmp_wiki)
+
+        # Caller passes mixed-case target_page_id (which is the bug trigger)
+        updated = inject_wikilinks("GPT-4", "concepts/GPT4", wiki_dir=tmp_wiki)
+        assert "entities/openai" not in updated, (
+            "Should not inject duplicate wikilink — page already links to lowercased target"
+        )
+
+        # Positive case: a page WITHOUT the link should get it injected
+        create_wiki_page(
+            page_id="concepts/transformers",
+            title="Transformers",
+            content="GPT-4 is a transformer model.",
+            wiki_dir=tmp_wiki,
+        )
+        updated2 = inject_wikilinks("GPT-4", "concepts/GPT4", wiki_dir=tmp_wiki)
+        assert "concepts/transformers" in updated2, (
+            "Page without existing link should get wikilink injected"
+        )
+
+    def test_find_changed_sources_read_only_does_not_update_manifest(self, tmp_path):
+        """find_changed_sources with save_hashes=False must not modify the manifest."""
+        from kb.compile.compiler import find_changed_sources, load_manifest, save_manifest
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        manifest_path = tmp_path / "hashes.json"
+        save_manifest({}, manifest_path)
+
+        find_changed_sources(
+            raw_dir=raw_dir,
+            manifest_path=manifest_path,
+            save_hashes=False,
+        )
+
+        manifest_after = load_manifest(manifest_path)
+        assert manifest_after == {}, (
+            f"Manifest was modified despite save_hashes=False: {manifest_after}"
+        )
+
+
+# -- Cycle 93 fold from test_phase4_audit_compile.py (compiler + linker subset) --
+
+
+def test_manifest_pruning_keeps_unchanged_source(tmp_path):
+    """Sources that exist on disk but were not processed must NOT be pruned."""
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+
+    # An unchanged source file — exists on disk but NOT in sources_to_process
+    kept_source = raw_dir / "articles" / "kept.md"
+    kept_source.parent.mkdir(parents=True)
+    kept_source.write_text("# Kept source\n")
+
+    manifest_before = {
+        "raw/articles/kept.md": "abc123",
+        "raw/articles/gone.md": "def456",  # This one doesn't exist on disk
+        "_template/article": "xyz",
+    }
+
+    # In full mode, compile_wiki calls scan_raw_sources() — return empty so no ingest runs.
+    # load_manifest is called twice: once in the loop (no-op) and once at pruning time.
+    # We return a fresh copy each time so the pruning logic has a real manifest to work with.
+    with patch("kb.compile.compiler.scan_raw_sources", return_value=[]):
+        with patch(
+            "kb.compile.compiler.load_manifest",
+            side_effect=lambda *a, **kw: dict(manifest_before),
+        ):
+            with patch("kb.compile.compiler.save_manifest") as mock_save:
+                with patch("kb.compile.compiler._template_hashes", return_value={}):
+                    from kb.compile.compiler import compile_wiki
+
+                    compile_wiki(incremental=False, wiki_dir=wiki_dir, raw_dir=raw_dir)
+
+    assert mock_save.called, "save_manifest should have been called in full mode"
+    final_manifest = mock_save.call_args_list[-1][0][0]
+    assert "raw/articles/kept.md" in final_manifest, (
+        "Source that exists on disk was incorrectly pruned from manifest"
+    )
+    assert "raw/articles/gone.md" not in final_manifest, (
+        "Source that no longer exists on disk was NOT pruned"
+    )
+    # Cycle 7 AC15: assert that the template-sentinel survives manifest pruning
+    # with its hash value intact. Previously the test verified source entries
+    # but never the template hash; a pruning regression that dropped template
+    # keys would force LLM re-extraction of every source on every compile with
+    # no test signal.
+    assert "_template/article" in final_manifest, (
+        "Template sentinel hash was incorrectly pruned from manifest"
+    )
+    assert final_manifest["_template/article"] == "xyz", (
+        "Template hash VALUE changed despite _template_hashes returning {}; "
+        "pruning must preserve pre-existing template entries"
+    )
+
+
+def test_linker_source_id_is_lowercased(tmp_wiki):
+    """resolve_wikilinks broken-link source IDs must be lowercased."""
+    from kb.compile.linker import resolve_wikilinks
+
+    # Create a page in a path that would yield a mixed-case page_id
+    # (page_id lowercases the result — verify source_id in broken list is also lowercased)
+    page = tmp_wiki / "entities" / "MyEntity.md"
+    page.write_text(
+        "---\ntitle: MyEntity\ntype: entity\nconfidence: stated\n---\n[[entities/nonexistent]]\n"
+    )
+
+    result = resolve_wikilinks(wiki_dir=tmp_wiki)
+    for entry in result["broken"]:
+        assert entry["source"] == entry["source"].lower(), (
+            f"source_id {entry['source']!r} is not lowercased"
+        )
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (compile linker + compiler) --
+
+
+class TestInjectWikilinksNestedGuardWarning:
+    """compile/linker.py inject_wikilinks: warns when guard blocks injection."""
+
+    def test_unmatched_bracket_does_not_silently_skip_all(self, tmp_wiki, caplog, create_wiki_page):
+        """An unmatched [[ earlier in body must not silently suppress all injections."""
+        import logging
+
+        from kb.compile.linker import inject_wikilinks
+
+        # Create a target page
+        create_wiki_page(
+            page_id="concepts/rag",
+            title="RAG",
+            content="Retrieval-augmented generation.",
+            wiki_dir=tmp_wiki,
+        )
+        # Create a source page with an unmatched [[ before the mention of RAG
+        source_dir = tmp_wiki / "concepts"
+        src_path = source_dir / "other-concept.md"
+        src_path.write_text(
+            '---\ntitle: "Other"\nsource:\n  - "raw/articles/s.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\n"
+            "Broken bracket [[unclosed somewhere. RAG is a technique.\n",
+            encoding="utf-8",
+        )
+        # The guard fires because RAG appears after an unmatched [[
+        # The fix must emit a WARNING log — not silently swallow the skip
+        with caplog.at_level(logging.WARNING, logger="kb.compile.linker"):
+            result = inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+        assert isinstance(result, list)
+        assert any(
+            "unmatched" in r.message.lower() or "skipping" in r.message.lower()
+            for r in caplog.records
+            if r.levelno >= logging.WARNING
+        ), "Expected a WARNING log about unmatched [[ / skipped replacement, got: " + str(
+            [r.message for r in caplog.records]
+        )
+
+
+class TestInjectWikilinksLowercaseTarget:
+    """compile/linker.py inject_wikilinks: injected wikilink uses consistent casing."""
+
+    def test_injected_wikilink_uses_lowercase_page_id(self, tmp_wiki, create_wiki_page):
+        """Injected [[target_page_id|Title]] must use lowercased target_page_id."""
+        from kb.compile.linker import inject_wikilinks
+
+        create_wiki_page(
+            page_id="concepts/rag",
+            title="RAG",
+            content="Retrieval-augmented generation.",
+            wiki_dir=tmp_wiki,
+        )
+        source_dir = tmp_wiki / "entities"
+        source_dir.mkdir(exist_ok=True)
+        src_path = source_dir / "gpt4.md"
+        src_path.write_text(
+            '---\ntitle: "GPT-4"\nsource:\n  - "raw/articles/s.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: entity\nconfidence: stated\n---\n\n"
+            "RAG is used with GPT-4 for retrieval.\n",
+            encoding="utf-8",
+        )
+        # Pass mixed-case target_page_id
+        inject_wikilinks("RAG", "Concepts/RAG", wiki_dir=tmp_wiki)
+        updated_content = src_path.read_text(encoding="utf-8")
+        # Injected link must use literal lowercase (not just when .lower() is applied to content)
+        assert "[[concepts/rag|" in updated_content or "[[concepts/rag]]" in updated_content, (
+            f"Expected lowercase wikilink in content, got: {updated_content!r}"
+        )
+
+
+class TestCompileHashCapturedBeforeIngest:
+    """compile/compiler.py compile_wiki: failed ingest records failed:<hash> in manifest."""
+
+    def test_compile_runs_ingest_and_records_failed_hash_on_error(self, tmp_project, monkeypatch):
+        """When ingest_source raises, compile_wiki records failed:<pre_hash> in manifest."""
+        from kb.compile.compiler import compile_wiki, load_manifest
+        from kb.utils.hashing import content_hash
+
+        raw_path = tmp_project / "raw" / "articles" / "hash-test.md"
+        raw_path.write_text("# Hash Test\n\nContent here.\n", encoding="utf-8")
+        expected_hash = content_hash(raw_path)
+
+        def failing_ingest(path, *a, **kw):
+            raise RuntimeError("simulated ingest failure")
+
+        monkeypatch.setattr("kb.compile.compiler.ingest_source", failing_ingest)
+
+        manifest_path = tmp_project / ".data" / "hashes-test.json"
+        manifest_path.parent.mkdir(exist_ok=True)
+        compile_wiki(incremental=False, raw_dir=tmp_project / "raw", manifest_path=manifest_path)
+
+        manifest = load_manifest(manifest_path)
+        # When ingest fails, compiler writes failed:<pre_hash> so source is retried next run.
+        found = False
+        for key, val in manifest.items():
+            if "hash-test" in key:
+                assert val == f"failed:{expected_hash}", (
+                    f"Expected failed:{expected_hash}, got {val}"
+                )
+                found = True
+                break
+        assert found, f"No manifest entry found for hash-test source. Keys: {list(manifest.keys())}"
+
+
+class TestScanRawSourcesWarnsUnknownSubdir:
+    """compile/compiler.py scan_raw_sources: warns for unknown subdirectories."""
+
+    def test_unknown_subdir_emits_warning(self, tmp_path, caplog):
+        """scan_raw_sources must emit WARNING for unknown subdirectories."""
+        import logging
+
+        from kb.compile.compiler import scan_raw_sources
+
+        # Create a known dir and an unknown dir
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        (raw_dir / "unknown_type").mkdir()
+        (raw_dir / "unknown_type" / "file.md").write_text("content", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="kb.compile.compiler"):
+            scan_raw_sources(raw_dir=raw_dir)
+
+        assert any("unknown_type" in r.message for r in caplog.records), (
+            "Expected WARNING mentioning unknown subdir 'unknown_type'"
+        )
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (compiler manifest + linker) --
+
+
+class TestCompileManifestPreservesTemplateHashes:
+    """compile_wiki must not clobber template hashes written by find_changed_sources."""
+
+    def test_manifest_reload_after_find_changed(self, tmp_path, monkeypatch):
+        from kb.compile.compiler import compile_wiki, load_manifest, save_manifest
+
+        manifest_path = tmp_path / "hashes.json"
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+
+        # Pre-populate manifest with a template hash
+        save_manifest({"_template/article": "abc123"}, manifest_path)
+
+        # Monkeypatch find_changed_sources to return empty lists but update manifest
+        def mock_find(raw_dir, manifest_path, save_hashes=True):
+            if save_hashes:
+                m = load_manifest(manifest_path)
+                m["_template/article"] = "new_hash"
+                save_manifest(m, manifest_path)
+            return [], []
+
+        monkeypatch.setattr("kb.compile.compiler.find_changed_sources", mock_find)
+        monkeypatch.setattr("kb.compile.compiler.append_wiki_log", lambda *a, **kw: None)
+
+        compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path)
+
+        # Template hash must survive the compile loop
+        final = load_manifest(manifest_path)
+        assert "_template/article" in final
+        assert final["_template/article"] == "new_hash"
+
+
+class TestInjectWikilinksSkipsCodeBlocks:
+    """inject_wikilinks must not create wikilinks inside code blocks."""
+
+    def test_fenced_code_block_preserved(self, tmp_wiki):
+        from kb.compile.linker import inject_wikilinks
+
+        # Create the target page
+        target_path = tmp_wiki / "concepts" / "rag.md"
+        target_path.write_text(
+            '---\ntitle: "RAG"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# RAG\n\nContent about RAG.\n",
+            encoding="utf-8",
+        )
+
+        # Create a page that mentions RAG inside a code block
+        code_page = tmp_wiki / "concepts" / "example.md"
+        code_page.write_text(
+            '---\ntitle: "Example"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# Example\n\n"
+            "Normal text here.\n\n"
+            "```python\n# RAG implementation\nclass RAG:\n    pass\n```\n\n"
+            "More text.\n",
+            encoding="utf-8",
+        )
+
+        inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+
+        result = code_page.read_text(encoding="utf-8")
+        # Wikilink should NOT appear inside the code block
+        lines = result.split("\n")
+        inside_code = False
+        for line in lines:
+            if line.startswith("```"):
+                inside_code = not inside_code
+            if inside_code and "[[" in line:
+                pytest.fail(f"Wikilink injected inside code block: {line}")
+
+    def test_inline_code_preserved(self, tmp_wiki):
+        from kb.compile.linker import inject_wikilinks
+
+        target_path = tmp_wiki / "concepts" / "rag.md"
+        target_path.write_text(
+            '---\ntitle: "RAG"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# RAG\n",
+            encoding="utf-8",
+        )
+
+        code_page = tmp_wiki / "concepts" / "inline.md"
+        code_page.write_text(
+            '---\ntitle: "Inline"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\nUse `RAG` for retrieval.\n",
+            encoding="utf-8",
+        )
+
+        inject_wikilinks("RAG", "concepts/rag", wiki_dir=tmp_wiki)
+
+        result = code_page.read_text(encoding="utf-8")
+        assert "`RAG`" in result, "Inline code backticks were corrupted"
+        # The inline `RAG` should NOT be converted to a wikilink
+        code_line = next(line for line in result.splitlines() if "`RAG`" in line)
+        assert "[[" not in code_line, f"Wikilink injected around inline code: {code_line}"

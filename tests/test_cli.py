@@ -738,3 +738,111 @@ def test_cli_query_surfaces_output_error(mocked_query_wiki):
         result.stderr_bytes.decode() if hasattr(result, "stderr_bytes") else ""
     )
     assert "simulated failure" in combined or "simulated failure" in result.output
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (CLI + coverage-gap subset) --
+
+
+class TestCLIFixes:
+    """cli.py fixes."""
+
+    def test_ingest_type_rejects_comparison(self):
+        """Fix 10.2: comparison is not a valid CLI ingest type (no raw/ dir)."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["ingest", "--type", "comparison", "/nonexistent.md"])
+        assert "Invalid value for '--type'" in (result.output or "")
+
+    def test_ingest_type_rejects_synthesis(self):
+        """Fix 10.2: synthesis is not a valid CLI ingest type (no raw/ dir)."""
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["ingest", "--type", "synthesis", "/nonexistent.md"])
+        assert "Invalid value for '--type'" in (result.output or "")
+
+    def test_mcp_command_handles_startup_error_gracefully(self, monkeypatch):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        def bad_main():
+            raise RuntimeError("Simulated MCP startup failure")
+
+        monkeypatch.setattr("kb.mcp_server.main", bad_main)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["mcp"])
+        assert result.exit_code != 0
+        assert "Traceback" not in (result.output or "")
+        assert "Error" in (result.output or "")
+
+
+class TestCoverageGaps:
+    """Test coverage for previously uncovered branches."""
+
+    def test_kb_compile_scan_full_scan_returns_string(self):
+        """kb_compile_scan with incremental=False must return a string result."""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        fake_sources = [Path("/fake/raw/articles/test.md")]
+
+        with patch("kb.compile.compiler.scan_raw_sources", return_value=fake_sources):
+            from kb.mcp.core import kb_compile_scan
+
+            result = kb_compile_scan(incremental=False)
+
+        assert isinstance(result, str), f"Expected str, got {type(result)}"
+        assert len(result) > 0, "Result should not be empty"
+
+    def test_cli_compile_command_runs(self):
+        """cli compile command should execute without error."""
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        mock_result = {
+            "mode": "incremental",
+            "sources_processed": 0,
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": [],
+            "duplicates": 0,
+            "errors": [],
+        }
+        with patch("kb.compile.compiler.compile_wiki", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["compile"])
+
+        assert result.exit_code == 0, f"CLI compile failed: {result.output!r}"
+        assert "Done" in result.output
+
+    def test_cli_query_command_runs(self):
+        """cli query command should execute without error."""
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        mock_result = {
+            "question": "test",
+            "answer": "Test answer.",
+            "citations": [],
+            "source_pages": [],
+        }
+        with patch("kb.query.engine.query_wiki", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["query", "test question"])
+
+        assert result.exit_code == 0, f"CLI query failed: {result.output!r}"
+        assert "Test answer" in result.output

@@ -960,3 +960,113 @@ class TestConfestCreatedParameter:
 
         with pytest.raises(TypeError):
             create_wiki_page("concepts/x", title="X", content="body.")
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (utils.pages) --
+
+
+class TestNormalizeSourcesTypeCheck:
+    """utils/pages.py normalize_sources: non-string list elements filtered."""
+
+    def test_none_in_list_filtered_out(self):
+        """None elements in source list must be filtered."""
+        from kb.utils.pages import normalize_sources
+
+        result = normalize_sources([None, "raw/articles/a.md", None, "raw/articles/b.md"])
+        assert result == ["raw/articles/a.md", "raw/articles/b.md"]
+
+    def test_non_string_converted(self):
+        """Non-string elements must be converted to str or dropped."""
+        from kb.utils.pages import normalize_sources
+
+        # At minimum, no AttributeError or TypeError
+        result = normalize_sources(["raw/articles/a.md", 42])
+        assert all(isinstance(s, str) for s in result)
+
+
+class TestContentLowerFieldName:
+    """utils/pages.py load_all_pages: field is named 'content_lower', not 'raw_content'."""
+
+    def test_content_lower_key_present(self, tmp_wiki, create_wiki_page):
+        """load_all_pages must return 'content_lower' key (not 'raw_content')."""
+        from kb.utils.pages import load_all_pages
+
+        create_wiki_page(
+            page_id="concepts/rename-test",
+            title="Rename Test",
+            content="Hello World",
+            wiki_dir=tmp_wiki,
+        )
+        pages = load_all_pages(tmp_wiki)
+        assert len(pages) == 1
+        assert "content_lower" in pages[0], "'content_lower' key missing"
+        assert "raw_content" not in pages[0], "'raw_content' key must not be present"
+        assert pages[0]["content_lower"] == "hello world"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (frontmatter + page model) --
+
+
+class TestValidateFrontmatterSourceType:
+    """validate_frontmatter must flag non-list and null source fields."""
+
+    def test_source_null_flagged(self):
+        import frontmatter as fm
+
+        from kb.models.frontmatter import validate_frontmatter
+
+        post = fm.Post("")
+        post.metadata = {
+            "title": "Test",
+            "source": None,
+            "created": "2026-01-01",
+            "updated": "2026-01-01",
+            "type": "concept",
+            "confidence": "stated",
+        }
+        errors = validate_frontmatter(post)
+        assert any("source" in e.lower() for e in errors)
+
+    def test_source_integer_flagged(self):
+        import frontmatter as fm
+
+        from kb.models.frontmatter import validate_frontmatter
+
+        post = fm.Post("")
+        post.metadata = {
+            "title": "Test",
+            "source": 42,
+            "created": "2026-01-01",
+            "updated": "2026-01-01",
+            "type": "concept",
+            "confidence": "stated",
+        }
+        errors = validate_frontmatter(post)
+        assert any("source" in e.lower() for e in errors)
+
+    def test_valid_source_passes(self):
+        import frontmatter as fm
+
+        from kb.models.frontmatter import validate_frontmatter
+
+        post = fm.Post("")
+        post.metadata = {
+            "title": "Test",
+            "source": ["raw/articles/test.md"],
+            "created": "2026-01-01",
+            "updated": "2026-01-01",
+            "type": "concept",
+            "confidence": "stated",
+        }
+        errors = validate_frontmatter(post)
+        assert not any("source" in e.lower() for e in errors)
+
+
+class TestWikiPageContentHashDefault:
+    """WikiPage.content_hash should default to None, not empty string."""
+
+    def test_default_is_none(self):
+        from kb.models.page import WikiPage
+
+        page = WikiPage(path=Path("test.md"), title="Test", page_type="concept")
+        assert page.content_hash is None

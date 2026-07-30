@@ -803,3 +803,143 @@ class TestListPagesSingularFilter:
         assert isinstance(result, str)
         # Should not error
         assert result.startswith("Error:") is False or "entity" in result
+
+
+# -- Cycle 93 fold from test_v0911_phase392.py (MCP browse safety subset) --
+# ── Task 3: MCP browse outer try/except ─────────────────────────
+
+
+class TestMcpBrowseSafety:
+    """kb_read_page and kb_list_sources must not let OSError escape to MCP client."""
+
+    def test_kb_read_page_ioerror_returns_error_string(self, tmp_path, monkeypatch):
+        """kb_read_page returns 'Error: ...' string when the underlying read raises OSError.
+
+        Cycle 4 PR R1 Codex MAJOR 1 refactor switched kb_read_page from
+        `path.read_text()` to `path.open('rb')` + bounded `.read()` so huge
+        pages don't OOM before truncation. Patch Path.open — the new I/O boundary.
+        """
+        from unittest.mock import patch
+
+        from kb.mcp import browse
+
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "test.md"
+        page.write_text(
+            "---\ntitle: T\nsource:\n  - raw/articles/a.md\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nBody.",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(browse, "WIKI_DIR", wiki_dir)
+
+        with patch("pathlib.Path.open", side_effect=OSError("disk error")):
+            result = browse.kb_read_page("concepts/test")
+
+        assert result.startswith("Error:"), f"Expected error string, got: {result!r}"
+
+    def test_kb_list_sources_ioerror_returns_error_string(self, tmp_path, monkeypatch):
+        """kb_list_sources returns 'Error: ...' string when iterdir raises PermissionError."""
+        from unittest.mock import patch
+
+        from kb.mcp import browse
+
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        monkeypatch.setattr(browse, "RAW_DIR", raw_dir)
+
+        with patch("pathlib.Path.iterdir", side_effect=PermissionError("no access")):
+            result = browse.kb_list_sources()
+
+        assert result.startswith("Error:"), f"Expected error string, got: {result!r}"
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (MCP app/browse subset) --
+
+
+class TestMCPFixes:
+    """mcp/browse.py and mcp/app.py fixes."""
+
+    def test_format_ingest_result_handles_flat_affected_pages(self):
+        from kb.mcp.app import _format_ingest_result
+
+        result = {
+            "pages_created": ["summaries/test"],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": ["concepts/rag"],
+        }
+        output = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+        assert "concepts/rag" in output
+        assert "backlink" not in output  # dead legacy branch removed
+
+    def test_kb_search_returns_error_string_on_exception(self, monkeypatch):
+        import kb.query.engine as eng_mod
+        from kb.mcp.browse import kb_search
+
+        def bad_search(*args, **kwargs):
+            raise RuntimeError("Simulated failure")
+
+        monkeypatch.setattr(eng_mod, "search_pages", bad_search)
+        result = kb_search("test query")
+        assert result.startswith("Error:"), f"Expected Error: string, got: {result[:80]!r}"
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (mcp health + browse) --
+
+
+class TestKbGraphVizMaxNodes:
+    """mcp/health.py kb_graph_viz: max_nodes clamped at 500."""
+
+    def test_max_nodes_clamped(self, monkeypatch):
+        """kb_graph_viz with max_nodes=99999 must call export_mermaid with max_nodes<=500."""
+        from kb.mcp import health as mcp_health
+
+        calls = []
+
+        def mock_export(max_nodes, wiki_dir=None):
+            # Cycle 6 AC2: kb_graph_viz now threads wiki_dir through to
+            # export_mermaid; mock accepts the new kwarg.
+            calls.append(max_nodes)
+            return "graph LR"
+
+        # Cycle 17 AC6: export_mermaid is imported function-locally inside
+        # kb_graph_viz; monkeypatch the owner module instead of the MCP wrapper.
+        monkeypatch.setattr("kb.graph.export.export_mermaid", mock_export, raising=True)
+
+        mcp_health.kb_graph_viz(max_nodes=99999)
+        assert calls and calls[0] <= 500, f"max_nodes not clamped: got {calls}"
+
+
+class TestListSourcesStatFailure:
+    """mcp/browse.py kb_list_sources: per-file stat failure is skipped."""
+
+    def test_broken_symlink_does_not_abort_listing(self, tmp_path, monkeypatch):
+        """A stat() failure on one file must not abort the entire listing."""
+        from pathlib import Path
+
+        from kb import config as kb_config
+
+        # Point RAW_DIR to tmp
+        raw_dir = tmp_path / "raw"
+        articles = raw_dir / "articles"
+        articles.mkdir(parents=True)
+        (articles / "good.md").write_text("content", encoding="utf-8")
+
+        monkeypatch.setattr(kb_config, "RAW_DIR", raw_dir)
+
+        original_stat = Path.stat
+
+        def failing_stat(self, **kw):
+            if self.name == "good.md":
+                raise OSError("stat failed")
+            return original_stat(self, **kw)
+
+        monkeypatch.setattr(Path, "stat", failing_stat)
+
+        from kb.mcp.browse import kb_list_sources
+
+        result = kb_list_sources()
+        # Must return a string, not raise
+        assert isinstance(result, str)

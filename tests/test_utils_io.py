@@ -481,3 +481,110 @@ class TestAtomicTextWriteBasic:
         content = "Hello 世界 🌍 Привет"
         atomic_text_write(content, path)
         assert path.read_text(encoding="utf-8") == content
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (wiki_log) --
+
+
+class TestWikiLogPipeSanitization:
+    """utils/wiki_log.py append_wiki_log: pipe characters are sanitized."""
+
+    def test_pipe_in_message_does_not_corrupt_log(self, tmp_path):
+        """A pipe character in message must be replaced before writing."""
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        append_wiki_log("ingest", "Processed raw/articles/a.md | extra column", log_path)
+        content = log_path.read_text(encoding="utf-8")
+        lines = [ln for ln in content.splitlines() if ln.startswith("-")]
+        assert len(lines) == 1, "Pipe in message must not create extra columns"
+        # The log line should have exactly 2 pipe separators (date | op | message)
+        assert lines[0].count("|") == 2, f"Expected 2 pipes in log line, got: {lines[0]!r}"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (atomic writes + wiki_log) --
+
+
+class TestAtomicJsonWriteFdSafety:
+    """atomic_json_write must not leak the fd when open()/json.dump() raises."""
+
+    def test_fd_closed_on_serialization_failure(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        target = tmp_path / "out.json"
+
+        class Unserializable:
+            pass
+
+        with pytest.raises(TypeError):
+            atomic_json_write(Unserializable(), target)
+        assert not target.exists()
+        # Verify no leftover temp files
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_successful_write_unchanged(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        target = tmp_path / "out.json"
+        atomic_json_write({"key": "value"}, target)
+        assert target.exists()
+        import json
+
+        assert json.loads(target.read_text(encoding="utf-8")) == {"key": "value"}
+
+
+class TestAppendWikiLogErrorHandling:
+    """append_wiki_log retries once on OSError then raises (H7 behavior)."""
+
+    def test_readonly_log_raises_after_retry(self, tmp_path):
+        """H7: append_wiki_log raises OSError after one retry (no silent swallow)."""
+        import sys
+
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Wiki Log\n\n", encoding="utf-8")
+        # Make read-only so both write attempts fail
+        log_path.chmod(0o444)
+        try:
+            # On Windows, chmod 0o444 may not prevent writes — skip if so
+            if sys.platform == "win32":
+                pytest.skip("chmod 0o444 does not reliably prevent writes on Windows")
+            with pytest.raises(OSError):
+                append_wiki_log("test", "message", log_path)
+        finally:
+            log_path.chmod(0o644)
+
+
+class TestAtomicTextWrite:
+    """atomic_text_write must write atomically like atomic_json_write."""
+
+    def test_successful_write(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        target = tmp_path / "output.md"
+        atomic_text_write("hello world", target)
+        assert target.read_text(encoding="utf-8") == "hello world"
+
+    def test_no_partial_write_on_failure(self, tmp_path, monkeypatch):
+        from kb.utils.io import atomic_text_write
+
+        target = tmp_path / "output.md"
+        target.write_text("original", encoding="utf-8")
+
+        # Make the promote fail after the temp write. Cycle 87 AC01 moved the
+        # rename into `durable_replace`, which is the only platform-agnostic
+        # seam — on Windows it uses `MoveFileExW`, so patching `Path.replace`
+        # or `os.replace` would not intercept and nothing would raise.
+        import kb.utils.io as io_mod
+
+        def failing_replace(_src, _dst):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(io_mod, "durable_replace", failing_replace)
+
+        with pytest.raises(OSError):
+            atomic_text_write("new content", target)
+
+        # Original content preserved
+        assert target.read_text(encoding="utf-8") == "original"

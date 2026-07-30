@@ -1402,3 +1402,350 @@ class TestFormatVerdictTrendsPassRate:
 
         # 2 passes out of 4 total = 50%
         assert "50%" in text
+
+
+# -- Cycle 93 fold from test_v0911_phase392.py (fix_dead_links + verdict trends subset) --
+# ── Task 4: fix_dead_links no phantom entries ─────────────────────
+
+
+class TestFixDeadLinksNoPhantom:
+    """fix_dead_links must not append audit entries for targets absent from page text."""
+
+    def test_no_phantom_entry_when_pattern_does_not_match(self, tmp_wiki):
+        """If broken link record exists but text lacks it, no fix entry is produced."""
+        from unittest.mock import patch
+
+        from kb.lint.checks import fix_dead_links
+
+        # Create a page with NO [[wikilinks]] at all
+        page = tmp_wiki / "concepts" / "clean.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            "---\ntitle: Clean\nsource:\n  - raw/articles/a.md\ncreated: 2026-01-01\n"
+            "updated: 2026-01-01\ntype: concept\nconfidence: stated\n---\n\nNo links here.",
+            encoding="utf-8",
+        )
+
+        # Inject a fake broken-link record pointing at this page
+        # with a target NOT present in the page body
+        fake_result = {
+            "total_links": 1,
+            "resolved": 0,
+            "broken": [{"source": "concepts/clean", "target": "nonexistent/page"}],
+        }
+        with patch("kb.lint.checks.resolve_wikilinks", return_value=fake_result):
+            fixes = fix_dead_links(tmp_wiki)
+
+        assert fixes == [], f"Expected no phantom fixes, got: {fixes}"
+
+
+# ── Task 8: VERDICT_TREND_THRESHOLD config constant ──────────────
+
+
+class TestVerdictTrendThreshold:
+    """trends.py uses VERDICT_TREND_THRESHOLD from config, not hardcoded 0.1."""
+
+    def test_threshold_constant_exists_and_is_correct(self):
+        """VERDICT_TREND_THRESHOLD is 0.1 and importable from config."""
+        from kb.config import VERDICT_TREND_THRESHOLD
+
+        assert VERDICT_TREND_THRESHOLD == 0.1
+
+    def test_compute_verdict_trends_uses_config_threshold(self, monkeypatch):
+        """Cycle 69 AC09 — C11-L1 upgrade per amendment A1.
+
+        compute_verdict_trends respects the monkeypatched
+        VERDICT_TREND_THRESHOLD, not a hardcoded constant. Replaced
+        inspect.getsource source-grep with behavioural divergent-threshold
+        assertion.
+
+        Build a 2-period verdicts list with pass_rate delta ~0.27. Default
+        threshold 0.1: delta > threshold -> trend="improving". Monkeypatched
+        threshold 0.5: delta < threshold -> trend="stable".
+
+        Mutation: revert trends.py:118,120 from
+        `previous + VERDICT_TREND_THRESHOLD` to hardcoded `previous + 0.1`
+        -> monkeypatch is bypassed -> high-threshold case still returns
+        "improving" (because 0.27 > 0.1) -> second assertion FAILs.
+        """
+        from kb.lint import trends
+
+        # Period A (2026-04-06 week): pass_rate = 2/5 = 0.40
+        # Period B (2026-04-13 week): pass_rate = 4/6 = 0.67 (delta 0.27)
+        verdicts = [
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-06T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "pass"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "fail"},
+            {"timestamp": "2026-04-13T00:00:00", "verdict": "fail"},
+        ]
+
+        # Default threshold (0.1): delta 0.27 > 0.1 -> improving
+        result_default = trends.compute_verdict_trends(path=verdicts)
+        assert result_default["trend"] == "improving", (
+            f"Expected 'improving' with default threshold 0.1, "
+            f"got {result_default['trend']!r} for {result_default['periods']}"
+        )
+
+        # Monkeypatched threshold (0.5): delta 0.27 < 0.5 -> stable
+        monkeypatch.setattr(trends, "VERDICT_TREND_THRESHOLD", 0.5)
+        result_high = trends.compute_verdict_trends(path=verdicts)
+        assert result_high["trend"] == "stable", (
+            f"Expected 'stable' with monkeypatched threshold 0.5, "
+            f"got {result_high['trend']!r} (a hardcoded 0.1 regression "
+            f"would still report 'improving' here)"
+        )
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (lint checks & verdicts subset) --
+
+
+class TestLintFixes:
+    """lint/checks.py and lint/verdicts.py correctness fixes."""
+
+    def test_check_staleness_handles_string_updated_date(self, tmp_wiki, create_wiki_page):
+        """check_staleness must detect stale pages with string-typed updated: field."""
+        from datetime import date, timedelta
+
+        from kb.lint.checks import check_staleness
+
+        old_date = (date.today() - timedelta(days=200)).isoformat()
+        page_path = tmp_wiki / "concepts" / "old-concept.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            f"---\ntitle: Old Concept\nsource:\n  - raw/articles/x.md\n"
+            f'created: "{old_date}"\nupdated: "{old_date}"\n'
+            f"type: concept\nconfidence: stated\n---\n\nBody.\n",
+            encoding="utf-8",
+        )
+
+        issues = check_staleness(wiki_dir=tmp_wiki, max_days=90)
+        stale_pages = [i["page"] for i in issues]
+        assert "concepts/old-concept" in stale_pages, (
+            f"Stale page with string updated: was silently skipped. Found: {stale_pages}"
+        )
+
+    def test_check_orphan_exempts_comparisons_and_synthesis(self, tmp_wiki, create_wiki_page):
+        """check_orphan_pages must not flag comparisons/ and synthesis/ pages as orphans."""
+        from kb.lint.checks import check_orphan_pages
+
+        create_wiki_page(page_id="comparisons/a-vs-b", title="A vs B", wiki_dir=tmp_wiki)
+        create_wiki_page(page_id="synthesis/overview", title="Overview", wiki_dir=tmp_wiki)
+
+        issues = check_orphan_pages(wiki_dir=tmp_wiki)
+        flagged = [i["page"] for i in issues]
+        assert "comparisons/a-vs-b" not in flagged, (
+            "comparisons/ should be exempt from orphan check"
+        )
+        assert "synthesis/overview" not in flagged, "synthesis/ should be exempt from orphan check"
+
+    def test_check_source_coverage_no_false_positive_same_filename(
+        self, tmp_wiki, create_wiki_page, tmp_path
+    ):
+        """check_source_coverage must not false-positive on same-named files in different dirs."""
+        from unittest.mock import patch
+
+        from kb.lint.checks import check_source_coverage
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        (raw_dir / "papers").mkdir(parents=True)
+        (raw_dir / "articles" / "example.md").write_text("article content", encoding="utf-8")
+        (raw_dir / "papers" / "example.md").write_text("paper content", encoding="utf-8")
+
+        # Wiki page references only the article
+        create_wiki_page(
+            page_id="summaries/example",
+            title="Example",
+            content="Source: raw/articles/example.md",
+            wiki_dir=tmp_wiki,
+        )
+
+        # Patch SOURCE_TYPE_DIRS to only include articles and papers
+        fake_dirs = {
+            "article": raw_dir / "articles",
+            "paper": raw_dir / "papers",
+        }
+        with patch("kb.lint.checks.SOURCE_TYPE_DIRS", fake_dirs):
+            issues = check_source_coverage(wiki_dir=tmp_wiki, raw_dir=raw_dir)
+
+        uncovered = [i["source"] for i in issues]
+        assert "raw/papers/example.md" in uncovered, (
+            "Paper with same name should be flagged as uncovered"
+        )
+        assert "raw/articles/example.md" not in uncovered, (
+            "Article should NOT be flagged — false positive from old endswith check"
+        )
+
+    def test_load_verdicts_logs_warning_on_json_error(self, tmp_path, caplog):
+        """load_verdicts must log a warning when verdicts file is corrupt JSON."""
+        import logging
+
+        from kb.lint.verdicts import load_verdicts
+
+        bad_path = tmp_path / "verdicts.json"
+        bad_path.write_text("{ NOT VALID JSON }", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="kb.lint.verdicts"):
+            result = load_verdicts(bad_path)
+
+        assert result == [], "Should return empty list on JSON error"
+        assert any(
+            "corrupt" in r.message.lower() or "json" in r.message.lower() for r in caplog.records
+        ), f"Expected warning about corrupt JSON. Got: {[r.message for r in caplog.records]}"
+
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (lint runner + checks) --
+
+
+class TestDeadLinkFilterAfterFix:
+    """lint/runner.py run_all_checks: fixed dead links removed from report."""
+
+    def test_fixed_links_excluded_from_report(self, tmp_wiki, create_wiki_page):
+        """After --fix, dead links that were fixed must not appear in the report."""
+        from kb.lint.runner import run_all_checks
+
+        # Create a page that links to a non-existent page
+        create_wiki_page(
+            page_id="concepts/linker",
+            title="Linker",
+            content="See [[concepts/nonexistent]] for more.",
+            wiki_dir=tmp_wiki,
+        )
+
+        report = run_all_checks(wiki_dir=tmp_wiki, fix=True)
+        dead_link_issues = [
+            i
+            for i in report["issues"]
+            if i.get("check") == "dead_link" and "nonexistent" in i.get("target", "")
+        ]
+        assert len(dead_link_issues) == 0, (
+            f"Fixed dead link still appears in report: {dead_link_issues}"
+        )
+
+
+class TestStalenessDatetimeBug:
+    """lint/checks.py check_staleness: handles datetime.datetime updated field."""
+
+    def test_staleness_does_not_raise_for_datetime_updated(self, tmp_wiki):
+        """check_staleness must not crash when python-frontmatter parses updated as datetime."""
+        from kb.lint.checks import check_staleness
+
+        # Write a page with a full ISO datetime string that frontmatter parses as datetime
+        page_dir = tmp_wiki / "concepts"
+        page_dir.mkdir(exist_ok=True)
+        page_path = page_dir / "datetime-page.md"
+        page_path.write_text(
+            "---\n"
+            "title: Datetime Page\n"
+            'source:\n  - "raw/articles/src.md"\n'
+            "created: 2025-01-01\n"
+            "updated: 2025-01-01T12:00:00\n"
+            "type: concept\n"
+            "confidence: stated\n"
+            "---\n\nContent here.\n",
+            encoding="utf-8",
+        )
+        # Should not raise TypeError
+        issues = check_staleness(tmp_wiki)
+        # The result is a list — no exception means pass
+        assert isinstance(issues, list)
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (lint checks + runner + trends) --
+
+
+class TestCheckStalenessNoneUpdated:
+    """check_staleness must flag pages with None/missing updated date."""
+
+    def test_missing_updated_flagged(self, create_wiki_page, tmp_wiki):
+        # Create a page with no updated field by writing manually
+        page_path = tmp_wiki / "concepts" / "stale.md"
+        page_path.write_text(
+            '---\ntitle: "Stale"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2020-01-01\ntype: concept\nconfidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from kb.lint.checks import check_staleness
+
+        issues = check_staleness(wiki_dir=tmp_wiki, max_days=30)
+        stale_pages = [i["page"] for i in issues]
+        assert "concepts/stale" in stale_pages
+
+
+class TestRunAllChecksDeadLinkKeyConsistency:
+    """run_all_checks dead-link filter must use consistent keys."""
+
+    def test_fixed_dead_links_removed_from_report(self, tmp_wiki, create_wiki_page):
+        create_wiki_page(
+            "concepts/test",
+            content="Link to [[concepts/nonexistent]].",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.lint.runner import run_all_checks
+
+        # Run with fix=True so dead links get fixed
+        result = run_all_checks(wiki_dir=tmp_wiki, fix=True)
+        # After fix, dead_link issues should be removed from the report
+        dead_links = [i for i in result["issues"] if i.get("check") == "dead_link"]
+        # If fix was applied, it should not appear in issues
+        fixed_targets = {f["target"] for f in result.get("fixes_applied", [])}
+        remaining = [d for d in dead_links if d.get("target") in fixed_targets]
+        assert len(remaining) == 0, f"Fixed dead links still in report: {remaining}"
+
+
+class TestCheckSourceCoverageCustomRawDir:
+    """check_source_coverage must work with non-standard raw_dir paths."""
+
+    def test_tmp_raw_dir_matches(self, tmp_project, create_wiki_page, create_raw_source):
+        wiki_dir = tmp_project / "wiki"
+        raw_dir = tmp_project / "raw"
+
+        create_raw_source("raw/articles/covered.md", "Source content.", project_dir=tmp_project)
+        create_wiki_page(
+            "summaries/covered",
+            title="Covered",
+            source_ref="raw/articles/covered.md",
+            wiki_dir=wiki_dir,
+        )
+
+        from kb.lint.checks import check_source_coverage
+
+        issues = check_source_coverage(wiki_dir=wiki_dir, raw_dir=raw_dir)
+        uncovered_sources = [i["source"] for i in issues]
+        assert "raw/articles/covered.md" not in uncovered_sources
+
+
+class TestVerdictTrendsMinSample:
+    """compute_verdict_trends must require minimum sample for trend classification."""
+
+    def test_single_verdict_stays_stable(self, tmp_path):
+        import json
+
+        from kb.lint.trends import compute_verdict_trends
+
+        verdict_path = tmp_path / "verdicts.json"
+        verdicts = [
+            {
+                "timestamp": "2026-04-09T10:00:00",
+                "page_id": "concepts/test",
+                "type": "lint",
+                "verdict": "pass",
+                "issues": [],
+                "notes": "",
+            },
+        ]
+        verdict_path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        result = compute_verdict_trends(path=verdict_path)
+        # With only 1 verdict, trend should be "stable" (insufficient data)
+        assert result["trend"] == "stable"

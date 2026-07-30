@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from kb.lint.semantic import (
     build_completeness_context,
     build_consistency_context,
@@ -304,3 +306,59 @@ class TestConsistencyGroupCap:
         )
         result = build_consistency_context(wiki_dir=tmp_wiki)
         assert isinstance(result, str)
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (semantic grouping) --
+
+
+class TestGroupByWikilinksSeenMarking:
+    """_group_by_wikilinks must mark ALL group members as seen."""
+
+    def test_no_overlapping_groups(self, tmp_wiki, create_wiki_page):
+        # Create a star topology: hub links to spoke1 and spoke2
+        create_wiki_page(
+            "concepts/hub",
+            content="Links to [[concepts/spoke1]] and [[concepts/spoke2]].",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page("concepts/spoke1", content="Content.", wiki_dir=tmp_wiki)
+        create_wiki_page("concepts/spoke2", content="Content.", wiki_dir=tmp_wiki)
+
+        from kb.lint.semantic import _group_by_wikilinks
+
+        groups = _group_by_wikilinks(tmp_wiki)
+        # Each page should appear in at most one group
+        all_pages = []
+        for g in groups:
+            all_pages.extend(g)
+        assert len(all_pages) == len(set(all_pages)), f"Overlapping groups detected: {groups}"
+
+
+class TestGroupByTermOverlapStripBeforeFilter:
+    """_group_by_term_overlap must strip punctuation before applying length filter."""
+
+    def test_short_stripped_words_excluded(self, tmp_wiki, create_wiki_page):
+        # "word." has len 5, passes len > 4, but strips to "word" (len 4)
+        # After fix, "word" should be excluded
+        create_wiki_page(
+            "concepts/page1",
+            content="word. word. word. word. word. unique1 unique1 unique1",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(
+            "concepts/page2",
+            content="word. word. word. word. word. unique2 unique2 unique2",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.lint.semantic import _group_by_term_overlap
+
+        groups = _group_by_term_overlap(tmp_wiki)
+        # "word" (4 chars after strip) should not create a false overlap
+        grouped_pages = {p for g in groups for p in g}
+        # If the only shared term is "word" (4 chars), these should NOT be grouped
+        if grouped_pages:
+            for g in groups:
+                if "concepts/page1" in g and "concepts/page2" in g:
+                    # They should only be grouped if they share 3+ terms > 4 chars
+                    pytest.fail("Pages grouped on short stripped terms only")

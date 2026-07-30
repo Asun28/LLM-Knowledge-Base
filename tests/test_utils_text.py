@@ -420,3 +420,18 @@ class TestYamlEscapeControlChars:
         assert "world" in result
         for code in [0x01, 0x02, 0x0B, 0x7F]:
             assert chr(code) not in result
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (slugify) --
+
+
+class TestSlugifyAsciiOnly:
+    """slugify behavior with Unicode — after item-11 fix, non-ASCII is preserved."""
+
+    def test_accented_chars_preserved(self):
+        from kb.utils.text import slugify
+
+        result = slugify("naïve Bayes résumé")
+        # After item-11 fix (re.ASCII dropped): accented chars are preserved in slug
+        assert result  # not empty — never collapses to untitled-<hash> with real words
+        assert "na" in result  # ASCII portion still present

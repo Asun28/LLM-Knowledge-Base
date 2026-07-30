@@ -319,3 +319,44 @@ class TestBM25TokenizeRegex:
 
         result = tokenize("state-of-the-art systems")
         assert "state-of-the-art" in result
+
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (bm25 duplicate tokens) --
+
+
+class TestBM25DuplicateTokens:
+    def test_duplicate_tokens_do_not_inflate_score(self):
+        from kb.query.bm25 import BM25Index
+
+        docs = [["neural", "network", "training"], ["python", "code"]]
+        index = BM25Index(docs)
+        score_single = index.score(["neural"])[0]
+        score_double = index.score(["neural", "neural"])[0]
+        assert score_single == score_double, (
+            f"Duplicate tokens inflated score: single={score_single}, double={score_double}"
+        )
+
+    def test_unique_tokens_still_sum_correctly(self):
+        from kb.query.bm25 import BM25Index
+
+        docs = [["neural", "network"], ["python", "code"]]
+        index = BM25Index(docs)
+        score_two = index.score(["neural", "network"])[0]
+        score_one = index.score(["neural"])[0]
+        assert score_two > score_one
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (tokenize) --
+
+
+class TestTokenizeVersionStrings:
+    """Tokenize should handle version strings gracefully."""
+
+    def test_version_documented_behavior(self):
+        from kb.query.bm25 import tokenize
+
+        tokens = tokenize("version v0.9.13 release")
+        # After fix: version strings should not silently lose components.
+        # At minimum, the behavior should be predictable.
+        assert "version" in tokens or "release" in tokens

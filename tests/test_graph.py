@@ -1,6 +1,8 @@
 """Tests for the graph builder and visualization."""
 
+import logging
 from pathlib import Path
+from unittest.mock import patch
 
 from kb.graph.builder import build_graph, graph_stats, page_id, scan_wiki_pages
 
@@ -526,3 +528,172 @@ class TestGraphStatsDeterminism_t11:
         graph = build_graph(tmp_wiki)
         stats = graph_stats(graph)
         assert isinstance(stats, dict)
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (graph export subset) --
+
+
+class TestGraphExportFixes:
+    """graph/export.py fixes."""
+
+    def test_sanitize_label_strips_newlines(self):
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("Line 1\nLine 2")
+        assert "\n" not in result, f"Newline not stripped: {result!r}"
+
+    def test_sanitize_label_strips_backticks(self):
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("`code term`")
+        assert "`" not in result, f"Backtick not stripped: {result!r}"
+
+    def test_export_mermaid_empty_wiki(self, tmp_wiki):
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=tmp_wiki)
+        assert result.startswith("graph LR")
+
+    def test_export_mermaid_with_pages(self, tmp_wiki, create_wiki_page):
+        from kb.graph.export import export_mermaid
+
+        create_wiki_page(page_id="concepts/rag", title="RAG", wiki_dir=tmp_wiki)
+        result = export_mermaid(wiki_dir=tmp_wiki)
+        assert "graph LR" in result
+        assert "concepts" in result
+
+
+# -- Cycle 93 fold from test_phase4_audit_compile.py (graph builder subset) --
+
+
+def test_bare_slug_wikilink_creates_graph_edge(tmp_wiki):
+    """Bare-slug wikilinks [[foo]] must produce graph edges to entities/foo."""
+    from kb.graph.builder import build_graph
+
+    # Entity page: entities/foo
+    (tmp_wiki / "entities" / "foo.md").write_text(
+        "---\ntitle: Foo\ntype: entity\nconfidence: stated\n---\ncontent\n"
+    )
+    # Concept page linking to [[foo]] (bare slug, no subdir/)
+    (tmp_wiki / "concepts" / "bar.md").write_text(
+        "---\ntitle: Bar\ntype: concept\nconfidence: stated\n---\n[[foo]]\n"
+    )
+
+    graph = build_graph(wiki_dir=tmp_wiki)
+    assert graph.has_edge("concepts/bar", "entities/foo"), (
+        "Bare-slug [[foo]] from concepts/bar did not produce an edge to entities/foo"
+    )
+
+
+# -- Cycle 93 fold from test_phase4_audit_observability.py (pagerank logging subset) --
+
+
+def test_pagerank_failure_logs_warning(caplog):
+    """PageRank convergence failure must emit a warning with the graph size."""
+    import networkx as nx
+
+    from kb.graph.builder import graph_stats
+
+    g = nx.DiGraph()
+    g.add_edges_from([("a", "b"), ("b", "a"), ("c", "a")])
+
+    with patch("networkx.pagerank", side_effect=nx.PowerIterationFailedConvergence(100)):
+        with caplog.at_level(logging.WARNING, logger="kb.graph.builder"):
+            stats = graph_stats(g)
+
+    assert stats["pagerank"] == []
+    warning_texts = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert (
+        "pagerank" in warning_texts.lower()
+        or "converge" in warning_texts.lower()
+        or "failed" in warning_texts.lower()
+    )
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (graph stats + export) --
+
+
+class TestGraphStatsBetweennessException:
+    """graph/builder.py graph_stats: betweenness_centrality failure is caught."""
+
+    def test_betweenness_exception_does_not_propagate(self, monkeypatch):
+        """A failure in betweenness_centrality must be caught and return empty bridge_nodes."""
+        import networkx as nx
+
+        from kb.graph.builder import graph_stats
+
+        def failing_bc(graph, **kw):
+            raise RuntimeError("betweenness boom")
+
+        monkeypatch.setattr(nx, "betweenness_centrality", failing_bc)
+
+        g = nx.DiGraph()
+        g.add_edge("a", "b")
+        stats = graph_stats(g)
+        assert stats["bridge_nodes"] == [], (
+            f"Expected empty bridge_nodes, got {stats['bridge_nodes']}"
+        )
+
+
+class TestGraphStatsOrphansKeyRenamed:
+    """graph/builder.py graph_stats: 'orphans' key renamed to 'no_inbound'."""
+
+    def test_no_inbound_key_present(self):
+        """graph_stats must return 'no_inbound' key (not 'orphans')."""
+        import networkx as nx
+
+        from kb.graph.builder import graph_stats
+
+        g = nx.DiGraph()
+        g.add_edge("a", "b")
+        g.add_node("c")  # isolated
+        stats = graph_stats(g)
+        assert "no_inbound" in stats, f"'no_inbound' key missing from stats: {list(stats.keys())}"
+
+
+class TestMermaidSanitizeLabel:
+    """graph/export.py _sanitize_label: parentheses stripped."""
+
+    def test_parentheses_stripped_from_label(self):
+        """_sanitize_label must remove '(' and ')' from page titles."""
+        from kb.graph.export import _sanitize_label
+
+        result = _sanitize_label("GPT-4 (OpenAI)")
+        assert "(" not in result and ")" not in result, f"Parens not stripped: {result!r}"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (graph builder) --
+
+
+class TestBuildGraphNodeIdCasing:
+    """build_graph must normalize node IDs to lowercase."""
+
+    def test_uppercase_filename_lowercased(self, tmp_wiki):
+        # Create a page with uppercase in filename
+        page_path = tmp_wiki / "entities" / "OpenAI.md"
+        page_path.write_text(
+            '---\ntitle: "OpenAI"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: entity\n"
+            "confidence: stated\n---\n\nContent.\n",
+            encoding="utf-8",
+        )
+
+        from kb.graph.builder import build_graph
+
+        graph = build_graph(wiki_dir=tmp_wiki)
+        node_ids = list(graph.nodes())
+        for nid in node_ids:
+            assert nid == nid.lower(), f"Node ID not lowercased: {nid}"
+
+
+class TestGraphPageIdConsolidated:
+    """graph/builder.page_id should delegate to utils/pages._page_id."""
+
+    def test_consistent_with_utils(self, tmp_wiki):
+        page_path = tmp_wiki / "concepts" / "test-page.md"
+        page_path.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+
+        from kb.graph.builder import page_id as graph_page_id
+        from kb.utils.pages import _page_id as utils_page_id
+
+        assert graph_page_id(page_path, tmp_wiki) == utils_page_id(page_path, tmp_wiki)
