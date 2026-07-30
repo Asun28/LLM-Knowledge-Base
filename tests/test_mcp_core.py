@@ -1808,3 +1808,589 @@ class TestKbCreatePageTypeMapFromConfig:
         # We verify by checking that PAGE_TYPES keys are recognized
         for page_type in PAGE_TYPES:
             assert page_type in PAGE_TYPES
+
+
+# -- Cycle 94 fold from test_v070.py (MCP split verification + cycle-17 cold-boot pins) --
+
+
+import asyncio  # noqa: E402  — fold-site import (cycle 94)
+
+from kb.mcp.app import _validate_run_id  # noqa: E402  — fold-site import (cycle 94)
+
+# ── 8. MCP Split Verification ────────────────────────────────────
+
+
+def test_mcp_server_backward_compat():
+    """mcp_server.py still exports mcp for backward compatibility."""
+    from kb.mcp_server import mcp
+
+    assert mcp is not None
+
+
+def test_mcp_all_tools_registered():
+    """All 21 tools are registered in the MCP server."""
+    from kb.mcp import mcp
+
+    tools = asyncio.run(mcp.list_tools())
+    tool_names = {t.name for t in tools}
+    expected = {
+        "kb_query",
+        "kb_ingest",
+        "kb_ingest_content",
+        "kb_save_source",
+        "kb_compile_scan",
+        "kb_search",
+        "kb_read_page",
+        "kb_list_pages",
+        "kb_list_sources",
+        "kb_stats",
+        "kb_lint",
+        "kb_evolve",
+        "kb_review_page",
+        "kb_refine_page",
+        "kb_lint_deep",
+        "kb_lint_consistency",
+        "kb_query_feedback",
+        "kb_reliability_map",
+        "kb_affected_pages",
+        "kb_save_lint_verdict",
+        "kb_create_page",
+    }
+    assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
+
+
+class TestKbMcpConsoleScript:
+    """Folded from tests/test_cycle12_mcp_console_script.py (cycle 49 — Phase 4.5 HIGH #4)."""
+
+    def test_kb_mcp_package_exposes_main(self):
+        from kb.mcp import main
+
+        assert callable(main)
+
+    def test_kb_mcp_server_reexports_main_and_mcp(self):
+        from kb.mcp import main as pkg_main
+        from kb.mcp import mcp as pkg_mcp
+        from kb.mcp_server import main as shim_main
+        from kb.mcp_server import mcp as shim_mcp
+
+        assert shim_main is pkg_main
+        assert shim_mcp is pkg_mcp
+
+    def test_pyproject_has_kb_mcp_script_entry(self):
+        import tomllib
+
+        with open("pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+        scripts = data.get("project", {}).get("scripts", {})
+        assert scripts.get("kb-mcp") == "kb.mcp:main"
+        assert scripts.get("kb") == "kb.cli:cli"
+
+
+class TestMcpAppInstructions:
+    """Folded from tests/test_cycle9_mcp_app.py (cycle 49 — Phase 4.5 HIGH #4)."""
+
+    @staticmethod
+    def _instruction_tool_groups(instructions: str) -> dict[str, list[str]]:
+        import re
+
+        groups: dict[str, list[str]] = {}
+        current_group: str | None = None
+
+        for line in instructions.splitlines():
+            if match := re.fullmatch(r"### (?P<group>.+)", line):
+                current_group = match.group("group")
+                groups[current_group] = []
+                continue
+
+            if current_group and (match := re.fullmatch(r"- `(?P<name>kb_[^`]+)` — .+", line)):
+                groups[current_group].append(match.group("name"))
+
+        return groups
+
+    def test_instructions_tool_names_sorted_within_groups(self):
+        from kb.mcp import mcp
+
+        groups = self._instruction_tool_groups(mcp.instructions or "")
+
+        assert groups
+        for group_name, tool_names in groups.items():
+            assert tool_names, f"{group_name} has no documented tools"
+            assert sorted(tool_names) == tool_names
+
+        rendered_tool_names = {name for tool_names in groups.values() for name in tool_names}
+        registered_tools = asyncio.run(mcp.list_tools(run_middleware=False))
+        registered_tool_names = {tool.name for tool in registered_tools}
+
+        assert rendered_tool_names == registered_tool_names
+
+
+class TestValidateRunId:
+    """T1 (cycle 17) — shared validator contract.
+
+    Folded from tests/test_cycle17_validators.py (cycle 51 — Phase 4.5 HIGH #4).
+    """
+
+    def test_empty_string_is_sentinel_for_no_resume(self) -> None:
+        assert _validate_run_id("") is None
+
+    def test_valid_8_hex_chars(self) -> None:
+        assert _validate_run_id("abc12345") is None
+        assert _validate_run_id("00000000") is None
+        assert _validate_run_id("ffffffff") is None
+        assert _validate_run_id("deadbeef") is None
+
+    @pytest.mark.parametrize(
+        "bad_input",
+        [
+            "../etc",
+            "../../secret",
+            "abc",
+            "abc1234",
+            "abcdef012",
+            "abcdef0123",
+            "ABCD1234",
+            "abcdefgh",
+            "abc1234*",
+            "abc1234?",
+            "abc12[34",
+            "abc/1234",
+            "abc\\1234",
+            "abc 1234",
+            "abc-1234",
+            "abc.1234",
+            "  abc12345  ",
+            "abc12345\n",
+            "\x00abc12345",
+        ],
+    )
+    def test_rejects_invalid(self, bad_input: str) -> None:
+        result = _validate_run_id(bad_input)
+        assert result is not None, f"Expected rejection for {bad_input!r}"
+        assert "Invalid resume id" in result
+
+    def test_rejection_message_quotes_input(self) -> None:
+        """Error message should include the offending value for operator visibility."""
+        result = _validate_run_id("../etc")
+        assert result is not None
+        assert "'../etc'" in result or '"../etc"' in result or "../etc" in result
+
+    def test_rejection_message_hints_format(self) -> None:
+        """Error message should state the expected format."""
+        result = _validate_run_id("bad")
+        assert result is not None
+        assert "8 hex" in result or "0-9a-f" in result
+
+
+# ── Cycle 17 AC4-AC7 — MCP cold-boot lazy imports (cycle 57 fold) ───────────
+#
+# Folded from tests/test_cycle17_lazy_imports.py per cycle-49+50+51 test_v070.py
+# receiver precedent.
+#
+# Helpers and module constants renamed with `_cycle17_` / `_CYCLE17_` prefixes
+# per cycle-52 L4 helper-name uniqueness.
+#
+# AC4 narrowed deferrals to `anthropic`, `frontmatter`, `kb.utils.llm.LLMError`,
+# `kb.utils.pages.save_page_frontmatter`, `kb.capture.*` inside their consuming tool
+# bodies. AC6 removed `kb.graph.export` from mcp/health.py module scope.
+# AC5 / AC7 are AST regression pins on mcp/browse.py and mcp/quality.py.
+# AST inspection used (not sys.modules) because cold-boot is order-dependent
+# under pytest's shared-process model — once any sibling test loads kb.mcp,
+# FastMCP @mcp.tool() decorators register + cache.
+
+import ast as _cycle17_ast  # noqa: E402 — appended fold section per cycle-49+50+51 host-shape
+import sys as _cycle17_sys  # noqa: E402
+from pathlib import Path as _Cycle17Path  # noqa: E402
+
+_CYCLE17_REPO_ROOT = _Cycle17Path(__file__).resolve().parent.parent
+_CYCLE17_SRC_KB_MCP = _CYCLE17_REPO_ROOT / "src" / "kb" / "mcp"
+
+
+def _cycle17_module_level_imports(py_file: _Cycle17Path) -> set[str]:
+    """Return set of fully-qualified names imported at MODULE level via `ast`.
+
+    Ignores function-body and class-body imports (those are lazy by definition).
+    Returns top-level Import + ImportFrom targets only.
+    """
+    try:
+        tree = _cycle17_ast.parse(py_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return set()
+    names: set[str] = set()
+    for node in tree.body:  # tree.body = top-level statements only
+        if isinstance(node, _cycle17_ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+        elif isinstance(node, _cycle17_ast.ImportFrom):
+            if node.module:
+                # Normalise `from X.Y import Z, W` → add both `X.Y` and `X.Y.Z`
+                # style entries so tests can match at either granularity.
+                names.add(node.module)
+                for alias in node.names:
+                    names.add(f"{node.module}.{alias.name}")
+        elif isinstance(node, _cycle17_ast.If):
+            # Handle TYPE_CHECKING guarded blocks — their imports are NOT
+            # runtime-level. Skip them.
+            continue
+    return names
+
+
+class TestAC4ModuleLevelImportsNarrowed:
+    """AC4 — `mcp/core.py` must defer the tool-body-lazy imports at source level."""
+
+    def test_anthropic_not_at_module_level(self) -> None:
+        imports = _cycle17_module_level_imports(_CYCLE17_SRC_KB_MCP / "core.py")
+        assert "anthropic" not in imports, (
+            "AC4 regression: `import anthropic` at module level of mcp/core.py. "
+            "Move it inside the `if use_api:` branch of kb_query."
+        )
+
+    def test_frontmatter_not_at_module_level(self) -> None:
+        imports = _cycle17_module_level_imports(_CYCLE17_SRC_KB_MCP / "core.py")
+        assert "frontmatter" not in imports, (
+            "AC4 regression: `import frontmatter` at module level of mcp/core.py. "
+            "Move it inside `_save_synthesis`."
+        )
+
+    def test_kb_capture_module_level_note(self) -> None:
+        """Cycle 17 parked — kb.capture stays module-level; header explains why."""
+        src = (_CYCLE17_SRC_KB_MCP / "core.py").read_text(encoding="utf-8")
+        assert "kb.capture" in src and "security check" in src.lower(), (
+            "AC4 documentation: cycle 17 header note about parked kb.capture "
+            "deferral missing from mcp/core.py"
+        )
+
+
+class TestAC6HealthGraphExportDeferred:
+    """AC6 — `mcp/health.py` must not import `kb.graph.export` at module level."""
+
+    def test_graph_export_not_at_module_level(self) -> None:
+        imports = _cycle17_module_level_imports(_CYCLE17_SRC_KB_MCP / "health.py")
+        assert (
+            "kb.graph.export" not in imports and "kb.graph.export.export_mermaid" not in imports
+        ), (
+            "AC6 regression: `from kb.graph.export import export_mermaid` at "
+            "module level of mcp/health.py. Move it inside `kb_graph_viz`."
+        )
+
+    def test_graph_export_not_loaded_at_mcp_package_import(self) -> None:
+        """Positive runtime pin — networkx must not load on `import kb.mcp.core`."""
+        # If kb.graph.export was already imported by some prior test, this
+        # check is informational only; the AST check above is the hard guarantee.
+        if "kb.graph.export" in _cycle17_sys.modules:
+            # Pre-loaded by an earlier test (e.g. one that invoked kb_graph_viz).
+            # Don't fail — the AST check already enforces the source contract.
+            return
+        import importlib
+
+        importlib.import_module("kb.mcp.core")
+        assert "kb.graph.export" not in _cycle17_sys.modules, (
+            "AC6 regression: importing kb.mcp.core (which triggers kb.mcp "
+            "package init → health.py) loaded kb.graph.export."
+        )
+
+
+class TestAC5BrowseRegressionPin:
+    """AC5 — `mcp/browse.py` MUST NOT gain module-level heavy imports."""
+
+    def test_no_heavy_imports_at_module_level(self) -> None:
+        imports = _cycle17_module_level_imports(_CYCLE17_SRC_KB_MCP / "browse.py")
+        forbidden = {
+            "kb.evolve.analyzer",
+            "kb.graph.builder",
+            "kb.graph.export",
+        }
+        violations = imports & forbidden
+        assert not violations, (
+            f"AC5 regression: mcp/browse.py imports {violations} at module level. "
+            "These must stay in tool bodies."
+        )
+
+
+class TestAC7QualityRegressionPin:
+    """AC7 — `mcp/quality.py` MUST NOT gain module-level heavy imports."""
+
+    def test_no_heavy_imports_at_module_level(self) -> None:
+        imports = _cycle17_module_level_imports(_CYCLE17_SRC_KB_MCP / "quality.py")
+        forbidden = {
+            "kb.review.refiner",
+            "kb.review.context",
+            "kb.lint.semantic",
+        }
+        violations = imports & forbidden
+        assert not violations, (
+            f"AC7 regression: mcp/quality.py imports {violations} at module level. "
+            "These must stay in tool bodies."
+        )
+
+
+class TestDocumentedScope:
+    """Meta — the module docstring explains what cycle 17 did / didn't fix."""
+
+    def test_docstring_declares_parked_deferrals(self) -> None:
+        """Future cycles planning deeper deferrals should see the precedent."""
+        core_source = (_CYCLE17_SRC_KB_MCP / "core.py").read_text(encoding="utf-8")
+        assert "Cycle 17 AC4" in core_source, (
+            "cycle 17 AC4 context note missing from mcp/core.py header"
+        )
+        health_source = (_CYCLE17_SRC_KB_MCP / "health.py").read_text(encoding="utf-8")
+        assert "Cycle 17 AC6" in health_source, (
+            "cycle 17 AC6 context note missing from mcp/health.py header"
+        )
+
+
+# -- Cycle 94 fold from test_v098_fixes.py (kb_ingest path traversal) --
+
+
+# ── 1. kb_ingest path traversal protection ──────────────────────────
+
+
+class TestKbIngestPathTraversal:
+    """kb_ingest must reject source paths outside the project directory."""
+
+    def _patch_project(self, monkeypatch, tmp_path):
+        """Set up a temporary project root for testing."""
+        monkeypatch.setattr(kb.config, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr("kb.mcp.core.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr("kb.mcp.core.RAW_DIR", tmp_path / "raw")
+        raw = tmp_path / "raw" / "articles"
+        raw.mkdir(parents=True)
+        return raw
+
+    def test_rejects_absolute_path_outside_project(self, tmp_path, monkeypatch):
+        """Absolute path outside project root is rejected."""
+        self._patch_project(monkeypatch, tmp_path)
+        from kb.mcp.core import kb_ingest
+
+        # Create a file outside the project
+        outside = tmp_path.parent / "outside.md"
+        outside.write_text("secret", encoding="utf-8")
+
+        result = kb_ingest(source_path=str(outside))
+        assert "Error:" in result
+        # Now rejects with "raw/ directory" message (tightened from project directory)
+        assert "raw/" in result.lower() or "directory" in result.lower()
+
+    def test_rejects_relative_traversal(self, tmp_path, monkeypatch):
+        """Relative path with .. escaping project root is rejected."""
+        self._patch_project(monkeypatch, tmp_path)
+        from kb.mcp.core import kb_ingest
+
+        result = kb_ingest(source_path="../../etc/passwd")
+        assert "Error:" in result
+        # Should either say "project directory" or "not found"
+        assert "Error:" in result
+
+    def test_allows_valid_raw_path(self, tmp_path, monkeypatch):
+        """Valid path within project root is allowed."""
+        raw = self._patch_project(monkeypatch, tmp_path)
+        from kb.mcp.core import kb_ingest
+
+        source = raw / "valid-article.md"
+        source.write_text("# Test Article\nContent here.", encoding="utf-8")
+
+        # Without extraction_json, should return extraction prompt
+        result = kb_ingest(
+            source_path="raw/articles/valid-article.md",
+            source_type="article",
+        )
+        assert "project directory" not in result.lower()
+
+    def test_rejects_backslash_traversal(self, tmp_path, monkeypatch):
+        """Path with backslash traversal is rejected."""
+        self._patch_project(monkeypatch, tmp_path)
+        from kb.mcp.core import kb_ingest
+
+        result = kb_ingest(source_path="..\\..\\etc\\passwd")
+        assert "Error:" in result
+
+    def test_allows_absolute_path_inside_project(self, tmp_path, monkeypatch):
+        """Absolute path within project root is allowed."""
+        raw = self._patch_project(monkeypatch, tmp_path)
+        from kb.mcp.core import kb_ingest
+
+        source = raw / "abs-test.md"
+        source.write_text("# Test\nContent.", encoding="utf-8")
+
+        result = kb_ingest(
+            source_path=str(source),
+            source_type="article",
+        )
+        # Should not be a traversal error
+        assert "project directory" not in result.lower()
+
+
+# -- Cycle 94 fold from test_v090.py (validate_page_id + kb_query clamps + app-level tools) --
+
+
+# ── 1. Path Traversal Rejection ──────────────────────────────────
+
+
+def test_validate_page_id_rejects_dot_dot():
+    """_validate_page_id rejects '..' in page_id."""
+    from kb.mcp.app import _validate_page_id
+
+    result = _validate_page_id("../../etc/passwd")
+    assert result is not None
+    assert "Invalid" in result
+
+
+def test_validate_page_id_rejects_absolute_path():
+    """_validate_page_id rejects page_id starting with '/'."""
+    from kb.mcp.app import _validate_page_id
+
+    result = _validate_page_id("/etc/passwd")
+    assert result is not None
+    assert "Invalid" in result
+
+
+def test_validate_page_id_rejects_backslash_start():
+    """_validate_page_id rejects page_id starting with '\\'."""
+    from kb.mcp.app import _validate_page_id
+
+    result = _validate_page_id("\\windows\\system32")
+    assert result is not None
+    assert "Invalid" in result
+
+
+def test_validate_page_id_allows_valid(tmp_path):
+    """_validate_page_id allows normal page IDs when page exists."""
+    from kb.mcp.app import _validate_page_id
+
+    wiki = tmp_path / "wiki"
+    (wiki / "concepts").mkdir(parents=True)
+    (wiki / "concepts" / "rag.md").write_text("content")
+
+    with patch("kb.mcp.app.WIKI_DIR", wiki):
+        result = _validate_page_id("concepts/rag")
+    assert result is None
+
+
+def test_validate_page_id_not_found(tmp_path):
+    """_validate_page_id returns 'not found' for valid but missing page IDs."""
+    from kb.mcp.app import _validate_page_id
+
+    wiki = tmp_path / "wiki"
+    (wiki / "concepts").mkdir(parents=True)
+
+    with patch("kb.mcp.app.WIKI_DIR", wiki):
+        result = _validate_page_id("concepts/nonexistent")
+    assert result is not None
+    assert "not found" in result.lower()
+
+
+def test_kb_compile_scan_returns_error_on_failure():
+    """kb_compile_scan returns error string instead of crashing."""
+    from kb.mcp.core import kb_compile_scan
+
+    with patch(
+        "kb.compile.compiler.find_changed_sources",
+        side_effect=RuntimeError("manifest corrupted"),
+    ):
+        result = kb_compile_scan()
+    assert "Error" in result
+    assert "manifest corrupted" in result
+
+
+def test_kb_query_clamps_max_results_low(tmp_path):
+    """kb_query clamps max_results to minimum 1."""
+    from kb.mcp.core import kb_query
+
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+        kb_query("test question", max_results=-5)
+    mock.assert_called_once_with("test question", max_results=1)
+
+
+def test_kb_query_clamps_max_results_high(tmp_path):
+    """kb_query clamps max_results to maximum 100."""
+    from kb.mcp.core import kb_query
+
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+        kb_query("test question", max_results=9999)
+    mock.assert_called_once_with("test question", max_results=100)
+
+
+def test_kb_query_normal_max_results():
+    """kb_query passes through valid max_results unchanged."""
+    from kb.mcp.core import kb_query
+
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+        kb_query("test question", max_results=25)
+    mock.assert_called_once_with("test question", max_results=25)
+
+
+# ── 7. MCP Instructions Update ──────────────────────────────────
+
+
+def test_mcp_instructions_include_phase2_tools():
+    """MCP server instructions mention Phase 2 quality tools."""
+    from kb.mcp.app import mcp
+
+    instructions = mcp.instructions
+    assert "kb_review_page" in instructions
+    assert "kb_refine_page" in instructions
+    assert "kb_lint_deep" in instructions
+    assert "kb_query_feedback" in instructions
+    assert "kb_reliability_map" in instructions
+    assert "kb_affected_pages" in instructions
+    assert "kb_save_lint_verdict" in instructions
+    assert "kb_create_page" in instructions
+
+
+# ── 8. Format Ingest Result with pages_skipped ───────────────────
+
+
+def test_format_ingest_result_handles_missing_skipped():
+    """_format_ingest_result works with result dicts lacking pages_skipped."""
+    from kb.mcp.app import _format_ingest_result
+
+    result = {
+        "pages_created": ["summaries/test"],
+        "pages_updated": [],
+    }
+    text = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+    assert "summaries/test" in text
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (kb_query wikilinks + escaping + control chars) --
+
+
+def test_kb_query_claude_code_instructions_use_wikilinks(monkeypatch):
+    from kb.mcp import core
+
+    page = {
+        "id": "concepts/rag",
+        "title": "RAG",
+        "type": "concept",
+        "confidence": "stated",
+        "score": 1.0,
+        "content": "RAG content.",
+    }
+    # Cycle 19 AC15 — patch owner modules so MCP call sites intercept.
+    import kb.feedback.reliability as _rel
+    import kb.query.engine as _qe
+
+    monkeypatch.setattr(_qe, "search_pages", lambda *args, **kwargs: [page])
+    monkeypatch.setattr(_rel, "compute_trust_scores", lambda: {})
+
+    output = core.kb_query("What is RAG?")
+
+    assert "[[" in output
+    assert "[source:" not in output
+
+
+def test_kb_save_source_escapes_source_type_in_hint(monkeypatch, tmp_path):
+    from kb.mcp import core
+
+    source_type = 'article" injected: true'
+    monkeypatch.setitem(core.SOURCE_TYPE_DIRS, source_type, tmp_path)
+
+    output = core.kb_save_source("content", "sample", source_type=source_type)
+
+    assert '"article\\" injected: true"' in output
+
+
+def test_validate_page_id_rejects_control_chars_and_accepts_valid_id():
+    from kb.mcp.app import _validate_page_id
+
+    assert _validate_page_id("\x00foo") == "page_id contains control characters."
+    assert _validate_page_id("concepts/rag", check_exists=False) is None

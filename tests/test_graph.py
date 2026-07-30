@@ -1,6 +1,7 @@
 """Tests for the graph builder and visualization."""
 
 import logging
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -697,3 +698,169 @@ class TestGraphPageIdConsolidated:
         from kb.utils.pages import _page_id as utils_page_id
 
         assert graph_page_id(page_path, tmp_wiki) == utils_page_id(page_path, tmp_wiki)
+
+
+# -- Cycle 94 fold from test_v070.py (graph pagerank / bridge nodes) --
+
+
+# ── 1. Graph: PageRank and Centrality ────────────────────────────
+
+
+def test_graph_stats_includes_pagerank(tmp_wiki, create_wiki_page):
+    """graph_stats returns pagerank key."""
+    create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="See [[concepts/b]]")
+    create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="See [[concepts/c]]")
+    create_wiki_page("concepts/c", wiki_dir=tmp_wiki, content="See [[concepts/a]]")
+    from kb.graph.builder import build_graph, graph_stats
+
+    g = build_graph(tmp_wiki)
+    stats = graph_stats(g)
+    assert "pagerank" in stats
+    assert len(stats["pagerank"]) > 0
+
+
+def test_graph_stats_includes_bridge_nodes(tmp_wiki, create_wiki_page):
+    """graph_stats returns bridge_nodes key."""
+    create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="See [[concepts/b]]")
+    create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="See [[concepts/c]]")
+    create_wiki_page("concepts/c", wiki_dir=tmp_wiki, content="")
+    from kb.graph.builder import build_graph, graph_stats
+
+    g = build_graph(tmp_wiki)
+    stats = graph_stats(g)
+    assert "bridge_nodes" in stats
+
+
+def test_graph_stats_bridge_nodes_filters_zero(tmp_wiki, create_wiki_page):
+    """Bridge nodes with 0 centrality are filtered out."""
+    # Two isolated pages -- no edges -- all centrality 0
+    create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="No links")
+    create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="No links")
+    from kb.graph.builder import build_graph, graph_stats
+
+    g = build_graph(tmp_wiki)
+    stats = graph_stats(g)
+    assert stats["bridge_nodes"] == []
+
+
+def test_graph_stats_empty_graph():
+    """graph_stats handles empty graph."""
+    from kb.graph.builder import graph_stats
+
+    g = nx.DiGraph()
+    stats = graph_stats(g)
+    assert stats["pagerank"] == []
+    assert stats["bridge_nodes"] == []
+
+
+# -- Cycle 94 fold from test_v090.py (graph edges use normalized wikilink targets) --
+
+
+def test_graph_edges_match_normalized_links(tmp_wiki, create_wiki_page):
+    """Graph builder creates edges using normalized wikilink targets."""
+    from kb.graph.builder import build_graph
+
+    create_wiki_page("concepts/rag", wiki_dir=tmp_wiki, content="See [[concepts/llm]]")
+    create_wiki_page("concepts/llm", wiki_dir=tmp_wiki, content="An LLM concept.")
+
+    graph = build_graph(tmp_wiki)
+    assert graph.has_edge("concepts/rag", "concepts/llm")
+
+
+# -- Cycle 94 fold from test_v099_phase39.py (Mermaid graph export) --
+
+
+def _make_wiki_page(wiki_dir, subdir, slug, title, content, source_ref="raw/articles/test.md"):
+    """Helper to create a wiki page with proper frontmatter."""
+    today = date.today().isoformat()
+    page_dir = wiki_dir / subdir
+    page_dir.mkdir(parents=True, exist_ok=True)
+    page_path = page_dir / f"{slug}.md"
+    text = (
+        f'---\ntitle: "{title}"\nsource:\n  - "{source_ref}"\n'
+        f"created: {today}\nupdated: {today}\ntype: concept\nconfidence: stated\n---\n\n"
+        f"{content}\n"
+    )
+    page_path.write_text(text, encoding="utf-8")
+    return page_path
+
+
+# ── Task 5: Mermaid graph export ─────────────────────────────
+
+
+class TestMermaidGraphExport:
+    """Test Mermaid diagram generation from wiki graph."""
+
+    def test_empty_graph_returns_empty_mermaid(self, tmp_path):
+        """Empty wiki produces minimal Mermaid diagram."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        assert result.startswith("graph LR")
+
+    def test_basic_graph_produces_valid_mermaid(self, tmp_path):
+        """Simple graph produces valid Mermaid with nodes and edges."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "rag",
+            "RAG",
+            "RAG combines [[concepts/retrieval]] with generation.",
+        )
+        _make_wiki_page(
+            wiki_dir, "concepts", "retrieval", "Retrieval", "Retrieval is used by [[concepts/rag]]."
+        )
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        assert "graph LR" in result
+        assert "concepts_rag" in result  # sanitized node ID
+        assert "concepts_retrieval" in result
+        assert "-->" in result
+
+    def test_auto_prune_large_graph(self, tmp_path):
+        """Graphs with >50 nodes are pruned to max_nodes most-connected."""
+        wiki_dir = tmp_path / "wiki"
+        # Create 60 pages
+        for i in range(60):
+            links = f"[[concepts/page-{(i + 1) % 60}]]"
+            _make_wiki_page(
+                wiki_dir,
+                "concepts",
+                f"page-{i}",
+                f"Page {i}",
+                f"Content for page {i}. {links}",
+                source_ref=f"raw/articles/p{i}.md",
+            )
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir, max_nodes=30)
+        # Should be pruned — count node definitions
+        node_lines = [line for line in result.split("\n") if '["' in line or '("' in line]
+        assert len(node_lines) <= 30
+
+    def test_node_labels_use_page_titles(self, tmp_path):
+        """Node labels use page titles from frontmatter."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(wiki_dir, "entities", "openai", "OpenAI", "OpenAI makes GPT models.")
+
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(wiki_dir=wiki_dir)
+        assert "entities_openai" in result
+        assert "OpenAI" in result  # title used as label
+
+    def test_mcp_tool_returns_mermaid(self):
+        """kb_graph_viz MCP tool returns Mermaid string."""
+        from kb.mcp.health import kb_graph_viz
+
+        result = kb_graph_viz()
+        assert isinstance(result, str)
+        assert "graph" in result.lower() or "no pages" in result.lower()

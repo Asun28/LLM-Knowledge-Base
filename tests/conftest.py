@@ -13,6 +13,27 @@ from kb.config import PROJECT_ROOT, SOURCE_TYPE_DIRS
 # genuine repo path under `pytest --use-real-paths` opt-in.
 _REAL_PROJECT_ROOT_AT_CONFTEST_IMPORT = Path(PROJECT_ROOT)
 
+# Cycle 94 FIX — snapshot of every Path-valued kb.config constant at conftest
+# import (real repo values, pre-any-test). Tests that monkeypatch
+# KB_PROJECT_ROOT and then `importlib.reload(kb.config)` (cycle-15 CLI
+# containment tests, cycle-66 project-root cache tests, ...) rebuild EVERY
+# derived module constant from the env at reload time; monkeypatch teardown
+# restores the env var but NOT the reloaded module attributes. The sandbox
+# fixture re-patches the names in its `patched` dict each test, but constants
+# deliberately NOT sandboxed (TEMPLATES_DIR / RESEARCH_DIR — repo-shipped
+# artifacts that tests assert exist for real) stayed pointing at a dead tmp
+# dir until the next reload. `_apply_kb_path_patches` uses this snapshot to
+# repair any such stale constant back to its real value.
+def _snapshot_real_config_paths() -> dict[str, Path]:
+    import kb.config as _config  # noqa: PLC0415
+
+    return {
+        name: value for name, value in vars(_config).items() if isinstance(value, Path)
+    }
+
+
+_REAL_CONFIG_PATHS_AT_CONFTEST_IMPORT = _snapshot_real_config_paths()
+
 WIKI_SUBDIRS = ("entities", "concepts", "comparisons", "summaries", "synthesis")
 RAW_SUBDIRS = tuple(sorted(d.name for d in SOURCE_TYPE_DIRS.values()))
 
@@ -309,14 +330,54 @@ def _apply_kb_path_patches(
     # point at the original config objects. Scoped to ``kb.*`` modules so a
     # third-party module happening to hold a dict/Path that compares equal
     # cannot be rebound — cycle-12 R1 architect review hardening.
+    #
+    # Cycle 94 FIX (fold-exposed): the equality guard alone left a poisoning
+    # hole — a kb.* module whose FIRST-EVER import happens INSIDE a sandboxed
+    # test captures that test's tmp paths at module level, so at the NEXT
+    # test's setup its attribute equals neither the original config value nor
+    # anything this loop recognized, and it stayed bound to a dead tmp dir
+    # forever. Full runs were shielded only by collection-time imports; subset
+    # runs (e.g. `pytest tests/test_cli.py tests/test_conftest_sandbox_guard.py`)
+    # hit it via any lazy first-import (kb.mcp.core in the cycle-93
+    # compile-scan test, kb.mcp.browse via the mcp_server smoke test). The
+    # second arm below therefore also rebinds a STALE-SANDBOX value: a Path
+    # (or path-valued dict, for SOURCE_TYPE_DIRS) under this session's pytest
+    # basetemp that is not the current sandbox is definitionally a leftover
+    # from an earlier test and safe to claim — no real repo path ever lives
+    # under basetemp.
+    basetemp = tmp_path.parent
+
+    def _is_stale_sandbox_value(current: object) -> bool:
+        if isinstance(current, Path):
+            try:
+                return current.is_relative_to(basetemp) and not current.is_relative_to(tmp_path)
+            except (TypeError, ValueError):  # pragma: no cover — defensive
+                return False
+        if isinstance(current, dict):
+            return any(_is_stale_sandbox_value(v) for v in current.values())
+        return False
+
     for module_name, module in tuple(sys.modules.items()):
         if module is None:
             continue
         if not (module_name == "kb" or module_name.startswith("kb.")):
             continue
         for name, value in mirror_patched.items():
-            if getattr(module, name, object()) == mirror_original[name]:
+            current = getattr(module, name, object())
+            if current == mirror_original[name] or _is_stale_sandbox_value(current):
                 monkeypatch.setattr(module, name, value, raising=False)
+
+    # Cycle 94 FIX (reload-leak repair; see _REAL_CONFIG_PATHS_AT_CONFTEST_IMPORT):
+    # a KB_PROJECT_ROOT + importlib.reload(kb.config) test leaves NON-sandboxed
+    # derived constants (TEMPLATES_DIR, RESEARCH_DIR, ...) bound to its dead
+    # tmp dir after teardown. Repair any stale one back to its real repo value
+    # so later tests reading repo-shipped artifacts (extraction templates, the
+    # capture prompt) see the real files regardless of run order.
+    for name, real_value in _REAL_CONFIG_PATHS_AT_CONFTEST_IMPORT.items():
+        if name in patched:
+            continue  # sandboxed names are already re-patched every test
+        if _is_stale_sandbox_value(getattr(config, name, None)):
+            monkeypatch.setattr(config, name, real_value)
 
     capture_module = sys.modules.get("kb.capture")
     if capture_module is not None:

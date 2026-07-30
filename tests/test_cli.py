@@ -846,3 +846,98 @@ class TestCoverageGaps:
 
         assert result.exit_code == 0, f"CLI query failed: {result.output!r}"
         assert "Test answer" in result.output
+
+
+# -- Cycle 94 fold from test_v070.py (CLI fixes + version bump (task09)) --
+
+
+# ── 11. Phase 3.97 task 09 — CLI fixes + version bump (cycle 56 fold from test_v0916_task09) ─
+
+
+class TestCompileExitCode:
+    """kb compile must exit 1 when errors occur."""
+
+    def test_compile_errors_exit_code_1(self):
+        from click.testing import CliRunner
+
+        from kb.cli import cli
+
+        runner = CliRunner()
+        mock_result = {
+            "mode": "incremental",
+            "sources_processed": 1,
+            "pages_created": [],
+            "pages_updated": [],
+            "pages_skipped": [],
+            "wikilinks_injected": [],
+            "affected_pages": [],
+            "duplicates": 0,
+            "errors": [{"source": "raw/articles/bad.md", "error": "parse failed"}],
+        }
+        with patch("kb.compile.compiler.compile_wiki", return_value=mock_result):
+            result = runner.invoke(cli, ["compile"])
+            assert result.exit_code == 1
+
+
+class TestCliSourceTypeList:
+    """CLI ingest --type choices must match SOURCE_TYPE_DIRS."""
+
+    def test_all_source_types_available(self):
+        from kb.cli import cli
+
+        # Get the ingest command's --type parameter choices
+        ingest_cmd = cli.commands["ingest"]
+        type_param = next(p for p in ingest_cmd.params if p.name == "source_type")
+        choices = type_param.type.choices
+
+        from kb.config import SOURCE_TYPE_DIRS
+
+        for key in SOURCE_TYPE_DIRS:
+            assert key in choices, f"Source type '{key}' missing from CLI choices"
+
+
+class TestVersionBump:
+    """Version must be bumped to current minor (cycle 65: 0.12.0)."""
+
+    def test_version_is_0_9_16(self):
+        # Test name preserves historical context (originally validated 0.9.16);
+        # cycle 34 bumped to 0.11.0; cycle 65 bumped to 0.12.0. The cycle-34
+        # regression test_pyproject_version_is_0_12_0 +
+        # test_kb_init_version_matches_pyproject provide the cross-file
+        # lockstep guard.
+        from kb import __version__
+
+        assert __version__ == "0.12.0"
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (CLI + mcp_server logging bootstrap) --
+
+
+def test_cli_configures_logging_when_root_has_no_handlers(monkeypatch):
+    import logging
+
+    from kb import cli as cli_module
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+
+    # Cycle 6 AC9: the Click group's callback now depends on context state
+    # (`@click.pass_context` for the `--verbose` flag). Call the extracted
+    # `_setup_logging()` helper directly — same invariant, stable surface.
+    cli_module._setup_logging()
+
+    assert root.handlers
+
+
+def test_mcp_server_main_configures_logging_when_root_has_no_handlers(monkeypatch):
+    import logging
+
+    from kb import mcp_server
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda: None)
+
+    mcp_server.main()
+
+    assert root.handlers

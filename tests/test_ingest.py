@@ -2355,3 +2355,759 @@ class TestIngestSourceWikiDirThreading:
 
         content = index_path.read_text(encoding="utf-8")
         assert "test-slug" in content
+
+
+# -- Cycle 94 fold from test_v070.py (entity enrichment + kb.ingest lazy-export contract) --
+
+
+# ── 6. Entity Enrichment ─────────────────────────────────────────
+
+
+def test_update_existing_page_enriches_content(tmp_wiki, create_wiki_page):
+    """Updating an existing page with extraction data adds context."""
+    from kb.ingest.pipeline import _update_existing_page
+
+    page = create_wiki_page(
+        "entities/openai",
+        wiki_dir=tmp_wiki,
+        page_type="entity",
+        content="# OpenAI\n\n## References\n\n- Mentioned in raw/articles/old.md\n",
+    )
+    extraction = {
+        "title": "New Article",
+        "key_claims": ["OpenAI released GPT-4", "OpenAI leads AI research"],
+        "entities_mentioned": ["OpenAI"],
+    }
+    _update_existing_page(page, "raw/articles/new.md", name="OpenAI", extraction=extraction)
+    content = page.read_text(encoding="utf-8")
+    assert "raw/articles/new.md" in content
+    assert "GPT-4" in content or "Context" in content
+
+
+def test_update_existing_page_no_duplicate_context(tmp_wiki, create_wiki_page):
+    """Context is not added if already present in the page."""
+    from kb.ingest.pipeline import _update_existing_page
+
+    page = create_wiki_page(
+        "entities/openai",
+        wiki_dir=tmp_wiki,
+        page_type="entity",
+        content=(
+            "# OpenAI\n\n## Context\n\n- OpenAI released GPT-4\n\n"
+            "## References\n\n- Mentioned in raw/articles/old.md\n"
+        ),
+    )
+    extraction = {
+        "title": "Same Article",
+        "key_claims": ["OpenAI released GPT-4"],
+        "entities_mentioned": ["OpenAI"],
+    }
+    _update_existing_page(page, "raw/articles/new.md", name="OpenAI", extraction=extraction)
+    content = page.read_text(encoding="utf-8")
+    # Should not have duplicate context
+    assert content.count("## Context") == 1
+
+
+def test_update_existing_page_without_extraction(tmp_wiki, create_wiki_page):
+    """Updating without extraction still works (backward compatible)."""
+    from kb.ingest.pipeline import _update_existing_page
+
+    page = create_wiki_page(
+        "entities/test",
+        wiki_dir=tmp_wiki,
+        page_type="entity",
+        content="# Test\n\n## References\n\n- Mentioned in raw/articles/old.md\n",
+    )
+    _update_existing_page(page, "raw/articles/new.md")
+    content = page.read_text(encoding="utf-8")
+    assert "raw/articles/new.md" in content
+
+
+def test_ingest_source_export_lazy_loads_pipeline():
+    """Folded from tests/test_cycle9_package_exports.py (cycle 49 — Phase 4.5 HIGH #4).
+
+    Subprocess child verifies lazy-import contract: kb.ingest.pipeline must
+    NOT be in sys.modules until kb.ingest.ingest_source attribute is accessed
+    (cycle-9 PEP-562 lazy-shim).
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_src = repo_root / "src"
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = (
+        str(repo_src) if not existing_pythonpath else f"{repo_src}{os.pathsep}{existing_pythonpath}"
+    )
+    probe = """
+import sys
+
+import kb.ingest
+
+assert "kb.ingest.pipeline" not in sys.modules
+kb.ingest.ingest_source
+assert "kb.ingest.pipeline" in sys.modules
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        env={**os.environ, "PYTHONPATH": pythonpath},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+# -- Cycle 94 fold from test_v098_fixes.py (extraction schema builder) --
+
+
+# ── 3. Extraction schema builder ────────────────────────────────────
+
+
+class TestBuildExtractionSchema:
+    """build_extraction_schema builds valid JSON Schema from templates."""
+
+    def test_article_template(self):
+        """Article template produces schema with correct list/scalar types."""
+        from kb.ingest.extractors import build_extraction_schema, load_template
+
+        template = load_template("article")
+        schema = build_extraction_schema(template)
+
+        assert schema["type"] == "object"
+        assert "title" in schema["properties"]
+        assert "title" in schema["required"]
+        # Scalar fields
+        assert schema["properties"]["title"]["type"] == "string"
+        assert schema["properties"]["author"]["type"] == "string"
+        # List fields
+        assert schema["properties"]["key_claims"]["type"] == "array"
+        assert schema["properties"]["entities_mentioned"]["type"] == "array"
+        assert schema["properties"]["concepts_mentioned"]["type"] == "array"
+
+    def test_repo_template_name_required(self):
+        """Repo template uses 'name' instead of 'title' — must be in required."""
+        from kb.ingest.extractors import build_extraction_schema, load_template
+
+        template = load_template("repo")
+        schema = build_extraction_schema(template)
+
+        assert "name" in schema["required"]
+        assert "title" not in schema.get("required", [])
+
+    def test_comparison_template_annotated_fields(self):
+        """Comparison template with type annotations parses correctly."""
+        import yaml
+
+        from kb.config import TEMPLATES_DIR
+        from kb.ingest.extractors import build_extraction_schema
+
+        # Load comparison template directly (not a source type, so skip load_template)
+        tpl = yaml.safe_load((TEMPLATES_DIR / "comparison.yaml").read_text(encoding="utf-8"))
+        schema = build_extraction_schema(tpl)
+
+        assert "title" in schema["required"]
+        assert schema["properties"]["subjects"]["type"] == "array"
+        assert schema["properties"]["dimensions"]["type"] == "array"
+        assert schema["properties"]["findings"]["type"] == "array"
+        # title is a scalar despite annotation
+        assert schema["properties"]["title"]["type"] == "string"
+
+    def test_paper_template_list_fields(self):
+        """Paper template correctly identifies list fields."""
+        from kb.ingest.extractors import build_extraction_schema, load_template
+
+        template = load_template("paper")
+        schema = build_extraction_schema(template)
+
+        assert schema["properties"]["authors"]["type"] == "array"
+        assert schema["properties"]["key_claims"]["type"] == "array"
+        assert schema["properties"]["title"]["type"] == "string"
+        assert schema["properties"]["abstract"]["type"] == "string"
+
+
+class TestParseFieldSpec:
+    """_parse_field_spec handles both simple and annotated template formats."""
+
+    def test_simple_field(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec("title")
+        assert name == "title"
+        assert desc == ""
+        assert is_list is False
+
+    def test_simple_field_with_comment(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec("key_claims           # List of claims")
+        assert name == "key_claims"
+        assert is_list is True  # known list field
+
+    def test_annotated_string_field(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec('"title (str): Title of the comparison"')
+        assert name == "title"
+        assert desc == "Title of the comparison"
+        assert is_list is False
+
+    def test_annotated_list_field(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec('"subjects (list[str]): Items being compared"')
+        assert name == "subjects"
+        assert desc == "Items being compared"
+        assert is_list is True
+
+    def test_known_list_field(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec("entities_mentioned")
+        assert name == "entities_mentioned"
+        assert is_list is True
+
+    def test_unknown_scalar_field(self):
+        from kb.ingest.extractors import _parse_field_spec
+
+        name, desc, is_list = _parse_field_spec("methodology")
+        assert name == "methodology"
+        assert is_list is False
+
+
+# -- Cycle 94 fold from test_v090.py (slug collision tracking + structured extraction output) --
+
+
+# ── 3. Slug Collision Tracking ───────────────────────────────────
+
+
+def test_ingest_tracks_skipped_slug_collisions(tmp_path):
+    """ingest_source returns pages_skipped for slug collisions."""
+    from kb.ingest.pipeline import ingest_source
+
+    # Set up project structure
+    wiki = tmp_path / "wiki"
+    for sub in ("summaries", "entities", "concepts"):
+        (wiki / sub).mkdir(parents=True)
+    raw = tmp_path / "raw" / "articles"
+    raw.mkdir(parents=True)
+    source = raw / "test.md"
+    source.write_text("Test content about collisions")
+
+    # Create index files
+    (wiki / "index.md").write_text(
+        "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+        "## Comparisons\n\n## Synthesis\n\n"
+    )
+    (wiki / "_sources.md").write_text("# Sources\n\n")
+    (wiki / "log.md").write_text("# Log\n\n")
+
+    # Extraction with slug collisions: "GPT 4" and "GPT-4" both → "gpt-4"
+    extraction = {
+        "title": "Collision Test",
+        "entities_mentioned": ["GPT 4", "GPT-4"],
+        "concepts_mentioned": ["Fine Tuning", "Fine-Tuning"],
+    }
+
+    with (
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md"),
+        patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
+    ):
+        result = ingest_source(source, "article", extraction=extraction)
+
+    assert "pages_skipped" in result
+    assert len(result["pages_skipped"]) == 2  # One entity + one concept collision
+    assert any("gpt-4" in s for s in result["pages_skipped"])
+    assert any("fine-tuning" in s for s in result["pages_skipped"])
+
+
+def test_ingest_no_skipped_without_collisions(tmp_path):
+    """ingest_source returns empty pages_skipped when no collisions."""
+    from kb.ingest.pipeline import ingest_source
+
+    wiki = tmp_path / "wiki"
+    for sub in ("summaries", "entities", "concepts"):
+        (wiki / sub).mkdir(parents=True)
+    raw = tmp_path / "raw" / "articles"
+    raw.mkdir(parents=True)
+    source = raw / "test.md"
+    source.write_text("Test content")
+
+    (wiki / "index.md").write_text(
+        "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+        "## Comparisons\n\n## Synthesis\n\n"
+    )
+    (wiki / "_sources.md").write_text("# Sources\n\n")
+    (wiki / "log.md").write_text("# Log\n\n")
+
+    extraction = {
+        "title": "No Collision",
+        "entities_mentioned": ["OpenAI", "Google"],
+        "concepts_mentioned": ["RAG", "LLM"],
+    }
+
+    with (
+        patch("kb.ingest.pipeline.WIKI_DIR", wiki),
+        patch("kb.ingest.pipeline.WIKI_INDEX", wiki / "index.md"),
+        patch("kb.ingest.pipeline.WIKI_SOURCES", wiki / "_sources.md"),
+        patch("kb.ingest.pipeline.RAW_DIR", tmp_path / "raw"),
+        patch("kb.utils.paths.RAW_DIR", tmp_path / "raw"),
+    ):
+        result = ingest_source(source, "article", extraction=extraction)
+
+    assert result["pages_skipped"] == []
+
+
+# ── 4. JSON Fence Hardening ──────────────────────────────────────
+
+
+def test_extract_structured_output():
+    """extract_from_source uses tool_use for guaranteed structured output."""
+    from kb.ingest.extractors import extract_from_source
+
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"title": "Test"}):
+        result = extract_from_source("content", "article")
+    assert result["title"] == "Test"
+
+
+def test_extract_structured_with_entities():
+    """extract_from_source returns entity lists from structured output."""
+    from kb.ingest.extractors import extract_from_source
+
+    data = {"title": "Test", "entities_mentioned": ["OpenAI"], "concepts_mentioned": ["RAG"]}
+    with patch("kb.ingest.extractors.call_llm_json", return_value=data):
+        result = extract_from_source("content", "article")
+    assert result["entities_mentioned"] == ["OpenAI"]
+
+
+def test_extract_structured_passes_schema():
+    """extract_from_source builds and passes schema to call_llm_json."""
+    from kb.ingest.extractors import extract_from_source
+
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"title": "Test"}) as mock:
+        extract_from_source("content", "article")
+    kwargs = mock.call_args.kwargs
+    assert "schema" in kwargs
+    schema = kwargs["schema"]
+    assert "title" in schema["properties"]
+    assert "title" in schema["required"]
+
+
+def test_extract_structured_paper_type():
+    """extract_from_source works with paper source type."""
+    from kb.ingest.extractors import extract_from_source
+
+    data = {"title": "Paper", "authors": ["Author A"], "abstract": "Summary"}
+    with patch("kb.ingest.extractors.call_llm_json", return_value=data):
+        result = extract_from_source("content", "paper")
+    assert result["title"] == "Paper"
+    assert result["authors"] == ["Author A"]
+
+
+def test_extract_structured_repo_name_required():
+    """extract_from_source schema requires 'name' for repo type."""
+    from kb.ingest.extractors import extract_from_source
+
+    with patch("kb.ingest.extractors.call_llm_json", return_value={"name": "proj"}) as mock:
+        extract_from_source("content", "repo")
+    schema = mock.call_args.kwargs["schema"]
+    assert "name" in schema["required"]
+
+
+# -- Cycle 94 fold from test_v099_phase39.py (duplicate detection + ingest tiering + cascade) --
+
+
+def _make_wiki_page(wiki_dir, subdir, slug, title, content, source_ref="raw/articles/test.md"):
+    """Helper to create a wiki page with proper frontmatter."""
+    today = date.today().isoformat()
+    page_dir = wiki_dir / subdir
+    page_dir.mkdir(parents=True, exist_ok=True)
+    page_path = page_dir / f"{slug}.md"
+    text = (
+        f'---\ntitle: "{title}"\nsource:\n  - "{source_ref}"\n'
+        f"created: {today}\nupdated: {today}\ntype: concept\nconfidence: stated\n---\n\n"
+        f"{content}\n"
+    )
+    page_path.write_text(text, encoding="utf-8")
+    return page_path
+
+
+# ── Task 3: Duplicate detection in ingest ─────────────────────
+
+
+class TestDuplicateDetection:
+    """Test hash-based duplicate detection in ingest pipeline."""
+
+    def _setup_project(self, tmp_path):
+        """Create minimal project structure for ingest tests."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+
+        return wiki_dir, raw_dir, data_dir
+
+    def test_first_ingest_succeeds(self, tmp_path, monkeypatch):
+        """First ingest of a source creates pages normally."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+
+        source = raw_dir / "articles" / "test-article.md"
+        source.write_text("# Test Article\n\nSome content here.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Test Article",
+            "entities_mentioned": ["TestEntity"],
+            "concepts_mentioned": ["TestConcept"],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+        assert len(result["pages_created"]) > 0
+        assert result.get("duplicate") is not True
+
+    def test_duplicate_detected_by_hash(self, tmp_path, monkeypatch):
+        """Ingesting same content from different path is detected as duplicate."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+        # Patch RAW_DIR in paths module so make_source_ref resolves correctly
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+
+        content = "# Duplicate Article\n\nThis is duplicate content."
+        source1 = raw_dir / "articles" / "original.md"
+        source1.write_text(content, encoding="utf-8")
+
+        source2 = raw_dir / "articles" / "copy.md"
+        source2.write_text(content, encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Duplicate Article",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        # First ingest — records hash in manifest
+        result1 = ingest_source(source1, "article", extraction=extraction)
+        assert len(result1["pages_created"]) > 0
+
+        # Second ingest with same content — should detect duplicate
+        result2 = ingest_source(source2, "article", extraction=extraction)
+        assert result2.get("duplicate") is True
+
+    def test_different_content_not_duplicate(self, tmp_path, monkeypatch):
+        """Different content from different paths is not flagged as duplicate."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+
+        source1 = raw_dir / "articles" / "article-a.md"
+        source1.write_text("# Article A\n\nUnique content A.", encoding="utf-8")
+
+        source2 = raw_dir / "articles" / "article-b.md"
+        source2.write_text("# Article B\n\nUnique content B.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        ext1 = {"title": "Article A", "entities_mentioned": [], "concepts_mentioned": []}
+        ext2 = {"title": "Article B", "entities_mentioned": [], "concepts_mentioned": []}
+
+        result1 = ingest_source(source1, "article", extraction=ext1)
+        result2 = ingest_source(source2, "article", extraction=ext2)
+        assert result1.get("duplicate") is not True
+        assert result2.get("duplicate") is not True
+
+
+# ── Task 7: Content-length-aware ingest tiering ──────────────
+
+
+class TestContentLengthIngestTiering:
+    """Test that short sources get simplified ingest (summary only)."""
+
+    def _setup_project(self, tmp_path):
+        """Create minimal project structure for ingest tests."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+        return wiki_dir, raw_dir, data_dir
+
+    def test_short_source_creates_summary_only(self, tmp_path, monkeypatch):
+        """Source under SMALL_SOURCE_THRESHOLD with auto-extraction defers entities."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Short source (under 1000 chars)
+        source = raw_dir / "articles" / "short.md"
+        source.write_text("# Short\nBrief note.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Short Note",
+            "entities_mentioned": ["BigEntity"],
+            "concepts_mentioned": ["BigConcept"],
+        }
+        result = ingest_source(source, "article", extraction=extraction, defer_small=True)
+
+        # Summary should be created
+        assert any("summaries/" in p for p in result["pages_created"])
+        # Entity/concept pages should NOT be created (deferred)
+        entity_pages = [p for p in result["pages_created"] if p.startswith("entities/")]
+        concept_pages = [p for p in result["pages_created"] if p.startswith("concepts/")]
+        assert len(entity_pages) == 0
+        assert len(concept_pages) == 0
+        assert result.get("deferred_entities") is True
+
+    def test_long_source_creates_full_pages(self, tmp_path, monkeypatch):
+        """Source over SMALL_SOURCE_THRESHOLD creates full entities and concepts."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Long source (over 1000 chars)
+        long_content = "# Long Article\n\n" + "Some substantial content. " * 100
+        source = raw_dir / "articles" / "long.md"
+        source.write_text(long_content, encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Long Article",
+            "entities_mentioned": ["EntityA"],
+            "concepts_mentioned": ["ConceptB"],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+
+        # All pages should be created
+        assert any("summaries/" in p for p in result["pages_created"])
+        assert any("entities/" in p for p in result["pages_created"])
+        assert any("concepts/" in p for p in result["pages_created"])
+        assert result.get("deferred_entities") is not True
+
+    def test_config_threshold_exists(self):
+        """SMALL_SOURCE_THRESHOLD config constant exists."""
+        from kb.config import SMALL_SOURCE_THRESHOLD
+
+        assert isinstance(SMALL_SOURCE_THRESHOLD, int)
+        assert SMALL_SOURCE_THRESHOLD > 0
+
+
+# ── Task 8: Cascade update on ingest ─────────────────────────
+
+
+class TestCascadeUpdateOnIngest:
+    """Test that ingest returns affected_pages for cascade updates."""
+
+    def _setup_project(self, tmp_path):
+        """Create project structure with existing pages."""
+        wiki_dir = tmp_path / "wiki"
+        for sub in ("summaries", "entities", "concepts", "comparisons", "synthesis"):
+            (wiki_dir / sub).mkdir(parents=True)
+        (wiki_dir / "index.md").write_text(
+            "# Index\n\n## Summaries\n\n## Entities\n\n## Concepts\n\n"
+            "## Comparisons\n\n## Synthesis\n",
+            encoding="utf-8",
+        )
+        (wiki_dir / "_sources.md").write_text("# Source Mapping\n\n", encoding="utf-8")
+        (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+        raw_dir = tmp_path / "raw"
+        (raw_dir / "articles").mkdir(parents=True)
+        data_dir = tmp_path / ".data"
+        data_dir.mkdir(parents=True)
+        return wiki_dir, raw_dir, data_dir
+
+    def test_ingest_returns_affected_pages(self, tmp_path, monkeypatch):
+        """Ingest result includes affected_pages from shared sources/backlinks."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Create existing page that references the same source
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "existing-concept",
+            "Existing Concept",
+            "Content about existing concept. See [[summaries/new-article]].",
+            source_ref="raw/articles/shared-source.md",
+        )
+
+        # Now ingest a new article
+        source = raw_dir / "articles" / "new-article.md"
+        source.write_text("# New Article\n\nSome content here.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "New Article",
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+
+        # Result should include affected_pages key
+        assert "affected_pages" in result
+        assert isinstance(result["affected_pages"], list)
+
+    def test_ingest_affected_pages_includes_backlinks(self, tmp_path, monkeypatch):
+        """Pages that link to the new summary are listed as affected."""
+        wiki_dir, raw_dir, data_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr("kb.config.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.config.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.config.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.config.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.config.WIKI_LOG", wiki_dir / "log.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_DIR", wiki_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_INDEX", wiki_dir / "index.md")
+        monkeypatch.setattr("kb.ingest.pipeline.WIKI_SOURCES", wiki_dir / "_sources.md")
+        monkeypatch.setattr("kb.utils.paths.RAW_DIR", raw_dir)
+        monkeypatch.setattr("kb.compile.compiler.HASH_MANIFEST", data_dir / "hashes.json")
+
+        # Create page that links to a page that will be created by ingest
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "linker",
+            "Linker Page",
+            "This page references [[entities/test-entity]].",
+        )
+
+        source = raw_dir / "articles" / "test-article.md"
+        source.write_text("# Test Article\n\nContent about test entity.", encoding="utf-8")
+
+        from kb.ingest.pipeline import ingest_source
+
+        extraction = {
+            "title": "Test Article",
+            "entities_mentioned": ["Test Entity"],
+            "concepts_mentioned": [],
+        }
+        result = ingest_source(source, "article", extraction=extraction)
+        # linker page links to entities/test-entity which was just created
+        affected = result.get("affected_pages", [])
+        assert "concepts/linker" in affected
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (purpose wrap + entity word boundaries) --
+
+
+def test_build_extraction_prompt_wraps_and_caps_purpose():
+    from kb.ingest.extractors import build_extraction_prompt
+
+    template = {"extract": ["summary"], "name": "article", "description": "Article"}
+
+    prompt = build_extraction_prompt("content", template, purpose="x" * 5000)
+
+    assert "<kb_purpose>" in prompt
+    inner = prompt.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
+    assert len(inner) <= 4096
+
+
+def test_extract_entity_context_matches_entity_word_boundaries():
+    from kb.ingest.pipeline import _extract_entity_context
+
+    no_match = _extract_entity_context(
+        "Ray",
+        {
+            "description": "A stray cat found an array.",
+            "key_claims": ["The stray cat hid under an array."],
+        },
+    )
+    match = _extract_entity_context(
+        "Python",
+        {
+            "description": "Python is great.",
+            "key_claims": ["Python is widely used."],
+        },
+    )
+
+    assert no_match == ""
+    assert "Python is great." in match

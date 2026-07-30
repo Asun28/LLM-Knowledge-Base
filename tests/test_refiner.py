@@ -544,3 +544,55 @@ class TestRefinePageWriteOrdering:
             history = json.loads(history_path.read_text(encoding="utf-8"))
             applied = [h for h in history if h.get("status") == "applied"]
             assert len(applied) == 0, "History recorded 'applied' for a failed page write"
+
+
+# -- Cycle 94 fold from test_v098_fixes.py (review history atomic writes) --
+
+
+import json  # noqa: E402  — fold-site import (cycle 94)
+
+# ── 5. Atomic writes for review history ─────────────────────────────
+
+
+class TestReviewHistoryAtomicWrite:
+    """save_review_history must use atomic writes to prevent corruption."""
+
+    def test_saves_history_file(self, tmp_path):
+        """save_review_history creates a valid JSON file."""
+        from kb.review.refiner import save_review_history
+
+        history = [{"page_id": "concepts/rag", "status": "applied"}]
+        path = tmp_path / "history.json"
+        save_review_history(history, path)
+
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        assert loaded == history
+
+    def test_no_temp_file_left_on_success(self, tmp_path):
+        """Successful write leaves no .tmp files behind."""
+        from kb.review.refiner import save_review_history
+
+        path = tmp_path / "history.json"
+        save_review_history([{"test": True}], path)
+
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert len(tmp_files) == 0
+
+    def test_overwrites_existing_file(self, tmp_path):
+        """save_review_history replaces existing content atomically."""
+        from kb.review.refiner import save_review_history
+
+        path = tmp_path / "history.json"
+        save_review_history([{"v": 1}], path)
+        save_review_history([{"v": 2}], path)
+
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        assert loaded == [{"v": 2}]
+
+    def test_creates_parent_directories(self, tmp_path):
+        """save_review_history creates parent dirs if they don't exist."""
+        from kb.review.refiner import save_review_history
+
+        path = tmp_path / "deep" / "nested" / "history.json"
+        save_review_history([{"ok": True}], path)
+        assert path.exists()

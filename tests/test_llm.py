@@ -639,3 +639,190 @@ class TestMakeApiCallNoSleepAfterFinalRetry:
 
         # Should sleep MAX_RETRIES times, not MAX_RETRIES + 1
         assert len(sleep_calls) == llm_mod.MAX_RETRIES
+
+
+# -- Cycle 94 fold from test_v098_fixes.py (call_llm_json structured output + retry) --
+
+
+from unittest.mock import Mock  # noqa: E402  — fold-site import (cycle 94)
+
+# ── 2. Structured output extraction (call_llm_json) ─────────────────
+
+
+class TestCallLlmJson:
+    """call_llm_json uses tool_use for guaranteed structured output."""
+
+    @pytest.fixture
+    def mock_get_client(self):
+        with patch("kb.utils.llm.get_client") as mock_gc:
+            yield mock_gc
+
+    def test_returns_tool_use_input(self, mock_get_client):
+        """call_llm_json extracts input from tool_use content block."""
+        from kb.utils.llm import call_llm_json
+
+        tool_block = Mock(type="tool_use", input={"title": "Test", "score": 42})
+        tool_block.name = "extract"
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
+
+        result = call_llm_json(
+            "Extract data",
+            schema={"type": "object", "properties": {"title": {"type": "string"}}},
+        )
+        assert result == {"title": "Test", "score": 42}
+
+    def test_raises_on_no_tool_use_block(self, mock_get_client):
+        """call_llm_json raises LLMError if no tool_use block in response."""
+        from kb.utils.llm import LLMError, call_llm_json
+
+        text_block = Mock(type="text", text="Hello")
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[text_block])
+
+        with pytest.raises(LLMError, match="No tool_use block"):
+            call_llm_json(
+                "Extract data",
+                schema={"type": "object", "properties": {}},
+            )
+
+    def test_invalid_tier_raises(self, mock_get_client):
+        """call_llm_json raises ValueError for unknown tier."""
+        from kb.utils.llm import call_llm_json
+
+        with pytest.raises(ValueError, match="Invalid tier"):
+            call_llm_json(
+                "Extract data",
+                tier="nonexistent",
+                schema={"type": "object"},
+            )
+
+    def test_passes_tools_and_tool_choice(self, mock_get_client):
+        """call_llm_json sends tools and forced tool_choice to the API."""
+        from kb.utils.llm import call_llm_json
+
+        tool_block = Mock(type="tool_use", input={"title": "OK"})
+        tool_block.name = "my_tool"
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
+
+        schema = {"type": "object", "properties": {"title": {"type": "string"}}}
+        call_llm_json("Extract", schema=schema, tool_name="my_tool")
+
+        call_kwargs = mock_get_client.return_value.messages.create.call_args.kwargs
+        assert len(call_kwargs["tools"]) == 1
+        assert call_kwargs["tools"][0]["name"] == "my_tool"
+        assert call_kwargs["tools"][0]["input_schema"] == schema
+        assert call_kwargs["tool_choice"] == {"type": "tool", "name": "my_tool"}
+
+    @patch("kb.utils.llm.time.sleep")
+    def test_retries_on_rate_limit(self, mock_sleep, mock_get_client):
+        """call_llm_json retries on rate limits then succeeds."""
+        import anthropic
+
+        from kb.utils.llm import call_llm_json
+
+        tool_block = Mock(type="tool_use", input={"title": "OK"})
+        tool_block.name = "extract"
+        mock_get_client.return_value.messages.create.side_effect = [
+            anthropic.RateLimitError(
+                message="rate limited",
+                response=Mock(status_code=429, headers={}),
+                body=None,
+            ),
+            Mock(content=[tool_block]),
+        ]
+
+        result = call_llm_json(
+            "Extract",
+            schema={"type": "object", "properties": {}},
+        )
+        assert result == {"title": "OK"}
+        assert mock_sleep.called
+
+    def test_system_prompt_passed(self, mock_get_client):
+        """call_llm_json forwards system prompt to the API."""
+        from kb.utils.llm import call_llm_json
+
+        tool_block = Mock(type="tool_use", input={})
+        tool_block.name = "extract"
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[tool_block])
+
+        call_llm_json("Extract", schema={"type": "object"}, system="Be precise")
+        call_kwargs = mock_get_client.return_value.messages.create.call_args.kwargs
+        assert call_kwargs["system"] == "Be precise"
+
+
+# ── 6. _make_api_call shared retry logic ─────────────────────────────
+
+
+class TestMakeApiCall:
+    """_make_api_call provides shared retry logic for call_llm and call_llm_json."""
+
+    @pytest.fixture
+    def mock_get_client(self):
+        with patch("kb.utils.llm.get_client") as mock_gc:
+            yield mock_gc
+
+    def test_call_llm_still_works(self, mock_get_client):
+        """call_llm returns text using shared _make_api_call."""
+        from kb.utils.llm import call_llm
+
+        text_block = Mock(type="text", text="Hello")
+        mock_get_client.return_value.messages.create.return_value = Mock(content=[text_block])
+        result = call_llm("Say hello", tier="write")
+        assert result == "Hello"
+
+    def test_call_llm_json_still_retries(self, mock_get_client):
+        """call_llm_json retries via shared _make_api_call."""
+        import anthropic
+
+        from kb.utils.llm import call_llm_json
+
+        tool_block = Mock(type="tool_use", input={"ok": True})
+        tool_block.name = "extract"
+        mock_get_client.return_value.messages.create.side_effect = [
+            anthropic.APIConnectionError(message="network error", request=Mock()),
+            Mock(content=[tool_block]),
+        ]
+
+        with patch("kb.utils.llm.time.sleep"):
+            result = call_llm_json("Extract", schema={"type": "object"})
+        assert result == {"ok": True}
+
+
+# -- Cycle 94 fold from test_v090.py (SDK retry disabled on client) --
+
+
+# ── 9. SDK Retry Fix (Context7) ──────────────────────────────────
+
+
+def test_anthropic_client_disables_sdk_retries():
+    """Anthropic client has max_retries=0 to avoid double retry."""
+    import kb.utils.llm as llm_mod
+    from kb.utils.llm import get_client
+
+    old_client = llm_mod._client
+    llm_mod._client = None
+    try:
+        client = get_client()
+        assert client.max_retries == 0
+    finally:
+        llm_mod._client = old_client
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (package User-Agent header) --
+
+
+def test_anthropic_client_sets_package_user_agent(monkeypatch):
+    from kb.utils import llm
+
+    captured = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(llm, "_client", None)
+    monkeypatch.setattr(llm.anthropic, "Anthropic", FakeAnthropic)
+
+    llm.get_client()
+
+    assert captured["default_headers"]["User-Agent"].startswith("llm-wiki-flywheel/")
