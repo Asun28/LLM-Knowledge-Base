@@ -1,5 +1,7 @@
 """Tests for the feedback module (store + reliability)."""
 
+import logging
+
 from kb.feedback.reliability import (
     compute_trust_scores,
     get_coverage_gaps,
@@ -148,3 +150,207 @@ def test_get_coverage_gaps_empty(tmp_path):
     path = tmp_path / "feedback.json"
     add_feedback_entry("Q1", "useful", ["concepts/rag"], path=path)
     assert get_coverage_gaps(path) == []
+
+
+# -- Cycle 92 fold from test_v0915_task08.py (feedback store/reliability subset) --
+# ── Fix 8.1 — stale lock recovery ────────────────────────────────────────────
+
+
+class TestFeedbackLockRecovery:
+    """Fix 8.1: stale lock recovery must retry acquisition, not fall through."""
+
+    def test_stale_lock_retries(self, tmp_path):
+        from kb.feedback.store import _feedback_lock
+
+        feedback_path = tmp_path / "feedback.json"
+        lock_path = feedback_path.with_suffix(".json.lock")
+
+        # Create a stale lock (simulate crash with lock still present).
+        # Cycle 2 item 2: lock content must be a valid ASCII integer — seed a
+        # dead PID rather than empty string so the waiter can distinguish
+        # "stale, steal" from "corruption, raise".
+        lock_path.write_text("999999999", encoding="ascii")
+
+        # Should succeed by removing stale lock and re-acquiring
+        with _feedback_lock(feedback_path, timeout=0.5):
+            assert lock_path.exists()
+
+    def test_lock_held_during_yield(self, tmp_path):
+        from kb.feedback.store import _feedback_lock
+
+        feedback_path = tmp_path / "feedback.json"
+        lock_path = feedback_path.with_suffix(".json.lock")
+
+        with _feedback_lock(feedback_path, timeout=1.0):
+            assert lock_path.exists()
+        assert not lock_path.exists()
+
+    def test_stale_lock_removed_after_timeout(self, tmp_path):
+        """Lock file is gone after context exits even when stale lock was present."""
+        from kb.feedback.store import _feedback_lock
+
+        feedback_path = tmp_path / "feedback.json"
+        lock_path = feedback_path.with_suffix(".json.lock")
+
+        # Cycle 2 item 2: seed dead-PID content, not empty.
+        lock_path.write_text("999999999", encoding="ascii")
+
+        with _feedback_lock(feedback_path, timeout=0.5):
+            pass
+        assert not lock_path.exists()
+
+
+# ── Fix 8.2 — missing parent directory ───────────────────────────────────────
+
+
+class TestFeedbackLockMissingDir:
+    """Fix 8.2: _feedback_lock must create parent directory."""
+
+    def test_missing_parent_dir_created(self, tmp_path):
+        from kb.feedback.store import _feedback_lock
+
+        deep_path = tmp_path / "nonexistent" / "subdir" / "feedback.json"
+        assert not deep_path.parent.exists()
+
+        with _feedback_lock(deep_path, timeout=1.0):
+            assert deep_path.parent.exists()
+
+    def test_existing_parent_dir_not_error(self, tmp_path):
+        """mkdir with exist_ok=True means already-existing dir is fine."""
+        from kb.feedback.store import _feedback_lock
+
+        feedback_path = tmp_path / "feedback.json"
+        # Parent already exists — should not raise
+        with _feedback_lock(feedback_path, timeout=1.0):
+            assert feedback_path.parent.exists()
+
+
+# ── Fix 8.4 — get_coverage_gaps KeyError guard ───────────────────────────────
+
+
+class TestCoverageGapsKeyError:
+    """Fix 8.4: get_coverage_gaps must not raise KeyError on malformed entries."""
+
+    def test_missing_question_key_skipped(self, tmp_path):
+        """Entries without 'question' key are silently skipped."""
+        import json
+
+        from kb.feedback.reliability import get_coverage_gaps
+
+        feedback_path = tmp_path / "feedback.json"
+        data = {
+            "entries": [
+                {"rating": "incomplete", "notes": "no question here"},  # missing 'question'
+                {"rating": "incomplete", "question": "What is X?", "notes": "ok"},
+            ],
+            "page_scores": {},
+        }
+        feedback_path.write_text(json.dumps(data), encoding="utf-8")
+
+        gaps = get_coverage_gaps(feedback_path)
+        # Only the valid entry should appear
+        assert len(gaps) == 1
+        assert gaps[0]["question"] == "What is X?"
+
+    def test_empty_question_skipped(self, tmp_path):
+        """Entries with empty string 'question' are skipped (falsy guard)."""
+        import json
+
+        from kb.feedback.reliability import get_coverage_gaps
+
+        feedback_path = tmp_path / "feedback.json"
+        data = {
+            "entries": [
+                {"rating": "incomplete", "question": "", "notes": "empty question"},
+                {"rating": "incomplete", "question": "Valid question?", "notes": ""},
+            ],
+            "page_scores": {},
+        }
+        feedback_path.write_text(json.dumps(data), encoding="utf-8")
+
+        gaps = get_coverage_gaps(feedback_path)
+        assert len(gaps) == 1
+        assert gaps[0]["question"] == "Valid question?"
+
+    def test_missing_notes_defaults_to_empty_string(self, tmp_path):
+        """Entries without 'notes' key return empty string for notes."""
+        import json
+
+        from kb.feedback.reliability import get_coverage_gaps
+
+        feedback_path = tmp_path / "feedback.json"
+        data = {
+            "entries": [
+                {"rating": "incomplete", "question": "What is Y?"},  # no 'notes'
+            ],
+            "page_scores": {},
+        }
+        feedback_path.write_text(json.dumps(data), encoding="utf-8")
+
+        gaps = get_coverage_gaps(feedback_path)
+        assert len(gaps) == 1
+        assert gaps[0]["notes"] == ""
+
+
+# ── Fix 8.6 — entry cap warning log ──────────────────────────────────────────
+
+
+class TestFeedbackEntryCapWarning:
+    """Fix 8.6: eviction of entries must emit a warning log."""
+
+    def test_warning_emitted_on_eviction(self, tmp_path, caplog):
+        """When MAX_FEEDBACK_ENTRIES is exceeded, a warning is logged."""
+        import json
+        from unittest.mock import patch
+
+        import kb.feedback.store as store_module
+        from kb.feedback.store import add_feedback_entry
+
+        feedback_path = tmp_path / "feedback.json"
+
+        # Pre-fill store to exactly at-capacity (use tiny cap for speed)
+        tiny_cap = 2
+        data = {
+            "entries": [
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "question": f"q{i}",
+                    "rating": "useful",
+                    "cited_pages": [],
+                    "notes": "",
+                }
+                for i in range(tiny_cap)
+            ],
+            "page_scores": {},
+        }
+        feedback_path.write_text(json.dumps(data), encoding="utf-8")
+
+        # Patch MAX_FEEDBACK_ENTRIES in the store module's namespace directly
+        with patch.object(store_module, "MAX_FEEDBACK_ENTRIES", tiny_cap):
+            with caplog.at_level(logging.WARNING, logger="kb.feedback.store"):
+                add_feedback_entry("overflow question", "useful", [], path=feedback_path)
+
+        assert any(
+            "capacity" in r.message.lower() or "evict" in r.message.lower() for r in caplog.records
+        ), "Expected eviction warning not found"
+
+
+# ── Fix 8.7 — MAX_PAGE_SCORES constant ───────────────────────────────────────
+
+
+class TestMaxPageScoresConstant:
+    """Fix 8.7: MAX_PAGE_SCORES must exist in config and be used in store."""
+
+    def test_max_page_scores_in_config(self):
+        from kb.config import MAX_PAGE_SCORES
+
+        assert isinstance(MAX_PAGE_SCORES, int)
+        assert MAX_PAGE_SCORES > 0
+
+    def test_max_page_scores_imported_in_store(self):
+        """store.py must import MAX_PAGE_SCORES (importable, not NameError)."""
+        import kb.feedback.store as store_module
+
+        # The import chain must work — if MAX_PAGE_SCORES is not imported,
+        # the module would have raised ImportError at load time
+        assert hasattr(store_module, "MAX_PAGE_SCORES") or True  # module loaded = import succeeded

@@ -3,6 +3,7 @@
 import json
 import logging
 import threading
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1866,3 +1867,123 @@ def test_load_all_pages_called_at_most_once_per_ingest(tmp_path, monkeypatch):
     assert call_count[0] <= 1, (
         f"load_all_pages was called {call_count[0]} times in a single ingest — expected ≤1"
     )
+
+
+# -- Cycle 92 fold from test_v0915_task01.py (detect_source_type subset) --
+# ── Fix 1.12: raw/assets/ confusing error ───────────────────────
+
+
+class TestRawAssetsError:
+    """Fix 1.12 — raw/assets/ gives a clear error."""
+
+    def test_assets_dir_clear_error(self, tmp_path):
+        from kb.ingest.pipeline import detect_source_type
+
+        raw = tmp_path / "raw"
+        assets = raw / "assets"
+        assets.mkdir(parents=True)
+        test_file = assets / "image.png"
+        test_file.write_bytes(b"\x89PNG")
+
+        # We need to patch RAW_DIR to use our tmp dir
+        import kb.ingest.pipeline as pipeline
+
+        orig = pipeline.RAW_DIR
+        try:
+            pipeline.RAW_DIR = raw
+            with pytest.raises(ValueError, match="(?i)assets"):
+                detect_source_type(test_file)
+        finally:
+            pipeline.RAW_DIR = orig
+
+
+# -- Cycle 92 fold from test_v0915_task11.py (_update_existing_page subset) --
+
+
+class TestUpdateExistingPageDateInBody:
+    """11.20: _update_existing_page with date in body."""
+
+    def test_body_date_not_replaced(self, tmp_path, monkeypatch):
+        import kb.ingest.pipeline as pipeline
+
+        page = tmp_path / "concepts" / "test.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# Test\n\nThis was updated: 2024-06-15 in docs.\n"
+            "\n## References\n\n- Mentioned in raw/articles/a.md\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "kb.ingest.pipeline.atomic_text_write",
+            lambda c, p: p.write_text(c, encoding="utf-8"),
+        )
+        pipeline._update_existing_page(page, "raw/articles/b.md")
+        result = page.read_text(encoding="utf-8")
+        assert "updated: 2024-06-15" in result  # body date preserved
+
+    def test_frontmatter_updated_date_changed(self, tmp_path, monkeypatch):
+        import kb.ingest.pipeline as pipeline
+
+        page = tmp_path / "concepts" / "test.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        old_date = "2024-01-01"
+        page.write_text(
+            f'---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            f"created: {old_date}\nupdated: {old_date}\ntype: concept\n"
+            f"confidence: stated\n---\n\n# Test\n\nContent.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "kb.ingest.pipeline.atomic_text_write",
+            lambda c, p: p.write_text(c, encoding="utf-8"),
+        )
+        pipeline._update_existing_page(page, "raw/articles/b.md")
+        result = page.read_text(encoding="utf-8")
+        today = date.today().isoformat()
+        # Frontmatter updated should change
+        assert f"updated: {today}" in result
+
+    def test_new_source_added_to_frontmatter(self, tmp_path, monkeypatch):
+        import kb.ingest.pipeline as pipeline
+
+        page = tmp_path / "concepts" / "test.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2024-01-01\nupdated: 2024-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# Test\n\nContent.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "kb.ingest.pipeline.atomic_text_write",
+            lambda c, p: p.write_text(c, encoding="utf-8"),
+        )
+        pipeline._update_existing_page(page, "raw/articles/b.md")
+        result = page.read_text(encoding="utf-8")
+        # Both sources should be listed
+        assert "raw/articles/a.md" in result
+        assert "raw/articles/b.md" in result
+
+    def test_duplicate_source_not_added(self, tmp_path, monkeypatch):
+        import kb.ingest.pipeline as pipeline
+
+        page = tmp_path / "concepts" / "test.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/a.md"\n'
+            "created: 2024-01-01\nupdated: 2024-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\n# Test\n\nContent.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "kb.ingest.pipeline.atomic_text_write",
+            lambda c, p: p.write_text(c, encoding="utf-8"),
+        )
+        # Try to add the same source again
+        pipeline._update_existing_page(page, "raw/articles/a.md")
+        result = page.read_text(encoding="utf-8")
+        # Count occurrences of the source
+        count = result.count("raw/articles/a.md")
+        assert count == 1  # Should only appear once

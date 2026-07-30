@@ -17,6 +17,17 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-30 — cycle 92 (freeze-and-fold)
+
+**Theme:** complete the v0915 task series (cycle 80 folded task02/04/05/07; this cycle lands the remaining 6 files) — the largest single fold batch to date: 204 tests, 19 receiver placements across 15 canonical files (count corrected 17/14 → 19/15 per R1 Codex, the review's only finding), executed as two bounded subagent batches on one branch.
+
+- **Items: 6 fold sources → 15 canonical receivers (19 source-subset placements); 204 tests moved verbatim; 6 versioned files deleted; src/kb/ untouched.**
+- Batch A (91 tests): `task03` (29, compiler + linker — linker confirmed canonical in `test_compile.py`, 25 pre-existing `inject_wikilinks`/`build_backlinks` references) → `test_compile.py`; `task06` (25) 3-way SPLIT → `test_lint.py` (14, checks + trends) + `test_lint_verdicts.py` (7, verdict store incl. `add_verdict` threading) + `test_lint_semantic.py` (4, consistency grouping); `task09` (37) SPLIT → `test_mcp_core.py` (35 — quality-tool validation kept here because it already hosts the Phase-4 MCP input-validation block) + `test_mcp_browse_health.py` (2, `kb_list_pages`).
+- Batch B (113 tests): `task01` (57) 5-way SPLIT → `test_models.py` (37, kb.utils.{pages,markdown,hashing} + models/frontmatter — canonical host of `extract_wikilinks`/`content_hash`/`load_all_pages`) + `test_utils_text.py` (9) + `test_utils_io.py` (7, incl. wiki_log which had no dedicated receiver; io is its module family) + `test_config.py` (3) + `test_ingest.py` (1); `task08` (22) SPLIT → `test_evolve.py` (11) + `test_feedback.py` (11); `task11` (34) 6-way SPLIT → `test_query.py` (12) + `test_graph.py` (7) + `test_utils_io.py` (5) + `test_ingest.py` (4) + `test_compile.py` (4) + `test_lint_semantic.py` (2).
+- One rename: `TestGraphStatsDeterminism` → `TestGraphStatsDeterminism_t11` (`test_graph.py` already hosts that class name from an earlier fold). Zero other collisions.
+- Process note (batch B deviation, resolved): a Bash-heredoc append mangled `\\n`/`\\t` escapes in one `test_utils_text.py` line; caught by the receiver run, fixed, and ALL 32 batch-B folded classes then diff-verified byte-for-byte against `git show HEAD` copies (0 mismatches). Remaining appends switched to Write-tool scratch files. Lesson: heredoc-based test moves are an escape-sequence hazard — use file-based appends.
+- Counts: full suite 3628 collected, unchanged. Test files 230 → 224. Versioned pattern set 18 → 12 (remaining: `test_v091{1,2,3,4}_phase39{2,3,4,5}`, `test_v0{70,90}`, `test_v098_fixes`, `test_v099_phase39`, `test_v09_cycle5_fixes`, `test_phase4_audit_{compile,observability,security}`).
+
 ### 2026-07-30 — cycle 91 (stale-marker hygiene)
 
 **Theme:** two MEDIUM operational closures — the cycle-83 T6 immortal-marker item (age + cap + operator clear path) and the cycle-89 Windows directory-durability residual (verified won't-fix, documented).

@@ -1412,3 +1412,136 @@ def test_bm25_limit_independent_of_vector_multiplier():
         assert bm25_calls[0] != vector_calls[0], (
             "BM25 and vector limits are identical — decoupling had no effect"
         )
+
+
+# -- Cycle 92 fold from test_v0915_task11.py (query engine + create_raw_source fixture subset) --
+
+
+class TestComputePageRankScores:
+    """11.7: _compute_pagerank_scores."""
+
+    def test_non_empty_graph_returns_scores(self, tmp_wiki, create_wiki_page):
+        from kb.query.engine import _compute_pagerank_scores
+
+        create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="See [[concepts/b]].")
+        create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="See [[concepts/a]].")
+        scores = _compute_pagerank_scores(tmp_wiki)
+        assert len(scores) > 0
+        assert all(0.0 <= v <= 1.0 for v in scores.values())
+
+    def test_empty_wiki_returns_empty(self, tmp_wiki):
+        from kb.query.engine import _compute_pagerank_scores
+
+        scores = _compute_pagerank_scores(tmp_wiki)
+        assert scores == {}
+
+    def test_single_page_scores(self, tmp_wiki, create_wiki_page):
+        from kb.query.engine import _compute_pagerank_scores
+
+        # Edge-free graph (single page, no wikilinks) returns {} — PageRank blending skipped
+        create_wiki_page("concepts/single", wiki_dir=tmp_wiki, content="No links.")
+        scores = _compute_pagerank_scores(tmp_wiki)
+        assert scores == {}
+
+    def test_hub_page_has_higher_score(self, tmp_wiki, create_wiki_page):
+        from kb.query.engine import _compute_pagerank_scores
+
+        # Create a hub page that many pages link to
+        create_wiki_page("concepts/hub", wiki_dir=tmp_wiki, content="Hub page.")
+        for i in range(3):
+            create_wiki_page(
+                f"concepts/spoke{i}",
+                wiki_dir=tmp_wiki,
+                content="Links to [[concepts/hub]].",
+            )
+        scores = _compute_pagerank_scores(tmp_wiki)
+        # Hub should have higher score (more inbound links)
+        assert scores["concepts/hub"] > 0.0
+
+
+class TestBuildQueryContext:
+    """11.8: _build_query_context truncation."""
+
+    def test_oversize_page_handled(self):
+        from kb.query.engine import _build_query_context
+
+        big_page = {
+            "id": "concepts/big",
+            "title": "Big",
+            "type": "concept",
+            "confidence": "stated",
+            "content": "x" * 100_000,
+        }
+        small_page = {
+            "id": "concepts/small",
+            "title": "Small",
+            "type": "concept",
+            "confidence": "stated",
+            "content": "Small content.",
+        }
+        result = _build_query_context([big_page, small_page], max_chars=1000)
+        assert result["context_pages"]  # at least one page included
+
+    def test_empty_pages_returns_empty(self):
+        from kb.query.engine import _build_query_context
+
+        result = _build_query_context([], max_chars=1000)
+        assert result["context_pages"] == []
+
+    def test_context_respects_max_chars(self):
+        from kb.query.engine import _build_query_context
+
+        pages = [
+            {
+                "id": "concepts/a",
+                "title": "A",
+                "type": "concept",
+                "confidence": "stated",
+                "content": "x" * 500,
+            },
+            {
+                "id": "concepts/b",
+                "title": "B",
+                "type": "concept",
+                "confidence": "stated",
+                "content": "y" * 500,
+            },
+        ]
+        result = _build_query_context(pages, max_chars=700)
+        # context_pages is a list of page IDs (strings)
+        # Both 500-char pages shouldn't fit in 700 chars
+        assert len(result["context_pages"]) <= 1
+
+    def test_single_page_fits_exactly(self):
+        from kb.query.engine import _build_query_context
+
+        page = {
+            "id": "concepts/test",
+            "title": "Test",
+            "type": "concept",
+            "confidence": "stated",
+            "content": "Test content.",
+        }
+        result = _build_query_context([page], max_chars=10000)
+        assert len(result["context_pages"]) == 1
+
+
+class TestCreateRawSourceValidation:
+    """11.11: create_raw_source fixture path validation."""
+
+    def test_raw_source_with_valid_prefix(self, create_raw_source):
+        path = create_raw_source("raw/articles/test.md", "Content")
+        assert path.exists()
+        assert path.read_text(encoding="utf-8") == "Content"
+
+    def test_raw_source_invalid_prefix_raises(self, create_raw_source):
+        with pytest.raises(AssertionError, match="source_ref must start with 'raw/'"):
+            create_raw_source("wiki/articles/test.md", "Content")
+
+    def test_raw_source_videos_subdirectory(self, create_raw_source):
+        path = create_raw_source("raw/videos/video.txt", "Video")
+        assert path.exists()
+
+    def test_raw_source_papers_subdirectory(self, create_raw_source):
+        path = create_raw_source("raw/papers/paper.pdf", "Paper")
+        assert path.exists()

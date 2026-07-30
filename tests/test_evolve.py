@@ -297,3 +297,228 @@ class TestEvolveReportExceptionHandler:
         ):
             report = generate_evolution_report(tmp_wiki)
             assert isinstance(report, dict)
+
+
+# -- Cycle 92 fold from test_v0915_task08.py (evolve analyzer subset) --
+# ── Fix 8.3 — ranking meaningful above 10 terms ──────────────────────────────
+
+
+class TestCrossLinkOpportunitiesRanking:
+    """Fix 8.3: shared_term_count must reflect true count, not the capped list length."""
+
+    def test_shared_term_count_field_present(self, tmp_wiki):
+        """find_connection_opportunities returns shared_term_count key."""
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        result = find_connection_opportunities(wiki_dir=tmp_wiki)
+        for opp in result:
+            assert "shared_term_count" in opp, "shared_term_count key missing from opportunity"
+
+    def test_shared_term_count_matches_actual_count(self, tmp_wiki):
+        """shared_term_count equals the true shared term total, not len(shared_terms[:10])."""
+        # Create two pages with more than 10 shared significant words (all > 4 chars)
+        long_words = [
+            "apple",
+            "banana",
+            "cherry",
+            "dragonfruit",
+            "elderberry",
+            "feijoa",
+            "guava",
+            "honeydew",
+            "jackfruit",
+            "kiwifruit",
+            "lychee",
+            "mango",
+            "nectarine",
+            "orange",
+            "papaya",
+        ]
+        assert len(long_words) > 10
+
+        frontmatter = "---\ntitle: Page A\ntype: concept\nconfidence: stated\n---\n\n"
+        content_a = frontmatter + " ".join(long_words)
+        content_b = frontmatter.replace("Page A", "Page B") + " ".join(long_words)
+
+        (tmp_wiki / "concepts" / "page-a.md").write_text(content_a, encoding="utf-8")
+        (tmp_wiki / "concepts" / "page-b.md").write_text(content_b, encoding="utf-8")
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        result = find_connection_opportunities(wiki_dir=tmp_wiki)
+        if result:
+            opp = result[0]
+            # shared_term_count must be the real count (>= len(shared_terms))
+            assert opp["shared_term_count"] >= len(opp["shared_terms"])
+
+    def test_sort_uses_shared_term_count_not_list_length(self, tmp_wiki):
+        """Opportunities are sorted by shared_term_count descending."""
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        result = find_connection_opportunities(wiki_dir=tmp_wiki)
+        counts = [opp["shared_term_count"] for opp in result]
+        assert counts == sorted(counts, reverse=True), (
+            "Opportunities not sorted by shared_term_count"
+        )
+
+
+# ── Fix 8.5 — word-stripping includes '-' and '/' ────────────────────────────
+
+
+class TestWordStrippingChars:
+    """Fix 8.5: word-stripping must remove '-' and '/' along with punctuation."""
+
+    def test_hyphen_stripped_from_word(self, tmp_wiki):
+        """Words ending with '-' are stripped correctly and still count as significant."""
+        content_a = (
+            "---\ntitle: Page A\ntype: concept\nconfidence: stated\n---\n\n"
+            "learning- training- neural- model- gradient-"
+        )
+        content_b = (
+            "---\ntitle: Page B\ntype: concept\nconfidence: stated\n---\n\n"
+            "learning training neural model gradient"
+        )
+
+        (tmp_wiki / "concepts" / "strip-a.md").write_text(content_a, encoding="utf-8")
+        (tmp_wiki / "concepts" / "strip-b.md").write_text(content_b, encoding="utf-8")
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        result = find_connection_opportunities(wiki_dir=tmp_wiki)
+        # If words are stripped properly, the pair should have shared terms
+        if result:
+            assert result[0]["shared_term_count"] >= 1
+
+    def test_slash_stripped_from_word(self, tmp_wiki):
+        """Words ending with '/' are stripped correctly."""
+        content_a = (
+            "---\ntitle: Page C\ntype: concept\nconfidence: stated\n---\n\n"
+            "training/ model/ neural/ gradient/ learning/"
+        )
+        content_b = (
+            "---\ntitle: Page D\ntype: concept\nconfidence: stated\n---\n\n"
+            "training model neural gradient learning"
+        )
+
+        (tmp_wiki / "concepts" / "strip-c.md").write_text(content_a, encoding="utf-8")
+        (tmp_wiki / "concepts" / "strip-d.md").write_text(content_b, encoding="utf-8")
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        result = find_connection_opportunities(wiki_dir=tmp_wiki)
+        if result:
+            assert result[0]["shared_term_count"] >= 1
+
+
+# ── Fix 8.8 — frontmatter regex: no leading \\s* ─────────────────────────────
+
+
+class TestFrontmatterRegex:
+    """Fix 8.8: frontmatter regex must not have \\s* prefix (anchored to \\A)."""
+
+    def test_frontmatter_stripped_at_start(self, tmp_wiki):
+        """Content after frontmatter is processed; frontmatter keywords not indexed."""
+        content = (
+            "---\n"
+            "title: Test Page\n"
+            "type: concept\n"
+            "confidence: stated\n"
+            "---\n\n"
+            "learning model gradient training neural"
+        )
+        (tmp_wiki / "concepts" / "fm-test.md").write_text(content, encoding="utf-8")
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        # Just confirm no exception; frontmatter stripping is exercised
+        find_connection_opportunities(wiki_dir=tmp_wiki)
+
+    def test_analyzer_frontmatter_re_identity_with_shared(self):
+        """Cycle 69 AC12 — C11-L1 upgrade per amendment A2.
+
+        Replaces inspect.getsource source-grep with behavioural identity
+        assertion: ``kb.evolve.analyzer.FRONTMATTER_RE is
+        kb.utils.markdown.FRONTMATTER_RE`` (same compiled regex object,
+        not an inline re-compile).
+
+        This catches the cycle-21 L4 mutation directly: replacing
+        ``from kb.utils.markdown import FRONTMATTER_RE`` with an inline
+        ``FRONTMATTER_RE = re.compile(r"\\A\\s*---")`` produces a NEW
+        compiled-regex object -> ``is`` check FAILs.
+
+        Identity assertion is strictly stronger than the CRLF + tab
+        divergence input proposed in A2 brainstorm — it catches ANY
+        inline-recompile mutation, not just one regex shape. Per
+        amendment-deviation rationale: stronger lock-in = better mutation
+        resistance.
+        """
+        from kb.evolve import analyzer
+        from kb.utils import markdown
+
+        # Import shape at evolve/analyzer.py:19 is
+        #   `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`
+        # so the bound module attribute is `_FRONTMATTER_RE` (aliased).
+        assert hasattr(analyzer, "_FRONTMATTER_RE"), (
+            "kb.evolve.analyzer must expose _FRONTMATTER_RE "
+            "(via `from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE`)"
+        )
+        assert analyzer._FRONTMATTER_RE is markdown.FRONTMATTER_RE, (
+            "analyzer._FRONTMATTER_RE must be the SAME compiled regex "
+            "object as kb.utils.markdown.FRONTMATTER_RE; an inline "
+            "re.compile() would create a different object and fail this check"
+        )
+
+
+# ── Fix 8.9 — analyze_coverage threshold < 3 ─────────────────────────────────
+
+
+class TestAnalyzeCoverageThreshold:
+    """Fix 8.9: under_covered_types should include types with fewer than 3 pages."""
+
+    def test_zero_pages_is_under_covered(self, tmp_wiki):
+        """A type with 0 pages is flagged as under-covered."""
+        from kb.evolve.analyzer import analyze_coverage
+
+        result = analyze_coverage(wiki_dir=tmp_wiki)
+        # tmp_wiki starts empty — all types have 0 pages → all are under-covered
+        assert len(result["under_covered_types"]) > 0
+
+    def test_one_page_is_under_covered(self, tmp_wiki):
+        """A type with only 1 page is still under-covered (< 3)."""
+        content = (
+            "---\ntitle: Single Concept\ntype: concept\nconfidence: stated\n---\n\nContent here."
+        )
+        (tmp_wiki / "concepts" / "single.md").write_text(content, encoding="utf-8")
+
+        from kb.evolve.analyzer import analyze_coverage
+
+        result = analyze_coverage(wiki_dir=tmp_wiki)
+        assert "concepts" in result["under_covered_types"], (
+            "'concepts' with 1 page should be under-covered"
+        )
+
+    def test_two_pages_is_under_covered(self, tmp_wiki):
+        """A type with 2 pages is still under-covered (< 3)."""
+        for i in range(2):
+            content = f"---\ntitle: Concept {i}\ntype: concept\nconfidence: stated\n---\n\nContent."
+            (tmp_wiki / "concepts" / f"concept-{i}.md").write_text(content, encoding="utf-8")
+
+        from kb.evolve.analyzer import analyze_coverage
+
+        result = analyze_coverage(wiki_dir=tmp_wiki)
+        assert "concepts" in result["under_covered_types"], (
+            "'concepts' with 2 pages should be under-covered"
+        )
+
+    def test_three_pages_is_not_under_covered(self, tmp_wiki):
+        """A type with exactly 3 pages is NOT under-covered."""
+        for i in range(3):
+            content = f"---\ntitle: Concept {i}\ntype: concept\nconfidence: stated\n---\n\nContent."
+            (tmp_wiki / "concepts" / f"concept-{i}.md").write_text(content, encoding="utf-8")
+
+        from kb.evolve.analyzer import analyze_coverage
+
+        result = analyze_coverage(wiki_dir=tmp_wiki)
+        assert "concepts" not in result["under_covered_types"], (
+            "'concepts' with 3 pages should NOT be under-covered"
+        )

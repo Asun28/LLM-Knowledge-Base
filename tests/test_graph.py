@@ -447,3 +447,82 @@ class TestSafeNodeId:
         id1 = _safe_node_id("concepts/rag", seen)
         id2 = _safe_node_id("concepts/rag", seen)
         assert id1 != id2
+
+
+# -- Cycle 92 fold from test_v0915_task11.py (graph export/builder subset) --
+
+
+class TestExportMermaid:
+    """11.9: export_mermaid basic test."""
+
+    def test_basic_mermaid_output(self, tmp_wiki, create_wiki_page):
+        from kb.graph.export import export_mermaid
+
+        create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="See [[concepts/b]].")
+        create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="About B.")
+        result = export_mermaid(tmp_wiki)
+        assert result.startswith("graph LR")
+
+    def test_empty_wiki_mermaid(self, tmp_wiki):
+        from kb.graph.export import export_mermaid
+
+        result = export_mermaid(tmp_wiki)
+        assert "graph LR" in result
+
+    def test_mermaid_contains_pages(self, tmp_wiki, create_wiki_page):
+        from kb.graph.export import export_mermaid
+
+        create_wiki_page("concepts/alice", wiki_dir=tmp_wiki, content="Link to [[concepts/bob]].")
+        create_wiki_page("concepts/bob", wiki_dir=tmp_wiki, content="Link to [[concepts/charlie]].")
+        create_wiki_page("concepts/charlie", wiki_dir=tmp_wiki, content="Standalone.")
+        result = export_mermaid(tmp_wiki)
+        # Should contain the graph syntax and some node references
+        assert "graph LR" in result
+
+    def test_mermaid_max_nodes_cap(self, tmp_wiki, create_wiki_page):
+        from kb.graph.export import export_mermaid
+
+        # Create more than 30 pages
+        for i in range(40):
+            create_wiki_page(
+                f"concepts/page{i}",
+                wiki_dir=tmp_wiki,
+                content=f"Page {i}",
+            )
+        result = export_mermaid(tmp_wiki, max_nodes=10)
+        # Should still be valid mermaid
+        assert "graph LR" in result
+
+
+# Renamed from TestGraphStatsDeterminism (collision with the class of the same
+# name already in this receiver) — origin suffix _t11 per cycle-92 fold rules.
+class TestGraphStatsDeterminism_t11:
+    """11.19: graph_stats determinism."""
+
+    def test_betweenness_centrality_deterministic(self, tmp_wiki, create_wiki_page):
+        from kb.graph.builder import build_graph, graph_stats
+
+        for i in range(5):
+            links = " ".join(f"[[concepts/page{j}]]" for j in range(5) if j != i)
+            create_wiki_page(f"concepts/page{i}", wiki_dir=tmp_wiki, content=links)
+        graph = build_graph(tmp_wiki)
+        stats1 = graph_stats(graph)
+        stats2 = graph_stats(graph)
+        assert stats1["bridge_nodes"] == stats2["bridge_nodes"]
+
+    def test_stats_returns_consistent_keys(self, tmp_wiki, create_wiki_page):
+        from kb.graph.builder import build_graph, graph_stats
+
+        create_wiki_page("concepts/a", wiki_dir=tmp_wiki, content="[[concepts/b]]")
+        create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="[[concepts/a]]")
+        graph = build_graph(tmp_wiki)
+        stats = graph_stats(graph)
+        # Check for expected keys
+        assert isinstance(stats, dict)
+
+    def test_empty_graph_stats(self, tmp_wiki):
+        from kb.graph.builder import build_graph, graph_stats
+
+        graph = build_graph(tmp_wiki)
+        stats = graph_stats(graph)
+        assert isinstance(stats, dict)

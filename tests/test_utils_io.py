@@ -1,5 +1,6 @@
 """Regression tests for kb.utils.io — file_lock SIGINT safety + sweep_orphan_tmp behaviors."""
 
+import json
 import os
 import time
 
@@ -367,3 +368,116 @@ class TestAtomicWriteLF:
         atomic_json_write({"key": "value"}, test_file)
         raw = test_file.read_bytes()
         assert b"\r\n" not in raw
+
+
+# -- Cycle 92 fold from test_v0915_task01.py (wiki_log + atomic_json_write subset) --
+# ── Fix 1.2: wiki_log newline injection ─────────────────────────
+
+
+class TestWikiLogNewlineInjection:
+    """Fix 1.2 — newlines stripped from operation and message."""
+
+    def test_newline_in_operation(self, tmp_path):
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        append_wiki_log("ingest\nevil", "normal message", log_path=log_path)
+        content = log_path.read_text(encoding="utf-8")
+        lines = content.strip().split("\n")
+        # Should be 3 lines: header, blank, entry — not more
+        assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}: {lines}"
+
+    def test_newline_in_message(self, tmp_path):
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        append_wiki_log("ingest", "line1\nline2\nline3", log_path=log_path)
+        content = log_path.read_text(encoding="utf-8")
+        lines = content.strip().split("\n")
+        assert len(lines) == 3
+
+    def test_carriage_return_stripped(self, tmp_path):
+        from kb.utils.wiki_log import append_wiki_log
+
+        log_path = tmp_path / "log.md"
+        append_wiki_log("op\r\n", "msg\r\n", log_path=log_path)
+        content = log_path.read_text(encoding="utf-8")
+        assert "\r" not in content.split("\n")[-2]  # check the entry line
+
+
+# ── Fix 1.9: atomic_json_write allow_nan=False ──────────────────
+
+
+class TestAtomicJsonWriteNaN:
+    """Fix 1.9 — NaN/Infinity rejected by atomic_json_write."""
+
+    def test_nan_raises(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        with pytest.raises(ValueError):
+            atomic_json_write({"score": float("nan")}, tmp_path / "test.json")
+
+    def test_infinity_raises(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        with pytest.raises(ValueError):
+            atomic_json_write({"score": float("inf")}, tmp_path / "test.json")
+
+    def test_neg_infinity_raises(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        with pytest.raises(ValueError):
+            atomic_json_write({"score": float("-inf")}, tmp_path / "test.json")
+
+    def test_normal_values_still_work(self, tmp_path):
+        from kb.utils.io import atomic_json_write
+
+        out = tmp_path / "test.json"
+        atomic_json_write({"score": 1.5, "name": "test"}, out)
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["score"] == 1.5
+
+
+# -- Cycle 92 fold from test_v0915_task11.py (atomic_text_write subset) --
+
+
+class TestAtomicTextWriteBasic:
+    """11.3: atomic_text_write basic functionality."""
+
+    def test_writes_content_correctly(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        path = tmp_path / "test.txt"
+        atomic_text_write("hello world", path)
+        assert path.read_text(encoding="utf-8") == "hello world"
+
+    def test_overwrites_existing_file(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        path = tmp_path / "test.txt"
+        path.write_text("old content", encoding="utf-8")
+        atomic_text_write("new content", path)
+        assert path.read_text(encoding="utf-8") == "new content"
+
+    def test_creates_parent_directories(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        path = tmp_path / "nested" / "deep" / "test.txt"
+        atomic_text_write("content", path)
+        assert path.exists()
+        assert path.read_text(encoding="utf-8") == "content"
+
+    def test_empty_string_written(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        path = tmp_path / "empty.txt"
+        atomic_text_write("", path)
+        assert path.read_text(encoding="utf-8") == ""
+
+    def test_unicode_content_preserved(self, tmp_path):
+        from kb.utils.io import atomic_text_write
+
+        path = tmp_path / "unicode.txt"
+        content = "Hello 世界 🌍 Привет"
+        atomic_text_write(content, path)
+        assert path.read_text(encoding="utf-8") == content

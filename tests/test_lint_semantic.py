@@ -139,3 +139,168 @@ def test_build_completeness_context_missing_page(tmp_project):
     raw_dir = tmp_project / "raw"
     context = build_completeness_context("concepts/nonexistent", wiki_dir, raw_dir)
     assert "Error:" in context
+
+
+# -- Cycle 92 fold from test_v0915_task06.py (semantic grouping subset) --
+# Phase 3.96 Task 6 — _group_by_wikilinks connected components,
+# consistency-group size cap, CRLF term overlap.
+
+
+# ── Fix 6.6 — _group_by_wikilinks uses nx.connected_components ───────────────
+
+
+class TestGroupByWikilinksConnectedComponents:
+    """Fix 6.6 — _group_by_wikilinks returns proper connected components (not star topologies)."""
+
+    def test_star_topology_pages_in_one_component(self, tmp_wiki, create_wiki_page):
+        """Hub → A, Hub → B, Hub → C should be one component of 4, not 3 pairs."""
+        from kb.lint.semantic import _group_by_wikilinks
+
+        # Hub links to a, b, c but a/b/c don't link to each other
+        create_wiki_page(
+            "concepts/hub",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/spoke-a]], [[concepts/spoke-b]], [[concepts/spoke-c]].",
+        )
+        create_wiki_page("concepts/spoke-a", wiki_dir=tmp_wiki, content="Spoke A.")
+        create_wiki_page("concepts/spoke-b", wiki_dir=tmp_wiki, content="Spoke B.")
+        create_wiki_page("concepts/spoke-c", wiki_dir=tmp_wiki, content="Spoke C.")
+
+        groups = _group_by_wikilinks(tmp_wiki)
+        # All 4 nodes are in the same connected component
+        assert len(groups) == 1
+        assert sorted(groups[0]) == [
+            "concepts/hub",
+            "concepts/spoke-a",
+            "concepts/spoke-b",
+            "concepts/spoke-c",
+        ]
+
+    def test_disconnected_graph_yields_multiple_components(self, tmp_wiki, create_wiki_page):
+        """Two disconnected link chains should appear as two separate components."""
+        from kb.lint.semantic import _group_by_wikilinks
+
+        create_wiki_page(
+            "concepts/a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/b]].",
+        )
+        create_wiki_page("concepts/b", wiki_dir=tmp_wiki, content="B.")
+        create_wiki_page(
+            "concepts/c",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/d]].",
+        )
+        create_wiki_page("concepts/d", wiki_dir=tmp_wiki, content="D.")
+
+        groups = _group_by_wikilinks(tmp_wiki)
+        assert len(groups) == 2
+        group_sets = [frozenset(g) for g in groups]
+        assert frozenset(["concepts/a", "concepts/b"]) in group_sets
+        assert frozenset(["concepts/c", "concepts/d"]) in group_sets
+
+
+# ── Fix 6.10 — auto-selected groups size cap ─────────────────────────────────
+
+
+class TestConsistencyContextGroupSizeCap:
+    """Fix 6.10 — auto-selected groups are chunked to MAX_CONSISTENCY_GROUP_SIZE."""
+
+    def test_large_component_is_split_into_chunks(self, tmp_wiki, create_wiki_page):
+        """A connected component larger than MAX_CONSISTENCY_GROUP_SIZE should be split."""
+        from kb.config import MAX_CONSISTENCY_GROUP_SIZE
+        from kb.lint.semantic import build_consistency_context
+
+        # Create MAX_CONSISTENCY_GROUP_SIZE + 2 pages all linked from a hub
+        n = MAX_CONSISTENCY_GROUP_SIZE + 2
+        links = " ".join(f"[[concepts/node-{i}]]" for i in range(n))
+        create_wiki_page("concepts/hub", wiki_dir=tmp_wiki, content=links)
+        for i in range(n):
+            create_wiki_page(f"concepts/node-{i}", wiki_dir=tmp_wiki, content=f"Node {i}.")
+
+        result = build_consistency_context(wiki_dir=tmp_wiki)
+        # The result should reference multiple groups since the component was split
+        # Check that no group header has more pages than MAX_CONSISTENCY_GROUP_SIZE
+        import re
+
+        group_headers = re.findall(r"## Group \d+ \((\d+) pages\)", result)
+        for size_str in group_headers:
+            assert int(size_str) <= MAX_CONSISTENCY_GROUP_SIZE
+
+
+# ── Fix 6.8 — CRLF in frontmatter regex ─────────────────────────────────────
+
+
+class TestGroupByTermOverlapCRLF:
+    """Fix 6.8 — _group_by_term_overlap handles CRLF line endings."""
+
+    def test_crlf_page_body_extracted_for_terms(self, tmp_wiki):
+        """Pages with CRLF line endings should have frontmatter stripped correctly."""
+        from kb.lint.semantic import _group_by_term_overlap
+
+        # Write a page with CRLF endings
+        page_a = tmp_wiki / "concepts" / "crlf-a.md"
+        page_a.parent.mkdir(parents=True, exist_ok=True)
+        crlf_fm = (
+            b"---\r\ntitle: CRLF A\r\nsource:\r\n  - raw/articles/test.md\r\n"
+            b"created: 2026-01-01\r\nupdated: 2026-01-01\r\ntype: concept\r\n"
+            b"confidence: stated\r\n---\r\n"
+        )
+        page_a.write_bytes(
+            crlf_fm + b"machine learning neural network transformer architecture training\r\n"
+        )
+        page_b = tmp_wiki / "concepts" / "crlf-b.md"
+        crlf_fm_b = (
+            b"---\r\ntitle: CRLF B\r\nsource:\r\n  - raw/articles/test.md\r\n"
+            b"created: 2026-01-01\r\nupdated: 2026-01-01\r\ntype: concept\r\n"
+            b"confidence: stated\r\n---\r\n"
+        )
+        page_b.write_bytes(
+            crlf_fm_b + b"machine learning neural network transformer architecture training\r\n"
+        )
+
+        # Should not crash and should find term overlap
+        groups = _group_by_term_overlap(tmp_wiki)
+        assert isinstance(groups, list)
+        # The two pages share terms, so they should be grouped
+        crlf_group = any("concepts/crlf-a" in g and "concepts/crlf-b" in g for g in groups)
+        assert crlf_group, f"CRLF pages not grouped by term overlap. Groups: {groups}"
+
+
+# -- Cycle 92 fold from test_v0915_task11.py (consistency-context subset) --
+
+
+class TestConsistencyGroupCap:
+    """11.15: build_consistency_context auto groups."""
+
+    def test_auto_groups_handled(self, tmp_wiki, create_wiki_page):
+        from kb.lint.semantic import build_consistency_context
+
+        for i in range(5):
+            create_wiki_page(
+                f"concepts/term{i}",
+                wiki_dir=tmp_wiki,
+                source_ref="raw/articles/shared.md",
+                content=f"Page {i} about shared topic.",
+            )
+        result = build_consistency_context(wiki_dir=tmp_wiki)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_consistency_context_with_linked_pages(self, tmp_wiki, create_wiki_page):
+        from kb.lint.semantic import build_consistency_context
+
+        create_wiki_page(
+            "concepts/a",
+            wiki_dir=tmp_wiki,
+            source_ref="raw/articles/shared.md",
+            content="Page A links to [[concepts/b]].",
+        )
+        create_wiki_page(
+            "concepts/b",
+            wiki_dir=tmp_wiki,
+            source_ref="raw/articles/shared.md",
+            content="Page B links to [[concepts/a]].",
+        )
+        result = build_consistency_context(wiki_dir=tmp_wiki)
+        assert isinstance(result, str)
