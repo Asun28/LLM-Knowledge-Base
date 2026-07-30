@@ -431,3 +431,106 @@ class TestFeedbackStoreFileLock:
         assert entry["rating"] == "useful"
         # Lock file should be cleaned up
         assert not (feedback_path.with_suffix(".json.lock")).exists()
+
+
+# -- Cycle 94 fold from test_v070.py (trust threshold boundary) --
+
+
+# ── 3. Trust Threshold Boundary ──────────────────────────────────
+
+
+def test_trust_at_threshold_is_flagged(tmp_path):
+    """Pages with trust exactly at threshold (0.4) are flagged."""
+    from kb.feedback.reliability import get_flagged_pages
+    from kb.feedback.store import save_feedback
+
+    data = {
+        "entries": [],
+        "page_scores": {"concepts/test": {"useful": 1, "wrong": 1, "incomplete": 0, "trust": 0.4}},
+    }
+    path = tmp_path / "feedback.json"
+    save_feedback(data, path)
+    flagged = get_flagged_pages(path, threshold=0.4)
+    assert "concepts/test" in flagged
+
+
+def test_trust_above_threshold_not_flagged(tmp_path):
+    """Pages with trust above threshold are not flagged."""
+    from kb.feedback.reliability import get_flagged_pages
+    from kb.feedback.store import save_feedback
+
+    data = {
+        "entries": [],
+        "page_scores": {"concepts/good": {"useful": 3, "wrong": 0, "incomplete": 0, "trust": 0.8}},
+    }
+    path = tmp_path / "feedback.json"
+    save_feedback(data, path)
+    flagged = get_flagged_pages(path, threshold=0.4)
+    assert flagged == []
+
+
+def test_trust_below_threshold_flagged(tmp_path):
+    """Pages below threshold are flagged."""
+    from kb.feedback.reliability import get_flagged_pages
+    from kb.feedback.store import save_feedback
+
+    data = {
+        "entries": [],
+        "page_scores": {"concepts/bad": {"useful": 0, "wrong": 2, "incomplete": 0, "trust": 0.2}},
+    }
+    path = tmp_path / "feedback.json"
+    save_feedback(data, path)
+    flagged = get_flagged_pages(path, threshold=0.4)
+    assert "concepts/bad" in flagged
+
+
+# -- Cycle 94 fold from test_v098_fixes.py (feedback deduplication) --
+
+
+import json  # noqa: E402  — fold-site import (cycle 94)
+
+# ── 4. Feedback deduplication ────────────────────────────────────────
+
+
+class TestFeedbackDeduplication:
+    """cited_pages must be deduplicated before trust score updates."""
+
+    def test_duplicate_citations_counted_once(self, tmp_path):
+        """Duplicate page IDs in cited_pages should only increment score once."""
+        from kb.feedback.store import add_feedback_entry
+
+        feedback_path = tmp_path / "feedback.json"
+
+        # Add entry with duplicate citations
+        add_feedback_entry(
+            question="What is RAG?",
+            rating="useful",
+            cited_pages=["concepts/rag", "concepts/rag", "concepts/rag"],
+            path=feedback_path,
+        )
+
+        # Load and verify trust score
+        data = json.loads(feedback_path.read_text(encoding="utf-8"))
+        scores = data["page_scores"]["concepts/rag"]
+        assert scores["useful"] == 1  # Not 3
+        # Trust with 1 useful: (1+1)/(1+0+2) = 2/3 ≈ 0.6667
+        assert scores["trust"] == pytest.approx(0.6667, abs=0.001)
+
+    def test_unique_citations_all_counted(self, tmp_path):
+        """Different page IDs are all counted correctly."""
+        from kb.feedback.store import add_feedback_entry
+
+        feedback_path = tmp_path / "feedback.json"
+
+        add_feedback_entry(
+            question="Compare RAG vs fine-tuning",
+            rating="useful",
+            cited_pages=["concepts/rag", "concepts/fine-tuning"],
+            path=feedback_path,
+        )
+
+        data = json.loads(feedback_path.read_text(encoding="utf-8"))
+        assert "concepts/rag" in data["page_scores"]
+        assert "concepts/fine-tuning" in data["page_scores"]
+        assert data["page_scores"]["concepts/rag"]["useful"] == 1
+        assert data["page_scores"]["concepts/fine-tuning"]["useful"] == 1

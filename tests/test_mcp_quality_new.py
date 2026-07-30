@@ -491,3 +491,129 @@ class TestKbSaveLintVerdictOSError:
             )
             assert "Error" in result
             assert "Disk full" in result
+
+
+# -- Cycle 94 fold from test_v070.py (kb_create_page + kb_save_lint_verdict MCP tools) --
+
+
+# ── 7. New MCP Tools ─────────────────────────────────────────────
+
+
+def test_kb_create_page(tmp_path):
+    """kb_create_page creates a new wiki page."""
+    from kb.mcp.quality import kb_create_page
+
+    wiki_dir = tmp_path / "wiki"
+    (wiki_dir / "comparisons").mkdir(parents=True)
+    log_path = wiki_dir / "log.md"
+    log_path.write_text("# Log\n\n")
+
+    with (
+        patch("kb.mcp.quality.WIKI_DIR", wiki_dir),
+    ):
+        result = kb_create_page(
+            "comparisons/rag-vs-finetuning",
+            "RAG vs Fine-tuning",
+            "# RAG vs Fine-tuning\n\nComparison content.",
+            "comparison",
+            "inferred",
+        )
+
+    assert "Created" in result
+    assert "comparison" in result
+    page = wiki_dir / "comparisons" / "rag-vs-finetuning.md"
+    assert page.exists()
+    content = page.read_text(encoding="utf-8")
+    assert "RAG vs Fine-tuning" in content
+    assert "type: comparison" in content
+
+
+def test_kb_create_page_already_exists_v070(tmp_path):
+    """kb_create_page rejects if page already exists."""
+    from kb.mcp.quality import kb_create_page
+
+    wiki_dir = tmp_path / "wiki"
+    (wiki_dir / "comparisons").mkdir(parents=True)
+    (wiki_dir / "comparisons" / "test.md").write_text("existing")
+
+    with patch("kb.mcp.quality.WIKI_DIR", wiki_dir):
+        result = kb_create_page("comparisons/test", "Test", "content")
+    assert "Error" in result
+    assert "already exists" in result
+
+
+def test_kb_save_lint_verdict(tmp_path):
+    """kb_save_lint_verdict stores a verdict."""
+    from kb.mcp.quality import kb_save_lint_verdict
+
+    with patch("kb.lint.verdicts.VERDICTS_PATH", tmp_path / "v.json"):
+        result = kb_save_lint_verdict("concepts/rag", "fidelity", "pass", notes="All good")
+    assert "Verdict recorded" in result
+    assert "fidelity" in result
+
+
+def test_kb_save_lint_verdict_invalid(tmp_path):
+    """kb_save_lint_verdict returns error for invalid verdict."""
+    from kb.mcp.quality import kb_save_lint_verdict
+
+    with patch("kb.lint.verdicts.VERDICTS_PATH", tmp_path / "v.json"):
+        result = kb_save_lint_verdict("concepts/rag", "fidelity", "maybe")
+    assert "Error" in result
+
+
+# -- Cycle 94 fold from test_v090.py (kb_create_page traversal/confidence + error strings) --
+
+
+def test_kb_create_page_rejects_traversal(tmp_path):
+    """kb_create_page rejects '..' in page_id."""
+    from kb.mcp.quality import kb_create_page
+
+    wiki = tmp_path / "wiki"
+    wiki.mkdir(parents=True)
+    with patch("kb.mcp.quality.WIKI_DIR", wiki):
+        result = kb_create_page("../evil/page", "Evil", "content", "concept")
+    assert "Error" in result
+    assert "Invalid" in result
+
+
+def test_kb_lint_consistency_returns_error_on_failure():
+    """kb_lint_consistency returns error string on crash."""
+    from kb.mcp.quality import kb_lint_consistency
+
+    with patch(
+        "kb.lint.semantic.build_consistency_context",
+        side_effect=RuntimeError("context build failed"),
+    ):
+        result = kb_lint_consistency("concepts/a,concepts/b")
+    assert "Error" in result
+
+
+def test_kb_affected_pages_returns_error_on_failure():
+    """kb_affected_pages returns error string on crash."""
+    from kb.mcp.quality import kb_affected_pages
+
+    with patch(
+        "kb.compile.linker.build_backlinks",
+        side_effect=RuntimeError("linker failed"),
+    ):
+        result = kb_affected_pages("concepts/rag")
+    assert "Error" in result
+
+
+# ── 11c. kb_create_page Confidence Validation ───────────────────────
+
+
+def test_kb_create_page_invalid_confidence_v090(tmp_path):
+    """kb_create_page rejects invalid confidence levels."""
+    from kb.mcp.quality import kb_create_page
+
+    wiki = tmp_path / "wiki"
+    (wiki / "concepts").mkdir(parents=True)
+
+    with patch("kb.mcp.quality.WIKI_DIR", wiki):
+        result = kb_create_page(
+            "concepts/test-page", "Test", "content", "concept", confidence="bad"
+        )
+    assert "Error" in result
+    assert "Invalid confidence" in result
+    assert "bad" in result

@@ -943,3 +943,79 @@ class TestListSourcesStatFailure:
         result = kb_list_sources()
         # Must return a string, not raise
         assert isinstance(result, str)
+
+
+# -- Cycle 94 fold from test_v090.py (kb_read_page traversal + tool errors + kb_search clamps) --
+
+
+def test_kb_read_page_rejects_traversal(tmp_path):
+    """kb_read_page rejects path traversal attempts."""
+    from kb.mcp.browse import kb_read_page
+
+    wiki = tmp_path / "wiki"
+    wiki.mkdir(parents=True)
+    with patch("kb.mcp.browse.WIKI_DIR", wiki):
+        result = kb_read_page("../../../etc/passwd")
+    assert "Error" in result or "Invalid" in result
+
+
+def test_kb_read_page_rejects_absolute(tmp_path):
+    """kb_read_page rejects absolute path attempts."""
+    from kb.mcp.browse import kb_read_page
+
+    wiki = tmp_path / "wiki"
+    wiki.mkdir(parents=True)
+    with patch("kb.mcp.browse.WIKI_DIR", wiki):
+        result = kb_read_page("/etc/passwd")
+    assert "Error" in result or "Invalid" in result
+
+
+def test_kb_stats_returns_error_on_failure(tmp_path):
+    """kb_stats returns error string instead of crashing."""
+    from kb.mcp.browse import kb_stats
+
+    with patch("kb.evolve.analyzer.analyze_coverage", side_effect=RuntimeError("graph corrupted")):
+        result = kb_stats()
+    assert "Error" in result
+    assert "graph corrupted" in result
+
+
+def test_kb_lint_returns_error_on_failure():
+    """kb_lint returns error string instead of crashing."""
+    from kb.mcp.health import kb_lint
+
+    with patch("kb.lint.runner.run_all_checks", side_effect=RuntimeError("check failed")):
+        result = kb_lint()
+    assert "Error" in result
+    assert "check failed" in result
+
+
+def test_kb_evolve_returns_error_on_failure():
+    """kb_evolve returns error string instead of crashing."""
+    from kb.mcp.health import kb_evolve
+
+    with patch(
+        "kb.evolve.analyzer.generate_evolution_report",
+        side_effect=RuntimeError("analysis failed"),
+    ):
+        result = kb_evolve()
+    assert "Error" in result
+    assert "analysis failed" in result
+
+
+def test_kb_search_clamps_max_results_low():
+    """kb_search clamps max_results to minimum 1."""
+    from kb.mcp.browse import kb_search
+
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+        kb_search("test", max_results=0)
+    mock.assert_called_once_with("test", max_results=1)
+
+
+def test_kb_search_clamps_max_results_high():
+    """kb_search clamps max_results to maximum 100."""
+    from kb.mcp.browse import kb_search
+
+    with patch("kb.query.engine.search_pages", return_value=[]) as mock:
+        kb_search("test", max_results=500)
+    mock.assert_called_once_with("test", max_results=100)

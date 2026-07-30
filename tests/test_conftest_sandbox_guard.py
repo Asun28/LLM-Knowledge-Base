@@ -107,3 +107,76 @@ def test_lru_cache_walk_clears_kb_modules() -> None:
     finally:
         # Clean up
         del sys.modules["kb._test_path_sensitive_module"]
+
+
+# -- Cycle 94 fold from test_v070.py (tmp_kb_env fixture coverage) --
+
+
+# ── 9. tmp_kb_env fixture coverage (cycle 51 fold from test_cycle12_conftest.py) ─
+
+
+def _is_under(path: Path, base: Path) -> bool:
+    return path.resolve().is_relative_to(base.resolve())
+
+
+def test_tmp_kb_env_rebinds_preimported_config_consumers(request):
+    import kb.capture as capture
+    import kb.config as config
+    import kb.mcp.browse as browse
+    import kb.mcp.core as core
+
+    original_source_keys = tuple(config.SOURCE_TYPE_DIRS)
+
+    project = request.getfixturevalue("tmp_kb_env")
+    raw = project / "raw"
+
+    for module in (config, core, browse, capture):
+        assert _is_under(module.PROJECT_ROOT, project)
+
+    for module in (config, core, browse):
+        assert _is_under(module.RAW_DIR, project)
+
+    for module in (config, browse):
+        assert _is_under(module.WIKI_DIR, project)
+
+    assert _is_under(config.CAPTURES_DIR, project)
+    assert _is_under(capture.CAPTURES_DIR, project)
+
+    assert tuple(config.SOURCE_TYPE_DIRS) == original_source_keys
+    assert tuple(core.SOURCE_TYPE_DIRS) == original_source_keys
+    for source_dir in config.SOURCE_TYPE_DIRS.values():
+        assert _is_under(source_dir, raw)
+    for source_dir in core.SOURCE_TYPE_DIRS.values():
+        assert _is_under(source_dir, raw)
+
+    assert _is_under(capture._CAPTURES_DIR_RESOLVED, project)
+    assert _is_under(capture._captures_resolved, project)
+    assert _is_under(capture._project_resolved, project)
+
+
+# Cycle 64 AC1/AC3: `test_tmp_kb_env_is_not_autouse` deleted — its contract
+# (tmp_kb_env path patches must NOT apply unless explicitly requested) was
+# deliberately reversed by cycle 64. The autouse `_autouse_kb_path_sandbox`
+# fixture now redirects `kb.config.WIKI_*` / `RAW_*` / `PROJECT_ROOT` for
+# every test by default. Replacement coverage lives in
+# `tests/test_cycle64_conftest_leak.py::test_default_isolation_redirects_wiki_constants_to_tmp`
+# (asserts the FORWARD contract: config.PROJECT_ROOT != real_project_root
+# under default pytest invocation). Per cycle-15 L2 / cycle-44 L4 DROP-with-
+# test-anchor, the deletion is safe because replacement coverage is in
+# place.
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (pytest marker registration in pyproject) --
+
+
+def test_pytest_markers_registered():
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    markers = data["tool"]["pytest"]["ini_options"]["markers"]
+
+    assert "slow: marks tests as slow (deselect with '-m not slow')" in markers
+    assert "network: marks tests requiring network access" in markers
+    assert "integration: marks integration tests requiring real filesystem or DB" in markers
+    assert "llm: marks tests that invoke a real LLM API" in markers

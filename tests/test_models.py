@@ -1070,3 +1070,169 @@ class TestWikiPageContentHashDefault:
 
         page = WikiPage(path=Path("test.md"), title="Test", page_type="concept")
         assert page.content_hash is None
+
+
+# -- Cycle 94 fold from test_v070.py (case-insensitive wikilinks + package export curation) --
+
+
+# ── 2. Case-Insensitive Wikilinks ───────────────────────────────
+
+
+def test_wikilinks_lowercase():
+    """Wikilinks are normalized to lowercase."""
+    from kb.utils.markdown import extract_wikilinks
+
+    links = extract_wikilinks("See [[Concepts/RAG]] and [[ENTITIES/OpenAI]]")
+    assert links == ["concepts/rag", "entities/openai"]
+
+
+def test_wikilinks_with_label_lowercase():
+    """Wikilinks with labels normalize the target to lowercase."""
+    from kb.utils.markdown import extract_wikilinks
+
+    links = extract_wikilinks("[[Concepts/RAG|Retrieval Augmented Gen]]")
+    assert links == ["concepts/rag"]
+
+
+def test_wikilinks_already_lowercase():
+    """Lowercase wikilinks pass through unchanged."""
+    from kb.utils.markdown import extract_wikilinks
+
+    links = extract_wikilinks("[[concepts/rag]]")
+    assert links == ["concepts/rag"]
+
+
+# ── 10. Package export curation (cycle 51 fold from test_cycle8_package_exports.py) ─
+
+
+def _run_export_import_probe(code: str):
+    """Helper: run an `import` probe in a fresh subprocess against repo src/.
+
+    Renamed from `_run_import_probe` per cycle-51 design Q2 (helper-name uniqueness
+    in receiver). The 6 callers below use this helper.
+    """
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[1]
+    src_dir = repo_root / "src"
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(src_dir) if not existing else f"{src_dir}{os.pathsep}{existing}"
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_kb_top_level_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb import ("
+        "ingest_source, compile_wiki, query_wiki, build_graph, "
+        "WikiPage, RawSource, LLMError, __version__"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_kb_top_level_all_is_curated():
+    import kb
+
+    # Cycle 20 AC3 — kb.errors taxonomy exports added: KBError + 5 subclasses.
+    assert kb.__all__ == [
+        "ingest_source",
+        "compile_wiki",
+        "query_wiki",
+        "build_graph",
+        "WikiPage",
+        "RawSource",
+        "LLMError",
+        "KBError",
+        "IngestError",
+        "CompileError",
+        "QueryError",
+        "ValidationError",
+        "StorageError",
+        "__version__",
+    ]
+
+
+def test_utils_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe(
+        "from kb.utils import ("
+        "slugify, yaml_escape, yaml_sanitize, STOPWORDS, atomic_json_write, "
+        "atomic_text_write, file_lock, content_hash, extract_wikilinks, "
+        "extract_raw_refs, FRONTMATTER_RE, append_wiki_log, load_all_pages, "
+        "normalize_sources, make_source_ref"
+        ")"
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_utils_all_is_curated():
+    import kb.utils as utils
+
+    assert utils.__all__ == [
+        "slugify",
+        "yaml_escape",
+        "yaml_sanitize",
+        "STOPWORDS",
+        "atomic_json_write",
+        "atomic_text_write",
+        "file_lock",
+        "content_hash",
+        "extract_wikilinks",
+        "extract_raw_refs",
+        "FRONTMATTER_RE",
+        "append_wiki_log",
+        "load_all_pages",
+        "normalize_sources",
+        "make_source_ref",
+    ]
+
+
+def test_models_exports_importable_in_fresh_subprocess():
+    result = _run_export_import_probe("from kb.models import WikiPage, RawSource")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_models_all_is_curated():
+    import kb.models as models
+
+    assert models.__all__ == ["WikiPage", "RawSource"]
+
+
+# -- Cycle 94 fold from test_v090.py (extract_wikilinks normalization) --
+
+
+# ── 10. Wikilink Normalization Consistency (Context7) ─────────────
+
+
+def test_extract_wikilinks_already_strips_md():
+    """extract_wikilinks strips .md suffix — linker/graph should not double-strip."""
+    from kb.utils.markdown import extract_wikilinks
+
+    text = "See [[concepts/rag.md]] and [[entities/openai]]"
+    links = extract_wikilinks(text)
+    assert "concepts/rag" in links
+    assert "entities/openai" in links
+    # Verify .md is already stripped (no double stripping needed)
+    assert all(not link.endswith(".md") for link in links)
+
+
+def test_extract_wikilinks_lowercases():
+    """extract_wikilinks lowercases targets for case-insensitive matching."""
+    from kb.utils.markdown import extract_wikilinks
+
+    text = "See [[Concepts/RAG]] and [[Entities/OpenAI]]"
+    links = extract_wikilinks(text)
+    assert "concepts/rag" in links
+    assert "entities/openai" in links

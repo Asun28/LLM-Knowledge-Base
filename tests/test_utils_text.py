@@ -435,3 +435,53 @@ class TestSlugifyAsciiOnly:
         # After item-11 fix (re.ASCII dropped): accented chars are preserved in slug
         assert result  # not empty — never collapses to untitled-<hash> with real words
         assert "na" in result  # ASCII portion still present
+
+
+# -- Cycle 94 fold from test_v090.py (yaml_escape carriage return + null byte) --
+
+
+# ── 11b. yaml_escape Improvements ───────────────────────────────────
+
+
+def test_yaml_escape_carriage_return():
+    """yaml_escape escapes carriage return characters."""
+    from kb.utils.text import yaml_escape
+
+    assert yaml_escape("line1\rline2") == "line1\\rline2"
+
+
+def test_yaml_escape_null_byte():
+    """yaml_escape strips null bytes."""
+    from kb.utils.text import yaml_escape
+
+    assert yaml_escape("before\0after") == "beforeafter"
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (wrap_purpose sentinel/cap/empty/newlines) --
+
+
+def test_wrap_purpose_adds_sentinel_and_caps_content():
+    from kb.utils.text import wrap_purpose
+
+    wrapped = wrap_purpose("x" * 5000)
+
+    assert "<kb_purpose>" in wrapped
+    assert "</kb_purpose>" in wrapped
+    inner = wrapped.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
+    assert len(inner) <= 4096
+
+
+def test_wrap_purpose_empty_input_returns_empty_string():
+    from kb.utils.text import wrap_purpose
+
+    assert wrap_purpose("") == ""
+    assert wrap_purpose("   ") == ""
+
+
+def test_wrap_purpose_preserves_newlines_in_multiline_text():
+    """Regression: wrap_purpose must NOT strip \\n/\\t — only non-whitespace C0 controls."""
+    from kb.utils.text import wrap_purpose
+
+    text = "Focus on LLM architectures.\nSecondary: trading systems.\n"
+    wrapped = wrap_purpose(text)
+    assert "Focus on LLM architectures.\nSecondary: trading systems." in wrapped

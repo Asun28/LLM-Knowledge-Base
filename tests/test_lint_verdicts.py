@@ -492,3 +492,101 @@ class TestAddVerdictTruncatesNotes:
             path=verdict_path,
         )
         assert len(result["notes"]) <= MAX_NOTES_LEN
+
+
+# -- Cycle 94 fold from test_v070.py (lint verdicts) --
+
+
+# ── 5. Lint Verdicts ─────────────────────────────────────────────
+
+
+def test_add_verdict(tmp_path):
+    """add_verdict creates and stores a verdict."""
+    from kb.lint.verdicts import add_verdict, load_verdicts
+
+    path = tmp_path / "verdicts.json"
+    entry = add_verdict("concepts/rag", "fidelity", "pass", path=path)
+    assert entry["page_id"] == "concepts/rag"
+    assert entry["verdict"] == "pass"
+    stored = load_verdicts(path)
+    assert len(stored) == 1
+
+
+def test_add_verdict_invalid_verdict_v070(tmp_path):
+    """add_verdict rejects invalid verdict values."""
+    from kb.lint.verdicts import add_verdict
+
+    path = tmp_path / "verdicts.json"
+    with pytest.raises(ValueError, match="Invalid verdict"):
+        add_verdict("concepts/rag", "fidelity", "maybe", path=path)
+
+
+def test_add_verdict_invalid_type_v070(tmp_path):
+    """add_verdict rejects invalid verdict_type values."""
+    from kb.lint.verdicts import add_verdict
+
+    path = tmp_path / "verdicts.json"
+    with pytest.raises(ValueError, match="Invalid verdict_type"):
+        add_verdict("concepts/rag", "grammar", "pass", path=path)
+
+
+def test_get_page_verdicts(tmp_path):
+    """get_page_verdicts returns filtered, reverse-chronological verdicts."""
+    import time
+
+    from kb.lint.verdicts import add_verdict, get_page_verdicts
+
+    path = tmp_path / "verdicts.json"
+    add_verdict("concepts/a", "fidelity", "pass", path=path)
+    add_verdict("concepts/b", "fidelity", "fail", path=path)
+    time.sleep(1.1)  # ensure distinct timestamps for ordering
+    add_verdict("concepts/a", "review", "warning", path=path)
+    results = get_page_verdicts("concepts/a", path)
+    assert len(results) == 2
+    assert results[0]["verdict_type"] == "review"  # most recent first
+
+
+def test_get_verdict_summary(tmp_path):
+    """get_verdict_summary aggregates stats correctly."""
+    from kb.lint.verdicts import add_verdict, get_verdict_summary
+
+    path = tmp_path / "verdicts.json"
+    add_verdict("concepts/a", "fidelity", "pass", path=path)
+    add_verdict("concepts/b", "fidelity", "fail", path=path)
+    add_verdict("concepts/a", "review", "warning", path=path)
+    summary = get_verdict_summary(path)
+    assert summary["total"] == 3
+    assert summary["by_verdict"]["pass"] == 1
+    assert summary["by_verdict"]["fail"] == 1
+    assert summary["by_verdict"]["warning"] == 1
+    assert summary["pages_with_failures"] == ["concepts/b"]
+
+
+def test_load_verdicts_missing_file(tmp_path):
+    """load_verdicts returns empty list when file doesn't exist."""
+    from kb.lint.verdicts import load_verdicts
+
+    path = tmp_path / "nonexistent.json"
+    assert load_verdicts(path) == []
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (load_verdicts OSError resilience) --
+
+
+def test_load_verdicts_returns_empty_when_read_text_raises_oserror(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from kb.lint.verdicts import load_verdicts
+
+    verdicts_path = tmp_path / "lint_verdicts.json"
+    verdicts_path.write_text("[]", encoding="utf-8")
+
+    def raise_oserror(self, *args, **kwargs):
+        if self == verdicts_path:
+            raise OSError("read failed")
+        return original_read_text(self, *args, **kwargs)
+
+    original_read_text = Path.read_text
+    monkeypatch.setattr(Path, "read_text", raise_oserror)
+
+    assert load_verdicts(verdicts_path) == []

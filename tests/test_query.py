@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from kb.config import PAGERANK_SEARCH_WEIGHT
 from kb.query.citations import extract_citations, format_citations
 from kb.query.embeddings import _vec_db_path
 from kb.query.engine import _flag_stale_results, query_wiki, search_pages
@@ -1884,3 +1885,219 @@ class TestBuildQueryContextSmallMaxChars:
         ]
         result = _build_query_context(pages, max_chars=10)
         assert "No relevant wiki pages" in result["context"]
+
+
+# -- Cycle 94 fold from test_v090.py (citation regex underscores/hyphens) --
+
+
+# ── 2. Citation Regex Fix ────────────────────────────────────────
+
+
+def test_citation_regex_matches_underscores():
+    """Citation pattern now matches page IDs with underscores."""
+    from kb.query.citations import extract_citations
+
+    text = "As noted in [source: concepts/machine_learning], this is important."
+    cites = extract_citations(text)
+    assert len(cites) == 1
+    assert cites[0]["path"] == "concepts/machine_learning"
+
+
+def test_citation_regex_matches_nested_underscores():
+    """Citation pattern matches deeply nested underscore paths."""
+    from kb.query.citations import extract_citations
+
+    text = "See [ref: raw/articles/deep_learning_intro.md] for details."
+    cites = extract_citations(text)
+    assert len(cites) == 1
+    assert cites[0]["path"] == "raw/articles/deep_learning_intro.md"
+
+
+def test_citation_regex_still_matches_hyphens():
+    """Citation pattern still works with hyphenated paths (regression test)."""
+    from kb.query.citations import extract_citations
+
+    text = "[source: concepts/rag-vs-fine-tuning]"
+    cites = extract_citations(text)
+    assert len(cites) == 1
+    assert cites[0]["path"] == "concepts/rag-vs-fine-tuning"
+
+
+def test_citation_regex_mixed_underscore_hyphen():
+    """Citation pattern matches paths with both underscores and hyphens."""
+    from kb.query.citations import extract_citations
+
+    text = "[source: entities/open_ai-gpt]"
+    cites = extract_citations(text)
+    assert len(cites) == 1
+    assert cites[0]["path"] == "entities/open_ai-gpt"
+
+
+# -- Cycle 94 fold from test_v099_phase39.py (PageRank-blended search ranking) --
+
+
+# ── Task 2: PageRank-blended search ranking ───────────────────
+
+
+def _make_wiki_page(wiki_dir, subdir, slug, title, content, source_ref="raw/articles/test.md"):
+    """Helper to create a wiki page with proper frontmatter."""
+    today = date.today().isoformat()
+    page_dir = wiki_dir / subdir
+    page_dir.mkdir(parents=True, exist_ok=True)
+    page_path = page_dir / f"{slug}.md"
+    text = (
+        f'---\ntitle: "{title}"\nsource:\n  - "{source_ref}"\n'
+        f"created: {today}\nupdated: {today}\ntype: concept\nconfidence: stated\n---\n\n"
+        f"{content}\n"
+    )
+    page_path.write_text(text, encoding="utf-8")
+    return page_path
+
+
+class TestPageRankBlendedSearch:
+    """Test that search results blend BM25 scores with PageRank."""
+
+    def test_pagerank_config_exists(self):
+        """PAGERANK_SEARCH_WEIGHT config constant exists."""
+        assert isinstance(PAGERANK_SEARCH_WEIGHT, (int, float))
+        assert PAGERANK_SEARCH_WEIGHT >= 0
+
+    def test_search_returns_scores_with_pagerank(self, tmp_path):
+        """search_pages returns results with blended scores when graph exists."""
+        wiki_dir = tmp_path / "wiki"
+        # Create pages that link to each other (hub page gets high PageRank)
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "hub-topic",
+            "Hub Topic",
+            "Hub topic is central. See [[concepts/spoke-a]] and [[concepts/spoke-b]].",
+        )
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "spoke-a",
+            "Spoke A",
+            "Spoke A discusses hub topic. See [[concepts/hub-topic]].",
+        )
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "spoke-b",
+            "Spoke B",
+            "Spoke B discusses hub topic. See [[concepts/hub-topic]].",
+        )
+
+        from kb.query.engine import search_pages
+
+        results = search_pages("hub topic", wiki_dir=wiki_dir)
+        assert len(results) > 0
+        # hub-topic should be boosted by PageRank (more inlinks)
+        top_result = results[0]
+        assert top_result["id"] == "concepts/hub-topic"
+
+    def test_search_works_with_zero_weight(self, tmp_path):
+        """Search works correctly when PageRank weight is zero (pure BM25)."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "alpha", "Alpha Topic", "Alpha topic content for search."
+        )
+
+        with patch("kb.query.engine.PAGERANK_SEARCH_WEIGHT", 0.0):
+            from kb.query.engine import search_pages
+
+            results = search_pages("alpha topic", wiki_dir=wiki_dir)
+            assert len(results) > 0
+
+    def test_search_single_page_no_graph(self, tmp_path):
+        """Search works with a single page (no meaningful graph)."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir, "concepts", "lonely", "Lonely Page", "A lonely page about searching."
+        )
+
+        from kb.query.engine import search_pages
+
+        results = search_pages("lonely page", wiki_dir=wiki_dir)
+        assert len(results) == 1
+        assert results[0]["score"] > 0
+
+    def test_pagerank_boosts_well_linked_page(self, tmp_path):
+        """A well-linked page gets boosted above a poorly-linked one with similar BM25."""
+        wiki_dir = tmp_path / "wiki"
+        # Create a hub that many pages link to
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "popular",
+            "Machine Learning",
+            "Machine learning is a popular topic.",
+        )
+        # Create several pages linking to popular
+        for i in range(5):
+            _make_wiki_page(
+                wiki_dir,
+                "concepts",
+                f"fan-{i}",
+                f"Fan {i}",
+                f"Fan {i} discusses machine learning. See [[concepts/popular]].",
+                source_ref=f"raw/articles/fan-{i}.md",
+            )
+        # Create an isolated page with similar content but distinct enough text to
+        # survive dedup (Jaccard threshold 0.85). The content matches the query but
+        # differs from popular's content word-set enough to not be deduplicated.
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "isolated",
+            "Machine Learning Isolated",
+            (
+                "Machine learning algorithms learn patterns from training data. "
+                "Supervised learning and unsupervised learning are core paradigms. "
+                "Neural networks are a fundamental tool in modern machine learning research."
+            ),
+            source_ref="raw/articles/isolated.md",
+        )
+
+        from kb.query.engine import search_pages
+
+        results = search_pages("machine learning", wiki_dir=wiki_dir)
+
+        # popular should appear above isolated due to PageRank boost
+        ids = [r["id"] for r in results]
+        popular_idx = ids.index("concepts/popular")
+        isolated_idx = ids.index("concepts/isolated")
+        assert popular_idx < isolated_idx, "Well-linked page should rank higher"
+
+
+# -- Cycle 94 fold from test_v09_cycle5_fixes.py (query_wiki purpose wrap + cap) --
+
+
+def test_query_wiki_wraps_and_caps_purpose(monkeypatch, tmp_path):
+    from kb.query import engine
+
+    captured = {}
+    page = {
+        "id": "concepts/rag",
+        "title": "RAG",
+        "type": "concept",
+        "confidence": "stated",
+        "content": "RAG content.",
+    }
+
+    monkeypatch.setattr(engine, "search_pages", lambda *args, **kwargs: [page])
+    monkeypatch.setattr(engine, "load_purpose", lambda wiki_dir: "x" * 5000)
+
+    def fake_call_llm(prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return "RAG answer [source: concepts/rag]"
+
+    monkeypatch.setattr(engine, "call_llm", fake_call_llm)
+
+    result = engine.query_wiki("What is RAG?", wiki_dir=tmp_path)
+
+    assert result["answer"] == "RAG answer [source: concepts/rag]"
+    prompt = captured["prompt"]
+    assert "<kb_purpose>" in prompt
+    inner = prompt.split("<kb_purpose>\n", 1)[1].split("\n</kb_purpose>", 1)[0]
+    assert len(inner) <= 4096

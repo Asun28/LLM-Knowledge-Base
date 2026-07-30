@@ -1,6 +1,7 @@
 """Tests for the compile module."""
 
 import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1809,3 +1810,199 @@ class TestInjectWikilinksSkipsCodeBlocks:
         # The inline `RAG` should NOT be converted to a wikilink
         code_line = next(line for line in result.splitlines() if "`RAG`" in line)
         assert "[[" not in code_line, f"Wikilink injected around inline code: {code_line}"
+
+
+# -- Cycle 94 fold from test_v070.py (template hash detection) --
+
+
+# ── 4. Template Hash Detection ───────────────────────────────────
+
+
+def test_template_hashes_computed():
+    """_template_hashes returns hash for each yaml template."""
+    from kb.compile.compiler import _template_hashes
+
+    hashes = _template_hashes()
+    assert len(hashes) >= 8  # 8 original + 2 new (comparison, synthesis)
+    for key in hashes:
+        assert key.startswith("_template/")
+
+
+def test_template_change_flags_sources(tmp_path):
+    """Changed template causes sources of that type to be flagged."""
+    from kb.compile.compiler import find_changed_sources, save_manifest
+    from kb.config import TEMPLATES_DIR
+    from kb.utils.hashing import content_hash
+
+    # Set up raw dir with one article
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True)
+    source = raw_dir / "articles" / "test.md"
+    source.write_text("test content")
+
+    # Create manifest with current source hash but OLD template hash
+    manifest_path = tmp_path / "hashes.json"
+    manifest = {"raw/articles/test.md": content_hash(source)}
+    # Add template hash with wrong value to simulate change
+    tpl = TEMPLATES_DIR / "article.yaml"
+    if tpl.exists():
+        manifest["_template/article"] = "old_hash_that_doesnt_match"
+    save_manifest(manifest, manifest_path)
+
+    new, changed = find_changed_sources(raw_dir, manifest_path)
+    # The source should appear as changed due to template change
+    assert len(changed) >= 1 or len(new) >= 1
+
+
+def test_compile_saves_template_hashes(tmp_path):
+    """compile_wiki stores template hashes in the manifest."""
+    from kb.compile.compiler import compile_wiki, load_manifest
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "articles").mkdir(parents=True)
+    manifest_path = tmp_path / "hashes.json"
+    wiki_log = tmp_path / "wiki" / "log.md"
+    wiki_log.parent.mkdir(parents=True)
+    wiki_log.write_text("# Log\n\n")
+
+    wiki_dir = wiki_log.parent
+    compile_wiki(incremental=True, raw_dir=raw_dir, manifest_path=manifest_path, wiki_dir=wiki_dir)
+
+    manifest = load_manifest(manifest_path)
+    template_keys = [k for k in manifest if k.startswith("_template/")]
+    assert len(template_keys) >= 8
+
+
+# -- Cycle 94 fold from test_v090.py (linker resolves normalized wikilinks) --
+
+
+def test_linker_resolve_uses_normalized_links(tmp_wiki, create_wiki_page):
+    """Linker resolves wikilinks correctly with normalized (lowered, no .md) IDs."""
+    from kb.compile.linker import resolve_wikilinks
+
+    create_wiki_page("concepts/rag", wiki_dir=tmp_wiki, content="See [[entities/openai]]")
+    create_wiki_page("entities/openai", wiki_dir=tmp_wiki, content="An entity.")
+
+    result = resolve_wikilinks(tmp_wiki)
+    assert result["resolved"] == 1
+    assert result["broken"] == []
+
+
+# -- Cycle 94 fold from test_v099_phase39.py (retroactive inbound wikilink injection) --
+
+
+def _make_wiki_page(wiki_dir, subdir, slug, title, content, source_ref="raw/articles/test.md"):
+    """Helper to create a wiki page with proper frontmatter."""
+    today = date.today().isoformat()
+    page_dir = wiki_dir / subdir
+    page_dir.mkdir(parents=True, exist_ok=True)
+    page_path = page_dir / f"{slug}.md"
+    text = (
+        f'---\ntitle: "{title}"\nsource:\n  - "{source_ref}"\n'
+        f"created: {today}\nupdated: {today}\ntype: concept\nconfidence: stated\n---\n\n"
+        f"{content}\n"
+    )
+    page_path.write_text(text, encoding="utf-8")
+    return page_path
+
+
+# ── Task 6: Retroactive inbound wikilink injection ───────────
+
+
+class TestRetroactiveWikilinkInjection:
+    """Test injecting wikilinks into existing pages when new pages are created."""
+
+    def test_inject_wikilink_for_exact_match(self, tmp_path):
+        """Existing page mentioning a new page's title gets a wikilink injected."""
+        wiki_dir = tmp_path / "wiki"
+        # Create existing page that mentions "Machine Learning" as plain text
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "deep-learning",
+            "Deep Learning",
+            "Deep learning is a subset of Machine Learning that uses neural networks.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Machine Learning", "concepts/machine-learning", wiki_dir=wiki_dir
+        )
+        assert len(injected) == 1
+        assert injected[0] == "concepts/deep-learning"
+
+        # Verify the wikilink was inserted
+        content = (wiki_dir / "concepts" / "deep-learning.md").read_text(encoding="utf-8")
+        assert "[[concepts/machine-learning|Machine Learning]]" in content
+
+    def test_no_injection_in_frontmatter(self, tmp_path):
+        """Wikilinks are not injected into YAML frontmatter."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "test-page",
+            "Test Page",
+            "Some content about other things.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        inject_wikilinks("Test Page", "concepts/test-page-new", wiki_dir=wiki_dir)
+        # Should not inject into the page's own title in frontmatter
+        content = (wiki_dir / "concepts" / "test-page.md").read_text(encoding="utf-8")
+        # Frontmatter should be unchanged
+        assert 'title: "Test Page"' in content
+
+    def test_no_injection_when_wikilink_exists(self, tmp_path):
+        """Skip injection when page already has a wikilink to the target."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "existing",
+            "Existing",
+            "Already links to [[concepts/target-page]] explicitly.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks("Target Page", "concepts/target-page", wiki_dir=wiki_dir)
+        assert len(injected) == 0  # Already linked
+
+    def test_skip_self_injection(self, tmp_path):
+        """Don't inject wikilink into the page itself."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "self-ref",
+            "Self Ref",
+            "This page talks about Self Ref concepts.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks("Self Ref", "concepts/self-ref", wiki_dir=wiki_dir)
+        assert len(injected) == 0
+
+    def test_case_insensitive_match(self, tmp_path):
+        """Matching is case-insensitive for the title."""
+        wiki_dir = tmp_path / "wiki"
+        _make_wiki_page(
+            wiki_dir,
+            "concepts",
+            "nlp-page",
+            "NLP Page",
+            "Natural language processing uses transformer architecture frequently.",
+        )
+
+        from kb.compile.linker import inject_wikilinks
+
+        injected = inject_wikilinks(
+            "Transformer Architecture",
+            "concepts/transformer-architecture",
+            wiki_dir=wiki_dir,
+        )
+        assert len(injected) == 1
