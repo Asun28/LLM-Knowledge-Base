@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _validate_wiki_dir, mcp
 from kb.utils.sanitize import sanitize_error_text
 
@@ -19,7 +20,9 @@ def _validate_health_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | 
     return _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
 
 
-@mcp.tool()
+# Cycle 95 — long tool (augment mode fetches URLs / minutes-scale sweeps):
+# registered async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 def kb_lint(
     fix: bool = False,
     augment: bool = False,
@@ -132,7 +135,11 @@ def kb_lint(
     return result
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool. Makes no LLM call, but loads the whole wiki and
+# scores up to MAX_CONNECTION_PAIRS (50,000) connection pairs; measured
+# 4.96-11.25s cold on a 174-page corpus. "No network call" is not the same as
+# "short", and the shared-pool starvation this cycle fixes is about WALL TIME.
+@register_long_tool
 def kb_evolve(wiki_dir: str | None = None) -> str:
     """Analyze knowledge gaps and suggest new connections, pages, and sources.
 
@@ -172,7 +179,8 @@ def kb_evolve(wiki_dir: str | None = None) -> str:
     return result
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: same whole-wiki graph build as kb_stats.
+@register_long_tool
 def kb_graph_viz(max_nodes: int = 30, wiki_dir: str | None = None) -> str:
     """Export the wiki knowledge graph as a Mermaid diagram.
 
@@ -236,7 +244,8 @@ def kb_verdict_trends(wiki_dir: str | None = None) -> str:
         return f"Error: Verdict trends failed — {sanitize_error_text(e)}"
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: re-hashes every raw source against the manifest.
+@register_long_tool
 def kb_detect_drift(wiki_dir: str | None = None) -> str:
     """Detect wiki pages that may be stale due to raw source changes.
 

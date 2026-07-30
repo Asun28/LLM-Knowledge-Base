@@ -609,6 +609,16 @@ VALID_VERDICT_TYPES: tuple[str, ...] = (
 MAX_PAGE_ID_LEN = 200
 MAX_CITED_PAGES = 50
 
+# ── MCP long-tool worker pool (cycle 95) ──────────────────────
+# Default capacity of the DEDICATED anyio.CapacityLimiter that long-running
+# MCP tools (kb_query / kb_lint / kb_compile / kb_ingest / kb_ingest_content /
+# kb_capture) are offloaded to, so they cannot saturate FastMCP's shared
+# default worker pool (anyio default: 40 threads). Runtime override:
+# KB_MCP_LONG_TOOL_THREADS (read when a loop's limiter is first created);
+# kill-switch KB_DISABLE_MCP_LONG_TOOL_LIMITER routes long tools back to
+# the shared pool (pre-cycle-95 behaviour). See kb.mcp._offload.
+MCP_LONG_TOOL_THREADS_DEFAULT = 8
+
 # ── Wiki subdir → page type mapping ───────────────────────────
 WIKI_SUBDIR_TO_TYPE: dict[str, str] = {
     "entities": "entity",

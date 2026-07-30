@@ -8,7 +8,12 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 import kb.config
-from kb.config import MAX_NOTES_LEN, MAX_PAGE_ID_LEN, WIKI_DIR
+from kb.config import (
+    MAX_NOTES_LEN,
+    MAX_PAGE_ID_LEN,
+    MCP_LONG_TOOL_THREADS_DEFAULT,
+    WIKI_DIR,
+)
 
 # Cycle 42 AC2 — `_rel` is re-exported for back-compat with `kb.mcp.core` and any
 # downstream caller that previously imported from `kb.mcp.app`. Ruff autofix
@@ -91,12 +96,52 @@ _TOOL_GROUPS = (
 )
 
 
+# Cycle 95 — long tools registered async-offloaded via kb.mcp._offload.
+# Names are duplicated here as a literal (NOT imported) because _offload
+# imports ``mcp`` from this module; tests/test_cycle95_mcp_async_offload.py
+# pins this tuple against kb.mcp._offload.LONG_TOOL_NAMES so the two
+# surfaces cannot drift.
+_LONG_TOOL_NOTE_NAMES = (
+    "kb_query",
+    "kb_lint",
+    "kb_compile",
+    "kb_ingest",
+    "kb_ingest_content",
+    "kb_capture",
+    "kb_evolve",
+    "kb_stats",
+    "kb_graph_viz",
+    "kb_detect_drift",
+    "kb_compile_scan",
+    "kb_lint_consistency",
+    "kb_refine_page",
+    "kb_affected_pages",
+)
+
+
 def _render_instructions() -> str:
     _lines = [_INSTRUCTIONS_PREAMBLE, "", "## Tool Groups"]
     for group_name, tools in _TOOL_GROUPS:
         _lines.append(f"\n### {group_name}")
         for name, desc in sorted(tools, key=lambda t: t[0]):
             _lines.append(f"- `{name}` — {desc}")
+    # Cycle 95 — surface the concurrency model (Phase 4.5 HIGH R3 remedy).
+    # Wording is deliberate (R1 P2): anyio reuses ONE worker-thread collection
+    # per event loop for every limiter, so a custom CapacityLimiter is an
+    # ADMISSION BUDGET, not a separate pool of reserved threads. Total live
+    # workers can reach roughly default capacity + long-tool capacity.
+    _lines.append(
+        "\n## Concurrency\n"
+        "Tools that make an LLM/network call or do whole-corpus work ("
+        + ", ".join(f"`{n}`" for n in _LONG_TOOL_NOTE_NAMES)
+        + ") run async under a dedicated admission budget of "
+        f"{MCP_LONG_TOOL_THREADS_DEFAULT} concurrent calls by default "
+        "(env KB_MCP_LONG_TOOL_THREADS), so they cannot exhaust the "
+        "per-event-loop default thread limiter (anyio default: 40) that "
+        "serves the remaining short, page-scoped sync tools. Kill-switch: "
+        "KB_DISABLE_MCP_LONG_TOOL_LIMITER=1 routes them back onto the "
+        "default limiter."
+    )
     return "\n".join(_lines)
 
 

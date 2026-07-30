@@ -108,13 +108,34 @@ class TestMCPErrorBoundarySanitization:
         assert "@_mcp_error_boundary" in source, "kb_query missing @_mcp_error_boundary"
 
     def test_mcp_tools_decorated(self):
-        """Test that MCP tools in core/ingest/quality are decorated.
+        """Every REGISTERED tool in core/ingest/quality is boundary-wrapped.
 
-        C17 — parametrized verification that decorators are applied.
+        C17 — verification that decorators are applied.
+
+        Cycle 95 counts ``@register_long_tool`` (async-offloaded
+        registration, kb.mcp._offload) as a registration alongside
+        ``@mcp.tool()``, and pairs the decorators PER FUNCTION rather than
+        comparing module-wide counts. The old count-comparison had a
+        concrete false pass: one unwrapped registered tool plus one
+        unrelated ``@_mcp_error_boundary`` helper yields ``1 == 1``.
+        Decorator ORDER is asserted too — the boundary must sit BELOW the
+        registration, or FastMCP registers the unwrapped function.
         """
         import ast
         from pathlib import Path
 
+        def _is_registration(dec) -> bool:
+            # @mcp.tool() / @mcp.tool
+            if isinstance(dec, ast.Call):
+                dec = dec.func
+            if isinstance(dec, ast.Attribute):
+                return dec.attr == "tool"
+            return isinstance(dec, ast.Name) and dec.id == "register_long_tool"
+
+        def _is_boundary(dec) -> bool:
+            return isinstance(dec, ast.Name) and dec.id == "_mcp_error_boundary"
+
+        checked = 0
         for module_path in [
             Path("src/kb/mcp/core.py"),
             Path("src/kb/mcp/ingest.py"),
@@ -123,25 +144,27 @@ class TestMCPErrorBoundarySanitization:
             with open(module_path, encoding="utf-8") as f:
                 tree = ast.parse(f.read())
 
-            # Count @mcp.tool() and @_mcp_error_boundary decorators
-            mcp_tool_count = 0
-            boundary_count = 0
-
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    for dec in node.decorator_list:
-                        if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
-                            if dec.func.attr == "tool":
-                                mcp_tool_count += 1
-                        elif isinstance(dec, ast.Name):
-                            if dec.id == "_mcp_error_boundary":
-                                boundary_count += 1
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                decorators = node.decorator_list
+                reg_idx = next((i for i, d in enumerate(decorators) if _is_registration(d)), None)
+                if reg_idx is None:
+                    continue
+                checked += 1
+                bnd_idx = next((i for i, d in enumerate(decorators) if _is_boundary(d)), None)
+                assert bnd_idx is not None, (
+                    f"{module_path}:{node.lineno} {node.name} is registered as an MCP "
+                    f"tool but has no @_mcp_error_boundary"
+                )
+                # Decorators apply bottom-up, so a LOWER decorator has a
+                # HIGHER list index. The boundary must be below registration.
+                assert bnd_idx > reg_idx, (
+                    f"{module_path}:{node.lineno} {node.name}: @_mcp_error_boundary must "
+                    f"be BELOW the registration decorator (it wraps the function body)"
+                )
 
-            # Every module should have matching counts
-            assert mcp_tool_count == boundary_count, (
-                f"{module_path}: {mcp_tool_count} @mcp.tool() but "
-                f"{boundary_count} @_mcp_error_boundary"
-            )
+        assert checked >= 16, f"expected to check the known tool set, only found {checked}"
 
     def test_error_with_windows_path(self):
         """Test that Windows paths are sanitized.
