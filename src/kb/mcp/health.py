@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _validate_wiki_dir, mcp
 from kb.utils.sanitize import sanitize_error_text
 
@@ -19,7 +20,9 @@ def _validate_health_wiki_dir(wiki_dir: str | None) -> tuple[Path | None, str | 
     return _validate_wiki_dir(wiki_dir, project_root=PROJECT_ROOT)
 
 
-@mcp.tool()
+# Cycle 95 — long tool (augment mode fetches URLs / minutes-scale sweeps):
+# registered async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 def kb_lint(
     fix: bool = False,
     augment: bool = False,

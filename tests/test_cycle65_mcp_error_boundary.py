@@ -111,6 +111,10 @@ class TestMCPErrorBoundarySanitization:
         """Test that MCP tools in core/ingest/quality are decorated.
 
         C17 — parametrized verification that decorators are applied.
+        Cycle 95 — ``@register_long_tool`` (async-offloaded registration,
+        kb.mcp._offload) counts as a tool registration equally: the boundary
+        invariant is "every REGISTERED tool in these modules is wrapped",
+        regardless of which decorator performs the registration.
         """
         import ast
         from pathlib import Path
@@ -123,8 +127,9 @@ class TestMCPErrorBoundarySanitization:
             with open(module_path, encoding="utf-8") as f:
                 tree = ast.parse(f.read())
 
-            # Count @mcp.tool() and @_mcp_error_boundary decorators
-            mcp_tool_count = 0
+            # Count tool registrations (@mcp.tool() / @register_long_tool)
+            # and @_mcp_error_boundary decorators
+            registration_count = 0
             boundary_count = 0
 
             for node in ast.walk(tree):
@@ -132,14 +137,17 @@ class TestMCPErrorBoundarySanitization:
                     for dec in node.decorator_list:
                         if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
                             if dec.func.attr == "tool":
-                                mcp_tool_count += 1
+                                registration_count += 1
                         elif isinstance(dec, ast.Name):
-                            if dec.id == "_mcp_error_boundary":
+                            if dec.id == "register_long_tool":
+                                registration_count += 1
+                            elif dec.id == "_mcp_error_boundary":
                                 boundary_count += 1
 
             # Every module should have matching counts
-            assert mcp_tool_count == boundary_count, (
-                f"{module_path}: {mcp_tool_count} @mcp.tool() but "
+            assert registration_count == boundary_count, (
+                f"{module_path}: {registration_count} tool registrations "
+                f"(@mcp.tool() / @register_long_tool) but "
                 f"{boundary_count} @_mcp_error_boundary"
             )
 

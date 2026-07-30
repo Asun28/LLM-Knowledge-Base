@@ -16,6 +16,7 @@ from kb.config import (
     SOURCE_TYPE_DIRS,
 )
 from kb.mcp._error_boundary import _mcp_error_boundary
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _format_ingest_result, _is_windows_reserved, _rel, mcp
 from kb.utils.io import atomic_text_write
 from kb.utils.sanitize import sanitize_error_text
@@ -135,7 +136,9 @@ def _validate_filename_slug(filename: str) -> tuple[str, str | None]:
     return filename, None
 
 
-@mcp.tool()
+# Cycle 95 — long tool (use_api=True API extraction 10s+): registered
+# async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 @_mcp_error_boundary
 def kb_ingest(
     source_path: str,
@@ -307,7 +310,9 @@ def kb_ingest(
     )
 
 
-@mcp.tool()
+# Cycle 95 — long tool (use_api=True API extraction 10s+): registered
+# async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 @_mcp_error_boundary
 def kb_ingest_content(
     content: str,
@@ -557,7 +562,9 @@ def kb_save_source(
     )
 
 
-@mcp.tool()
+# Cycle 95 — long tool (scan-tier LLM atomization over up-to-50KB input):
+# registered async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 @_mcp_error_boundary
 def kb_capture(content: str, provenance: str | None = None) -> str:
     """Extract discrete knowledge items (decisions, discoveries, corrections, gotchas)

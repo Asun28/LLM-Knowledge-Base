@@ -2,6 +2,7 @@
 
 import logging
 
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _rel, _validate_wiki_dir, mcp
 from kb.utils.sanitize import sanitize_error_text
 
@@ -93,7 +94,9 @@ def kb_compile_scan(incremental: bool = True, wiki_dir: str | None = None) -> st
     return "\n".join(lines)
 
 
-@mcp.tool()
+# Cycle 95 — long tool (per-source LLM extraction, minutes in full mode):
+# registered async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 def kb_compile(incremental: bool = True) -> str:
     """Compile wiki pages from raw sources.
 

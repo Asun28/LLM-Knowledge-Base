@@ -13,15 +13,18 @@ Purpose: Current test-suite state + one-row-per-cycle history. Keep this file as
 
 | Metric | Value |
 |--------|-------|
-| Tests | 3421 passed + 24 skipped + 16 xfailed (3461 collected) |
-| Test files | ~235 |
+| Tests | 3614 passed + 29 skipped + 17 xfailed (3660 collected) |
+| Test files | 213 |
 | Version | v0.12.0 |
 | CI | ubuntu-latest strict-gated (cycle 36+); windows-latest deferred to cycle-53+ |
 
 ## Cycle History (newest first)
 
+> Rows for cycles 83-94 were not backfilled here as they landed; their full detail is in [CHANGELOG-history.md](../../CHANGELOG-history.md) and the compact index in [CHANGELOG.md](../../CHANGELOG.md).
+
 | Cycle | Date | Theme | Tests | Files |
 |-------|------|-------|-------|-------|
+| 95 | 2026-07-31 | MCP long-tool async offload — dedicated `anyio.CapacityLimiter` for the 6 long tools (closes the last open Phase 4.5 HIGH) | 3631→3660 (+29) | 212→213 |
 | 82b | 2026-07-23 | R2 Codex response: phantom depth on async interrupt + `StorageError` masking in `file_lock` cleanup + event-driven concurrency tests | 3458→3461 (+3) | ~235 |
 | 82 | 2026-07-23 | Refiner page-lock migration — one page-lock primitive across all 5 page-mutating sites | 3461 (preserved) | ~235 |
 | 81 | 2026-07-22 | Reentrant per-page write lock (closes Phase 4.5 HIGH R5 release-then-reacquire window) | 3437→3461 (+24) | ~220→~222 |

@@ -27,13 +27,13 @@ from kb.config import (
     WIKI_DIR,
 )
 from kb.mcp._error_boundary import _mcp_error_boundary
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import (
     _format_ingest_result,
     _is_windows_reserved,
     _rel,
     _validate_wiki_dir,
     error_tag,
-    mcp,
 )
 from kb.query.rewriter import rewrite_query
 from kb.utils.io import atomic_text_write
@@ -233,7 +233,9 @@ def _save_synthesis(slug: str, result: dict) -> str:
         return f"\n[warn] save_as failed: {sanitized_err}"
 
 
-@mcp.tool()
+# Cycle 95 — long tool (use_api=True synthesis 30s+): registered
+# async-offloaded; module attribute stays the sync callable.
+@register_long_tool
 @_mcp_error_boundary
 def kb_query(
     question: str,
