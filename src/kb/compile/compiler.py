@@ -2,7 +2,9 @@
 
 import json
 import logging
+import math
 import os
+import time
 from pathlib import Path
 
 import yaml
@@ -15,7 +17,7 @@ from kb.config import (
     TEMPLATES_DIR,
     WIKI_DIR,
 )
-from kb.errors import ValidationError
+from kb.errors import CompileError, ValidationError
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
@@ -30,6 +32,44 @@ logger = logging.getLogger(__name__)
 
 # Hash manifest location (git-ignored)
 HASH_MANIFEST = PROJECT_ROOT / ".data" / "hashes.json"
+
+# Cycle 91 AC02 — cap on how many stale-marker keys AC7's warning enumerates
+# by name. Cycle 25's Step-8 gate chose full enumeration; cycle-83's T6 threat
+# showed the unbounded log line is its own failure mode on a repo with many
+# stale markers, so the cap supersedes that decision. The count is always
+# reported in full; only the per-key listing is truncated.
+STALE_MARKER_WARNING_CAP = 10
+
+
+def _marker_age_days(value: str, *, now: float | None = None) -> float | None:
+    """Age in days of a timestamped ``in_progress:`` marker, or ``None``.
+
+    Cycle 91 AC01 — marker format is ``in_progress:{pre_hash}[:{unix_ts}]``.
+    The integer-epoch third segment is written by cycle-91+ ``compile_wiki``;
+    two-segment markers from earlier cycles, unparseable timestamps, and
+    timestamps in the future (clock skew) all return ``None`` — "age unknown"
+    is reported rather than a guessed number, per the ``get_prompt_version``
+    legacy-default convention.
+    """
+    parts = value.split(":")
+    if len(parts) < 3:
+        return None
+    try:
+        ts = float(parts[2])
+    except ValueError:
+        return None
+    # Cycle 91 R1 Codex F3 — float("nan") passes both ordered comparisons
+    # below (NaN compares False against everything) and would render as
+    # "age nand"; float("inf") is equally meaningless as a birth time.
+    if not math.isfinite(ts):
+        return None
+    if ts <= 0:
+        return None
+    current = time.time() if now is None else now
+    age_seconds = current - ts
+    if age_seconds < 0:
+        return None
+    return age_seconds / 86400.0
 
 
 def _template_hashes() -> dict[str, str]:
@@ -407,6 +447,69 @@ def detect_source_drift(
     }
 
 
+def clear_stale_markers(manifest_path: Path | None = None) -> list[str]:
+    """Delete every ``in_progress:``-valued manifest entry (operator-invoked).
+
+    Cycle 91 AC03 — the explicit remediation path for cycle-25 AC7's
+    "operator decides" contract. AUTO-deletion stays rejected (cycle-25 Q10:
+    it races a legitimate concurrent compile); this helper is reachable only
+    from ``kb compile --clear-stale-markers``, i.e. a deliberate human
+    decision. The read-modify-write holds ``file_lock`` so a concurrent
+    manifest writer is not clobbered mid-save, but clearing while another
+    compile is genuinely in flight WILL discard that run's live premarker —
+    the CLI help text says so, and the consequence is only a lost AC7
+    warning, never lost source data (the in-flight ingest's own tail
+    manifest write is unaffected).
+
+    Returns the sorted list of cleared keys (empty when nothing matched;
+    the manifest file is not rewritten in that case).
+
+    Raises:
+        CompileError: when the manifest file exists but cannot be parsed,
+            OR parses to valid JSON whose root is not an object.
+            Cycle 91 R1 Codex F1 — `load_manifest` deliberately self-heals
+            corruption to `{}` for the compile path, but here that would
+            report "no stale markers" against a corrupt-but-recoverable
+            manifest and let the subsequent compile overwrite it. An
+            operator-invoked remediation must fail loudly instead; a
+            MISSING manifest is genuinely "no markers" and returns [].
+        OSError: raw filesystem errors from the read (e.g. permission
+            denied) and from `save_manifest` propagate unchanged — the CLI
+            boundary (`_error_exit`) converts them to a clean exit 1, and
+            wrapping them here would only hide the errno (R2 Codex P2-1).
+        TimeoutError: from `file_lock` when another process holds the
+            manifest lock.
+    """
+    manifest_path = manifest_path or HASH_MANIFEST
+    with file_lock(manifest_path):
+        if not manifest_path.exists():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise CompileError(
+                f"clear_stale_markers: manifest is corrupt and was NOT modified "
+                f"({exc}). Inspect it manually or run `kb rebuild-indexes` to reset."
+            ) from exc
+        if not isinstance(manifest, dict):
+            raise CompileError(
+                "clear_stale_markers: manifest root is not a JSON object; "
+                "NOT modified. Inspect it manually or run `kb rebuild-indexes`."
+            )
+        cleared = sorted(k for k, v in manifest.items() if str(v).startswith("in_progress:"))
+        if not cleared:
+            return []
+        for k in cleared:
+            del manifest[k]
+        save_manifest(manifest, manifest_path)
+    logger.info(
+        "clear_stale_markers: removed %d in_progress marker(s): %s",
+        len(cleared),
+        ", ".join(cleared),
+    )
+    return cleared
+
+
 def compile_wiki(
     incremental: bool = True,
     raw_dir: Path | None = None,
@@ -448,25 +551,42 @@ def compile_wiki(
     # abortive run (hard-kill, power-loss between AC6's pre-marker write and
     # the subsequent ingest_source manifest overwrite). Log-only per Q2
     # (operator decides remediation; auto-delete would race a legitimate
-    # concurrent compile per Q10). Truncation dropped per Step-8 plan-gate:
-    # each stale source named individually so operators correlate with the
-    # specific failed ingest.
+    # concurrent compile per Q10). Cycle 91 AC01/AC02 — each shown key is
+    # annotated with its marker age (cycle-91 markers carry a birth
+    # timestamp; older two-segment markers report "age unknown") and the
+    # per-key listing is capped at STALE_MARKER_WARNING_CAP with an
+    # "and M more" suffix, superseding cycle-25's full-enumeration choice
+    # (cycle-83 T6: the unbounded log line was its own failure mode).
     try:
         _existing_manifest_snapshot = load_manifest(manifest_path)
     except Exception as e:  # pragma: no cover — defensive
         logger.warning("compile_wiki: could not scan for stale markers: %s", e)
         _existing_manifest_snapshot = {}
-    _stale_in_progress = [
-        k for k, v in _existing_manifest_snapshot.items() if str(v).startswith("in_progress:")
-    ]
+    _stale_in_progress = sorted(
+        (k, str(v))
+        for k, v in _existing_manifest_snapshot.items()
+        if str(v).startswith("in_progress:")
+    )
     if _stale_in_progress:
+        _shown = _stale_in_progress[:STALE_MARKER_WARNING_CAP]
+        _descriptions = []
+        for _key, _value in _shown:
+            _age_days = _marker_age_days(_value)
+            _age_note = "age unknown" if _age_days is None else f"age {_age_days:.1f}d"
+            _descriptions.append(f"{_key} ({_age_note})")
+        _listing = ", ".join(_descriptions)
+        _overflow = len(_stale_in_progress) - len(_shown)
+        if _overflow > 0:
+            _listing += f", and {_overflow} more"
         logger.warning(
             "compile_wiki: found %d stale in_progress marker(s) from a prior "
-            "abortive run. Sources: %s. Investigate or run `kb rebuild-indexes` "
-            "to clear. Concurrent in-flight compiles from another process may "
-            "also produce this warning (see CLAUDE.md for details).",
+            "abortive run. Sources: %s. Investigate, run `kb compile "
+            "--clear-stale-markers` to discard them, or `kb rebuild-indexes` "
+            "to reset all derived state. Concurrent in-flight compiles from "
+            "another process may also produce this warning (see CLAUDE.md "
+            "for details).",
             len(_stale_in_progress),
-            ", ".join(_stale_in_progress),
+            _listing,
         )
 
     if incremental:
@@ -511,7 +631,10 @@ def compile_wiki(
         try:
             with file_lock(manifest_path, timeout=1.0):
                 _marker_manifest = load_manifest(manifest_path)
-                _marker_manifest[rel_path] = f"in_progress:{pre_hash}"
+                # Cycle 91 AC01 — third segment is the marker's birth time so
+                # AC7's scan can report an age. `startswith("in_progress:")`
+                # consumers and the AC8 `failed:` overwrite are unaffected.
+                _marker_manifest[rel_path] = f"in_progress:{pre_hash}:{int(time.time())}"
                 save_manifest(_marker_manifest, manifest_path)
         except (TimeoutError, OSError) as marker_exc:
             # Best-effort: if the marker write fails, log and proceed.

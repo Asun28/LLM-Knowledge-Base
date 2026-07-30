@@ -199,9 +199,39 @@ def ingest(source_path: str, source_type: str | None):
 
 @cli.command()
 @click.option("--incremental/--full", default=True, help="Incremental (default) or full recompile")
-def compile(incremental: bool):
+@click.option(
+    "--clear-stale-markers",
+    "clear_stale",
+    is_flag=True,
+    default=False,
+    help=(
+        "Before compiling, delete stale in_progress: manifest markers left by a "
+        "prior hard-killed compile. Do NOT use while another compile may be "
+        "running — it would discard that run's live marker."
+    ),
+)
+def compile(incremental: bool, clear_stale: bool):
     """Compile wiki pages from raw sources."""
-    from kb.compile.compiler import compile_wiki
+    from kb.compile.compiler import clear_stale_markers, compile_wiki
+
+    # Cycle 91 AC03 — operator-invoked marker remediation (auto-deletion
+    # stays rejected per cycle-25 Q10; this flag is the human decision).
+    # R1 Codex F2 — the clear runs inside its own error boundary and is
+    # fail-fast: a lock/save/corrupt-manifest failure exits via _error_exit
+    # WITHOUT running the compile, so a failed remediation is never buried
+    # under compile output.
+    if clear_stale:
+        try:
+            cleared = clear_stale_markers()
+        except Exception as e:
+            _error_exit(e)
+            return  # pragma: no cover — _error_exit raises SystemExit
+        if cleared:
+            click.echo(f"Cleared {len(cleared)} stale in_progress marker(s):")
+            for key in cleared:
+                click.echo(f"    - {key}")
+        else:
+            click.echo("No stale in_progress markers found.")
 
     mode = "incremental" if incremental else "full"
     click.echo(f"Compiling ({mode})...")
