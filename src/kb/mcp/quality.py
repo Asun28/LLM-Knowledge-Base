@@ -20,6 +20,7 @@ from kb.feedback.reliability import compute_trust_scores, get_flagged_pages
 from kb.lint._safe_call import _safe_call
 from kb.lint.verdicts import add_verdict
 from kb.mcp._error_boundary import _mcp_error_boundary
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _validate_notes, _validate_page_id, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.sanitize import sanitize_error_text
@@ -62,7 +63,9 @@ def kb_review_page(page_id: str) -> str:
         return f"Error reviewing {page_id}: {sanitize_error_text(e)}"
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: rebuilds the WHOLE-WIKI backlink map
+# (`build_backlinks()` with no args) after the page write.
+@register_long_tool
 @_mcp_error_boundary
 def kb_refine_page(page_id: str, updated_content: str, revision_notes: str = "") -> str:
     """Update a wiki page's content while preserving frontmatter.
@@ -165,7 +168,9 @@ def kb_lint_deep(page_id: str) -> str:
         return f"Error checking fidelity for {page_id}: {sanitize_error_text(e)}"
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: auto mode builds three whole-wiki groupings
+# BEFORE the output cap applies, so the cap bounds the response, not the work.
+@register_long_tool
 @_mcp_error_boundary
 def kb_lint_consistency(page_ids: str = "") -> str:
     """Cross-page consistency check — returns related pages grouped for
@@ -277,7 +282,8 @@ def kb_reliability_map() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: same whole-wiki `build_backlinks()` as kb_refine_page.
+@register_long_tool
 @_mcp_error_boundary
 def kb_affected_pages(page_id: str) -> str:
     """Find pages affected when this page changes.

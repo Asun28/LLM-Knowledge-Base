@@ -1,21 +1,46 @@
 """Async offload for long-running MCP tools.
 
 Cycle 95 — Phase 4.5 HIGH R3: FastMCP executes sync tools via
-``anyio.to_thread.run_sync`` on anyio's shared default worker pool
-(default capacity: 40 threads). Long tools — ``kb_query(use_api=True)``
-30s+, ``kb_lint(augment=True)`` network fetches, ``kb_compile`` minutes,
-``kb_ingest(use_api=True)`` / ``kb_ingest_content(use_api=True)`` 10s+,
-``kb_capture`` LLM extraction — each hold one of those threads for their
-whole runtime, so concurrent long calls can saturate the pool and queue
-every other tool (including sub-second browse reads) behind them.
+``anyio.to_thread.run_sync``, which draws from the DEFAULT thread limiter
+(capacity 40, stored per event loop in an anyio ``RunVar``). A tool holds
+its token for its entire runtime, so concurrent long calls exhaust that
+budget and queue every other tool — including sub-second browse reads —
+behind them.
 
 ``register_long_tool(fn)`` registers a signature-preserving ASYNC wrapper
 with FastMCP under ``fn``'s own name. The wrapper offloads the sync
 implementation to a DEDICATED per-event-loop ``anyio.CapacityLimiter`` so
-long tools compete only with each other; the shared default pool stays
-free for the short tools. The module attribute (``kb.mcp.health.kb_lint``
+long tools contend only with each other and the default budget stays free
+for the short tools. The module attribute (``kb.mcp.health.kb_lint``
 etc.) remains the plain sync function, so direct-call test sites and CLI
 parity paths are unchanged.
+
+**Terminology (R1 P2).** A custom ``CapacityLimiter`` is an ADMISSION
+BUDGET, not a separate pool of reserved OS threads: anyio keeps ONE
+``workers``/``idle_workers`` collection per event loop and applies the
+limiter as an ``async with`` gate around it. Total live workers can
+therefore reach roughly default capacity + long-tool capacity. Do not
+describe this as "a dedicated pool of N threads".
+
+**Classification rule (R1 P1).** A tool belongs here if it makes an
+LLM/network call OR does unbounded whole-corpus work. "Makes no LLM call"
+is NOT sufficient to call a tool short — the starvation this module fixes
+is about WALL TIME. Measured on a 174-page corpus: ``kb_evolve`` 4.96-11.25s
+(loads the wiki, scores up to 50,000 connection pairs), ``kb_stats``
+2.63-7.37s cold (fingerprints every page, rebuilds the graph under
+``graph.cache._CACHE_LOCK``, runs PageRank). The 14 registered tools are
+the 6 LLM/network ones plus 8 whole-corpus ones; each call site carries a
+comment naming the specific unbounded work.
+
+Deliberately NOT registered (bounded to one page or one capped store, so
+they belong on the default budget): ``kb_search``, ``kb_read_page``,
+``kb_list_pages``, ``kb_list_sources``, ``kb_verdict_trends``,
+``kb_review_page``, ``kb_lint_deep``, ``kb_query_feedback``,
+``kb_reliability_map``, ``kb_save_source``, ``kb_save_lint_verdict``,
+``kb_create_page``, ``kb_refine_sweep``, ``kb_refine_list_stale``.
+``kb_review_page`` / ``kb_lint_deep`` read every source referenced by
+their ONE page with no byte cap — bounded by that page's source list, not
+the corpus; the missing read bound is filed in BACKLOG as its own item.
 
 Env vars (truthy variants ``{1, true, yes}`` case-insensitive):
 

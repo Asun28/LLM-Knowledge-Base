@@ -108,6 +108,14 @@ _LONG_TOOL_NOTE_NAMES = (
     "kb_ingest",
     "kb_ingest_content",
     "kb_capture",
+    "kb_evolve",
+    "kb_stats",
+    "kb_graph_viz",
+    "kb_detect_drift",
+    "kb_compile_scan",
+    "kb_lint_consistency",
+    "kb_refine_page",
+    "kb_affected_pages",
 )
 
 
@@ -118,16 +126,21 @@ def _render_instructions() -> str:
         for name, desc in sorted(tools, key=lambda t: t[0]):
             _lines.append(f"- `{name}` — {desc}")
     # Cycle 95 — surface the concurrency model (Phase 4.5 HIGH R3 remedy).
+    # Wording is deliberate (R1 P2): anyio reuses ONE worker-thread collection
+    # per event loop for every limiter, so a custom CapacityLimiter is an
+    # ADMISSION BUDGET, not a separate pool of reserved threads. Total live
+    # workers can reach roughly default capacity + long-tool capacity.
     _lines.append(
         "\n## Concurrency\n"
-        "Long-running tools ("
+        "Tools that make an LLM/network call or do whole-corpus work ("
         + ", ".join(f"`{n}`" for n in _LONG_TOOL_NOTE_NAMES)
-        + ") run async on a dedicated worker pool of "
-        f"{MCP_LONG_TOOL_THREADS_DEFAULT} threads by default "
-        "(env KB_MCP_LONG_TOOL_THREADS) so they cannot starve the shared "
-        "FastMCP worker pool (anyio default: 40 threads) serving the "
-        "remaining sync tools. Kill-switch: KB_DISABLE_MCP_LONG_TOOL_LIMITER=1 "
-        "routes long tools back through the shared pool."
+        + ") run async under a dedicated admission budget of "
+        f"{MCP_LONG_TOOL_THREADS_DEFAULT} concurrent calls by default "
+        "(env KB_MCP_LONG_TOOL_THREADS), so they cannot exhaust the "
+        "per-event-loop default thread limiter (anyio default: 40) that "
+        "serves the remaining short, page-scoped sync tools. Kill-switch: "
+        "KB_DISABLE_MCP_LONG_TOOL_LIMITER=1 routes them back onto the "
+        "default limiter."
     )
     return "\n".join(_lines)
 

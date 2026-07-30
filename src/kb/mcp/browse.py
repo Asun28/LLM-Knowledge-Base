@@ -12,6 +12,7 @@ from kb.config import (
     WIKI_DIR,
     WIKI_SUBDIR_TO_TYPE,
 )
+from kb.mcp._offload import register_long_tool
 from kb.mcp.app import _validate_page_id, _validate_wiki_dir, mcp
 from kb.utils.pages import load_all_pages
 from kb.utils.sanitize import sanitize_error_text
@@ -168,9 +169,7 @@ def kb_read_page(page_id: str) -> str:
     # bytes too. Worst-case footer with 10-digit ``omitted`` and 6-digit
     # ``effective_cap`` is ~120 chars; 200 is a comfortable upper bound.
     _MAX_TRUNCATION_FOOTER_BYTES = 200
-    effective_cap = (
-        QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD - _MAX_TRUNCATION_FOOTER_BYTES
-    )
+    effective_cap = QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD - _MAX_TRUNCATION_FOOTER_BYTES
     if truncated_at_read or len(body) > effective_cap:
         omitted = max(
             file_bytes - len(body.encode("utf-8")),
@@ -354,7 +353,11 @@ def kb_list_sources(limit: int = 200, offset: int = 0) -> str:
         return f"Error: Could not list sources: {sanitize_error_text(e)}"
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool. On a cache MISS this fingerprints every page,
+# rebuilds the graph under the module-level `_CACHE_LOCK`, and runs PageRank;
+# measured 2.63-7.37s cold on a 174-page corpus, and concurrent cache-miss
+# callers serialize on that lock while each holds a worker thread.
+@register_long_tool
 def kb_stats(wiki_dir: str | None = None) -> str:
     """Get wiki statistics: page counts by type, graph metrics, coverage info."""
     try:

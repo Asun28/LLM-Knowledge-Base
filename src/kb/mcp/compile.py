@@ -3,7 +3,7 @@
 import logging
 
 from kb.mcp._offload import register_long_tool
-from kb.mcp.app import _rel, _validate_wiki_dir, mcp
+from kb.mcp.app import _rel, _validate_wiki_dir
 from kb.utils.sanitize import sanitize_error_text
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,8 @@ def _refresh_legacy_bindings() -> None:
             globals()[name] = getattr(core, name)
 
 
-@mcp.tool()
+# Cycle 95 R1 P1 — long tool: hashes every raw source (O(corpus bytes)).
+@register_long_tool
 def kb_compile_scan(incremental: bool = True, wiki_dir: str | None = None) -> str:
     """Scan for new/changed raw sources that need ingestion.
 
