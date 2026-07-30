@@ -180,3 +180,75 @@ def test_pytest_markers_registered():
     assert "network: marks tests requiring network access" in markers
     assert "integration: marks integration tests requiring real filesystem or DB" in markers
     assert "llm: marks tests that invoke a real LLM API" in markers
+
+
+# -- Cycle 94 R1 Codex P2-1: self-contained pins for the two conftest repair arms --
+# Each test SEEDS the leak it targets (no reliance on file-pairing run order),
+# then explicitly requests `tmp_kb_env` so `_apply_kb_path_patches` re-runs
+# and must repair it. monkeypatch scoping restores the seeds afterwards.
+
+
+def test_mirror_rebind_claims_stale_sandbox_path(request, tmp_path, monkeypatch):
+    """Repair arm 1 — a kb.* module attr bound to a PRIOR sandbox is rebound.
+
+    Simulates the poisoning left by a module whose first-ever import happened
+    inside an earlier sandboxed test (cycle-93 compile-scan / mcp_server smoke
+    cascade): a Path under this session's basetemp but OUTSIDE the current
+    tmp_path. The equality-guarded arm alone could never repair it.
+    """
+    import kb.mcp.browse as browse
+
+    stale = tmp_path.parent / f"stale-{tmp_path.name}" / "project"
+    monkeypatch.setattr(browse, "PROJECT_ROOT", stale)
+
+    project = request.getfixturevalue("tmp_kb_env")
+
+    assert browse.PROJECT_ROOT.resolve().is_relative_to(project.resolve()), (
+        "stale-sandbox PROJECT_ROOT must be claimed by the mirror-rebind arm"
+    )
+
+
+def test_mirror_rebind_claims_mixed_stale_source_type_dirs(request, tmp_path, monkeypatch):
+    """Repair arm 1, dict case — SOURCE_TYPE_DIRS with ONE stale value is
+    replaced whole (matching tmp_kb_env's whole-map contract)."""
+    import kb.config as config
+    import kb.mcp.browse as browse
+
+    stale_root = tmp_path.parent / f"stale-{tmp_path.name}" / "raw"
+    mixed = dict(config.SOURCE_TYPE_DIRS)
+    first_key = next(iter(mixed))
+    mixed[first_key] = stale_root / mixed[first_key].name
+    monkeypatch.setattr(browse, "SOURCE_TYPE_DIRS", mixed, raising=False)
+
+    project = request.getfixturevalue("tmp_kb_env")
+
+    for source_dir in browse.SOURCE_TYPE_DIRS.values():
+        assert source_dir.resolve().is_relative_to(project.resolve()), (
+            "a SOURCE_TYPE_DIRS map containing any stale value must be "
+            "replaced whole with the current sandbox map"
+        )
+
+
+def test_stale_nonsandboxed_config_constant_repaired_to_real(request, tmp_path, monkeypatch):
+    """Repair arm 2 — a reload-leaked NON-sandboxed constant is restored.
+
+    Simulates the cycle-15 KB_PROJECT_ROOT + importlib.reload(kb.config) leak:
+    TEMPLATES_DIR left pointing at a dead sandbox. The repair must restore the
+    REAL repo value (templates are repo-shipped artifacts, never sandboxed).
+    """
+    import kb.config as config
+    from tests.conftest import _REAL_CONFIG_PATHS_AT_CONFTEST_IMPORT
+
+    real_templates = _REAL_CONFIG_PATHS_AT_CONFTEST_IMPORT["TEMPLATES_DIR"]
+    stale = tmp_path.parent / f"stale-{tmp_path.name}" / "templates"
+    monkeypatch.setattr(config, "TEMPLATES_DIR", stale)
+
+    request.getfixturevalue("tmp_kb_env")
+
+    assert config.TEMPLATES_DIR == real_templates, (
+        "a stale-sandbox TEMPLATES_DIR must be repaired to the real repo "
+        "templates dir, not sandboxed"
+    )
+    assert (config.TEMPLATES_DIR / "comparison.yaml").is_file(), (
+        "repaired TEMPLATES_DIR must point at the real repo-shipped templates"
+    )
