@@ -72,6 +72,13 @@ def test_marker_age_days_nonpositive_timestamp_returns_none():
     assert _marker_age_days("in_progress:abc123:-5") is None
 
 
+def test_marker_age_days_nonfinite_timestamp_returns_none():
+    """R1 Codex F3 — float('nan')/'inf' parse as floats but are not ages."""
+    assert _marker_age_days("in_progress:abc123:nan") is None
+    assert _marker_age_days("in_progress:abc123:inf") is None
+    assert _marker_age_days("in_progress:abc123:-inf") is None
+
+
 def test_premarker_write_carries_timestamp_segment(tmp_path, monkeypatch):
     """AC01 — the premarker written before ingest has 3 segments.
 
@@ -219,6 +226,43 @@ def test_clear_stale_markers_noop_returns_empty_and_preserves_manifest(tmp_path)
     )
 
 
+def test_clear_stale_markers_missing_manifest_returns_empty(tmp_path):
+    assert clear_stale_markers(tmp_path / "does_not_exist.json") == []
+
+
+def test_clear_stale_markers_corrupt_manifest_raises_and_preserves_file(tmp_path):
+    """R1 Codex F1 — corruption must fail LOUDLY, not report 'no markers'.
+
+    `load_manifest` self-heals corruption to {} for the compile path; the
+    operator-invoked remediation must instead refuse to touch the file.
+
+    Cycle-20 L1 reload-leak guard: the exception class is late-bound via
+    `compiler_mod.CompileError` (the class production code raises), NOT
+    re-imported from `kb.errors` — a sibling test's `importlib.reload`
+    of `kb.errors` creates a NEW class and `pytest.raises(<new>)` would
+    miss the OLD one raised by the un-reloaded compiler module.
+    """
+    import pytest
+
+    manifest_path = tmp_path / "hashes.json"
+    manifest_path.write_text("{not valid json", encoding="utf-8")
+    raw_before = manifest_path.read_text(encoding="utf-8")
+
+    with pytest.raises(compiler_mod.CompileError, match="corrupt"):
+        clear_stale_markers(manifest_path)
+    assert manifest_path.read_text(encoding="utf-8") == raw_before
+
+
+def test_clear_stale_markers_non_dict_root_raises(tmp_path):
+    import pytest
+
+    manifest_path = tmp_path / "hashes.json"
+    manifest_path.write_text('["a", "list"]', encoding="utf-8")
+
+    with pytest.raises(compiler_mod.CompileError, match="not a JSON object"):
+        clear_stale_markers(manifest_path)
+
+
 def _fake_compile_result():
     return {
         "sources_processed": 0,
@@ -260,6 +304,30 @@ def test_cli_compile_clear_stale_markers_flag_no_markers(monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "No stale in_progress markers found." in result.output
+
+
+def test_cli_compile_clear_failure_exits_without_compiling(monkeypatch):
+    """R1 Codex F2 — a failed clear routes through _error_exit, fail-fast."""
+    from kb.errors import CompileError
+
+    compile_calls = []
+
+    def _raising_clear(manifest_path=None):
+        raise CompileError("manifest is corrupt and was NOT modified")
+
+    monkeypatch.setattr(compiler_mod, "clear_stale_markers", _raising_clear)
+    monkeypatch.setattr(
+        compiler_mod,
+        "compile_wiki",
+        lambda *, incremental=True: compile_calls.append(1) or _fake_compile_result(),
+    )
+
+    result = CliRunner().invoke(cli, ["compile", "--clear-stale-markers"])
+
+    assert result.exit_code != 0
+    assert "Error:" in result.output
+    assert "corrupt" in result.output
+    assert not compile_calls, "compile must NOT run after a failed clear"
 
 
 def test_cli_compile_without_flag_never_clears(monkeypatch):

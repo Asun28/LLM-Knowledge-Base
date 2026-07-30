@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ from kb.config import (
     TEMPLATES_DIR,
     WIKI_DIR,
 )
-from kb.errors import ValidationError
+from kb.errors import CompileError, ValidationError
 from kb.ingest.pipeline import ingest_source
 from kb.utils.hashing import content_hash
 from kb.utils.io import file_lock
@@ -56,6 +57,11 @@ def _marker_age_days(value: str, *, now: float | None = None) -> float | None:
     try:
         ts = float(parts[2])
     except ValueError:
+        return None
+    # Cycle 91 R1 Codex F3 — float("nan") passes both ordered comparisons
+    # below (NaN compares False against everything) and would render as
+    # "age nand"; float("inf") is equally meaningless as a birth time.
+    if not math.isfinite(ts):
         return None
     if ts <= 0:
         return None
@@ -457,10 +463,32 @@ def clear_stale_markers(manifest_path: Path | None = None) -> list[str]:
 
     Returns the sorted list of cleared keys (empty when nothing matched;
     the manifest file is not rewritten in that case).
+
+    Raises:
+        CompileError: when the manifest file exists but cannot be parsed.
+            Cycle 91 R1 Codex F1 — `load_manifest` deliberately self-heals
+            corruption to `{}` for the compile path, but here that would
+            report "no stale markers" against a corrupt-but-recoverable
+            manifest and let the subsequent compile overwrite it. An
+            operator-invoked remediation must fail loudly instead; a
+            MISSING manifest is genuinely "no markers" and returns [].
     """
     manifest_path = manifest_path or HASH_MANIFEST
     with file_lock(manifest_path):
-        manifest = load_manifest(manifest_path)
+        if not manifest_path.exists():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise CompileError(
+                f"clear_stale_markers: manifest is corrupt and was NOT modified "
+                f"({exc}). Inspect it manually or run `kb rebuild-indexes` to reset."
+            ) from exc
+        if not isinstance(manifest, dict):
+            raise CompileError(
+                "clear_stale_markers: manifest root is not a JSON object; "
+                "NOT modified. Inspect it manually or run `kb rebuild-indexes`."
+            )
         cleared = sorted(k for k, v in manifest.items() if str(v).startswith("in_progress:"))
         if not cleared:
             return []
