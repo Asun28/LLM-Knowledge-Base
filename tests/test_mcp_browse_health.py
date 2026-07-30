@@ -774,3 +774,32 @@ def test_kb_verdict_trends_rejects_traversal_wiki_dir(tmp_path, monkeypatch):
 
     assert kb_verdict_trends(wiki_dir="../..").startswith("Error: wiki_dir")
     assert kb_verdict_trends(wiki_dir=str(tmp_path.parent)).startswith("Error: wiki_dir")
+
+
+# -- Cycle 92 fold from test_v0915_task09.py (kb_list_pages subset) --
+# Phase 3.96 Task 9 — Fix 9.13 kb_list_pages singular filter normalization.
+
+
+# ── Fix 9.13 — kb_list_pages singular filter normalization ───────────────────
+
+
+class TestListPagesSingularFilter:
+    def test_singular_concept_accepted(self):
+        from kb.mcp.browse import kb_list_pages
+
+        result_singular = kb_list_pages("concept")
+        result_plural = kb_list_pages("concepts")
+        # Both should behave the same (either both find nothing or both find pages)
+        if "No pages found" in result_singular:
+            assert "No pages found" in result_plural
+        else:
+            # Both should contain the same page type header
+            assert "concepts" in result_singular or "No pages found" in result_singular
+
+    def test_singular_entity_accepted(self):
+        from kb.mcp.browse import kb_list_pages
+
+        result = kb_list_pages("entity")
+        assert isinstance(result, str)
+        # Should not error
+        assert result.startswith("Error:") is False or "entity" in result

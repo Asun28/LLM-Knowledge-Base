@@ -1,6 +1,7 @@
 """Tests for the lint verdicts module (persistent verdict storage)."""
 
 import json
+import threading
 
 import pytest
 
@@ -257,3 +258,178 @@ def test_add_verdict_rejects_unknown_type(tmp_path, monkeypatch):
             notes="x",
             issues=[],
         )
+
+
+# -- Cycle 92 fold from test_v0915_task06.py (verdict-store subset) --
+# Phase 3.96 Task 6 — add_verdict threading lock + null-byte guard,
+# get_page_verdicts malformed-entry tolerance.
+
+
+# ── Fix 6.3 — threading.Lock in add_verdict ──────────────────────────────────
+
+
+class TestAddVerdictThreadingLock:
+    """Fix 6.3 — concurrent add_verdict calls do not lose entries."""
+
+    def test_concurrent_add_verdict_no_lost_writes(self, tmp_path):
+        """Multiple threads adding verdicts concurrently should all be persisted."""
+        from kb.lint.verdicts import add_verdict, load_verdicts
+
+        path = tmp_path / "verdicts.json"
+        n_threads = 10
+
+        errors = []
+
+        def add_one(i):
+            try:
+                add_verdict(
+                    f"concepts/page-{i}",
+                    "review",
+                    "pass",
+                    notes=f"thread {i}",
+                    path=path,
+                )
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_one, args=(i,)) for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors during concurrent write: {errors}"
+        result = load_verdicts(path)
+        assert len(result) == n_threads
+
+    def test_concurrent_writes_trim_at_max_verdicts(self, tmp_path):
+        """Concurrent writes near MAX_VERDICTS cap should trim correctly, not overflow."""
+        import json
+
+        from kb.config import MAX_VERDICTS
+        from kb.lint.verdicts import add_verdict, load_verdicts
+
+        path = tmp_path / "verdicts.json"
+        # Pre-fill to (MAX_VERDICTS - 3) entries so the cap is hit during the test.
+        pre = [
+            {
+                "page_id": f"concepts/pre-{i}",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "issues": [],
+                "notes": "",
+            }
+            for i in range(MAX_VERDICTS - 3)
+        ]
+        path.write_text(json.dumps(pre), encoding="utf-8")
+
+        errors = []
+
+        def add_one(i):
+            try:
+                add_verdict(f"concepts/new-{i}", "review", "pass", path=path)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_one, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors during trim-path concurrent write: {errors}"
+        result = load_verdicts(path)
+        assert len(result) <= MAX_VERDICTS, f"Trim failed: {len(result)} > {MAX_VERDICTS}"
+
+    def test_lock_module_attribute_does_not_use_threading(self):
+        """_verdicts_lock (old name) must not exist; _VERDICTS_WRITE_LOCK is the successor."""
+        import threading
+
+        import kb.lint.verdicts as verdicts_mod
+
+        # Old name must be absent.
+        assert not hasattr(verdicts_mod, "_verdicts_lock") or not hasattr(
+            getattr(verdicts_mod, "_verdicts_lock", None), "acquire"
+        ), "_verdicts_lock is still present — remove it (use _VERDICTS_WRITE_LOCK + file_lock)"
+        # New in-process guard must be present and be a threading.Lock.
+        assert hasattr(verdicts_mod, "_VERDICTS_WRITE_LOCK"), (
+            "_VERDICTS_WRITE_LOCK missing from verdicts module"
+        )
+        assert isinstance(verdicts_mod._VERDICTS_WRITE_LOCK, type(threading.Lock())), (
+            "_VERDICTS_WRITE_LOCK is not a threading.Lock"
+        )
+
+
+# ── Fix 6.11 — get_page_verdicts KeyError ────────────────────────────────────
+
+
+class TestGetPageVerdictsKeyError:
+    """Fix 6.11 — get_page_verdicts uses .get() to tolerate malformed entries."""
+
+    def test_malformed_entry_no_page_id_key_is_skipped(self, tmp_path):
+        """Entry missing 'page_id' key should not raise KeyError."""
+        import json
+
+        from kb.lint.verdicts import get_page_verdicts
+
+        path = tmp_path / "verdicts.json"
+        # Write a malformed entry (no page_id key)
+        malformed = [
+            {"verdict_type": "review", "verdict": "pass", "timestamp": "2026-01-01T00:00:00"}
+        ]
+        path.write_text(json.dumps(malformed), encoding="utf-8")
+
+        # Should not raise
+        result = get_page_verdicts("concepts/rag", path=path)
+        assert result == []
+
+    def test_malformed_entry_mixed_with_valid(self, tmp_path):
+        """Valid entries are returned even when malformed entries are present."""
+        import json
+
+        from kb.lint.verdicts import get_page_verdicts
+
+        path = tmp_path / "verdicts.json"
+        data = [
+            # malformed — no page_id
+            {"verdict_type": "review", "verdict": "pass", "timestamp": "2026-01-01T00:00:00"},
+            # valid
+            {
+                "page_id": "concepts/rag",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-01-02T00:00:00",
+            },
+        ]
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+        result = get_page_verdicts("concepts/rag", path=path)
+        assert len(result) == 1
+        assert result[0]["page_id"] == "concepts/rag"
+
+
+# ── Fix 6.15 — null byte check in add_verdict ────────────────────────────────
+
+
+class TestAddVerdictNullByte:
+    """Fix 6.15 — add_verdict rejects page_id containing null bytes."""
+
+    def test_null_byte_raises_value_error(self, tmp_path):
+        """page_id with null byte should raise ValueError."""
+        import pytest
+
+        from kb.lint.verdicts import add_verdict
+
+        path = tmp_path / "verdicts.json"
+        with pytest.raises(ValueError, match="Invalid page_id"):
+            add_verdict("concepts/rag\x00evil", "review", "pass", path=path)
+
+    def test_valid_page_id_not_rejected(self, tmp_path):
+        """Normal page_id should still work after adding null byte check."""
+        from kb.lint.verdicts import add_verdict, load_verdicts
+
+        path = tmp_path / "verdicts.json"
+        entry = add_verdict("concepts/rag", "review", "pass", path=path)
+        assert entry["page_id"] == "concepts/rag"
+        assert len(load_verdicts(path)) == 1

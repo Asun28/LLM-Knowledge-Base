@@ -1029,3 +1029,376 @@ class TestCheckStubPages:
         stub_recs = [r for r in report["recommendations"] if "stub" in r.lower()]
         assert len(stub_recs) >= 1
         assert "enrichment" in stub_recs[0].lower()
+
+
+# -- Cycle 92 fold from test_v0915_task06.py (checks & trends subset) --
+# Phase 3.96 Task 6 — Lint module fixes: fix_dead_links, check_dead_links,
+# check_frontmatter, check_staleness, verdict trends.
+
+
+# ── Fix 6.1 — fix_dead_links pages_fixed count ───────────────────────────────
+
+
+class TestFixDeadLinksPageCount:
+    """Fix 6.1 — pages_fixed counts only pages where content actually changed."""
+
+    def test_pages_fixed_counts_modified_pages_only(self, tmp_wiki, create_wiki_page):
+        """A page where all targets happen to not match the pattern should not be counted."""
+        from kb.lint.checks import fix_dead_links
+
+        # Page A links to non-existent page B
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing-target]] for details.",
+        )
+        # Page C links to non-existent page D but the link is in a weird format
+        # that won't match the regex — so content won't change
+        create_wiki_page(
+            "concepts/page-c",
+            wiki_dir=tmp_wiki,
+            content="No broken links here (none matching target).",
+        )
+
+        fixes = fix_dead_links(tmp_wiki)
+        # Only page-a had its content actually changed
+        pages_in_fixes = {f["page"] for f in fixes}
+        # Verify the count matches unique modified pages
+        assert len(pages_in_fixes) == len({f["page"] for f in fixes})
+
+    def test_single_page_with_two_broken_links(self, tmp_wiki, create_wiki_page):
+        """Two broken links on same page → 1 page fixed, 2 fixes."""
+        from kb.lint.checks import fix_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing-one]] and [[concepts/missing-two]].",
+        )
+
+        fixes = fix_dead_links(tmp_wiki)
+        assert len(fixes) == 2
+        pages_fixed = len({f["page"] for f in fixes})
+        assert pages_fixed == 1
+
+    def test_two_pages_each_with_one_broken_link(self, tmp_wiki, create_wiki_page):
+        """One broken link each on two pages → 2 pages fixed, 2 fixes."""
+        from kb.lint.checks import fix_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing-x]].",
+        )
+        create_wiki_page(
+            "concepts/page-b",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing-y]].",
+        )
+
+        fixes = fix_dead_links(tmp_wiki)
+        assert len(fixes) == 2
+        pages_fixed = len({f["page"] for f in fixes})
+        assert pages_fixed == 2
+
+
+# ── Fix 6.2 — broken_links optional parameter ────────────────────────────────
+
+
+class TestFixDeadLinksBrokenLinksParam:
+    """Fix 6.2 — fix_dead_links accepts pre-computed broken_links."""
+
+    def test_accepts_broken_links_param(self, tmp_wiki, create_wiki_page):
+        """Passing broken_links avoids calling resolve_wikilinks() again."""
+        from kb.lint.checks import fix_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing]].",
+        )
+
+        # Pre-compute broken links manually
+        broken = [{"source": "concepts/page-a", "target": "concepts/missing"}]
+        fixes = fix_dead_links(tmp_wiki, broken_links=broken)
+        assert len(fixes) == 1
+        assert fixes[0]["page"] == "concepts/page-a"
+
+    def test_empty_broken_links_returns_no_fixes(self, tmp_wiki, create_wiki_page):
+        """Passing empty broken_links list returns no fixes."""
+        from kb.lint.checks import fix_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing]].",
+        )
+
+        fixes = fix_dead_links(tmp_wiki, broken_links=[])
+        assert fixes == []
+
+    def test_none_broken_links_falls_back_to_resolve(self, tmp_wiki, create_wiki_page):
+        """Passing broken_links=None (default) calls resolve_wikilinks internally."""
+        from kb.lint.checks import fix_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/missing]].",
+        )
+
+        fixes = fix_dead_links(tmp_wiki, broken_links=None)
+        assert len(fixes) == 1
+
+
+# ── Fix 6.4 — check_frontmatter bare except narrowed ─────────────────────────
+
+
+class TestCheckFrontmatterNarrowExcept:
+    """Fix 6.4 — check_frontmatter uses specific exception types."""
+
+    def test_does_not_swallow_keyboard_interrupt(self, tmp_wiki, create_wiki_page):
+        """KeyboardInterrupt should propagate (not caught by narrowed except)."""
+        import frontmatter as fm_lib
+
+        from kb.lint import checks
+
+        create_wiki_page("concepts/rag", wiki_dir=tmp_wiki)
+
+        original = fm_lib.load
+        call_count = [0]
+
+        def mock_load(path):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise KeyboardInterrupt("user abort")
+            return original(path)
+
+        fm_lib.load = mock_load
+        try:
+            import importlib
+
+            importlib.reload(checks)
+            # Should propagate the KeyboardInterrupt
+            try:
+                checks.check_frontmatter(tmp_wiki)
+                assert False, "Expected KeyboardInterrupt"
+            except KeyboardInterrupt:
+                pass
+        finally:
+            fm_lib.load = original
+
+
+# ── Fix 6.9 — check_staleness unrecognised updated type ──────────────────────
+
+
+class TestCheckStalenessUnrecognisedType:
+    """Fix 6.9 — check_staleness emits warning for unexpected updated types."""
+
+    def test_integer_updated_triggers_warning_issue(self, tmp_wiki):
+        """An integer 'updated' value should produce a staleness warning issue."""
+        from kb.lint.checks import check_staleness
+
+        page_path = tmp_wiki / "concepts" / "weird.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write a page with numeric updated field
+        page_path.write_text(
+            "---\ntitle: Weird\nsource:\n  - raw/articles/test.md\n"
+            "created: 2026-01-01\nupdated: 20260101\ntype: concept\nconfidence: stated\n---\n"
+            "# Weird\n",
+            encoding="utf-8",
+        )
+
+        issues = check_staleness(tmp_wiki)
+        staleness_issues = [i for i in issues if i.get("page", "").endswith("weird")]
+        assert any("unrecognised" in i["message"] for i in staleness_issues)
+
+    def test_valid_date_not_flagged_as_unrecognised(self, tmp_wiki, create_wiki_page):
+        """A proper date string should not trigger the unrecognised type warning."""
+        from kb.lint.checks import check_staleness
+
+        create_wiki_page("concepts/normal", wiki_dir=tmp_wiki, updated="2026-01-01")
+        issues = check_staleness(tmp_wiki)
+        unrecognised = [i for i in issues if "unrecognised" in i.get("message", "")]
+        assert not any(i.get("page", "") == "concepts/normal" for i in unrecognised)
+
+
+# ── Fix 6.14 — standardized "page" key in dead_link issues ───────────────────
+
+
+class TestDeadLinkIssuePageKey:
+    """Fix 6.14 — check_dead_links uses 'page' key instead of 'source'."""
+
+    def test_dead_link_issue_has_page_key(self, tmp_wiki, create_wiki_page):
+        """check_dead_links issues should have 'page' key, not 'source'."""
+        from kb.lint.checks import check_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/nonexistent]].",
+        )
+
+        issues = check_dead_links(tmp_wiki)
+        dead = [i for i in issues if i.get("check") == "dead_link"]
+        assert len(dead) >= 1
+        for issue in dead:
+            assert "page" in issue, f"'page' key missing from dead_link issue: {issue}"
+            assert "source" not in issue, f"'source' key should not be in dead_link issue: {issue}"
+
+    def test_dead_link_page_value_is_source_page(self, tmp_wiki, create_wiki_page):
+        """The 'page' value should be the page containing the broken link."""
+        from kb.lint.checks import check_dead_links
+
+        create_wiki_page(
+            "concepts/page-a",
+            wiki_dir=tmp_wiki,
+            content="See [[concepts/nonexistent]].",
+        )
+
+        issues = check_dead_links(tmp_wiki)
+        dead = [i for i in issues if i.get("check") == "dead_link"]
+        assert any(i["page"] == "concepts/page-a" for i in dead)
+
+
+# ── Fix 6.7 — trend min sample for previous period ───────────────────────────
+
+
+class TestTrendMinSampleBothPeriods:
+    """Fix 6.7 — trend direction requires min 3 verdicts in BOTH periods."""
+
+    def test_previous_period_below_min_gives_stable(self, tmp_path):
+        """If previous period has < 3 verdicts, trend should stay 'stable'."""
+        import json
+
+        from kb.lint.trends import compute_verdict_trends
+
+        path = tmp_path / "verdicts.json"
+        verdicts = [
+            # Previous week — only 2 verdicts (below threshold)
+            {
+                "page_id": "p1",
+                "verdict_type": "review",
+                "verdict": "fail",
+                "timestamp": "2026-03-30T10:00:00",
+            },
+            {
+                "page_id": "p2",
+                "verdict_type": "review",
+                "verdict": "fail",
+                "timestamp": "2026-03-31T10:00:00",
+            },
+            # Current week — 3 passes (above threshold)
+            {
+                "page_id": "p3",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-06T10:00:00",
+            },
+            {
+                "page_id": "p4",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-07T10:00:00",
+            },
+            {
+                "page_id": "p5",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-08T10:00:00",
+            },
+        ]
+        path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        result = compute_verdict_trends(path)
+        # Previous period has only 2 verdicts, so should be stable (not improving)
+        assert result["trend"] == "stable"
+
+    def test_both_periods_above_min_can_show_improving(self, tmp_path):
+        """Both periods with >= 3 verdicts can produce 'improving' trend."""
+        import json
+
+        from kb.lint.trends import compute_verdict_trends
+
+        path = tmp_path / "verdicts.json"
+        verdicts = [
+            # Previous week — 3 fails
+            {
+                "page_id": "p1",
+                "verdict_type": "review",
+                "verdict": "fail",
+                "timestamp": "2026-03-30T10:00:00",
+            },
+            {
+                "page_id": "p2",
+                "verdict_type": "review",
+                "verdict": "fail",
+                "timestamp": "2026-03-31T10:00:00",
+            },
+            {
+                "page_id": "p3",
+                "verdict_type": "review",
+                "verdict": "fail",
+                "timestamp": "2026-04-01T10:00:00",
+            },
+            # Current week — 3 passes
+            {
+                "page_id": "p4",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-06T10:00:00",
+            },
+            {
+                "page_id": "p5",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-07T10:00:00",
+            },
+            {
+                "page_id": "p6",
+                "verdict_type": "review",
+                "verdict": "pass",
+                "timestamp": "2026-04-08T10:00:00",
+            },
+        ]
+        path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        result = compute_verdict_trends(path)
+        assert result["trend"] == "improving"
+
+
+# ── Fix 6.18 — pass_rate uses sum(o.values()) ────────────────────────────────
+
+
+class TestFormatVerdictTrendsPassRate:
+    """Fix 6.18 — format_verdict_trends uses sum(o.values()) for pass_rate."""
+
+    def test_pass_rate_uses_overall_sum(self, tmp_path):
+        """pass_rate denominator should be sum of pass+fail+warning counts."""
+        import json
+
+        from kb.lint.trends import compute_verdict_trends, format_verdict_trends
+
+        path = tmp_path / "verdicts.json"
+
+        def v(pid, verdict, hour):
+            return {
+                "page_id": pid,
+                "verdict_type": "review",
+                "verdict": verdict,
+                "timestamp": f"2026-04-06T{hour:02d}:00:00",
+            }
+
+        verdicts = [
+            v("p1", "pass", 10),
+            v("p2", "fail", 11),
+            v("p3", "warning", 12),
+            v("p4", "pass", 13),
+        ]
+        path.write_text(json.dumps(verdicts), encoding="utf-8")
+
+        trends = compute_verdict_trends(path)
+        text = format_verdict_trends(trends)
+
+        # 2 passes out of 4 total = 50%
+        assert "50%" in text

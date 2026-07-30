@@ -357,3 +357,66 @@ class TestYamlEscapeNEL:
         result = yaml_escape("hello\x85world")
         assert "\x85" not in result
         assert result == "helloworld"
+
+
+# -- Cycle 92 fold from test_v0915_task01.py (yaml_escape control-chars subset) --
+# ── Fix 1.1: yaml_escape control chars ──────────────────────────
+
+
+class TestYamlEscapeControlChars:
+    """Fix 1.1 — yaml_escape strips ASCII control characters."""
+
+    def test_strips_bell_char(self):
+        from kb.utils.text import yaml_escape
+
+        assert "\x07" not in yaml_escape("hello\x07world")
+
+    def test_strips_backspace(self):
+        from kb.utils.text import yaml_escape
+
+        assert "\x08" not in yaml_escape("hello\x08world")
+
+    def test_strips_vertical_tab(self):
+        from kb.utils.text import yaml_escape
+
+        assert "\x0b" not in yaml_escape("hello\x0bworld")
+
+    def test_strips_form_feed(self):
+        from kb.utils.text import yaml_escape
+
+        assert "\x0c" not in yaml_escape("hello\x0cworld")
+
+    def test_strips_range_0x0e_to_0x1f(self):
+        from kb.utils.text import yaml_escape
+
+        for code in range(0x0E, 0x20):
+            char = chr(code)
+            result = yaml_escape(f"a{char}b")
+            assert char not in result, f"0x{code:02x} not stripped"
+
+    def test_strips_delete_char(self):
+        from kb.utils.text import yaml_escape
+
+        assert "\x7f" not in yaml_escape("hello\x7fworld")
+
+    def test_preserves_normal_text(self):
+        from kb.utils.text import yaml_escape
+
+        assert yaml_escape("hello world") == "hello world"
+
+    def test_preserves_existing_escapes(self):
+        """Existing backslash/quote/newline escaping still works."""
+        from kb.utils.text import yaml_escape
+
+        result = yaml_escape('line1\nline2\t"quoted"')
+        assert result == 'line1\\nline2\\t\\"quoted\\"'
+
+    def test_strips_multiple_control_chars(self):
+        from kb.utils.text import yaml_escape
+
+        # Mix of control chars with normal text
+        result = yaml_escape("\x01\x02hello\x0b\x7fworld")
+        assert "hello" in result
+        assert "world" in result
+        for code in [0x01, 0x02, 0x0B, 0x7F]:
+            assert chr(code) not in result
