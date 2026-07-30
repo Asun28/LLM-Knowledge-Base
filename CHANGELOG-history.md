@@ -17,6 +17,30 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-30 — cycle 90 (freeze-and-fold)
+
+**Theme:** land the complete 12-file versioned-test set recovered from the abandoned cycle-59/61/62/63 branches — the last block of the Phase 4.5 HIGH coverage-visibility item with a pre-computed inventory.
+
+- **Items: 12 fold sources → 8 receivers; 69 tests moved verbatim; 12 versioned test files deleted; src/kb/ untouched.**
+- Fold map (source (tests, subject) → receiver):
+  - `test_v4_11_cli.py` (5, CLI `--format` handling for `kb query`) → `test_cli.py`
+  - `test_v4_11_markdown.py` (8, `kb.query.formats.markdown.render_markdown`) → `test_query.py`
+  - `test_phase4_audit_query.py` (5, `_build_query_context` tier budgets) → `test_query.py`
+  - `test_v4_11_mcp.py` (7, `kb_query` format param validation) → `test_mcp_core.py`
+  - `test_v5_augment_config.py` (2, augment fetch config constants) → `test_config.py`
+  - `test_v5_autogen_prefixes.py` (3, `AUTOGEN_PREFIXES` skip in orphan/isolated/stub checks) → `test_lint.py`
+  - `test_stub_detection_v094.py` (6, `check_stub_pages` + `run_all_checks` registration) → `test_lint.py`
+  - `test_v5_verdict_augment_type.py` (3, `augment` in `VALID_VERDICT_TYPES`) → `test_lint_verdicts.py`
+  - `test_v5_lint_augment_manifest.py` (7, per-gap manifest state machine) → `test_lint_augment_split.py`
+  - `test_v5_lint_augment_rate.py` (7, cross-process rate limiter) → `test_lint_augment_split.py`
+  - `test_ingest_fixes_v092.py` (8, `_update_existing_page` regex/exception handling + `_format_ingest_result`) → `test_ingest.py`
+  - `test_phase4_audit_ingest.py` (8, hashing + ingest data-integrity) → `test_ingest.py`
+- Convention: cycle-78/80 fold style — `# -- Cycle 90 fold from <file>.py --` provenance banner per source, module docstring demoted to a comment, imports merged into the receiver's top block where clean (`test_query.py` uses fold-site `# noqa: E402` imports per its cycle-78 precedent).
+- One collision rename: `_make_page` → `_make_page_p4q` (the `test_phase4_audit_query` helper; `test_query.py`'s `TestBuildQueryContextOversize` already defines a `_make_page` method). Uses updated within the folded block only.
+- Provenance note: `git tag archive/cycle-62` was consulted for receiver PLACEMENT only (it confirmed markdown-adapter tests belong in `test_query.py`, `v4_11_mcp` in `test_mcp_core.py`, `v5_verdict_augment_type` in `test_lint_verdicts.py`). The archived diffs themselves predate cycles 65-89 (config call-time accessors, wrap_wiki_context, tier-boundary) and were NOT replayed — every fold re-moved the CURRENT file contents.
+- Counts: full suite 3608 collected, unchanged (3562 passed / 29 skipped / 17 xfailed local Windows). Test files 241 → 229. Versioned `test_v0*`/`test_phase4_audit` naming-pattern set 20 → 18 (remaining: `test_v0915_task{01,03,06,08,09,11}`, `test_v091{1,2,3,4}_phase39{2,3,4,5}`, `test_v0{70,90}`, `test_v098_fixes`, `test_v099_phase39`, `test_v09_cycle5_fixes`, `test_phase4_audit_{compile,observability,security}`).
+- BACKLOG: the "Concrete remaining set" paragraph (the 12 recovered files) and the archive-tag replay instructions are DELETED from the coverage-visibility item — the recovered set is fully landed; the general freeze-and-fold cadence item stays open for the 18 pattern-set files plus the wider `test_v4_11_*`/`test_v5_*`/`test_fixes_v0*` inventory.
+
 ### 2026-07-29 — cycle 89 (barrier tri-state)
 
 Cycle 88's review produced the same finding twice, from two model families

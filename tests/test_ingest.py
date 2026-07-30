@@ -1,7 +1,9 @@
 """Tests for the ingest pipeline."""
 
 import json
+import logging
 import threading
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -11,10 +13,12 @@ from kb.ingest.pipeline import (
     _build_summary_content,
     _coerce_str_field,
     _extract_entity_context,
+    _update_existing_page,
     detect_source_type,
     ingest_source,
 )
 from kb.mcp import core as mcp_core
+from kb.mcp.app import _format_ingest_result
 from kb.utils.hashing import hash_bytes
 from kb.utils.text import slugify
 
@@ -1543,3 +1547,322 @@ class TestExtractionSchemaRequired:
         }
         schema = build_extraction_schema(template)
         assert len(schema["required"]) >= 1
+
+
+# -- Cycle 90 fold from test_ingest_fixes_v092.py --
+# Tests for v0.9.2 ingest fixes — regex, exception handling, pages_skipped surfacing.
+
+# ---------------------------------------------------------------------------
+# Fix 1 & 2: _update_existing_page — regex and exception handling
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateExistingPageAppendsAfterLastSource:
+    """Fix 1: New source is inserted after the last source line, not in the middle."""
+
+    def test_appends_after_last_source(self, tmp_path: Path):
+        page = tmp_path / "entity.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n'
+            '  - "raw/articles/first.md"\n'
+            '  - "raw/articles/second.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\n"
+            "type: entity\nconfidence: stated\n---\n\n"
+            "# Test\n\n## References\n\n- Mentioned in raw/articles/first.md\n",
+            encoding="utf-8",
+        )
+
+        _update_existing_page(page, "raw/articles/third.md")
+
+        content = page.read_text(encoding="utf-8")
+        # The new source should appear after the second source, not between first and second
+        lines = content.splitlines()
+        source_lines = [line for line in lines if line.strip().startswith('- "raw/')]
+        assert len(source_lines) == 3
+        assert source_lines[0] == '  - "raw/articles/first.md"'
+        assert source_lines[1] == '  - "raw/articles/second.md"'
+        assert source_lines[2] == '  - "raw/articles/third.md"'
+
+    def test_appends_with_three_existing_sources(self, tmp_path: Path):
+        """Ensure the fix works with 3+ existing sources (the old regex was flaky here)."""
+        page = tmp_path / "entity.md"
+        page.write_text(
+            '---\ntitle: "Test"\nsource:\n'
+            '  - "raw/articles/a.md"\n'
+            '  - "raw/articles/b.md"\n'
+            '  - "raw/articles/c.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\n"
+            "type: entity\nconfidence: stated\n---\n\n# Test\n",
+            encoding="utf-8",
+        )
+
+        _update_existing_page(page, "raw/articles/d.md")
+
+        content = page.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        source_lines = [line for line in lines if line.strip().startswith('- "raw/')]
+        assert len(source_lines) == 4
+        assert source_lines[-1] == '  - "raw/articles/d.md"'
+
+
+class TestUpdateExistingPageSkipsExistingSource:
+    """Fix 2: Returns early when source is already in frontmatter."""
+
+    def test_skips_existing_source(self, tmp_path: Path):
+        page = tmp_path / "entity.md"
+        original = (
+            '---\ntitle: "Test"\nsource:\n'
+            '  - "raw/articles/first.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\n"
+            "type: entity\nconfidence: stated\n---\n\n# Test\n"
+        )
+        page.write_text(original, encoding="utf-8")
+
+        _update_existing_page(page, "raw/articles/first.md")
+
+        # Content should be unchanged — no duplicate source, no updated date
+        assert page.read_text(encoding="utf-8") == original
+
+
+class TestUpdateExistingPageCorruptedFrontmatter:
+    """Fix 2: Handles corrupted frontmatter without crashing."""
+
+    def test_handles_corrupted_frontmatter(self, tmp_path: Path, caplog):
+        page = tmp_path / "entity.md"
+        # Invalid YAML: unmatched quote and bad indentation
+        page.write_text(
+            '---\ntitle: "Broken\nsource:\n'
+            '  - "raw/articles/first.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\n"
+            "type: entity\nconfidence: stated\n---\n\n# Test\n",
+            encoding="utf-8",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+            _update_existing_page(page, "raw/articles/new.md")
+
+        content = page.read_text(encoding="utf-8")
+        # Q_C fix: on frontmatter parse error, the function returns early to prevent
+        # duplicate source injection. The file should be unchanged (no new source added).
+        assert '"raw/articles/new.md"' not in content
+        # Should have logged a warning about the parse failure
+        assert any("Failed to parse frontmatter" in r.message for r in caplog.records)
+
+    def test_handles_completely_invalid_yaml(self, tmp_path: Path, caplog):
+        """Page with no valid YAML at all — should not crash."""
+        page = tmp_path / "entity.md"
+        page.write_text(
+            "This is not YAML at all\nJust plain text\nsource:\n",
+            encoding="utf-8",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="kb.ingest.pipeline"):
+            # Should not raise
+            _update_existing_page(page, "raw/articles/new.md")
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: _format_ingest_result — pages_skipped surfacing
+# ---------------------------------------------------------------------------
+
+
+class TestFormatIngestResultSkipped:
+    """Fix 3: _format_ingest_result includes pages_skipped when present."""
+
+    def test_includes_skipped_pages(self):
+        result = {
+            "pages_created": ["summaries/test"],
+            "pages_updated": ["entities/foo"],
+            "pages_skipped": [
+                "entities/bar (collision: 'Bar')",
+                "concepts/baz (collision: 'Baz')",
+            ],
+        }
+        output = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+
+        assert "Pages skipped (2):" in output
+        assert "  ! entities/bar (collision: 'Bar')" in output
+        assert "  ! concepts/baz (collision: 'Baz')" in output
+
+    def test_no_skipped_section_when_empty(self):
+        result = {
+            "pages_created": ["summaries/test"],
+            "pages_updated": [],
+            "pages_skipped": [],
+        }
+        output = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+
+        assert "skipped" not in output.lower()
+
+    def test_no_skipped_section_when_missing_key(self):
+        result = {
+            "pages_created": ["summaries/test"],
+            "pages_updated": [],
+        }
+        output = _format_ingest_result("raw/articles/test.md", "article", "abc123", result)
+
+        assert "skipped" not in output.lower()
+
+
+# -- Cycle 90 fold from test_phase4_audit_ingest.py --
+# Tests for ingest data-integrity fixes — Phase 4 audit.
+
+
+def test_hash_bytes_matches_content_hash(tmp_path):
+    """hash_bytes(data) must produce the same result as content_hash(path)."""
+    from kb.utils.hashing import content_hash, hash_bytes
+
+    path = tmp_path / "test.md"
+    data = b"hello world content for hashing"
+    path.write_bytes(data)
+    assert hash_bytes(data) == content_hash(path)
+
+
+def test_hash_bytes_returns_32_char_hex(tmp_path):
+    """hash_bytes must return the same format as content_hash — 32 hex chars."""
+    from kb.utils.hashing import hash_bytes
+
+    result = hash_bytes(b"some content")
+    assert len(result) == 32
+    assert all(c in "0123456789abcdef" for c in result)
+
+
+def test_sources_mapping_merges_on_reingest(tmp_path):
+    """Re-ingesting the same source must merge new page IDs into existing entry."""
+    from kb.ingest.pipeline import _update_sources_mapping
+
+    sources_file = tmp_path / "_sources.md"
+    sources_file.write_text(
+        "- `raw/articles/foo.md` → [[summaries/foo-summary]]\n", encoding="utf-8"
+    )
+
+    _update_sources_mapping(
+        "raw/articles/foo.md",
+        ["summaries/foo-summary", "entities/new-entity"],
+        wiki_dir=tmp_path,
+    )
+
+    content = sources_file.read_text()
+    assert "[[entities/new-entity]]" in content, (
+        "New page from re-ingest was not merged into _sources.md entry"
+    )
+    # Original entry must still be there
+    assert "[[summaries/foo-summary]]" in content
+
+
+def test_sources_mapping_first_ingest_appends(tmp_path):
+    """First ingest of a source must append a new entry to _sources.md."""
+    from kb.ingest.pipeline import _update_sources_mapping
+
+    sources_file = tmp_path / "_sources.md"
+    sources_file.write_text("")  # empty
+
+    _update_sources_mapping(
+        "raw/articles/new.md",
+        ["summaries/new-summary"],
+        wiki_dir=tmp_path,
+    )
+
+    content = sources_file.read_text()
+    assert "raw/articles/new.md" in content
+    assert "[[summaries/new-summary]]" in content
+
+
+def test_extraction_prompt_with_missing_template_keys():
+    """build_extraction_prompt must not raise KeyError when name/description are missing."""
+    from kb.ingest.extractors import build_extraction_prompt
+
+    template_minimal = {"extract": ["key_claims", "entities_mentioned"]}
+    # Must not raise KeyError
+    prompt = build_extraction_prompt("Some source content.", template_minimal)
+    assert "key_claims" in prompt
+    assert "entities_mentioned" in prompt
+
+
+def test_contradiction_strips_evidence_trail_header():
+    """Evidence Trail section headers must not produce false contradiction signals."""
+    from kb.ingest.contradiction import detect_contradictions
+
+    new_claims = ["transformers use attention mechanisms for sequence modeling"]
+    existing_pages = [
+        {
+            "id": "entities/transformer",
+            "content": (
+                "## Evidence Trail\n"
+                "2026-01-01 | raw/articles/a.md | Initial extraction\n\n"
+                "## References\n"
+                "- [[raw/articles/a.md]]\n"
+            ),
+        }
+    ]
+    result = detect_contradictions(new_claims, existing_pages, max_claims=10)
+    assert result == [], f"Got spurious contradictions from structural-only page content: {result}"
+
+
+def test_contradiction_strips_wikilinks():
+    """Wikilinks in page content must be stripped to their display text before tokenizing."""
+    from kb.ingest.contradiction import _strip_markdown_structure
+
+    content = "The [[entities/transformer|Transformer]] model is not slow."
+    stripped = _strip_markdown_structure(content)
+    assert "[[" not in stripped
+    assert "entities/transformer" not in stripped
+    assert "Transformer" in stripped  # display text preserved
+
+
+def test_load_all_pages_called_at_most_once_per_ingest(tmp_path, monkeypatch):
+    """load_all_pages must be called at most once during ingest_source."""
+    import kb.ingest.pipeline as pipeline_mod
+    import kb.utils.pages as pages_mod
+    from kb.ingest.pipeline import ingest_source
+
+    # Set up minimal wiki and raw directories
+    wiki = tmp_path / "wiki"
+    for subdir in ("entities", "concepts", "comparisons", "summaries", "synthesis"):
+        (wiki / subdir).mkdir(parents=True)
+    (wiki / "index.md").write_text("", encoding="utf-8")
+    (wiki / "_sources.md").write_text("", encoding="utf-8")
+    (wiki / "_categories.md").write_text("", encoding="utf-8")
+    (wiki / "log.md").write_text("", encoding="utf-8")
+
+    raw = tmp_path / "raw" / "articles"
+    raw.mkdir(parents=True)
+    source = raw / "test.md"
+    source.write_text("# Test\nContent here.\n", encoding="utf-8")
+
+    # Patch module-level config names so the path-validation check passes
+    monkeypatch.setattr(pipeline_mod, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(pipeline_mod, "WIKI_DIR", wiki)
+    monkeypatch.setattr(pipeline_mod, "WIKI_INDEX", wiki / "index.md")
+    monkeypatch.setattr(pipeline_mod, "WIKI_SOURCES", wiki / "_sources.md")
+    monkeypatch.setattr("kb.utils.paths.RAW_DIR", tmp_path / "raw")
+
+    call_count = [0]
+    real_load = pages_mod.load_all_pages
+
+    def counting_load(wiki_dir=None):
+        call_count[0] += 1
+        return real_load(wiki_dir=wiki_dir)
+
+    # Patch the load_all_pages reference inside pipeline module
+    monkeypatch.setattr(pipeline_mod, "load_all_pages", counting_load)
+
+    # Patch out the LLM extraction and other side-effectful operations
+    monkeypatch.setattr(
+        pipeline_mod,
+        "extract_from_source",
+        lambda *a, **kw: {
+            "key_claims": ["claim one"],
+            "entities_mentioned": [],
+            "concepts_mentioned": [],
+            "title": "Test",
+            "summary": "A test document.",
+        },
+    )
+    monkeypatch.setattr(pipeline_mod, "_is_duplicate_content", lambda *a: False)
+
+    ingest_source(source, wiki_dir=wiki)
+
+    assert call_count[0] <= 1, (
+        f"load_all_pages was called {call_count[0]} times in a single ingest — expected ≤1"
+    )
