@@ -17,6 +17,26 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-30 — cycle 91 (stale-marker hygiene)
+
+**Theme:** two MEDIUM operational closures — the cycle-83 T6 immortal-marker item (age + cap + operator clear path) and the cycle-89 Windows directory-durability residual (verified won't-fix, documented).
+
+- **AC01 — timestamped premarker + `_marker_age_days`** (`src/kb/compile/compiler.py`):
+  - `compile_wiki`'s AC6 premarker value becomes `in_progress:{pre_hash}:{int(time.time())}`. Audit of every consumer before the change: compiler's own three `startswith("in_progress:")` sites (AC7 scan + two prune exemptions), `ingest/pipeline.py`'s bare-hash-unequal comparison (any marker value ≠ current hash → source re-selected; still true with a third segment), and the duplicate-path whole-entry delete. None parse segments positionally, EXCEPT one cycle-25 test assertion (`split(":", 1)[1]` hash comparison) which was made segment-aware (`split(":")[1]`) with a cycle-91 provenance comment — intent (same pre_hash in premarker and `failed:` overwrite) unchanged.
+  - `_marker_age_days(value, *, now=None) -> float | None`: `None` for two-segment legacy markers, unparseable timestamps, `ts <= 0`, and future timestamps (clock skew) — report "age unknown" rather than a guessed number, per the `get_prompt_version` legacy-default convention. `now` kwarg is the test seam.
+- **AC02 — AC7 warning: age annotation + `STALE_MARKER_WARNING_CAP=10`**:
+  - Each shown key renders as `key (age N.Nd)` or `key (age unknown)`; keys sorted so the truncation is deterministic; `, and M more` suffix when over cap. The COUNT in the message header is always the full count.
+  - Supersedes cycle-25's Step-8 "no truncation, name every source" gate decision — cycle-83's T6 threat identified the unbounded log line as its own failure mode on a repo with many stale markers. The warning text now names `kb compile --clear-stale-markers` as the targeted remedy (previously only `kb rebuild-indexes`, a full derived-state wipe, was offered).
+- **AC03 — `clear_stale_markers()` + `kb compile --clear-stale-markers`**:
+  - Library: RMW under `file_lock(manifest_path)`; deletes exactly the `in_progress:`-valued entries; returns sorted cleared keys; no manifest rewrite on no-op. Cycle-25 Q10's rejection of AUTO-deletion stands — this is operator-invoked only.
+  - CLI: flag on `kb compile`; clears BEFORE compiling and echoes each cleared key; help text warns that clearing while another compile is in flight discards that run's live premarker (consequence: one lost AC7 warning; the in-flight ingest's own tail manifest write is untouched — never source-data loss).
+  - Deliberately NOT built: the backlog's alternative `.data/marker_ages.json` sidecar (a second file to keep transactionally in sync with the manifest — rejected in favour of the in-value timestamp, which travels with the entry) and any age-based auto-expiry (same Q10 race).
+- **AC04 — Windows directory-entry durability: WON'T-FIX, verified + documented** (`docs/reference/error-handling.md`):
+  - Verified inventory: `FlushFileBuffers` is file-handle-only (directory handles rejected; volume-handle form flushes the whole volume and needs admin); `NtFlushBuffersFileEx` documents `FLUSH_FLAGS_FILE_DATA_SYNC_ONLY` as invalid on directory handles; `DeleteFileW` has no write-through flag; transactional NTFS deprecated. External confirmations cited in the doc (WASI #756, ayende.com, Microsoft DDI docs, evanjones.ca durability survey).
+  - What Windows does provide: `MoveFileExW(MOVEFILE_WRITE_THROUGH)` (renames covered since cycle 87) and NTFS `$LogFile` journaling (deletes crash-CONSISTENT, not durable-on-return). `BarrierResult.SKIPPED_PLATFORM` is therefore the designed permanent state on `nt`, not a pending gap; per cycle-89's crying-wolf decision it stays un-surfaced per-call. Reviewers independently re-proposed reporting this in cycles 87, 88, and 89 — the doc entry is the pointer that stops a fourth re-derivation.
+- **Tests: 3608 → 3623 (+15)** — new `tests/test_cycle91_marker_hygiene.py`: 6 AC01 (5 `_marker_age_days` domains + premarker-format snapshot via the cycle-25 revert-detection pattern, asserting the birth timestamp falls in the call window and AC8's `failed:` overwrite still lands), 4 AC02 (cap + overflow suffix + deterministic truncation, below-cap no-suffix, age/unknown annotations, remedy mention), 5 AC03 (mixed-manifest selective clear, no-op preserves file bytes, CLI flag happy path + empty path + never-called-without-flag spy).
+- **BACKLOG:** both MEDIUM items DELETED (immortal markers; Windows directory-flush).
+
 ### 2026-07-30 — cycle 90 (freeze-and-fold)
 
 **Theme:** land the complete 12-file versioned-test set recovered from the abandoned cycle-59/61/62/63 branches — the last block of the Phase 4.5 HIGH coverage-visibility item with a pre-computed inventory.

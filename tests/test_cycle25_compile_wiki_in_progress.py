@@ -142,7 +142,10 @@ def test_exception_during_ingest_overwrites_marker_with_failed(tmp_path, monkeyp
         "AC8: in_progress marker MUST NOT persist after a normal exception"
     )
     # Both hashes should be equal (same pre_hash used by both marker and failure).
-    assert pre_value.split(":", 1)[1] == final_value.split(":", 1)[1], (
+    # Cycle 91 AC01 — the premarker gained a birth-timestamp third segment
+    # (`in_progress:{pre_hash}:{unix_ts}`), so compare the hash SEGMENT rather
+    # than "everything after the first colon".
+    assert pre_value.split(":")[1] == final_value.split(":")[1], (
         "Pre-marker and failure marker must reference the same pre_hash"
     )
 

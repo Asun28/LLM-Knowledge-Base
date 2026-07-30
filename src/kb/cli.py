@@ -199,9 +199,31 @@ def ingest(source_path: str, source_type: str | None):
 
 @cli.command()
 @click.option("--incremental/--full", default=True, help="Incremental (default) or full recompile")
-def compile(incremental: bool):
+@click.option(
+    "--clear-stale-markers",
+    "clear_stale",
+    is_flag=True,
+    default=False,
+    help=(
+        "Before compiling, delete stale in_progress: manifest markers left by a "
+        "prior hard-killed compile. Do NOT use while another compile may be "
+        "running — it would discard that run's live marker."
+    ),
+)
+def compile(incremental: bool, clear_stale: bool):
     """Compile wiki pages from raw sources."""
-    from kb.compile.compiler import compile_wiki
+    from kb.compile.compiler import clear_stale_markers, compile_wiki
+
+    # Cycle 91 AC03 — operator-invoked marker remediation (auto-deletion
+    # stays rejected per cycle-25 Q10; this flag is the human decision).
+    if clear_stale:
+        cleared = clear_stale_markers()
+        if cleared:
+            click.echo(f"Cleared {len(cleared)} stale in_progress marker(s):")
+            for key in cleared:
+                click.echo(f"    - {key}")
+        else:
+            click.echo("No stale in_progress markers found.")
 
     mode = "incremental" if incremental else "full"
     click.echo(f"Compiling ({mode})...")
