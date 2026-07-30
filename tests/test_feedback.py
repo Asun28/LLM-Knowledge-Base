@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from kb.feedback.reliability import (
     compute_trust_scores,
     get_coverage_gaps,
@@ -354,3 +356,78 @@ class TestMaxPageScoresConstant:
         # The import chain must work — if MAX_PAGE_SCORES is not imported,
         # the module would have raised ImportError at load time
         assert hasattr(store_module, "MAX_PAGE_SCORES") or True  # module loaded = import succeeded
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (feedback store) --
+
+
+class TestLoadFeedbackShapeValidation:
+    """feedback/store.py load_feedback: returns default when shape is wrong."""
+
+    def test_wrong_shape_json_returns_default(self, tmp_path):
+        """JSON with missing 'entries' or 'page_scores' must return default structure."""
+        from kb.feedback.store import load_feedback
+
+        bad_file = tmp_path / "feedback.json"
+        bad_file.write_text('{"wrong_key": []}', encoding="utf-8")
+
+        result = load_feedback(bad_file)
+        assert "entries" in result
+        assert "page_scores" in result
+
+    def test_valid_structure_returned_as_is(self, tmp_path):
+        """A valid feedback file's entries list is preserved and core fields are intact.
+
+        Cycle 2 item 24: `load_feedback` now backfills MISSING count keys
+        (`useful`/`wrong`/`incomplete`) once at load, so the page_scores dict
+        may gain those keys. `trust` is preserved exactly. Legacy assertion
+        updated to reflect the one-shot migration contract.
+        """
+        import json
+
+        from kb.feedback.store import load_feedback
+
+        good_file = tmp_path / "feedback.json"
+        good_data = {"entries": [], "page_scores": {"concepts/rag": {"trust": 0.7}}}
+        good_file.write_text(json.dumps(good_data), encoding="utf-8")
+
+        result = load_feedback(good_file)
+        assert result["entries"] == good_data["entries"]
+        # trust preserved verbatim
+        assert result["page_scores"]["concepts/rag"]["trust"] == 0.7
+        # count keys backfilled (cycle 2 migration)
+        for key in ("useful", "wrong", "incomplete"):
+            assert result["page_scores"]["concepts/rag"][key] == 0
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (feedback store) --
+
+
+class TestFeedbackStoreUNCPathTraversal:
+    """add_feedback_entry must reject Windows UNC paths."""
+
+    def test_unc_path_rejected(self, tmp_path):
+        from kb.feedback.store import add_feedback_entry
+
+        feedback_path = tmp_path / "feedback.json"
+        with pytest.raises(ValueError, match="Invalid page ID"):
+            add_feedback_entry(
+                "test question",
+                "useful",
+                ["\\\\server\\share\\page"],
+                path=feedback_path,
+            )
+
+
+class TestFeedbackStoreFileLock:
+    """add_feedback_entry must use file locking for concurrent safety."""
+
+    def test_lock_file_created_and_cleaned_up(self, tmp_path):
+        from kb.feedback.store import add_feedback_entry
+
+        feedback_path = tmp_path / "feedback.json"
+        # Just verify it works without errors
+        entry = add_feedback_entry("test", "useful", ["concepts/test"], path=feedback_path)
+        assert entry["rating"] == "useful"
+        # Lock file should be cleaned up
+        assert not (feedback_path.with_suffix(".json.lock")).exists()

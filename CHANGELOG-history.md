@@ -17,6 +17,17 @@ Purpose: Full per-cycle bullet-level detail archive. CHANGELOG.md is the compact
 
 > Detailed per-cycle entries live here. High-level summaries remain in [CHANGELOG.md](CHANGELOG.md); full bullet-level detail belongs here.
 
+### 2026-07-30 — cycle 93 (freeze-and-fold)
+
+**Theme:** fold the 4 `test_v091N_phase39N` fix-batch files and the last 3 `test_phase4_audit_*` files — 7 sources, 134 tests, 53 source-subset placements across 20 canonical receivers, two bounded subagent batches on one branch. Pattern set 12 → 5.
+
+- **Batch A (54 tests, 22 placements across 12 receivers):** `v0911_phase392` (9) → refiner(1)/mcp_browse_health(2)/lint(3)/compile(3); `v0912_phase393` (30) → mcp_browse_health(2)/lint(4)/compile(2)/llm(2)/query(3)/ingest(4)/graph(4)/config(3)/cli(6); `phase4_audit_compile` (4) → compile(2)/graph(1)/evolve(1); `phase4_audit_observability` (4) → llm(2)/query(1)/graph(1); `phase4_audit_security` (7) → refiner(1)/query(1)/mcp_core(5).
+- **Batch B (80 tests, 31 placements across 18 receivers):** `v0913_phase394` (39) and `v0914_phase395` (41) split across test_bm25/query/lint/lint_verdicts/lint_semantic/ingest/compile/mcp_core/mcp_browse_health/paths/utils_io/utils_text/models/graph/feedback/refiner/llm/evolve — full per-class table in PR #137.
+- **Judgment calls (recorded because a later reader will ask):** `TestVerdictTrendsMinSample` (kb.lint.trends) → `test_lint.py` not `test_lint_verdicts.py` (trends tests already live there; verdicts file is scoped to storage); `TestFormatIngestResultGetSafety` (kb.mcp.app) → `test_ingest.py` (hosts the prior `_format_ingest_result` fold); `TestKbCreatePageTypeMapFromConfig` (kb.mcp.quality) → `test_mcp_core.py` (hosts existing `kb_create_page` tests); `tests/test_paths.py` added as receiver (subject-named canonical host of `kb.utils.paths`); mixed classes placed by majority subject (`TestCoverageGaps` → `test_cli.py`, `TestMCPFixes` → `test_mcp_browse_health.py`, `TestLintFixes` → `test_lint.py`).
+- **Renames (1):** `_make_rate_limit_error` → `_make_rate_limit_error_p393` in the `test_llm.py` fold block (receiver hosts an identical-named helper); 2 call sites updated inside the folded class only. Zero class-name collisions across all 65+ moved classes.
+- **Process notes:** file-based appends only (cycle-92 heredoc-mangling lesson applied as standing rule); both batches byte-verbatim audited against `git show HEAD:` sources (0 mismatches); batch B normalized accidental bare-LF lines back to CRLF in 18 receivers (content-neutral; git renormalizes at commit); one non-reproducible `test_ingest.py` flake observed once in batch A (threading-related, pre-existing — 3 consecutive reruns green; matches the known cycle-84 `test_persist_contradictions_concurrent` fragility note).
+- Counts: full suite 3628 collected, unchanged. Test files 224 → 217. Pattern set 12 → 5 (`test_v0{70,90}`, `test_v098_fixes`, `test_v099_phase39`, `test_v09_cycle5_fixes`).
+
 ### 2026-07-30 — cycle 92 (freeze-and-fold)
 
 **Theme:** complete the v0915 task series (cycle 80 folded task02/04/05/07; this cycle lands the remaining 6 files) — the largest single fold batch to date: 204 tests, 19 receiver placements across 15 canonical files (count corrected 17/14 → 19/15 per R1 Codex, the review's only finding), executed as two bounded subagent batches on one branch.

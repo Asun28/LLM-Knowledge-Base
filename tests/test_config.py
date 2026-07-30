@@ -237,3 +237,31 @@ class TestWikiSubdirsFromConfig:
             f"expected {expected_types!r} drawn from WIKI_SUBDIRS "
             f"(used at analyzer.py:21,57)"
         )
+
+
+# -- Cycle 93 fold from test_v0912_phase393.py (config constants subset) --
+
+
+class TestConfigFixes:
+    """config.py constants and model validation."""
+
+    def test_max_verdicts_importable_from_config(self):
+        from kb.config import MAX_VERDICTS
+
+        assert isinstance(MAX_VERDICTS, int) and MAX_VERDICTS > 0
+
+    def test_max_feedback_entries_importable_from_config(self):
+        from kb.config import MAX_FEEDBACK_ENTRIES
+
+        assert isinstance(MAX_FEEDBACK_ENTRIES, int) and MAX_FEEDBACK_ENTRIES > 0
+
+    def test_empty_model_env_override_falls_back_to_default(self, monkeypatch):
+        """Empty CLAUDE_SCAN_MODEL must not pass empty string to API."""
+        import importlib
+
+        monkeypatch.setenv("CLAUDE_SCAN_MODEL", "")
+        import kb.config as cfg
+
+        importlib.reload(cfg)
+        assert cfg.MODEL_TIERS["scan"] != "", "Empty env override must fall back to default"
+        importlib.reload(cfg)  # restore for other tests

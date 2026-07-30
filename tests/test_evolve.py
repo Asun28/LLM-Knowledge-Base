@@ -1,6 +1,7 @@
 """Tests for the evolve analyzer."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from kb.evolve.analyzer import (
     analyze_coverage,
@@ -522,3 +523,77 @@ class TestAnalyzeCoverageThreshold:
         assert "concepts" not in result["under_covered_types"], (
             "'concepts' with 3 pages should NOT be under-covered"
         )
+
+
+# -- Cycle 93 fold from test_phase4_audit_compile.py (evolve analyzer subset) --
+
+
+def test_evolve_word_normalization_strips_markdown_tokens(tmp_path):
+    """Words like **transformer** must be normalized to transformer, not kept as-is."""
+    from kb.evolve.analyzer import find_connection_opportunities
+
+    page_a = tmp_path / "a.md"
+    page_b = tmp_path / "b.md"
+    # Both pages share `transformer` but page_a has it wrapped in markdown
+    page_a.write_text("**transformer** attention mechanism deep neural network learning\n")
+    page_b.write_text("transformer architecture self attention neural network processing\n")
+
+    with patch("kb.evolve.analyzer.scan_wiki_pages", return_value=[page_a, page_b]):
+        with patch("kb.evolve.analyzer.page_id", side_effect=lambda p, wd: p.stem):
+            opportunities = find_connection_opportunities(wiki_dir=tmp_path)
+
+    # After normalization, **transformer** → transformer, so terms must not contain **
+    for opp in opportunities:
+        for term in opp.get("shared_terms", []):
+            assert "**" not in term, f"Markdown token not stripped from shared term: {term!r}"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (evolve analyzer) --
+
+
+class TestFindConnectionOpportunitiesStripBeforeFilter:
+    """find_connection_opportunities must strip punctuation before length filter."""
+
+    def test_short_stripped_terms_excluded(self, tmp_wiki, create_wiki_page):
+        # "word." len=5 pre-strip, len=4 post-strip → should be excluded
+        create_wiki_page(
+            "concepts/alpha",
+            content="word. word. word. unique_alpha unique_alpha",
+            wiki_dir=tmp_wiki,
+        )
+        create_wiki_page(
+            "concepts/beta",
+            content="word. word. word. unique_beta unique_beta",
+            wiki_dir=tmp_wiki,
+        )
+
+        from kb.evolve.analyzer import find_connection_opportunities
+
+        opps = find_connection_opportunities(wiki_dir=tmp_wiki)
+        # "word" (4 chars after strip) should not count toward shared terms
+        for opp in opps:
+            pair = set(opp.get("pages", []))
+            if {"concepts/alpha", "concepts/beta"} == pair:
+                terms = opp.get("shared_terms", [])
+                assert "word" not in terms
+
+
+class TestEvolveReportNarrowExcept:
+    """generate_evolution_report must use narrow exception types."""
+
+    def test_report_handles_import_error(self, tmp_wiki, monkeypatch, caplog):
+        import logging
+
+        # Monkeypatch to cause an error in one subsystem
+        import kb.lint.checks as checks_mod
+        from kb.evolve.analyzer import generate_evolution_report
+
+        def bad_check(*a, **kw):
+            raise AttributeError("test attribute error")
+
+        monkeypatch.setattr(checks_mod, "check_stub_pages", bad_check)
+
+        with caplog.at_level(logging.WARNING):
+            result = generate_evolution_report(wiki_dir=tmp_wiki)
+        # Should still produce a report, not crash
+        assert isinstance(result, dict)

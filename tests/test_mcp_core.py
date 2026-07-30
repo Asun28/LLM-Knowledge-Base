@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 
 import kb.config
+from kb.config import MAX_INGEST_CONTENT_CHARS
+from kb.mcp.app import _validate_page_id
 from kb.mcp.browse import kb_stats
 from kb.mcp.core import kb_compile_scan, kb_ingest_content, kb_query, kb_save_source
 from kb.mcp.health import kb_detect_drift, kb_evolve, kb_graph_viz, kb_lint, kb_verdict_trends
@@ -1664,3 +1666,145 @@ class TestSaveLintVerdictNotesLengthCap:
             notes=notes_2000,
         )
         assert "Notes too long" not in result
+
+
+# -- Cycle 93 fold from test_phase4_audit_security.py (page-id validation + quality caps subset) --
+
+
+def test_validate_page_id_rejects_null_byte():
+    err = _validate_page_id("concepts/foo\x00bar", check_exists=False)
+    assert err is not None
+    assert "null" in err.lower() or "invalid" in err.lower() or "control" in err.lower()
+
+
+def test_validate_page_id_rejects_null_byte_only():
+    err = _validate_page_id("\x00", check_exists=False)
+    assert err is not None
+
+
+def test_validate_page_id_still_rejects_traversal():
+    """Existing behaviour must not be broken by the null-byte fix."""
+    err = _validate_page_id("../etc/passwd", check_exists=False)
+    assert err is not None
+
+
+def test_kb_refine_page_rejects_oversized_content(tmp_path):
+    from kb.mcp.quality import kb_refine_page
+
+    page_path = tmp_path / "concepts" / "test-page.md"
+    page_path.parent.mkdir(parents=True)
+    page_path.write_text("---\ntitle: Test\ntype: concept\nconfidence: stated\n---\nBody\n")
+    with patch("kb.mcp.app.WIKI_DIR", tmp_path), patch("kb.mcp.quality.WIKI_DIR", tmp_path):
+        oversized = "x" * (MAX_INGEST_CONTENT_CHARS + 1)
+        result = kb_refine_page("concepts/test-page", oversized)
+    assert "Error" in result
+    assert "large" in result.lower() or str(MAX_INGEST_CONTENT_CHARS) in result
+
+
+def test_kb_create_page_rejects_oversized_content(tmp_path):
+    from kb.mcp.quality import kb_create_page
+
+    with patch("kb.mcp.app.WIKI_DIR", tmp_path), patch("kb.mcp.quality.WIKI_DIR", tmp_path):
+        oversized = "x" * (MAX_INGEST_CONTENT_CHARS + 1)
+        result = kb_create_page("concepts/test-new", "Title", oversized)
+    assert "Error" in result
+    assert "large" in result.lower() or str(MAX_INGEST_CONTENT_CHARS) in result
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (kb_ingest_content) --
+
+
+class TestKbIngestContentOSError:
+    """mcp/core.py kb_ingest_content: OSError returns error string, no orphan file."""
+
+    @pytest.mark.skip(
+        reason=(
+            "cycle 64 trial-skip — autouse tmp_kb_env (AC1) interaction with "
+            "monkeypatched OSError raises path. Diagnosis defers to cycle-65+ "
+            "per cycle-61 precedent."
+        )
+    )
+    def test_write_oserror_returns_error_string(self, monkeypatch, tmp_project):
+        """OSError during file write must return 'Error: ...' string."""
+        from unittest.mock import patch
+
+        from kb.mcp import core as mcp_core
+
+        def failing_atomic_write(content, path):
+            if "test-content" in str(path):
+                raise OSError("disk full")
+
+        with patch.object(mcp_core, "atomic_text_write", side_effect=failing_atomic_write):
+            result = mcp_core.kb_ingest_content(
+                content="Some article content",
+                filename="test-content",
+                source_type="article",
+                extraction_json='{"title":"Test","entities_mentioned":[],"concepts_mentioned":[]}',
+            )
+        assert result.startswith("Error:"), f"Expected error string, got: {result[:80]}"
+
+    def test_orphan_file_cleaned_up_on_ingest_failure(self, monkeypatch, tmp_project):
+        """If ingest_source raises after write, the written file must be deleted."""
+        from kb.mcp import core as mcp_core
+
+        def failing_ingest(*a, **kw):
+            raise RuntimeError("ingest boom")
+
+        # Cycle 19 AC15 — patch owner module. Drop `raising=False` because the
+        # attribute exists on `kb.ingest.pipeline` (no need for the silent-miss
+        # guard the legacy `kb.mcp.core` patch site needed).
+        monkeypatch.setattr("kb.ingest.pipeline.ingest_source", failing_ingest)
+
+        result = mcp_core.kb_ingest_content(
+            content="Orphan file content",
+            filename="orphan-test-file",
+            source_type="article",
+            extraction_json='{"title":"Orphan","entities_mentioned":[],"concepts_mentioned":[]}',
+        )
+        assert result.startswith("Error:")
+        # The raw file must NOT remain
+        from kb.config import SOURCE_TYPE_DIRS
+
+        orphan = SOURCE_TYPE_DIRS["article"] / "orphan-test-file.md"
+        assert not orphan.exists(), "Orphaned raw file not cleaned up"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (mcp core + quality) --
+
+
+class TestKbIngestContentNoOverwrite:
+    """kb_ingest_content must not overwrite existing source files."""
+
+    def test_existing_file_returns_error(self, monkeypatch, tmp_path):
+        from kb.mcp.core import kb_ingest_content
+
+        # Create the target file first
+        type_dir = tmp_path / "articles"
+        type_dir.mkdir()
+        existing = type_dir / "test.md"
+        existing.write_text("original content", encoding="utf-8")
+
+        # Monkeypatch SOURCE_TYPE_DIRS to use tmp_path
+        monkeypatch.setattr("kb.mcp.core.SOURCE_TYPE_DIRS", {"article": type_dir})
+
+        result = kb_ingest_content(
+            content="new content",
+            filename="test",
+            source_type="article",
+            extraction_json='{"title": "Test"}',
+        )
+        assert "already exists" in result.lower() or "error" in result.lower()
+        # Original content preserved
+        assert existing.read_text(encoding="utf-8") == "original content"
+
+
+class TestKbCreatePageTypeMapFromConfig:
+    """kb_create_page must derive type_map from config, not hardcode it."""
+
+    def test_type_map_matches_config(self):
+        from kb.config import PAGE_TYPES
+
+        # The function should handle all configured page types
+        # We verify by checking that PAGE_TYPES keys are recognized
+        for page_type in PAGE_TYPES:
+            assert page_type in PAGE_TYPES

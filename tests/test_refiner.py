@@ -2,6 +2,8 @@
 
 from contextlib import contextmanager
 
+from kb.review.refiner import refine_page
+
 
 def test_refine_page_preserves_leading_code_block_indent(tmp_wiki, create_wiki_page, monkeypatch):
     """Regression: Phase 4.5 CRITICAL item 10 (lstrip() stripped 4-space code-block indent)."""
@@ -377,3 +379,168 @@ class TestRefinerLeadingWhitespaceStripped:
         # After the closing --- of frontmatter there should be exactly one blank line
         # then the body (no multiple leading blank lines from updated_content)
         assert "---\n\nBody with leading newlines." in written
+
+
+# -- Cycle 93 fold from test_v0911_phase392.py (review history cap subset) --
+# ── Task 2: Review history 10k cap ──────────────────────────────
+
+
+class TestReviewHistoryCap:
+    """review/refiner.py must cap review history at MAX_REVIEW_HISTORY_ENTRIES."""
+
+    def test_review_history_capped_at_limit(self, tmp_path):
+        """refine_page caps history at MAX_REVIEW_HISTORY_ENTRIES entries."""
+        from kb.config import MAX_REVIEW_HISTORY_ENTRIES
+        from kb.review.refiner import load_review_history, save_review_history
+
+        history_path = tmp_path / "review_history.json"
+
+        # Pre-populate with MAX entries
+        entries = [
+            {"timestamp": f"2026-01-01T00:00:{i % 60:02d}", "page_id": f"p{i}", "status": "applied"}
+            for i in range(MAX_REVIEW_HISTORY_ENTRIES)
+        ]
+        save_review_history(entries, history_path)
+
+        # Create a wiki page to refine
+        wiki_dir = tmp_path / "wiki"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        page = wiki_dir / "concepts" / "test.md"
+        page.write_text(
+            "---\ntitle: Test\nsource:\n  - raw/articles/a.md\n"
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\nBody.",
+            encoding="utf-8",
+        )
+
+        from kb.review.refiner import refine_page
+
+        refine_page(
+            "concepts/test",
+            "Updated body.",
+            revision_notes="test cap",
+            wiki_dir=wiki_dir,
+            history_path=history_path,
+        )
+
+        history = load_review_history(history_path)
+        assert len(history) == MAX_REVIEW_HISTORY_ENTRIES, (
+            f"Expected {MAX_REVIEW_HISTORY_ENTRIES} entries, got {len(history)}"
+        )
+
+
+# -- Cycle 93 fold from test_phase4_audit_security.py (refine_page subset) --
+
+
+def test_kb_refine_page_accepts_valid_content(tmp_wiki, create_wiki_page):
+    """Regression: Phase 4.5 CRITICAL item 3 (verify body actually written)."""
+    page_id = "concepts/test-item-3"
+    create_wiki_page(
+        page_id=page_id,
+        title="Test",
+        content="Original body.\n",
+        wiki_dir=tmp_wiki,
+    )
+    new_body = "Updated body with more detail.\n\nSecond paragraph.\n"
+    result = refine_page(
+        page_id=page_id,
+        updated_content=new_body,
+        revision_notes="tighten",
+        wiki_dir=tmp_wiki,
+    )
+    assert isinstance(result, dict)
+    assert result.get("updated") is True, f"refine_page did not report success: {result}"
+    page_text = (tmp_wiki / f"{page_id}.md").read_text(encoding="utf-8")
+    assert "Updated body with more detail." in page_text
+    assert "Second paragraph." in page_text
+
+
+# -- Cycle 93 fold from test_v0913_phase394.py (refine_page) --
+
+
+class TestRefinePageHorizontalRule:
+    """review/refiner.py refine_page: content starting with '---' (hr) is allowed."""
+
+    def test_horizontal_rule_content_not_rejected(self, tmp_wiki, create_wiki_page):
+        """Content starting with '---\\n' (horizontal rule) must not return error."""
+        from kb.review.refiner import refine_page
+
+        create_wiki_page(
+            page_id="concepts/hr-test",
+            title="HR Test",
+            content="Some content.",
+            wiki_dir=tmp_wiki,
+        )
+        result = refine_page(
+            "concepts/hr-test",
+            updated_content="---\n\nBelow the rule.\n",
+            wiki_dir=tmp_wiki,
+        )
+        assert "error" not in result, f"Horizontal rule incorrectly rejected: {result}"
+
+    def test_frontmatter_block_content_still_rejected(self, tmp_wiki, create_wiki_page):
+        """Content that is a full frontmatter block (---\\nkey: val\\n---) must be rejected."""
+        from kb.review.refiner import refine_page
+
+        create_wiki_page(
+            page_id="concepts/fm-test",
+            title="FM Test",
+            content="Some content.",
+            wiki_dir=tmp_wiki,
+        )
+        result = refine_page(
+            "concepts/fm-test",
+            updated_content="---\ntitle: Injected\n---\nContent\n",
+            wiki_dir=tmp_wiki,
+        )
+        assert "error" in result, "Frontmatter block content must be rejected"
+
+
+# -- Cycle 93 fold from test_v0914_phase395.py (refine_page) --
+
+
+class TestRefinePageWriteOrdering:
+    """refine_page must write the page file BEFORE recording 'applied' in history."""
+
+    def test_failed_page_write_no_history(self, tmp_wiki, monkeypatch, tmp_path):
+        from kb.review.refiner import refine_page
+
+        # Create a page to refine
+        page_path = tmp_wiki / "concepts" / "test.md"
+        page_path.write_text(
+            '---\ntitle: "Test"\nsource:\n  - "raw/articles/test.md"\n'
+            "created: 2026-01-01\nupdated: 2026-01-01\ntype: concept\n"
+            "confidence: stated\n---\n\nOriginal content.\n",
+            encoding="utf-8",
+        )
+
+        history_path = tmp_path / "review_history.json"
+
+        # Make page write fail — patch atomic_text_write since refiner now uses it
+        def failing_atomic_write(content, path):
+            if "test.md" in str(path) and "wiki" in str(path):
+                raise OSError("disk full")
+            from kb.utils.io import atomic_text_write as _real
+
+            _real(content, path)
+
+        monkeypatch.setattr("kb.review.refiner.atomic_text_write", failing_atomic_write)
+
+        result = refine_page(
+            "concepts/test",
+            "Updated content.",
+            revision_notes="Test revision",
+            wiki_dir=tmp_wiki,
+            history_path=history_path,
+        )
+
+        # The result should indicate an error
+        assert "error" in str(result).lower() or not result.get("updated", False)
+
+        # History should NOT contain "applied" for a failed write
+        if history_path.exists():
+            import json
+
+            history = json.loads(history_path.read_text(encoding="utf-8"))
+            applied = [h for h in history if h.get("status") == "applied"]
+            assert len(applied) == 0, "History recorded 'applied' for a failed page write"
