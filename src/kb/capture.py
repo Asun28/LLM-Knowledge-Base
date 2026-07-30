@@ -661,32 +661,30 @@ def _finish_rollback(captures_dir: Path, survivors: list[Path], *, targets: list
       needed — the entries all live in the same directory.
 
       **Honest scope: this half is POSIX-only.** ``_fsync_parent_dir`` returns
-      immediately when ``os.name == "nt"``, so on Windows — this project's
-      primary development platform — the deletions get no barrier. Unlike the
-      rename case, there is no cheap Win32 equivalent to reach for:
-      ``DeleteFileW`` has no write-through flag, and ``FlushFileBuffers`` is not
-      supported on a directory handle (the volume-handle form flushes the entire
-      volume and needs admin). Saying so plainly rather than implying a
-      cross-platform guarantee is the point — cycle 87 exists because the
-      previous docstring claimed NTFS durability that ``os.replace`` never
-      provided. Filed for a Windows-specific pass; see BACKLOG.
+      ``BarrierResult.SKIPPED_PLATFORM`` when ``os.name == "nt"``, so on
+      Windows — this project's primary development platform — the deletions
+      get no barrier. Unlike the rename case, there is no supported Win32
+      equivalent to reach for: ``DeleteFileW`` has no write-through flag, and
+      ``FlushFileBuffers`` is not supported on a directory handle (the
+      volume-handle form flushes the entire volume and needs admin). Saying so
+      plainly rather than implying a cross-platform guarantee is the point —
+      cycle 87 exists because the previous docstring claimed NTFS durability
+      that ``os.replace`` never provided. Cycle 91 VERIFIED and closed this as
+      won't-fix: the delete-resurrection risk on Windows is accepted and
+      deliberately unreported per-call (constant on the platform); see
+      docs/reference/error-handling.md for the full API inventory.
 
-      **And a POSIX barrier is not proof either** (R2 Codex P2).
-      ``_fsync_parent_dir`` returns normally both when it cannot open the
-      directory and when the fsync fails with a TOLERATED errno (``EINVAL`` /
+      **And a POSIX barrier is not proof either** (cycle-88 R2 Codex P2,
+      CLOSED by cycle 89). ``_fsync_parent_dir`` now returns a
+      ``BarrierResult`` tri-state, so the tolerated-errno case (``EINVAL`` /
       ``ENOTSUP`` / ``EPERM`` — some SMB and NFS mounts reject fsync on a
-      directory handle outright). In those cases no flush happened and this
-      function still records ``barrier_failed = False``.
-
-      That is NOT reported as indeterminate, deliberately and for the same
-      reason the Windows case is not: the rollback COMPLETED, and completion is
-      a different axis from durability. Firing the marker wherever a barrier is
-      merely unavailable would make it constant on those mounts and train the
-      reader to ignore the one case it exists to flag — a rollback that could
-      not finish. Fixing it properly needs ``_fsync_parent_dir`` to REPORT
-      whether a flush occurred, which changes a signature that ``durable_replace``
-      and ``durable_rename`` also depend on; that belongs in its own cycle and is
-      filed in BACKLOG alongside the Windows half.
+      directory handle outright) is distinguishable from a real flush:
+      ``_finish_rollback`` appends ``BARRIER_UNSUPPORTED_MARKER`` for
+      ``UNSUPPORTED`` (unusual, filesystem-specific — worth a note) while
+      staying SILENT for ``SKIPPED_PLATFORM`` (constant on Windows — a
+      per-call note would train the reader to ignore it). Completion and
+      durability remain separate axes: neither value fires the INDETERMINACY
+      report, which is reserved for a rollback that could not finish.
 
       The INDETERMINACY REPORT below is fully cross-platform, and it is the more
       load-bearing half: it tells the caller the batch state is unknown whether

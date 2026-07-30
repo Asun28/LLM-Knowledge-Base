@@ -465,13 +465,20 @@ def clear_stale_markers(manifest_path: Path | None = None) -> list[str]:
     the manifest file is not rewritten in that case).
 
     Raises:
-        CompileError: when the manifest file exists but cannot be parsed.
+        CompileError: when the manifest file exists but cannot be parsed,
+            OR parses to valid JSON whose root is not an object.
             Cycle 91 R1 Codex F1 — `load_manifest` deliberately self-heals
             corruption to `{}` for the compile path, but here that would
             report "no stale markers" against a corrupt-but-recoverable
             manifest and let the subsequent compile overwrite it. An
             operator-invoked remediation must fail loudly instead; a
             MISSING manifest is genuinely "no markers" and returns [].
+        OSError: raw filesystem errors from the read (e.g. permission
+            denied) and from `save_manifest` propagate unchanged — the CLI
+            boundary (`_error_exit`) converts them to a clean exit 1, and
+            wrapping them here would only hide the errno (R2 Codex P2-1).
+        TimeoutError: from `file_lock` when another process holds the
+            manifest lock.
     """
     manifest_path = manifest_path or HASH_MANIFEST
     with file_lock(manifest_path):
