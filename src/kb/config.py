@@ -189,6 +189,24 @@ CAPTURE_MAX_CALLS_PER_HOUR = 60  # per-process rate limit (sliding 1h window)
 # article from ballooning the in-memory corpus and tokenizer.
 RAW_SOURCE_MAX_BYTES = 2_097_152  # 2 MiB
 
+# Cycle 96 (Phase 4.5 MEDIUM — cycle-95 R1 P1 residual): per-CALL TOTAL
+# read-byte budget for `kb.review.context.pair_page_with_sources`, the shared
+# read path behind `kb_review_page` (build_review_context) and `kb_lint_deep`
+# (build_fidelity_context).
+#
+# Both tools bounded their OUTPUT but neither bounded the READ: every raw
+# source named in one page's `source:` frontmatter was `read_text()`-ed in
+# full before any truncation applied, so a page citing a handful of very large
+# raw files pulled tens of MB into a single tool response. Deliberately
+# distinct from RAW_SOURCE_MAX_BYTES above, which is a PER-FILE skip threshold
+# for the corpus-wide `search_raw_sources` scan — this one is a TOTAL spent
+# across the sources of one page, in frontmatter order.
+#
+# Sized to sit above QUERY_CONTEXT_MAX_CHARS (the downstream assembly cap) so
+# the read budget is not the binding constraint on a normal page, while still
+# bounding the pathological case.
+PAIRED_SOURCE_READ_MAX_BYTES = 1_048_576  # 1 MiB total per pairing call
+
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
 SUPPORTED_SOURCE_EXTENSIONS = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".rst", ".csv"})

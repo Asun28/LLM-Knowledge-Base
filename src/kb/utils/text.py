@@ -373,10 +373,7 @@ def wrap_wiki_context(text: str) -> str:
     if not text or not text.strip():
         return ""
     escaped = _escape_wiki_context_close(text)
-    return (
-        f"\n{_WIKI_CONTEXT_ASSERTION}\n"
-        f"<wiki_context>\n{escaped}\n</wiki_context>\n"
-    )
+    return f"\n{_WIKI_CONTEXT_ASSERTION}\n<wiki_context>\n{escaped}\n</wiki_context>\n"
 
 
 # Fixed overhead added by `wrap_wiki_context()` to a non-empty input:
@@ -391,3 +388,38 @@ _FENCE_OVERHEAD = (
     + 1  # "\n" before closing tag
     + len("</wiki_context>\n")
 )
+
+
+_CAP_TRUNCATION_MARKER = "\n…[truncated for context budget]"
+
+
+def _cap_page_content(text: str, max_chars: int) -> str:
+    """Cap a wiki page body at ``max_chars`` so an oversized body cannot
+    bypass a caller's ``_FENCE_OVERHEAD`` reservation. Returns the input
+    unchanged when under the cap; otherwise truncates with the marker
+    ``"\\n…[truncated for context budget]"``.
+
+    Cycle 72 R2 Codex M-1: the marker length is reserved WITHIN ``max_chars``
+    so the returned length is ``<= max_chars`` (an earlier revision returned
+    ``max_chars + len(marker)``, overrunning the fence reservation).
+
+    Cycle 96 AC04: moved here from ``kb.lint.semantic``. It lives beside
+    ``wrap_wiki_context`` / ``_FENCE_OVERHEAD`` because reserving that
+    overhead is the whole point of the cap, and because a second caller
+    (``kb.review.context.build_review_context``) now needs it — importing
+    ``kb.lint`` from ``kb.review`` would create a cross-domain edge for a
+    pure string helper. ``kb.lint.semantic`` re-exports the SAME object so
+    the cycle-72 monkeypatch surface is unchanged (cycle-74 ``tier_boundary``
+    extraction precedent).
+    """
+    if len(text) <= max_chars:
+        return text
+    # Cycle 96: clamp the slice at 0. With `max_chars` below the marker length
+    # the cycle-72 expression `text[:max_chars - len(marker)]` becomes a
+    # NEGATIVE index, which silently keeps a tail slice of the body instead of
+    # truncating it — the exact overrun the marker reservation exists to
+    # prevent. Callers now derive `max_chars` by subtracting several
+    # reservations from a configurable cap, so a degenerate value is reachable
+    # by configuration rather than only by a code bug.
+    keep = max(0, max_chars - len(_CAP_TRUNCATION_MARKER))
+    return text[:keep] + _CAP_TRUNCATION_MARKER
