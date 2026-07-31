@@ -2,6 +2,7 @@
 
 import codecs
 import logging
+import os
 from pathlib import Path
 
 import yaml
@@ -36,20 +37,39 @@ def _read_within_budget(path: Path, budget: int) -> tuple[str, int, int]:
        so the bytes are taken with a bounded ``file.read(n)``.
     2. **The cut is UTF-8 boundary-safe.** A budget landing mid-sequence must
        not raise and must not emit U+FFFD. An incremental decoder called with
-       ``final=False`` buffers an incomplete trailing sequence and discards it
-       (we never finalise), while still raising ``UnicodeDecodeError`` on
-       genuinely invalid bytes elsewhere in the buffer. That last part is why
-       this is not simply ``errors="ignore"``: the pre-cycle-96 full-read path
-       surfaced corrupt files as an error entry, and silently ignoring them
-       would be a regression in fidelity reporting.
+       ``final=False`` buffers an incomplete trailing sequence and discards it,
+       while still raising ``UnicodeDecodeError`` on genuinely invalid bytes
+       elsewhere in the buffer. That last part is why this is not simply
+       ``errors="ignore"``: the pre-cycle-96 full-read path surfaced corrupt
+       files as an error entry, and silently ignoring them would be a
+       regression in fidelity reporting.
+
+    **R1 F5 — finalise only when the whole file was read.** Dropping an
+    incomplete trailing sequence is right when the BUDGET made the cut; it is
+    wrong when the FILE simply ends that way, because then nothing was
+    truncated, ``bytes_read == bytes_total``, no ``truncated`` flag is set, and
+    the caller is told a corrupt file read cleanly. ``read_text()`` raised
+    there. So when the read consumed the file, the decoder is finalised, which
+    re-raises exactly as before; when the budget cut the read short, it is not.
+    Verified with ``b"hello\\xe2"``: ``final=False`` yields ``"hello"`` and
+    claims a complete read, ``final=True`` raises ``UnicodeDecodeError``.
+
+    **R1 F3 — size comes from the open descriptor.** ``os.fstat(fh.fileno())``
+    reads size and identity from the same file description the bytes came from,
+    so a separate ``path.stat()`` cannot disagree with what was read. This does
+    not WIDEN anything relative to pre-cycle-96 (that path was ``exists()``
+    then ``read_text()``, the same window, and the cycle-86/87
+    ``_is_regular_file_no_follow`` discipline lives in
+    ``lint/checks/evidence_resolvable.py``, never on this path) — it is simply
+    one fewer window than the stat-then-open pair it replaces.
     """
-    bytes_total = path.stat().st_size
     with path.open("rb") as fh:
+        bytes_total = os.fstat(fh.fileno()).st_size
         buf = fh.read(budget)
     decoder = codecs.getincrementaldecoder("utf-8")()
-    # final=False: hold back (and drop) an incomplete trailing sequence.
-    text = decoder.decode(buf, final=False)
-    return text, len(buf), bytes_total
+    bytes_read = len(buf)
+    text = decoder.decode(buf, final=bytes_read >= bytes_total)
+    return text, bytes_read, bytes_total
 
 
 def pair_page_with_sources(
@@ -315,6 +335,19 @@ def build_review_context(
     skipped sources are announced explicitly: silently handing the reviewer
     LLM a short context makes it score source fidelity against material it
     never saw.
+
+    **R1 F4 — the bound has a floor, stated rather than implied.**
+    ``len(result) <= QUERY_CONTEXT_MAX_CHARS`` holds whenever
+    ``QUERY_CONTEXT_MAX_CHARS`` exceeds the FIXED overhead: the fence, the
+    metadata header, and the constant review checklist. Those parts are not
+    optional — a response without the checklist is not a review context, and
+    ``_FENCE_OVERHEAD`` is what makes the content a trust boundary rather than
+    bare text — so below that floor the
+    variable budget clamps to 0 and the result is the fixed overhead alone,
+    which is the smallest useful output rather than a cap violation. The
+    shipped value (80,000) is roughly two orders of magnitude above the floor;
+    a config beneath it is a misconfiguration, and a WARNING says so instead of
+    silently returning something the caller believes is capped.
     """
     paired = pair_page_with_sources(page_id, wiki_dir, raw_dir, read_budget=read_budget)
 
@@ -340,7 +373,22 @@ def build_review_context(
         build_review_checklist(),
     ]
     outer_overhead = sum(len(part) for part in outer_lines) + max(0, len(outer_lines) - 1)
-    budget = max(0, QUERY_CONTEXT_MAX_CHARS - _FENCE_OVERHEAD - outer_overhead)
+    fixed_overhead = _FENCE_OVERHEAD + outer_overhead
+    budget = QUERY_CONTEXT_MAX_CHARS - fixed_overhead
+    if budget <= 0:
+        # R1 F4: the fixed parts are not optional, so they are emitted anyway
+        # and the result exceeds the configured cap. Say so — a caller that
+        # believes the output is capped and finds it is not should learn it
+        # here, not from a downstream token-limit error.
+        logger.warning(
+            "QUERY_CONTEXT_MAX_CHARS=%d is below the fixed review-context "
+            "overhead (%d chars: fence + header + checklist); returning the "
+            "fixed parts with no source content for page %s",
+            QUERY_CONTEXT_MAX_CHARS,
+            fixed_overhead,
+            page_id,
+        )
+        budget = 0
 
     # Cycle 72 AC02: replace cycle-1 H14 ``<wiki_page_body>`` /
     # ``<raw_source_N>`` XML literal sentinels with a single

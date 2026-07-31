@@ -394,3 +394,155 @@ class TestAC04_CapHelperExtraction:
         from kb.utils.text import _cap_page_content
 
         assert len(_cap_page_content("y" * 10_000, max_chars)) <= max_chars
+
+
+# ── R1 review findings ───────────────────────────────────────────────
+
+
+class TestR1_F5_IncompleteTrailingSequence:
+    """R1 F5 (CONFIRMED): dropping an incomplete trailing UTF-8 sequence is
+    right when the BUDGET cut the read, and wrong when the FILE simply ends
+    that way — there nothing was truncated, so ``bytes_read == bytes_total``,
+    no ``truncated`` flag is set, and the caller is told a corrupt file read
+    cleanly. ``read_text()`` raised there pre-cycle-96, so silently returning
+    short content was a reporting regression."""
+
+    def _wiki_with_bytes(self, tmp_path, raw_bytes):
+        wiki_dir = tmp_path / "wiki"
+        raw_dir = tmp_path / "raw"
+        (wiki_dir / "concepts").mkdir(parents=True)
+        (raw_dir / "articles").mkdir(parents=True)
+        (raw_dir / "articles" / "src0.md").write_bytes(raw_bytes)
+        (wiki_dir / "concepts" / "test.md").write_text(
+            PAGE_FRONTMATTER.format(sources='  - "raw/articles/src0.md"\n'),
+            encoding="utf-8",
+        )
+        return wiki_dir, raw_dir
+
+    def test_file_ending_mid_sequence_is_an_error_not_a_silent_short_read(self, tmp_path):
+        """The whole file is read (budget is ample), so the decoder MUST be
+        finalised and the corruption surfaced — matching pre-cycle-96."""
+        from kb.review.context import pair_page_with_sources
+
+        # b"hello\xe2": 0xE2 opens a 3-byte sequence that never completes.
+        wiki_dir, raw_dir = self._wiki_with_bytes(tmp_path, b"hello\xe2")
+        paired = pair_page_with_sources(
+            "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir, read_budget=10_000
+        )
+        entry = paired["source_contents"][0]
+
+        assert entry["content"] is None, (
+            "R1 F5: a file ending mid-sequence read in FULL must be reported as "
+            f"an error, not silently shortened; got {entry.get('content')!r}"
+        )
+        assert entry.get("error")
+        assert not entry.get("truncated"), "nothing was truncated — the file just ends badly"
+
+    def test_budget_cut_mid_sequence_is_still_tolerated(self, tmp_path):
+        """Negative control for the fix: when the BUDGET made the cut, the
+        incomplete tail is expected and must NOT raise. This is the case the
+        F5 fix must not break."""
+        from kb.review.context import pair_page_with_sources
+
+        wiki_dir, raw_dir = self._wiki_with_bytes(tmp_path, "识".encode() * 200)
+        paired = pair_page_with_sources(
+            "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir, read_budget=100
+        )
+        entry = paired["source_contents"][0]
+
+        assert entry["content"] == "识" * 33
+        assert entry.get("truncated") is True
+
+    def test_the_two_cases_are_distinguished_by_the_same_bytes(self, tmp_path):
+        """The SAME trailing byte pattern must behave differently depending on
+        whether the budget or the file ended the read. A `final=True`-always
+        implementation fails the second assert; `final=False`-always fails the
+        first. Only the read-consumed-the-file condition passes both."""
+        from kb.review.context import pair_page_with_sources
+
+        wiki_dir, raw_dir = self._wiki_with_bytes(tmp_path, b"ok\xe2\x82\xac\xe2")
+
+        full = pair_page_with_sources(
+            "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir, read_budget=10_000
+        )["source_contents"][0]
+        assert full["content"] is None, "whole-file read of a bad tail → error"
+
+        cut = pair_page_with_sources(
+            "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir, read_budget=3
+        )["source_contents"][0]
+        assert cut["content"] == "ok", "budget-cut read of the same bytes → tolerated"
+        assert cut.get("truncated") is True
+
+
+class TestR1_F4_DegenerateBudgetFloor:
+    """R1 F4 (CONFIRMED, bounded): the fixed parts — fence, metadata header,
+    constant checklist — are not optional, so a ``QUERY_CONTEXT_MAX_CHARS``
+    below their combined size cannot be honoured. Pin the ACTUAL behaviour
+    (emit the fixed parts, no source content, warn) rather than leaving an
+    unqualified cap claim that a degenerate config quietly falsifies."""
+
+    def test_below_the_floor_emits_fixed_parts_and_warns(self, tmp_path, monkeypatch, caplog):
+        import logging
+
+        from kb.review import context as context_mod
+
+        wiki_dir, raw_dir, _ = _make_wiki(tmp_path, [5_000])
+        monkeypatch.setattr(context_mod, "QUERY_CONTEXT_MAX_CHARS", 10)
+
+        with caplog.at_level(logging.WARNING, logger="kb.review.context"):
+            out = context_mod.build_review_context(
+                "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir
+            )
+
+        assert "Review Checklist" in out, "the checklist is not optional"
+        assert "A" * 500 not in out, "no source content may be emitted below the floor"
+        warned = any("below the fixed review-context overhead" in r.message for r in caplog.records)
+        assert warned, (
+            "R1 F4: a cap that cannot be honoured must be reported, not silently exceeded"
+        )
+
+    def test_at_realistic_configs_the_cap_holds(self, tmp_path, monkeypatch):
+        """The floor is ~2 orders of magnitude below the shipped value, so the
+        invariant holds across every plausible setting."""
+        from kb.review import context as context_mod
+
+        wiki_dir, raw_dir, _ = _make_wiki(tmp_path, [50_000, 50_000])
+        for cap in (5_000, 20_000, 80_000):
+            monkeypatch.setattr(context_mod, "QUERY_CONTEXT_MAX_CHARS", cap)
+            out = context_mod.build_review_context(
+                "concepts/test", wiki_dir=wiki_dir, raw_dir=raw_dir
+            )
+            assert len(out) <= cap, f"cap {cap} exceeded: {len(out)}"
+
+
+class TestR1_F2_RegressionGuardIsReal:
+    """R1 F2 was REJECTED on verification. The reviewer read
+    ``test_oversized_file_is_never_fully_loaded`` as a false pass because the
+    ``Path.read_text`` monkeypatch never fires — but not firing IS the pass
+    condition for a regression guard. Reverting ``_read_within_budget`` to a
+    whole-file read makes it fail with its own message (verified by mutation).
+    This test pins the guard's premise so the reasoning is not re-litigated:
+    the read path must not use ``read_text`` at all."""
+
+    def test_read_helper_does_not_use_read_text(self):
+        """Checks the CODE, not the docstring — which discusses ``read_text``
+        at length precisely because avoiding it is the point."""
+        import ast
+        import inspect
+        import textwrap
+
+        from kb.review import context as context_mod
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(context_mod._read_within_budget)))
+        fn = tree.body[0]
+        # Drop the docstring node, then look at attribute accesses only.
+        body = fn.body[1:] if ast.get_docstring(fn) else fn.body
+        attrs = {
+            node.attr for stmt in body for node in ast.walk(stmt) if isinstance(node, ast.Attribute)
+        }
+
+        assert "read_text" not in attrs, (
+            "R1 F2 premise broken: _read_within_budget calls read_text(), which "
+            "materialises the whole file — the exact defect cycle 96 closes"
+        )
+        assert "read" in attrs, "bytes must come from a bounded read()"
