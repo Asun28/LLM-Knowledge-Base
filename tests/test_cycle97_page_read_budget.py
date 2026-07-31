@@ -108,12 +108,30 @@ class TestPageReadBudgetConstant:
         ref = _write_raw(tmp_kb_env, "raw/articles/a.md", "S" * 5_000)
         _write_page(wiki, "concepts/p", body="P" * 5_000, source=[ref])
 
-        result = _pair(tmp_kb_env, "concepts/p", read_budget=10)
+        # R1 Sonnet P2: passing `page_read_budget` explicitly is what makes this
+        # diverge. Varying only `read_budget` asserted something the
+        # pre-cycle-97 code already satisfied — the page came through a wholly
+        # separate reader then, so "the source budget does not touch the page"
+        # was trivially true before this change existed.
+        result = _pair(tmp_kb_env, "concepts/p", read_budget=10, page_read_budget=100_000)
 
         first = result["source_contents"][0]
         assert first.get("truncated") or first.get("skipped"), "source budget should have bitten"
         assert "page_truncated" not in result
         assert "P" * 5_000 in result["page_content"]
+
+    def test_source_budget_is_not_drawn_from_the_page_pool(self, tmp_kb_env):
+        """The other direction: a page budget that bites must leave the sources
+        whole. The docstring above claims both, so both are pinned."""
+        ref = _write_raw(tmp_kb_env, "raw/articles/a.md", "S" * 3_000)
+        _write_page(tmp_kb_env / "wiki", "concepts/p", body="P" * 30_000, source=[ref])
+
+        result = _pair(tmp_kb_env, "concepts/p", page_read_budget=1_200)
+
+        assert result["page_truncated"] is True
+        first = result["source_contents"][0]
+        assert first["content"] == "S" * 3_000
+        assert "truncated" not in first and "skipped" not in first
 
 
 # --------------------------------------------------------------------------
@@ -355,6 +373,59 @@ class TestFrontmatterCutByBudget:
         legal 12 KB block reads as unclosed and a fine page is refused."""
         block = '---\ntitle: "T"\nnotes: "' + "n" * 12_000 + '"\n---\n'
         assert context._frontmatter_resolved(block + "body")
+
+    def test_legal_frontmatter_larger_than_10kb_survives_the_real_call(self, tmp_kb_env):
+        """R1 Sonnet P2 — the isolated helper assertion above cannot catch a
+        mutation at the CALL SITE. Swapping `_frontmatter_resolved` for a
+        `FRONTMATTER_RE`-based check refuses this page end-to-end while the
+        helper test stays green, so the budget cuts inside the BODY here and the
+        whole path is exercised."""
+        wiki = tmp_kb_env / "wiki"
+        page_path = wiki / "concepts" / "fat_legal.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        head = '---\ntitle: "T"\nnotes: "' + "n" * 12_000 + '"\n---\n\n'
+        page_path.write_text(head + "B" * 20_000, encoding="utf-8")
+
+        result = _pair(tmp_kb_env, "concepts/fat_legal", page_read_budget=len(head) + 500)
+
+        assert "error" not in result, result.get("error")
+        assert result["page_metadata"]["title"] == "T"
+        assert result["page_truncated"] is True
+
+    def test_body_only_page_cut_exactly_at_its_first_newline_is_not_flagged(self, tmp_kb_env):
+        """R1 DeepSeek P1 — a legal body-only page whose prefix ends EXACTLY at
+        the first line break was refused.
+
+        The check looked for the terminator in ``text.strip()``, and ``strip()``
+        removes it. This is the narrow input that separates a correct
+        implementation from the shipped one: the prefix must contain the
+        newline and nothing after it.
+        """
+        wiki = tmp_kb_env / "wiki"
+        page_path = wiki / "concepts" / "bodyonly.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        # Written as BYTES on purpose: `write_text` translates "\n" to "\r\n" on
+        # Windows, which moves the terminator one byte past the budget and makes
+        # the prefix genuinely unterminated — the test would then pass for the
+        # wrong reason on one platform and the right reason on the other.
+        first_line = b"body text\n"
+        page_path.write_bytes(first_line + b"w" * 9_000)
+
+        result = _pair(tmp_kb_env, "concepts/bodyonly", page_read_budget=len(first_line))
+
+        assert "error" not in result, result.get("error")
+        assert result["page_metadata"] == {}
+        assert result["page_truncated"] is True
+
+    @pytest.mark.parametrize("prefix", ["\n", "\n\n", "\n--"])
+    def test_leading_blank_lines_alone_do_not_resolve(self, tmp_kb_env, prefix):
+        """The other side of the P1 fix. The reviewer proposed looking for the
+        terminator anywhere in ``text``, which marks each of these as resolved —
+        but ``frontmatter.parse`` strips leading blank lines, so an opener may
+        still be sitting on the next line and the page is NOT yet classified.
+        A `"\\n" in text` implementation returns "body-only page" here and hands
+        back an empty body with zero sources."""
+        assert not context._frontmatter_resolved(prefix)
 
     @pytest.mark.parametrize("budget", [1, 2, 3])
     def test_prefix_too_short_to_classify_fails_closed(self, tmp_kb_env, budget):

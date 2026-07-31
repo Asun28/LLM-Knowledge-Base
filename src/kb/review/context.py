@@ -114,10 +114,21 @@ def _frontmatter_resolved(text: str) -> bool:
     from it hands back an empty body and an empty source list — precisely the
     failure this check exists to stop, arriving through the side door. So the
     no-opener branch additionally requires a terminated first line.
+
+    **R1 — that terminator must be looked for in ``text``, not ``stripped``
+    (DeepSeek P1).** ``strip()`` removes the trailing newline, so a body-only
+    page whose prefix ends exactly at its first line break (``"body text\\n"``)
+    looked unterminated and a perfectly legal page was refused. The check runs
+    on ``text.lstrip()`` rather than on ``text``: the reviewer's suggested
+    ``"\\n" in text`` swings too far the other way, marking ``"\\n"``,
+    ``"\\n\\n"`` and ``"\\n--"`` as resolved when a frontmatter opener could
+    still be sitting on the next line. Stripping only the LEFT side discards
+    the leading blank lines ``frontmatter.parse`` would discard anyway, while
+    keeping the terminator that proves the first real line was seen whole.
     """
     stripped = text.strip()
     if not _FM_BOUNDARY.match(stripped):
-        return "\n" in stripped
+        return "\n" in text.lstrip()
     return len(_FM_BOUNDARY.findall(stripped)) >= 2
 
 
@@ -504,8 +515,13 @@ def build_review_context(
     optional — a response without the checklist is not a review context, and
     ``_FENCE_OVERHEAD`` is what makes the content a trust boundary rather than
     bare text — so below that floor the
-    variable budget clamps to 0 and the result is the fixed overhead alone,
-    which is the smallest useful output rather than a cap violation. The
+    variable budget clamps to 0 and the result is the fixed overhead plus at
+    most the ``_CAP_TRUNCATION_MARKER`` length (cycle-97 R1 Sonnet P3: with a
+    budget under the marker's own length, ``_cap_page_content`` returns the
+    marker alone, so the overshoot band is
+    ``fixed_overhead < QUERY_CONTEXT_MAX_CHARS < fixed_overhead + 32`` rather
+    than the floor point only). That is the smallest useful output rather than
+    a cap violation, and it is ~60x below the shipped value. The
     shipped value (80,000) is roughly two orders of magnitude above the floor;
     a config beneath it is a misconfiguration, and a WARNING says so instead of
     silently returning something the caller believes is capped.

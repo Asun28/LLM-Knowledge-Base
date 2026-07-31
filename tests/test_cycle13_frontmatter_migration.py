@@ -18,6 +18,7 @@ from pathlib import Path
 
 import frontmatter
 
+from kb import config as kb_config
 from kb.utils import pages as pages_mod
 
 
@@ -352,7 +353,9 @@ class TestReviewContextMigration:
         )
 
         assert len(budgets) == 1, f"Expected exactly 1 bounded read, got {len(budgets)}"
-        assert budgets[0] > 0, "the budget must be resolved before the read"
+        # Cycle-97 R1 Sonnet P3: pin the VALUE, not just positivity — feeding
+        # the source budget in here would also be > 0.
+        assert budgets[0] == kb_config.PAIRED_PAGE_READ_MAX_BYTES
         assert result["page_metadata"]["title"] == "X"
 
     def test_malformed_yaml_still_reported_by_the_widened_except(self, tmp_kb_env):
