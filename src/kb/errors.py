@@ -55,6 +55,27 @@ class ValidationError(KBError):
     """Input-validation failure (page_id, wiki_dir, manifest_key, notes length, etc.)."""
 
 
+class PageReadBudgetError(ValidationError):
+    """Cycle 97 AC04: a wiki page could not be read within its byte budget.
+
+    Raised by ``kb.review.context._read_page_within_budget`` in exactly two
+    cases: the configured budget is non-positive, or the budget cut the read
+    before the page's frontmatter block closed. The second is the one that
+    matters — ``frontmatter.parse`` answers an unclosed block by returning
+    empty metadata and the whole prefix as content, which is indistinguishable
+    from a page that legitimately has no frontmatter. A review context built on
+    that reports every field as ``unknown`` and no sources at all, so the
+    pairing helper fails closed instead.
+
+    Deliberately NOT a ``ValueError`` subclass: the pairing helper's broad
+    ``except (OSError, ValueError, AttributeError, yaml.YAMLError,
+    UnicodeDecodeError)`` would otherwise swallow it and re-label a budget
+    problem as malformed YAML, sending the operator to the page instead of to
+    ``PAIRED_PAGE_READ_MAX_BYTES``. Subclassing ``ValidationError`` keeps it
+    inside the ``KBError`` tree for callers that catch broadly.
+    """
+
+
 class TierBoundaryError(ValidationError):
     """Cycle 73 AC04: scan-tier → orchestrate-tier output rejected at the
     cross-tier verification boundary.

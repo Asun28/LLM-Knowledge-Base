@@ -16,7 +16,11 @@ from kb.config import (
     QUERY_CONTEXT_MAX_CHARS,
     WIKI_DIR,
 )
-from kb.review.context import pair_page_with_sources
+from kb.review.context import (
+    page_truncation_notice,
+    pair_page_with_sources,
+    source_truncation_notice,
+)
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
 from kb.utils.text import (
@@ -96,10 +100,19 @@ def _render_sources(sources: list[dict], lines: list[str], *, budget: int | None
             body = _truncate_source(source["content"], remaining)
         else:
             body = f"*Not available: {source.get('error', 'unknown')}*"
+        # Cycle 97 AC05: cycle 96 announced the read-time source cut in
+        # `build_review_context` only, so `kb_lint_deep` — the tool that ships —
+        # showed a partially-read source as if it were whole. The assembly-side
+        # cut in `_truncate_source` above is a different event with a different
+        # remedy, and it loses material a reviewer can still ask for; this one
+        # loses material that was never loaded.
+        notice = source_truncation_notice(source)
         lines.append(header)
         lines.append(body)
+        if notice:
+            lines.append(notice)
         lines.append("\n---\n")
-        used += len(header) + len(body) + 6
+        used += len(header) + len(body) + len(notice) + 6
 
 
 def build_fidelity_context(
@@ -126,12 +139,20 @@ def build_fidelity_context(
 
     # Cycle 71 AC03: split into 3 segments — header (outside fence),
     # body (page + sources, inside fence), closing instructions (outside).
+    # Cycle 97 AC05: the page-truncation notice goes in the header, OUTSIDE the
+    # `wrap_wiki_context` fence — inside it, the fence's own assertion tells the
+    # model to treat it as data to evaluate rather than a caveat to honour, and
+    # a page body carrying the same literal string would be indistinguishable
+    # from the real notice.
     header_lines = [
         f"# Source Fidelity Check: {page_id_str}\n",
         "Evaluate whether each factual claim in the wiki page can be traced "
         "to a specific passage in the raw source(s).\n",
-        "---\n",
     ]
+    page_notice = page_truncation_notice(paired)
+    if page_notice:
+        header_lines.append(page_notice)
+    header_lines.append("---\n")
 
     # Cycle 72 AC01: cap page_content BEFORE assembly so an oversized page
     # body does not bypass the cycle-71 _FENCE_OVERHEAD reservation. Single
@@ -476,12 +497,16 @@ def build_completeness_context(
 
     # Cycle 73 AC01: split into 3 segments — header (outside fence),
     # body (page + sources, inside fence), closing instructions (outside).
+    # Cycle 97 AC05: same outside-the-fence placement as the fidelity peer.
     header_lines = [
         f"# Completeness Check: {page_id_str}\n",
         "Evaluate whether key claims from the raw source(s) are represented "
         "in the wiki page. Identify important omissions.\n",
-        "---\n",
     ]
+    page_notice = page_truncation_notice(paired)
+    if page_notice:
+        header_lines.append(page_notice)
+    header_lines.append("---\n")
 
     # Cycle 73 AC01: cap page_content BEFORE assembly so an oversized page
     # body does not bypass the cycle-71 _FENCE_OVERHEAD reservation. Reuses
