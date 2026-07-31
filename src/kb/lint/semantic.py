@@ -19,7 +19,13 @@ from kb.config import (
 from kb.review.context import pair_page_with_sources
 from kb.utils.markdown import FRONTMATTER_RE as _FRONTMATTER_RE
 from kb.utils.pages import load_page_frontmatter, normalize_sources, page_id, scan_wiki_pages
-from kb.utils.text import _FENCE_OVERHEAD, sanitize_extraction_field, wrap_wiki_context
+from kb.utils.text import (
+    _CAP_TRUNCATION_MARKER,  # noqa: F401 — cycle-96 AC04 compat re-export
+    _FENCE_OVERHEAD,
+    _cap_page_content,
+    sanitize_extraction_field,
+    wrap_wiki_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,27 +37,13 @@ def _truncate_source(content: str, budget: int) -> str:
     return content[:budget] + f"\n\n[... truncated from {len(content):,} to {budget:,} chars]\n"
 
 
-_CAP_TRUNCATION_MARKER = "\n…[truncated for context budget]"
-
-
-def _cap_page_content(text: str, max_chars: int) -> str:
-    """Cycle 72 AC01: cap ``paired['page_content']`` at ``max_chars`` so an
-    oversized wiki page body does not bypass the cycle-71 ``_FENCE_OVERHEAD``
-    reservation in ``build_fidelity_context``. Returns input unchanged when
-    under the cap; otherwise truncates with the marker
-    ``"\\n…[truncated for context budget]"``.
-
-    Cycle 72 R2 Codex M-1 fix: reserve marker length within ``max_chars`` so
-    the returned content length is ≤ ``max_chars`` (was: ``max_chars +
-    len(marker)``, exceeding the cycle-71 fence-overhead reservation).
-
-    Single-site cap (design-decision condition 1): only ``build_fidelity_context``
-    calls this. ``build_completeness_context`` is deferred to cycle-73+
-    per threat-model §T1.
-    """
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - len(_CAP_TRUNCATION_MARKER)] + _CAP_TRUNCATION_MARKER
+# Cycle 96 AC04: ``_cap_page_content`` + ``_CAP_TRUNCATION_MARKER`` moved to
+# the leaf module ``kb.utils.text`` once ``kb.review.context`` needed them too
+# (a kb.review → kb.lint import for a pure string helper would be a
+# cross-domain edge). They are imported at the top of this module — as the
+# SAME objects — so the cycle-72 monkeypatch surface
+# (``kb.lint.semantic._cap_page_content``) is unchanged. Same shape as the
+# cycle-74 ``tier_boundary`` extraction + orchestrator re-export.
 
 
 _MIN_SOURCE_CHARS = 500  # Phase 4.5 HIGH L6: per-source minimum floor
