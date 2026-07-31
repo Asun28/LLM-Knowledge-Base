@@ -207,6 +207,25 @@ RAW_SOURCE_MAX_BYTES = 2_097_152  # 2 MiB
 # bounding the pathological case.
 PAIRED_SOURCE_READ_MAX_BYTES = 1_048_576  # 1 MiB total per pairing call
 
+# Cycle 97 (Phase 4.5 MEDIUM — cycle-96 R1 F1 residual): per-CALL cap on the
+# bytes read from ONE wiki page's BODY in the same paired-context path.
+#
+# Cycle 96 bounded the source half and left this one open on purpose: the page
+# body arrives through `load_page_frontmatter`, the shared frontmatter reader
+# behind `scan_wiki_pages`, every `lint/checks/*`, `graph/builder` and
+# `query/engine`, cached at `maxsize=8192`. Capping THERE changes what every
+# caller sees. Cycle 97 takes the smaller option the backlog recorded: a
+# separate bounded reader used only by the two paired-context builders, leaving
+# the shared hot path exactly as it was.
+#
+# A THIRD pool, not a share of `PAIRED_SOURCE_READ_MAX_BYTES`: splitting one
+# budget across body and sources means a huge body starves the sources it is
+# supposed to be checked against, and a huge source starves the body. Sized
+# above `QUERY_CONTEXT_MAX_CHARS` for the same reason as the source budget —
+# on any ordinary page the downstream assembly cap binds first, and this one
+# only bounds the pathological case.
+PAIRED_PAGE_READ_MAX_BYTES = 1_048_576  # 1 MiB per page body per pairing call
+
 # ── Supported source file extensions ─────────────────────────────────
 # Single source of truth — imported by both compiler.py and mcp/core.py.
 SUPPORTED_SOURCE_EXTENSIONS = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".rst", ".csv"})

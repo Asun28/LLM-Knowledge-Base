@@ -18,6 +18,7 @@ from pathlib import Path
 
 import frontmatter
 
+from kb import config as kb_config
 from kb.utils import pages as pages_mod
 
 
@@ -320,8 +321,15 @@ class TestReviewContextMigration:
         assert len(sc) == 1, f"expected 1 source, got {len(sc)}"
         assert sc[0]["content"] is not None and "Raw article body" in sc[0]["content"]
 
-    def test_pair_page_with_sources_uses_cached_helper(self, tmp_kb_env, monkeypatch):
-        """Spy on load_page_frontmatter to prove context uses the cached path."""
+    def test_pair_page_with_sources_uses_the_bounded_reader(self, tmp_kb_env, monkeypatch):
+        """Cycle 97 AC07 — deliberate contract change to this cycle-13 AC12 test.
+
+        AC12 pinned that the paired path routed through the CACHED
+        ``load_page_frontmatter``. Cycle 97 moves it onto a bounded reader
+        instead, because the cached helper reads the whole page body and this is
+        the path where that body reaches an LLM tool response. The cached helper
+        is itself unchanged and still serves the lint/query hot path.
+        """
         from kb.review import context
 
         wiki = tmp_kb_env / "wiki"
@@ -329,22 +337,42 @@ class TestReviewContextMigration:
         _write_stub_page(wiki, "concepts/x", title="X", body="X body.", source=[])
 
         pages_mod.load_page_frontmatter.cache_clear()
-        calls: list[Path] = []
-        real_helper = context.load_page_frontmatter
+        budgets: list[int] = []
+        real_reader = context._read_page_within_budget
 
-        def _spy(page_path):
-            calls.append(page_path)
-            return real_helper(page_path)
+        def _spy(page_path, budget):
+            budgets.append(budget)
+            return real_reader(page_path, budget)
 
-        monkeypatch.setattr(context, "load_page_frontmatter", _spy)
-        context.pair_page_with_sources(
+        monkeypatch.setattr(context, "_read_page_within_budget", _spy)
+        result = context.pair_page_with_sources(
             "concepts/x",
             wiki_dir=wiki,
             raw_dir=raw,
             project_root=tmp_kb_env,
         )
 
-        assert len(calls) >= 1, f"Expected ≥1 cached-helper call, got {len(calls)}"
+        assert len(budgets) == 1, f"Expected exactly 1 bounded read, got {len(budgets)}"
+        # Cycle-97 R1 Sonnet P3: pin the VALUE, not just positivity — feeding
+        # the source budget in here would also be > 0.
+        assert budgets[0] == kb_config.PAIRED_PAGE_READ_MAX_BYTES
+        assert result["page_metadata"]["title"] == "X"
+
+    def test_malformed_yaml_still_reported_by_the_widened_except(self, tmp_kb_env):
+        """The part of the cycle-13 AC12 contract that outlives the reader swap:
+        a YAML parse failure comes back as an error dict, not an exception."""
+        from kb.review import context
+
+        wiki = tmp_kb_env / "wiki"
+        page_path = wiki / "concepts" / "bad.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text('---\ntitle: "unterminated\nkey: [1, 2\n---\n\nbody\n', "utf-8")
+
+        result = context.pair_page_with_sources(
+            "concepts/bad", wiki_dir=wiki, raw_dir=tmp_kb_env / "raw", project_root=tmp_kb_env
+        )
+
+        assert "Malformed YAML" in result["error"]
 
 
 class TestWriteBackOutOfScope:
