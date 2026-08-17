@@ -1,3 +1,5 @@
+
+
 # 🌪️ LLM Wiki Flywheel
 
 **Language / 语言：** **English** · [简体中文](README.zh-CN.md)
@@ -277,7 +279,7 @@ Pages with `belief_state: retracted|contradicted` or `confidence: speculative` a
   "mcpServers": {
     "kb": {
       "command": ".venv/Scripts/python.exe",
-      "args": ["-m", "kb.mcp_server"]
+      "args": ["-m", "kb.mcp"]
     }
   }
 }
